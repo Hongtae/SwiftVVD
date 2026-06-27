@@ -65,20 +65,92 @@ extension ViewSize: Animatable {
 /// Minimal geometry descriptor for a scroll view's current scroll state.
 /// Used by `ViewTransform.appendScrollGeometry` to embed the scroll offset
 /// in the transform chain so that hit-testing correctly maps through scroll containers.
-public struct ScrollGeometry: Equatable, Sendable {
+public struct ScrollGeometry: Equatable, Sendable, CustomDebugStringConvertible {
     /// The current scroll offset (content origin offset from the container origin).
-    public var contentOffset: CGPoint
+    public var contentOffset: CGPoint {
+        didSet { updateVisibleRect() }
+    }
     public var contentSize:   CGSize
-    public var containerSize: CGSize
+    public var contentInsets: EdgeInsets
+    public var containerSize: CGSize {
+        didSet { updateVisibleRect() }
+    }
+    public private(set) var visibleRect: CGRect
 
     public init(
         contentOffset: CGPoint = .zero,
         contentSize:   CGSize  = .zero,
+        contentInsets: EdgeInsets = EdgeInsets(),
         containerSize: CGSize  = .zero
     ) {
+        self.init(
+            contentOffset: contentOffset,
+            contentSize: contentSize,
+            contentInsets: contentInsets,
+            containerSize: containerSize,
+            visibleRect: CGRect(origin: contentOffset, size: containerSize)
+        )
+    }
+
+    init(
+        contentOffset: CGPoint,
+        contentSize: CGSize,
+        contentInsets: EdgeInsets,
+        containerSize: CGSize,
+        visibleRect: CGRect
+    ) {
         self.contentOffset = contentOffset
-        self.contentSize   = contentSize
+        self.contentSize = contentSize
+        self.contentInsets = contentInsets
         self.containerSize = containerSize
+        self.visibleRect = visibleRect
+    }
+
+    public var bounds: CGRect {
+        visibleRect
+    }
+
+    public var debugDescription: String {
+        "<ScrollGeometry: contentOffset \(contentOffset), " +
+        "contentSize \(contentSize), " +
+        "contentInsets <top: \(contentInsets.top), " +
+        "leading: \(contentInsets.leading), " +
+        "bottom: \(contentInsets.bottom), " +
+        "trailing: \(contentInsets.trailing)>, " +
+        "containerSize \(containerSize), " +
+        "visibleRect \(visibleRect)>"
+    }
+
+    private mutating func updateVisibleRect() {
+        visibleRect = CGRect(origin: contentOffset, size: containerSize)
+    }
+
+    mutating func applyLayoutDirection(_ layoutDirection: LayoutDirection, contentSize override: CGSize? = nil) {
+        guard layoutDirection == .rightToLeft else {
+            return
+        }
+        let previousOffset = contentOffset
+        let previousVisibleRect = visibleRect
+        let width = override?.width ?? contentSize.width
+        let newOffsetX = width - containerSize.width - previousOffset.x
+        contentOffset = CGPoint(x: newOffsetX, y: previousOffset.y)
+        visibleRect = previousVisibleRect.offsetBy(dx: newOffsetX - previousOffset.x, dy: 0)
+    }
+}
+
+extension CGSize {
+    func inset(by insets: EdgeInsets) -> CGSize {
+        CGSize(
+            width: max(width - insets.leading - insets.trailing, 0),
+            height: max(height - insets.top - insets.bottom, 0)
+        )
+    }
+
+    func outset(by insets: EdgeInsets) -> CGSize {
+        CGSize(
+            width: max(width + insets.leading + insets.trailing, 0),
+            height: max(height + insets.top + insets.bottom, 0)
+        )
     }
 }
 

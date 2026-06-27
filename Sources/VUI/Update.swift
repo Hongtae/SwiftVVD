@@ -152,3 +152,62 @@ enum Update {
     }
 
 }
+
+/// Limits repeated action dispatches within the same graph update seed.
+struct UpdateCycleDetector {
+    private var seed: UInt32
+    private var lastSeed: UInt32
+    private var remainingPasses: UInt32
+    private var didWarn: Bool
+
+    init() {
+        seed = Self.currentSeed()
+        lastSeed = .max
+        remainingPasses = 0
+        didWarn = false
+    }
+
+    mutating func reset() {
+        lastSeed = .max
+        remainingPasses = 0
+        didWarn = false
+    }
+
+    mutating func dispatch(label: @autoclosure () -> String, isDebug: Bool = false) -> Bool {
+        let current = Self.currentSeed()
+        seed = current
+
+        if lastSeed == current {
+            guard remainingPasses > 0 else {
+                warnIfNeeded(label: label(), isDebug: isDebug)
+                return false
+            }
+
+            remainingPasses -= 1
+            guard remainingPasses > 0 else {
+                warnIfNeeded(label: label(), isDebug: isDebug)
+                return false
+            }
+            return true
+        }
+
+        lastSeed = current
+        remainingPasses = 2
+        return true
+    }
+
+    private mutating func warnIfNeeded(label: String, isDebug: Bool) {
+        guard !didWarn else { return }
+        didWarn = true
+        if !isDebug {
+            Log.warning("action tried to update multiple times per frame: \(label)")
+        }
+    }
+
+    private static func currentSeed() -> UInt32 {
+        guard let host = AttributeGraphRef.current?.context as? GraphHost else {
+            return 0
+        }
+        return host.data.updateSeed
+    }
+}

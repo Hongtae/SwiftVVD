@@ -176,6 +176,16 @@ extension Binding: RandomAccessCollection where Value: MutableCollection, Value:
 }
 
 extension Binding {
+    func projecting<P>(_ projection: P) -> Binding<P.Projected>
+        where P: Projection, P.Base == Value
+    {
+        var binding = Binding<P.Projected>(
+            location: location.projecting(projection)
+        )
+        binding.transaction = transaction
+        return binding
+    }
+
     private var resolvedTransaction: Transaction {
         let current = Transaction.current
         guard !transaction.isEmpty else {

@@ -93,6 +93,18 @@ struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredica
     }
 }
 
+struct BothFeatures<A: ViewInputPredicate, B: ViewInputPredicate>: ViewInputPredicate {
+    static func evaluate(inputs: _GraphInputs) -> Bool {
+        A.evaluate(inputs: inputs) && B.evaluate(inputs: inputs)
+    }
+}
+
+struct InferredToolbarUserDefaultFeature: ViewInputPredicate {
+    static func evaluate(inputs: _GraphInputs) -> Bool {
+        false
+    }
+}
+
 // ViewInputFlag: ViewInput with Bool value semantics.
 protocol ViewInputFlag: ViewInput where Value == Bool {}
 

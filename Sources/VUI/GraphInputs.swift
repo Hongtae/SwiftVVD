@@ -348,6 +348,15 @@ public struct _GraphInputs {
         if other.options.contains(.animationsDisabled) {
             options.insert(.animationsDisabled)
         }
+        if other.options.contains(.viewRequestsLayoutComputer) {
+            options.insert(.viewRequestsLayoutComputer)
+        }
+        if other.options.contains(.viewNeedsGeometry) {
+            options.insert(.viewNeedsGeometry)
+        }
+        if other.options.contains(.viewNeedsGeometryAccessibility) {
+            options.insert(.viewNeedsGeometryAccessibility)
+        }
         mergedInputs.formUnion(other.mergedInputs)
     }
 

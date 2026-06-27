@@ -88,6 +88,43 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
+    func testAppearanceEffectPhaseChangeQueuesDisappearAndAppearWithoutRemovalReason() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            var events: [String] = []
+            let modifier = graph.makeInput(
+                value: _AppearanceActionModifier(
+                    appear: { events.append("appear") },
+                    disappear: { events.append("disappear") }
+                )
+            )
+            let phase = graph.makeInput(value: Phase())
+            let effect = graph.makeStatefulRule(
+                AppearanceEffect(modifier: modifier, phase: phase)
+            )
+
+            _ = effect.value
+            XCTAssertEqual(events, ["appear"])
+
+            var nextPhase = phase.value
+            nextPhase.resetSeed = 1
+            phase.setValue(nextPhase)
+
+            Update.begin()
+            _ = effect.value
+
+            XCTAssertEqual(Update.queuedActionReasons, [nil, nil])
+            XCTAssertEqual(events, ["appear"])
+
+            Update.end()
+
+            XCTAssertEqual(Update.queuedActionReasons, [])
+            XCTAssertEqual(events, ["appear", "disappear", "appear"])
+        }
+    }
+
     func testAppearanceEffectUsesLatestCallbacksAfterModifierChange() {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)
@@ -190,6 +227,40 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
+    func testAppearanceEffectWillRemoveQueuesDisappearWithRemovalReason() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                var events: [String] = []
+                let modifier = host.data.graph.makeInput(
+                    value: _AppearanceActionModifier(
+                        appear: { events.append("appear") },
+                        disappear: { events.append("disappear") }
+                    )
+                )
+                let phase = host.data.graph.makeInput(value: Phase())
+                let effect = host.data.graph.makeStatefulRule(
+                    AppearanceEffect(modifier: modifier, phase: phase)
+                )
+
+                _ = effect.value
+                XCTAssertEqual(events, ["appear"])
+
+                Update.begin()
+                AppearanceEffect.willRemove(attribute: effect.identifier)
+
+                XCTAssertEqual(Update.queuedActionReasons, [0x02])
+                XCTAssertEqual(events, ["appear"])
+
+                Update.end()
+
+                XCTAssertEqual(Update.queuedActionReasons, [])
+                XCTAssertEqual(events, ["appear", "disappear"])
+            }
+        }
+    }
+
     func testAppearanceEffectQueuesTrackedRemovalWhenFirstEvaluatedWhileHostIsUnattached() {
         let host = GraphHost()
         host.removedState = .unattached
@@ -245,6 +316,43 @@ final class AppearanceActionModifierTests: XCTestCase {
 
                 XCTAssertEqual(Update.queuedActionReasons, [])
                 XCTAssertEqual(events, ["appear", "disappear"])
+            }
+        }
+    }
+
+    func testAppearanceEffectTrackedRemovalQueuesRemovalInNextDispatchPass() {
+        let host = GraphHost()
+        host.removedState = .unattached
+
+        host.data.withCurrent {
+            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                var events: [String] = []
+                let modifier = host.data.graph.makeInput(
+                    value: _AppearanceActionModifier(
+                        appear: {
+                            events.append("appear")
+                            Update.enqueueAction {
+                                events.append("appear-followup")
+                            }
+                        },
+                        disappear: { events.append("disappear") }
+                    )
+                )
+                let phase = host.data.graph.makeInput(value: Phase())
+                let effect = host.data.graph.makeStatefulRule(
+                    AppearanceEffect(modifier: modifier, phase: phase)
+                )
+
+                Update.begin()
+                _ = effect.value
+
+                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+                XCTAssertEqual(events, [])
+
+                Update.end()
+
+                XCTAssertEqual(Update.queuedActionReasons, [])
+                XCTAssertEqual(events, ["appear", "appear-followup", "disappear"])
             }
         }
     }

@@ -416,6 +416,28 @@ public struct _ViewInputs {
         base.options.contains(.supportsVariableFrameDuration)
     }
 
+    var needsGeometry: Bool {
+        get { base.options.contains(.viewNeedsGeometry) }
+        set {
+            if newValue {
+                base.options.insert(.viewNeedsGeometry)
+            } else {
+                base.options.remove(.viewNeedsGeometry)
+            }
+        }
+    }
+
+    var requestsLayoutComputer: Bool {
+        get { base.options.contains(.viewRequestsLayoutComputer) }
+        set {
+            if newValue {
+                base.options.insert(.viewRequestsLayoutComputer)
+            } else {
+                base.options.remove(.viewRequestsLayoutComputer)
+            }
+        }
+    }
+
     // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
     // Used by view-specific inputs that should not be stored in the graph channel.
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {

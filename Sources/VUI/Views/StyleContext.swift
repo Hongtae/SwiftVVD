@@ -30,6 +30,8 @@ struct AccessibilityRepresentableStyleContext: StyleContext {}
 // Menu-related contexts retained until Menu is rewritten.
 struct MenuStyleContext: StyleContext {}
 
+struct ScrollViewStyleContext: StyleContext {}
+
 // SheetStyleContext: StyleContext + ViewInputFlag.
 // styleContext(.sheet) pushes SheetStyleContext into customInputs via
 // StyleContextWriter<SheetStyleContext>. input(SheetStyleContext.self) writes

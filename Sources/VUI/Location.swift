@@ -17,6 +17,26 @@ protocol _Location {
     mutating func setValue(_: Value, transaction: Transaction)
 }
 
+/// Describes a stable lens from a stored location value into a projected value.
+protocol Projection: Hashable {
+    associatedtype Base
+    associatedtype Projected
+
+    func get(base: Base) -> Projected
+    func set(base: inout Base, newValue: Projected)
+}
+
+/// Cache key that keeps repeated binding projections sharing the same location box.
+private struct ProjectionCacheKey: Hashable {
+    var type: ObjectIdentifier
+    var projection: AnyHashable
+
+    init<P: Projection>(_ projection: P) {
+        self.type = ObjectIdentifier(P.self)
+        self.projection = AnyHashable(projection)
+    }
+}
+
 @usableFromInline
 class AnyLocationBase {
     init() {}
@@ -26,6 +46,8 @@ class AnyLocationBase {
         let offset: Int
     }
     private var notificationTargets: [TrackerKey: () -> Void] = [:]
+    private var projectedLocations: [ProjectionCacheKey: AnyLocationBase] = [:]
+
     func addTracker(key: TrackerKey, tracker: @escaping ()->Void) {
         notificationTargets[key] = tracker
     }
@@ -35,6 +57,20 @@ class AnyLocationBase {
     func notifyChange() {
         notificationTargets.values.map { $0 }
             .forEach { $0() }
+    }
+
+    func cachedProjectedLocation<P: Projection>(
+        for projection: P,
+        make: () -> AnyLocation<P.Projected>
+    ) -> AnyLocation<P.Projected> {
+        let key = ProjectionCacheKey(projection)
+        if let location = projectedLocations[key] as? AnyLocation<P.Projected> {
+            return location
+        }
+
+        let location = make()
+        projectedLocations[key] = location
+        return location
     }
 }
 
@@ -48,6 +84,14 @@ class AnyLocation<Value>: AnyLocationBase, @unchecked Sendable {
 
     func setValue(_: Value, transaction: Transaction) {
         notifyChange()
+    }
+
+    func projecting<P>(_ projection: P) -> AnyLocation<P.Projected>
+        where P: Projection, P.Base == Value
+    {
+        cachedProjectedLocation(for: projection) {
+            LocationBox(location: ProjectedLocation(base: self, projection: projection))
+        }
     }
 }
 
@@ -91,6 +135,22 @@ struct ConstantLocation<Value>: _Location {
     let value: Value
     func getValue() -> Value { value }
     func setValue(_: Value, transaction: Transaction) {}
+}
+
+/// Location wrapper that writes a projected value back through its base location.
+private struct ProjectedLocation<P: Projection>: _Location {
+    var base: AnyLocation<P.Base>
+    var projection: P
+
+    func getValue() -> P.Projected {
+        projection.get(base: base.getValue())
+    }
+
+    mutating func setValue(_ value: P.Projected, transaction: Transaction) {
+        var baseValue = base.getValue()
+        projection.set(base: &baseValue, newValue: value)
+        base.setValue(baseValue, transaction: transaction)
+    }
 }
 
 class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {

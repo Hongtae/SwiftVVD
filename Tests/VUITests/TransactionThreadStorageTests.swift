@@ -11,6 +11,14 @@ final class TransactionThreadStorageTests: XCTestCase {
         super.tearDown()
     }
 
+    func testTransactionStoresSinglePropertyListWord() {
+        let labels = Mirror(reflecting: Transaction()).children.map(\.label)
+
+        XCTAssertEqual(labels, ["plist"])
+        XCTAssertEqual(MemoryLayout<Transaction>.size, MemoryLayout<UInt>.size)
+        XCTAssertEqual(MemoryLayout<PropertyList>.size, MemoryLayout<UInt>.size)
+    }
+
     func testTransactionIDFirstReadLazilyAllocatesStableThreadID() {
         Transaction.ThreadStorage.resetCurrentIDForTesting()
 

@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+/// Policy for preserving or disabling content-offset adjustment when scroll content changes.
 public struct ScrollContentOffsetAdjustmentBehavior {
     private enum Role: UInt8 {
         case automatic = 0

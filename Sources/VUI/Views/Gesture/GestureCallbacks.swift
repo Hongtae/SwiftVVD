@@ -81,7 +81,16 @@ struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
             let shouldFire: Bool
             if case .active(let prev) = state.lastPhase { shouldFire = prev != v }
             else { shouldFire = true }
-            if shouldFire { changed?(v) }
+            if shouldFire, let cb = changed {
+                let value = v
+                return {
+                    var transaction = Transaction()
+                    transaction.tracksVelocity = true
+                    Transaction.withScopedThreadTransaction(transaction) {
+                        cb(value)
+                    }
+                }
+            }
         case .ended(let v):
             if !state.hasFired {
                 state.hasFired = true

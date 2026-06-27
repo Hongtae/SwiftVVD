@@ -39,6 +39,99 @@ private struct LayoutChildGeometry: Rule {
     }
 }
 
+/// Shared bridge from dynamic-container item identity back to scroll item geometry.
+final class ScrollableLayoutItemGeometryContext {
+    var layoutDirection: Attribute<LayoutDirection>
+    var containerInfo: Attribute<DynamicContainer.Info>?
+    var placement: (AnyHashable) -> _Placement?
+
+    init(
+        layoutDirection: Attribute<LayoutDirection>,
+        placement: @escaping (AnyHashable) -> _Placement?
+    ) {
+        self.layoutDirection = layoutDirection
+        self.placement = placement
+    }
+
+    func identifier(for uniqueId: _ViewList_ID.Canonical) -> AnyHashable? {
+        guard let containerInfo else { return nil }
+        let info = containerInfo.value
+        guard let item = info.item(for: uniqueId) else { return nil }
+        return item.item
+    }
+}
+
+/// Carries the scroll item geometry bridge through child view input rewriting.
+struct ScrollableLayoutItemGeometryContextKey: ViewInput {
+    static var defaultValue: ScrollableLayoutItemGeometryContext? { nil }
+
+    static func valuesEqual(
+        _ lhs: ScrollableLayoutItemGeometryContext?,
+        _ rhs: ScrollableLayoutItemGeometryContext?
+    ) -> Bool {
+        lhs === rhs
+    }
+}
+
+/// Resolves a dynamic list unique id to the scroll layout's item identifier.
+private struct ScrollableItemIdentifier: Rule {
+    typealias Value = AnyHashable?
+
+    var uniqueId: _ViewList_ID.Canonical
+    var context: ScrollableLayoutItemGeometryContext
+
+    func updateValue() -> AnyHashable? {
+        context.identifier(for: uniqueId)
+    }
+}
+
+/// Publishes geometry that keeps scroll item placement and child layout in sync.
+private struct ScrollableItemGeometry: Rule {
+    typealias Value = ViewGeometry
+
+    var identifier: Attribute<AnyHashable?>
+    var context: ScrollableLayoutItemGeometryContext
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var layoutComputer: Attribute<LayoutComputer>
+
+    func updateValue() -> ViewGeometry {
+        _ = context.layoutDirection.value
+        if let identifier = identifier.value {
+            _ = context.placement(identifier)
+        }
+
+        let resolvedSize = size.value
+        let computer = layoutComputer.value
+        return ViewGeometry(
+            origin: position.value,
+            dimensions: ViewDimensions(guideComputer: computer, size: resolvedSize)
+        )
+    }
+}
+
+/// Projection rule for child-facing position inputs rewritten by scroll layout.
+private struct ScrollableItemGeometryPosition: Rule {
+    typealias Value = CGPoint
+
+    var geometry: Attribute<ViewGeometry>
+
+    func updateValue() -> CGPoint {
+        geometry.value.origin
+    }
+}
+
+/// Projection rule for child-facing size inputs rewritten by scroll layout.
+private struct ScrollableItemGeometrySize: Rule {
+    typealias Value = ViewSize
+
+    var geometry: Attribute<ViewGeometry>
+
+    func updateValue() -> ViewSize {
+        geometry.value.dimensions.size
+    }
+}
+
 /// StatefulRule: produces LayoutComputer wrapping ViewLayoutEngine<L> for a static child list.
 /// Re-fires when layoutAttr changes (e.g. animating spacing). Child LC deps are tracked
 /// downstream by LayoutChildGeometries (which calls childGeometries via ViewLayoutEngine).
@@ -56,7 +149,7 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
 }
 
 /// Dynamic container storage used by DynamicContainerInfo.
-private enum DynamicContainer {
+enum DynamicContainer {
     final class TransitionRemovalListener: @unchecked Sendable {
         private struct State {
             var seedValue: UInt32 = 0
@@ -120,7 +213,7 @@ private enum DynamicContainer {
 
     /// Field roles: subgraph, uniqueId, viewCount, outputs,
     /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
-    /// resetSeed, phase, completion seed, transition transactions.
+    /// resetSeed, phase, item, completion seed, transition transactions.
     /// The identity is stored in canonical form for lookup across updates.
     final class ItemInfo {
         var subgraph: AGSubgraph
@@ -134,6 +227,9 @@ private enum DynamicContainer {
         var precedingViewCount: Int
         var resetSeed: UInt32
         var phase: UInt8
+        // Type-erased dynamic adaptor item payload. The scrollable layout bridge
+        // uses this to recover the original collection index from DynamicContainer.Info.
+        var item: AnyHashable?
         // Cache for non-unary DynamicContainer items. This keeps each materialized
         // child addressable until multi-output storage is modeled.
         var layoutAttributes: [LayoutProxyAttributes]
@@ -157,6 +253,7 @@ private enum DynamicContainer {
             precedingViewCount: Int = 0,
             resetSeed: UInt32 = 0,
             phase: UInt8 = 1,
+            item: AnyHashable? = nil,
             transitionCompletionSeed: Attribute<UInt32>? = nil,
             transitionTransactions: _TransitionTransactionResolver? = nil
         ) {
@@ -171,6 +268,7 @@ private enum DynamicContainer {
             self.precedingViewCount = precedingViewCount
             self.resetSeed = resetSeed
             self.phase = phase
+            self.item = item
             self.layoutAttributes = layoutAttributes
             self.preferenceOutputs = preferenceOutputs
             self.transitionPhaseSetters = transitionPhaseSetters
@@ -230,10 +328,6 @@ private enum DynamicContainer {
         mutating func replaceItems(
             active activeItems: [ItemInfo],
             removed removedItems: [ItemInfo] = [],
-            // Scroll retained-unused lifecycle is not implemented yet.
-            // Scrollable layout can keep phase-3 unused items with scroll
-            // geometry/identifier rules. Keep this empty until scroll-specific
-            // DynamicContainer item geometry is implemented.
             unused unusedItems: [ItemInfo] = []
         ) {
             let oldIdentity = items.map { ItemIdentity(item: $0) }
@@ -378,7 +472,7 @@ private struct DynamicLayoutMap {
 }
 
 /// StatefulRule: reconciles dynamic container items and publishes DynamicContainer.Info.
-private struct DynamicContainerInfo: StatefulRule {
+struct DynamicContainerInfo: StatefulRule {
     typealias Value = DynamicContainer.Info
     var viewListAttr: Attribute<any ViewList>
     var inputs: _ViewInputs
@@ -453,21 +547,27 @@ private struct DynamicContainerInfo: StatefulRule {
             return true
         }
 
-        let removedItems = retainedRemovedItems(
+        let retention = retainedInactiveItems(
             excluding: liveIDs,
             transaction: listTransaction,
             graph: graph
         )
-        info.replaceItems(active: orderedItems, removed: removedItems)
+        info.replaceItems(
+            active: orderedItems,
+            removed: retention.removed,
+            unused: retention.unused
+        )
         AttributeGraph.setStatefulOutput(info)
     }
 
-    private mutating func retainedRemovedItems(
+    private mutating func retainedInactiveItems(
         excluding liveIDs: Set<_ViewList_ID.Canonical>,
         transaction: Transaction,
         graph: AttributeGraph
-    ) -> [DynamicContainer.ItemInfo] {
+    ) -> (removed: [DynamicContainer.ItemInfo], unused: [DynamicContainer.ItemInfo]) {
         var removedItems: [DynamicContainer.ItemInfo] = []
+        var unusedItems: [DynamicContainer.ItemInfo] = []
+        let maxUnusedItems = max(inputs[DynamicContainerMaxUnusedItems.self], 0)
         for item in info.items where !liveIDs.contains(item.uniqueId) {
             if item.phase == 2 {
                 guard let listener = item.listener else {
@@ -485,6 +585,15 @@ private struct DynamicContainerInfo: StatefulRule {
                 removedItems.append(item)
                 continue
             }
+            if item.phase == 3 {
+                guard unusedItems.count < maxUnusedItems else {
+                    item.invalidate()
+                    retainedElements.removeValue(forKey: item.uniqueId)
+                    continue
+                }
+                unusedItems.append(item)
+                continue
+            }
 
             let transitionTransaction = item.transitionTransactions?(.didDisappear, transaction)
                 .first { candidate in
@@ -497,8 +606,15 @@ private struct DynamicContainerInfo: StatefulRule {
                   let animation = transitionTransaction.effectiveAnimation,
                   animation.box.duration > 0,
                   let completionSeed = item.transitionCompletionSeed else {
-                item.invalidate()
-                retainedElements.removeValue(forKey: item.uniqueId)
+                guard unusedItems.count < maxUnusedItems else {
+                    item.invalidate()
+                    retainedElements.removeValue(forKey: item.uniqueId)
+                    continue
+                }
+                item.listener = nil
+                item.phase = 3
+                item.removalOrder = 0
+                unusedItems.append(item)
                 continue
             }
 
@@ -521,7 +637,7 @@ private struct DynamicContainerInfo: StatefulRule {
             item.removalOrder = removedItems.count
             removedItems.append(item)
         }
-        return removedItems
+        return (removedItems, unusedItems)
     }
 
     private mutating func makeItem(
@@ -548,12 +664,17 @@ private struct DynamicContainerInfo: StatefulRule {
             let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
             let traitsListAttr = sublist.list.map { OptionalAttribute($0) } ??
                 OptionalAttribute<any ViewList>()
+            let scrollContext = baseInputs[ScrollableLayoutItemGeometryContextKey.self]
+            let dynamicItem = scrollContext != nil ? sublist.id.canonicalID.explicitID : nil
 
             // Non-unary items are a single DynamicContainer item whose viewCount spans
             // multiple child outputs, not multiple item records.
             for elementOffset in offset..<(offset + viewCount) {
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
                 let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
+                let scrollLayoutComputer = scrollContext.map { _ in
+                    graph.makeIndirectAttribute(defaultValue: LayoutComputer.defaultValue)
+                }
 
                 let childOutputs = sublist.elements.makeOneElement(at: elementOffset, inputs: baseInputs) {
                     elementInputs,
@@ -575,10 +696,33 @@ private struct DynamicContainerInfo: StatefulRule {
                         t.appendPosition(posAttr.value)
                         return t
                     }
-                    childInputs.transform = childTransform
                     childInputs.position = posAttr
-                    childInputs.containerPosition = capturedInputs.position
                     childInputs.size = sizeAttr
+                    if let scrollContext, let scrollLayoutComputer {
+                        let identifierAttr = graph.makeRule(
+                            ScrollableItemIdentifier(uniqueId: uniqueId, context: scrollContext)
+                        )
+                        let geometryAttr = graph.makeRule(
+                            ScrollableItemGeometry(
+                                identifier: identifierAttr,
+                                context: scrollContext,
+                                position: posAttr,
+                                size: sizeAttr,
+                                layoutComputer: scrollLayoutComputer
+                            )
+                        )
+                        if childInputs.needsGeometry {
+                            childInputs.size = graph.makeRule(
+                                ScrollableItemGeometrySize(geometry: geometryAttr)
+                            )
+                            childInputs.position = graph.makeRule(
+                                ScrollableItemGeometryPosition(geometry: geometryAttr)
+                            )
+                            childInputs.requestsLayoutComputer = true
+                        }
+                    }
+                    childInputs.transform = childTransform
+                    childInputs.containerPosition = capturedInputs.position
                     childInputs.safeAreaInsets = capturedInputs.safeAreaInsets
                     childInputs.containerSize = OptionalAttribute(capturedInputs.size)
                     childInputs.stackOrientation = capturedInputs.stackOrientation
@@ -601,6 +745,9 @@ private struct DynamicContainerInfo: StatefulRule {
                 preferenceOutputs.append(childOutputs.preferences)
 
                 guard let lcAttr = childOutputs._layoutComputer.attribute else {
+                    if let scrollLayoutComputer {
+                        graph.setIndirectTarget(scrollLayoutComputer, to: nil)
+                    }
                     layoutAttributes.append(LayoutProxyAttributes())
                     continue
                 }
@@ -619,6 +766,9 @@ private struct DynamicContainerInfo: StatefulRule {
                         },
                         explicitAlignment: { inner.explicitAlignment($0, at: $1) }
                     )
+                }
+                if let scrollLayoutComputer {
+                    graph.setIndirectTarget(scrollLayoutComputer, to: wrapperLC)
                 }
 
                 layoutAttributes.append(LayoutProxyAttributes(
@@ -640,6 +790,7 @@ private struct DynamicContainerInfo: StatefulRule {
                 preferenceOutputs: preferenceOutputs,
                 transitionPhaseSetters: transitionPhaseSetters,
                 needsTransitions: transition != nil,
+                item: dynamicItem,
                 transitionCompletionSeed: transitionCompletionSeed,
                 transitionTransactions: transition.map { transition in
                     { phase, transaction in
@@ -686,7 +837,7 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
 /// SE-0352 allows this to be called with `any PreferenceKey.Type`. The
 /// compiler opens the existential and binds `K` to the concrete key type,
 /// so `Attribute<K.Value>` is correctly typed at call time.
-private func _makeDynReduceAttr<K: PreferenceKey>(
+func _makeDynReduceAttr<K: PreferenceKey>(
     _ keyType: K.Type,
     nodeListAttr: Attribute<[AGWeakAttribute]>,
     in graph: AttributeGraph
@@ -962,6 +1113,17 @@ extension Layout {
 public enum LayoutDirection: Hashable, CaseIterable {
     case leftToRight
     case rightToLeft
+}
+
+private struct LayoutDirectionKey: EnvironmentKey {
+    static var defaultValue: LayoutDirection { .leftToRight }
+}
+
+extension EnvironmentValues {
+    public var layoutDirection: LayoutDirection {
+        get { self[LayoutDirectionKey.self] }
+        set { self[LayoutDirectionKey.self] = newValue }
+    }
 }
 
 public struct LayoutProperties {

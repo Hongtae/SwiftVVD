@@ -124,4 +124,68 @@ final class AttributeGraphCounterTests: XCTestCase {
             XCTAssertEqual(innerGraph.graphCounter(lane: 1), 2)
         }
     }
+
+    func testParentInvalidationMarksKeyPathChildInputsChanged() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        let recorder = KeyPathChangedInputRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: KeyPathChangedInputPair(first: 1, second: 10))
+            let first = graph.subscriptNode(parent: source, keyPath: \.first)
+            let second = graph.subscriptNode(parent: source, keyPath: \.second)
+            let output = graph.makeStatefulRule(
+                KeyPathChangedInputRule(
+                    first: first,
+                    second: second,
+                    recorder: recorder
+                )
+            )
+
+            XCTAssertEqual(output.value, 11)
+
+            source.setValue(KeyPathChangedInputPair(first: 2, second: 20))
+            XCTAssertEqual(output.value, 22)
+        }
+
+        XCTAssertEqual(
+            recorder.snapshots,
+            [
+                KeyPathChangedInputSnapshot(firstChanged: false, secondChanged: false),
+                KeyPathChangedInputSnapshot(firstChanged: true, secondChanged: true),
+            ]
+        )
+    }
+}
+
+private struct KeyPathChangedInputPair: Equatable {
+    var first: Int
+    var second: Int
+}
+
+private struct KeyPathChangedInputSnapshot: Equatable {
+    var firstChanged: Bool
+    var secondChanged: Bool
+}
+
+private final class KeyPathChangedInputRecorder {
+    var snapshots: [KeyPathChangedInputSnapshot] = []
+}
+
+private struct KeyPathChangedInputRule: StatefulRule {
+    typealias Value = Int
+
+    var first: Attribute<Int>
+    var second: Attribute<Int>
+    var recorder: KeyPathChangedInputRecorder
+
+    mutating func updateValue() {
+        recorder.snapshots.append(
+            KeyPathChangedInputSnapshot(
+                firstChanged: AttributeGraph.currentStatefulInputChanged(first.identifier),
+                secondChanged: AttributeGraph.currentStatefulInputChanged(second.identifier)
+            )
+        )
+        AttributeGraph.setStatefulOutput(first.value + second.value)
+    }
 }

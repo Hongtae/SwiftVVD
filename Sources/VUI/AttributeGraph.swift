@@ -55,6 +55,7 @@ extension StatefulRule {
     mutating func destroy() {}
 }
 
+/// Hidden lifecycle hook for stateful attributes owned by removable subgraphs.
 protocol RemovableAttribute: _AttributeBody {
     static func willRemove(attribute: AGAttribute)
     static func didReinsert(attribute: AGAttribute)
@@ -195,8 +196,11 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
 /// Carries a seed (generation counter) to detect whether the slot at `identifier`
 /// still holds the same node that was referenced when this value was created.
 struct AGWeakAttribute: Hashable, Sendable {
+    static let invalid = AGWeakAttribute(uncheckedIdentifier: 0, seed: 0)
+
     let identifier: UInt32
     let seed: UInt32
+    var isInvalid: Bool { identifier == 0 && seed == 0 }
 
 #if DEBUG
     private let _owningGraphID: ObjectIdentifier
@@ -205,9 +209,26 @@ struct AGWeakAttribute: Hashable, Sendable {
         self.seed = seed
         self._owningGraphID = owningGraph
     }
+
+    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
+        self.identifier = uncheckedIdentifier
+        self.seed = seed
+        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
+    }
+#else
+    init(identifier: UInt32, seed: UInt32) {
+        self.identifier = identifier
+        self.seed = seed
+    }
+
+    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
+        self.identifier = uncheckedIdentifier
+        self.seed = seed
+    }
 #endif
 
     func isValid(in graph: AttributeGraph) -> Bool {
+        guard !isInvalid else { return false }
         if graph._isValid(index: identifier, seed: seed) {
 #if DEBUG
             guard _owningGraphID == ObjectIdentifier(graph) else {
@@ -223,10 +244,35 @@ struct AGWeakAttribute: Hashable, Sendable {
     }
 
     func toStrong() -> AGAttribute {
+        guard !isInvalid else {
+            fatalError("Invalid AGWeakAttribute sentinel cannot be converted to a strong attribute.")
+        }
 #if DEBUG
-        AGAttribute(rawValue: identifier, owningGraph: _owningGraphID, seed: seed)
+        return AGAttribute(rawValue: identifier, owningGraph: _owningGraphID, seed: seed)
 #else
-        AGAttribute(rawValue: identifier)
+        return AGAttribute(rawValue: identifier)
+#endif
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        if lhs.isInvalid || rhs.isInvalid {
+            return lhs.identifier == rhs.identifier && lhs.seed == rhs.seed
+        }
+#if DEBUG
+        guard lhs._owningGraphID == rhs._owningGraphID else {
+            return false
+        }
+#endif
+        return lhs.identifier == rhs.identifier && lhs.seed == rhs.seed
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(identifier)
+        hasher.combine(seed)
+#if DEBUG
+        if !isInvalid {
+            hasher.combine(_owningGraphID)
+        }
 #endif
     }
 }
@@ -298,8 +344,10 @@ extension Attribute where Value: Equatable {
 struct WeakAttribute<T>: Hashable, Sendable {
     let raw: AGWeakAttribute
 
+    init() { self.raw = .invalid }
     init(_ raw: AGWeakAttribute) { self.raw = raw }
 
+    var isInvalid: Bool { raw.isInvalid }
     func isValid(in graph: AttributeGraph) -> Bool { raw.isValid(in: graph) }
 
     func toStrong() -> Attribute<T> { Attribute<T>(raw.toStrong()) }
@@ -827,7 +875,8 @@ class AttributeGraph: @unchecked Sendable {
             return index
         }
         let index = UInt32(slots.count)
-        slots.append(NodeSlot(seed: 0, node: nil))
+        // Reserve the all-zero weak handle as the invalid sentinel.
+        slots.append(NodeSlot(seed: 1, node: nil))
         return index
     }
 
@@ -1400,14 +1449,15 @@ class AttributeGraph: @unchecked Sendable {
         // Side-effect nodes are collected separately and evaluated after the BFS completes,
         // so that cascading setValue calls (from inside the side-effect rule) create their
         // own BFS + evaluation chain without interfering with the current traversal.
-        var queue: [UInt32] = [startID.rawValue]
+        var queue: [(id: UInt32, changedInput: UInt32?)] = [(startID.rawValue, changedInput)]
         var visited: Set<UInt32> = []
         var sideEffects: [UInt32] = []
         var sideEffectSet: Set<UInt32> = []
         var i = 0
         while i < queue.count {
-            let rawID = queue[i]; i += 1
-            guard visited.insert(rawID).inserted else { continue }
+            let (rawID, incomingChangedInput) = queue[i]
+            i += 1
+            let firstVisit = visited.insert(rawID).inserted
             let index = Int(rawID)
             guard var node = slots[index].node else { continue }  // freed slot, skip
             if propagateTransaction {
@@ -1415,8 +1465,8 @@ class AttributeGraph: @unchecked Sendable {
             }
             if inputsChanged {
                 node.inputsChanged = true
-                if let changedInput {
-                    node.changedInputs.insert(changedInput)
+                if let incomingChangedInput {
+                    node.changedInputs.insert(incomingChangedInput)
                 }
             }
             if !node.needsEvaluation {
@@ -1430,11 +1480,12 @@ class AttributeGraph: @unchecked Sendable {
                     sideEffects.append(UInt32(index))
                 }
             }
+            guard firstVisit else { continue }
             // Even when a node is already dirty, keep walking its outputs.
             // Structural updates can leave intermediate preference/layout nodes
             // dirty. Later source changes still need to reach side-effect refresh
             // rules that may have been evaluated and cleared in the meantime.
-            queue.append(contentsOf: node.outputs)
+            queue.append(contentsOf: node.outputs.map { ($0, UInt32(index)) })
             // Propagate to cross-graph mirror nodes watching this node.
             notifyCrossGraphObservers(for: UInt32(index))
         }
