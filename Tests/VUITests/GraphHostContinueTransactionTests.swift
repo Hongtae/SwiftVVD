@@ -151,6 +151,58 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
+    func testContinueTransactionInvalidatingFallbackCapturesCurrentTransactionBeforeUpdateAction() {
+        let host = GraphHost()
+        var input: Attribute<Int>!
+        var output: Attribute<Int>!
+        var weakInput: AGWeakAttribute!
+        var evaluations = 0
+
+        host.data.withCurrent {
+            input = host.data.graph.makeInput(value: 3)
+            output = host.data.graph.makeRule {
+                evaluations += 1
+                return input.value * 2
+            }
+            weakInput = input.asWeak().raw
+
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 1)
+            XCTAssertNil(host.data.graph.transaction(for: output.identifier))
+        }
+
+        var transaction = Transaction()
+        transaction[ContinueTransactionKey.self] = 42
+
+        Update.begin()
+        defer {
+            if Update.isActive {
+                Update.end()
+            }
+        }
+
+        withTransaction(transaction) {
+            host.continueTransaction(invalidating: weakInput)
+        }
+
+        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+        XCTAssertFalse(host.hasPendingTransactions)
+
+        Update.end()
+
+        XCTAssertTrue(Transaction.current.isEmpty)
+        XCTAssertTrue(host.hasPendingTransactions)
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            let propagated = host.data.graph.transaction(for: output.identifier)
+            XCTAssertEqual(propagated?[ContinueTransactionKey.self], 42)
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 2)
+        }
+    }
+
     func testContinueTransactionWithoutUpdatingHostFallbackBatchesThroughAsyncTransaction() {
         let host = GraphHost()
         var events: [String] = []
@@ -252,6 +304,10 @@ private struct ContinueRecordingGraphMutation: GraphMutation {
 
 private final class ContinueCombineStorage {
     var events: [String] = []
+}
+
+private struct ContinueTransactionKey: TransactionKey {
+    static let defaultValue = 0
 }
 
 private struct CombiningContinueMutation: GraphMutation {

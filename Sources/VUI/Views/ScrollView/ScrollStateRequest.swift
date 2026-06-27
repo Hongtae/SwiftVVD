@@ -107,9 +107,9 @@ private extension ScrollGeometry {
 }
 
 /// Concrete content rect and optional anchor requested from a scrollable host.
-struct ScrollTarget: Hashable, Sendable {
-    var rect: CGRect
-    var anchor: UnitPoint?
+public struct ScrollTarget: Hashable {
+    public var rect: CGRect
+    public var anchor: UnitPoint?
 
     init(rect: CGRect, anchor: UnitPoint? = nil) {
         self.rect = rect
@@ -412,6 +412,7 @@ struct ScrollStateEnqueueRequests: StatefulRule {
 /// Converts visible scrollable collection geometry into binding update requests.
 struct ScrollStateRequestTransform: StatefulRule {
     typealias Value = [any ScrollStateRequest]
+    private static let targetDistanceUpdateTolerance = CGFloat(0.1)
 
     var collection: Attribute<any ScrollableCollection>
     var layoutDirection: Attribute<LayoutDirection>
@@ -536,7 +537,7 @@ struct ScrollStateRequestTransform: StatefulRule {
         if stored.isVisible != newRequest.isVisible {
             return true
         }
-        return abs(stored.targetDistance - newRequest.targetDistance) > .ulpOfOne
+        return abs(stored.targetDistance - newRequest.targetDistance) >= Self.targetDistanceUpdateTolerance
     }
 
     private func currentVisibleRect() -> CGRect {

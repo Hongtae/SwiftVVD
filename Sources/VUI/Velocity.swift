@@ -12,6 +12,11 @@ public struct _Velocity<Value>: Equatable where Value: Equatable {
     @inlinable public init(valuePerSecond: Value) {
         self.valuePerSecond = valuePerSecond
     }
+
+    func map<NewValue>(_ transform: (Value) -> NewValue) -> _Velocity<NewValue>
+        where NewValue: Equatable {
+        _Velocity<NewValue>(valuePerSecond: transform(valuePerSecond))
+    }
 }
 
 extension _Velocity: Sendable where Value: Sendable {

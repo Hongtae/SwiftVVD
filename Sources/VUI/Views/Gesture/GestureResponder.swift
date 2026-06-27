@@ -91,6 +91,8 @@ protocol AnyGestureResponder: AnyObject {
 // ViewResponder extension
 
 extension ViewResponder {
+    func resetGesture() {}
+
     /// Returns true if self appears in the nextResponder chain leading up to ancestor.
     ///
     /// ResponderNode.parent chain is not used.
@@ -257,6 +259,9 @@ protocol ViewResponder: AnyObject {
     /// An optional opaque gesture container (for grouping/priority resolution).
     var gestureContainer: AnyObject? { get }
 
+    /// Clears gesture-session state owned by this responder and its descendants.
+    func resetGesture()
+
     /// Determines how this responder participates in hit testing.
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy
 
@@ -339,6 +344,12 @@ class MultiViewResponder: ResponderNode {
         }
     }
 
+    func resetGesture() {
+        for responder in responders {
+            responder.resetGesture()
+        }
+    }
+
     enum ResponderVisitorResult { case `continue`, stop }
 
     func visit(applying: (ResponderNode) -> ResponderVisitorResult) -> ResponderVisitorResult {
@@ -375,6 +386,74 @@ class MultiViewResponder: ResponderNode {
             }
         }
         return result
+    }
+}
+
+// DefaultLayoutViewResponder
+
+nonisolated(unsafe) private var _defaultLayoutViewResponderKeyCounter: UInt32 = 1
+
+final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
+    let hitTestKey: UInt32
+    weak var nextResponder: ResponderNode?
+    var gestureContainer: AnyObject? { nil }
+    var scrollTarget: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
+    var gestureSubgraph1: AGSubgraph?
+    var gestureSubgraph2: AGSubgraph?
+
+    init(
+        responders: [any ViewResponder] = [],
+        scrollTarget: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)? = nil
+    ) {
+        self.hitTestKey = _defaultLayoutViewResponderKeyCounter
+        _defaultLayoutViewResponderKeyCounter &+= 1
+        self.scrollTarget = scrollTarget
+        super.init()
+        update(responders: responders, scrollTarget: scrollTarget)
+    }
+
+    func update(
+        responders: [any ViewResponder],
+        scrollTarget: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
+    ) {
+        self.scrollTarget = scrollTarget
+        updateChildren((value: responders, changed: true))
+    }
+
+    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+        .passthrough
+    }
+
+    func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ContainsPointsOptions
+    ) -> ContainsPointsResult {
+        let count = min(points.count, 64)
+        let mask = count == 64 ? UInt64.max : ((UInt64(1) << UInt64(count)) - 1)
+        return ContainsPointsResult(mask: mask, priority: 0, children: responders)
+    }
+
+    func scrollTarget(
+        in geometry: ScrollGeometry,
+        layoutDirection: LayoutDirection
+    ) -> ScrollTarget? {
+        scrollTarget?(geometry, layoutDirection)
+    }
+
+    override func resetGesture() {
+        scrollTarget = nil
+        resetSubgraph(&gestureSubgraph1)
+        resetSubgraph(&gestureSubgraph2)
+        super.resetGesture()
+    }
+
+    private func resetSubgraph(_ subgraph: inout AGSubgraph?) {
+        guard let current = subgraph else { return }
+        if let graph = AttributeGraph.current, graph === current.graph {
+            current.invalidate()
+        }
+        subgraph = nil
     }
 }
 
@@ -518,6 +597,22 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
 
     func accepts(eventType: Any.Type) -> Bool {
         currentModifier.acceptsEventType(eventType)
+    }
+
+    override func resetGesture() {
+        if let subgraph = childSubgraph,
+           let graph = AttributeGraph.current,
+           graph === subgraph.graph {
+            subgraph.invalidate()
+            childSubgraph = nil
+            needsRebuild = false
+        } else if childSubgraph != nil {
+            needsRebuild = true
+        }
+        eventsAttr = nil
+        resetSeedAttr = nil
+        cachedGestureOutputs = nil
+        super.resetGesture()
     }
 
     // ViewResponder hit testing

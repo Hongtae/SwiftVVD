@@ -44,6 +44,10 @@ struct LayoutComputer {
         )
     }
 
+    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+        box.childGeometries_(at: size, origin: origin)
+    }
+
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
         box.explicitAlignment_(key, at: size)
     }
@@ -62,6 +66,7 @@ struct LayoutComputer {
         sizeThatFits: @escaping (ProposedViewSize) -> CGSize,
         spacing: ViewSpacing = ViewSpacing(),
         place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
+        childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
         priority: Double = 0,
         explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil
     ) {
@@ -69,6 +74,7 @@ struct LayoutComputer {
             sizeThatFits: sizeThatFits,
             spacing: spacing,
             place: place,
+            childGeometries: childGeometries,
             priority: priority,
             explicitAlignment: explicitAlignment
         )

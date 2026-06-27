@@ -1262,7 +1262,11 @@ class AttributeGraph: @unchecked Sendable {
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
-    func invalidateAttribute(_ id: AGAttribute) {
+    func invalidateAttribute(
+        _ id: AGAttribute,
+        transaction: Transaction? = nil,
+        propagateTransaction: Bool = false
+    ) {
         assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
         guard let node = slots[index].node else { return }
@@ -1271,12 +1275,19 @@ class AttributeGraph: @unchecked Sendable {
             for outputIndex in node.outputs {
                 markNeedsEvaluation(
                     AGAttribute(rawValue: outputIndex),
+                    transaction: transaction,
+                    propagateTransaction: propagateTransaction,
                     changedInput: id.rawValue
                 )
             }
             notifyCrossGraphObservers(for: id.rawValue)
         } else {
-            markNeedsEvaluation(id, changedInput: id.rawValue)
+            markNeedsEvaluation(
+                id,
+                transaction: transaction,
+                propagateTransaction: propagateTransaction,
+                changedInput: id.rawValue
+            )
         }
     }
 

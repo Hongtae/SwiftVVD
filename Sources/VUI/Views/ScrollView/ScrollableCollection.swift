@@ -83,7 +83,10 @@ extension ScrollableCollection {
     }
 
     func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
-        scroll(toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID, anchor: nil)
+        scroll(
+            toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
+            anchor: Transaction.current.scrollTargetAnchor
+        )
     }
 }
 

@@ -156,6 +156,35 @@ final class AttributeGraphCounterTests: XCTestCase {
             ]
         )
     }
+
+    func testWithoutTrackingSkipsDependencyAndRestoresRuleContext() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        let recorder = TrackingIsolationRecorder()
+
+        ref.withCurrent {
+            let tracked = graph.makeInput(value: 1)
+            let isolated = graph.makeInput(value: 10)
+            let output = graph.makeStatefulRule(
+                TrackingIsolationRule(
+                    tracked: tracked,
+                    isolated: isolated,
+                    recorder: recorder
+                )
+            )
+
+            XCTAssertEqual(output.value, 11)
+            XCTAssertEqual(recorder.values, [11])
+
+            isolated.setValue(20)
+            XCTAssertEqual(output.value, 11)
+            XCTAssertEqual(recorder.values, [11])
+
+            tracked.setValue(2)
+            XCTAssertEqual(output.value, 22)
+            XCTAssertEqual(recorder.values, [11, 22])
+        }
+    }
 }
 
 private struct KeyPathChangedInputPair: Equatable {
@@ -187,5 +216,25 @@ private struct KeyPathChangedInputRule: StatefulRule {
             )
         )
         AttributeGraph.setStatefulOutput(first.value + second.value)
+    }
+}
+
+private final class TrackingIsolationRecorder {
+    var values: [Int] = []
+}
+
+private struct TrackingIsolationRule: StatefulRule {
+    typealias Value = Int
+
+    var tracked: Attribute<Int>
+    var isolated: Attribute<Int>
+    var recorder: TrackingIsolationRecorder
+
+    mutating func updateValue() {
+        let value = tracked.value + AttributeGraph.withoutTracking {
+            isolated.value
+        }
+        recorder.values.append(value)
+        AttributeGraph.setStatefulOutput(value)
     }
 }

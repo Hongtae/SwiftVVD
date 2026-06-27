@@ -86,6 +86,14 @@ class AnyLocation<Value>: AnyLocationBase, @unchecked Sendable {
         notifyChange()
     }
 
+    func update() -> (Value, Bool) {
+        (getValue(), false)
+    }
+
+    func wasReadValue() -> Bool {
+        false
+    }
+
     func projecting<P>(_ projection: P) -> AnyLocation<P.Projected>
         where P: Projection, P.Base == Value
     {
@@ -219,9 +227,13 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
         super.setValue(value, transaction: transaction)
     }
 
-    func update() -> (Value, Bool) {
+    override func update() -> (Value, Bool) {
         wasRead = true
         return (updateValue, true)
+    }
+
+    override func wasReadValue() -> Bool {
+        wasRead
     }
 
     func setCommitValueHandler(_ handler: ((Value, Transaction) -> Void)?) {
@@ -408,8 +420,15 @@ class LocationBox<Location: _Location>: AnyLocation<Location.Value>, @unchecked 
     override func getValue() -> Location.Value {
         location.getValue()
     }
+    override func update() -> (Location.Value, Bool) {
+        let value = location.getValue()
+        let changed = !_stateValuesAreKnownEqual(_value, value)
+        _value = value
+        return (value, changed)
+    }
     override func setValue(_ value: Location.Value, transaction: Transaction) {
         location.setValue(value, transaction: transaction)
+        _value = value
         super.setValue(value, transaction: transaction)
     }
 }

@@ -834,8 +834,11 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     func resetEvents() {
         // Tear down sessions explicitly, then nil all lazy AG attrs so they are
         // recreated fresh on the next sendEvents call.
-        for sessions in activeSessions.values {
-            for session in sessions { session.teardown() }
+        data.withCurrent {
+            for sessions in activeSessions.values {
+                for session in sessions { session.teardown() }
+            }
+            rootResponder?.resetGesture()
         }
         activeSessions.removeAll()
         eventBindingManager.bindings.removeAll()

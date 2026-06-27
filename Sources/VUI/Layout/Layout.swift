@@ -12,7 +12,7 @@ import Synchronization
 
 /// AG Rule: computes child geometries for a layout container.
 /// Reads parentSize/parentPosition and calls LayoutComputer.childGeometries via the box vtable.
-private struct LayoutChildGeometries: Rule {
+struct LayoutChildGeometries: Rule {
     typealias Value = [ViewGeometry]
     var parentSize: Attribute<ViewSize>
     var parentPosition: Attribute<CGPoint>
@@ -96,17 +96,27 @@ private struct ScrollableItemGeometry: Rule {
     var layoutComputer: Attribute<LayoutComputer>
 
     func updateValue() -> ViewGeometry {
-        _ = context.layoutDirection.value
-        if let identifier = identifier.value {
-            _ = context.placement(identifier)
+        guard let identifier = identifier.value,
+              let placement = context.placement(identifier) else {
+            return ViewGeometry(
+                origin: .zero,
+                dimensions: ViewDimensions(guideComputer: .defaultValue, size: .zero)
+            )
         }
-
+        let layoutDirection = context.layoutDirection.value
         let resolvedSize = size.value
-        let computer = layoutComputer.value
-        return ViewGeometry(
-            origin: position.value,
-            dimensions: ViewDimensions(guideComputer: computer, size: resolvedSize)
+        let proxy = LayoutProxy(
+            attributes: LayoutProxyAttributes(layoutComputer: layoutComputer)
         )
+        var geometry = proxy.finallyPlaced(
+            at: placement,
+            in: resolvedSize.value,
+            layoutDirection: layoutDirection
+        )
+        let origin = position.value
+        geometry.origin.x += origin.x
+        geometry.origin.y += origin.y
+        return geometry
     }
 }
 
@@ -313,6 +323,10 @@ enum DynamicContainer {
         func item(for id: _ViewList_ID.Canonical) -> ItemInfo? {
             guard let index = indexMap[id], items.indices.contains(index) else { return nil }
             return items[index]
+        }
+
+        func item(for subgraph: AGSubgraph) -> ItemInfo? {
+            items.first { $0.subgraph === subgraph }
         }
 
         var activeItems: ArraySlice<ItemInfo> {
@@ -672,6 +686,9 @@ struct DynamicContainerInfo: StatefulRule {
             for elementOffset in offset..<(offset + viewCount) {
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
                 let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
+                let scrollBasePosAttr = scrollContext.map { _ in
+                    graph.makeInput(value: CGPoint.zero)
+                }
                 let scrollLayoutComputer = scrollContext.map { _ in
                     graph.makeIndirectAttribute(defaultValue: LayoutComputer.defaultValue)
                 }
@@ -706,7 +723,7 @@ struct DynamicContainerInfo: StatefulRule {
                             ScrollableItemGeometry(
                                 identifier: identifierAttr,
                                 context: scrollContext,
-                                position: posAttr,
+                                position: scrollBasePosAttr ?? posAttr,
                                 size: sizeAttr,
                                 layoutComputer: scrollLayoutComputer
                             )
@@ -759,9 +776,25 @@ struct DynamicContainerInfo: StatefulRule {
                         spacing: inner.spacing,
                         place: { pos, anchor, proposal in
                             let sz = inner.sizeThatFits(proposal)
-                            rawPosAttr.setValue(CGPoint(x: pos.x - sz.width * anchor.x,
-                                                        y: pos.y - sz.height * anchor.y))
+                            let rawOrigin = CGPoint(
+                                x: pos.x - sz.width * anchor.x,
+                                y: pos.y - sz.height * anchor.y
+                            )
+                            rawPosAttr.setValue(rawOrigin)
                             rawSizeAttr.setValue(ViewSize(sz, proposal: proposal))
+                            if let scrollContext,
+                               let scrollBasePosAttr,
+                               let identifier = dynamicItem,
+                               let placement = scrollContext.placement(identifier) {
+                                scrollBasePosAttr.setValue(
+                                    CGPoint(
+                                        x: pos.x - placement.anchorPosition.x,
+                                        y: pos.y - placement.anchorPosition.y
+                                    )
+                                )
+                            } else {
+                                scrollBasePosAttr?.setValue(rawOrigin)
+                            }
                             inner.place(at: pos, anchor: anchor, proposal: proposal)
                         },
                         explicitAlignment: { inner.explicitAlignment($0, at: $1) }

@@ -46,7 +46,12 @@ struct InvalidatingGraphMutation: GraphMutation {
               attribute.isValid(in: graph) else {
             return
         }
-        graph.invalidateAttribute(attribute.toStrong())
+        let transaction = Transaction.current
+        graph.invalidateAttribute(
+            attribute.toStrong(),
+            transaction: transaction,
+            propagateTransaction: !transaction.isEmpty
+        )
     }
 
     mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
@@ -66,7 +71,7 @@ struct AssignmentGraphMutation<Value>: GraphMutation {
               attribute.isValid(in: graph) else {
             return
         }
-        attribute.toStrong().setValue(value)
+        attribute.toStrong().setValue(value, transaction: Transaction.current)
     }
 
     mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
@@ -358,7 +363,27 @@ class GraphHost {
     }
 
     func continueTransaction(invalidating attribute: AGWeakAttribute) {
-        continueTransaction(InvalidatingGraphMutation(attribute: attribute))
+        let mutation = InvalidatingGraphMutation(attribute: attribute)
+        guard let host = updatingMutationHost else {
+            let transaction = Transaction.current
+            let id = Transaction.id
+            Update.enqueueAction(reason: 0x11) { [self] in
+                asyncTransaction(
+                    transaction,
+                    id: id,
+                    mutation: mutation,
+                    style: .deferred,
+                    mayDeferUpdate: true
+                )
+                if Self.isFlushingGlobalTransactions {
+                    flushTransactions()
+                }
+            }
+            return
+        }
+
+        host.appendGraphMutation(mutation)
+        host.needsTransaction = true
     }
 
     func continueTransaction<Value>(setting attribute: WeakAttribute<Value>, to value: Value) {

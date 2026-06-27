@@ -280,6 +280,7 @@ final class ClosureLayoutEngine: LayoutEngine {
     var _sizeThatFits: (ProposedViewSize) -> CGSize
     var _spacing: ViewSpacing
     var _place: (CGPoint, UnitPoint, ProposedViewSize) -> Void
+    var _childGeometries: (ViewSize, CGPoint) -> [ViewGeometry]
     var _priority: Double
     var _explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)?
 
@@ -287,12 +288,14 @@ final class ClosureLayoutEngine: LayoutEngine {
         sizeThatFits: @escaping (ProposedViewSize) -> CGSize,
         spacing: ViewSpacing = ViewSpacing(),
         place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
+        childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
         priority: Double = 0,
         explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil
     ) {
         _sizeThatFits = sizeThatFits
         _spacing = spacing
         _place = place
+        _childGeometries = childGeometries
         _priority = priority
         _explicitAlignment = explicitAlignment
     }
@@ -300,6 +303,9 @@ final class ClosureLayoutEngine: LayoutEngine {
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize { _sizeThatFits(proposal) }
     func spacing() -> ViewSpacing { _spacing }
     func layoutPriority() -> Double { _priority }
+    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+        _childGeometries(size, origin)
+    }
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
         _explicitAlignment?(key, size)
     }

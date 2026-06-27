@@ -51,6 +51,76 @@ final class LocationStorageTests: XCTestCase {
         XCTAssertFalse(update.1)
     }
 
+    func testLocationBoxUpdateTracksCachedValueChanges() {
+        var stored = 1
+        let location = LocationBox(location: FunctionalLocation<Int>(
+            get: { stored },
+            set: { value, _ in stored = value },
+            marksMutation: false
+        ))
+
+        var update = location.update()
+        XCTAssertEqual(update.0, 1)
+        XCTAssertFalse(update.1)
+
+        stored = 3
+        update = location.update()
+        XCTAssertEqual(update.0, 3)
+        XCTAssertTrue(update.1)
+
+        update = location.update()
+        XCTAssertEqual(update.0, 3)
+        XCTAssertFalse(update.1)
+    }
+
+    func testObservationCenterStashesAccessAndRestoresOuterRecorder() {
+        let center = ObservationCenter.current
+
+        let outer = center._withObservationStashed {
+            center.accessOccurred()
+
+            let inner = center._withObservationStashed {
+                7
+            }
+            XCTAssertEqual(inner.value, 7)
+            XCTAssertFalse(inner.accessOccurred)
+
+            center.accessOccurred()
+            return 11
+        }
+
+        XCTAssertEqual(outer.value, 11)
+        XCTAssertTrue(outer.accessOccurred)
+    }
+
+    func testObservationCenterReportsOnlyExplicitAccessDuringLocationUpdate() {
+        var stored = 1
+        let plain = LocationBox(location: FunctionalLocation<Int>(
+            get: { stored },
+            set: { value, _ in stored = value },
+            marksMutation: false
+        ))
+        let tracked = LocationBox(location: ObservationAccessLocation<Int>(
+            get: { stored },
+            set: { value, _ in stored = value }
+        ))
+
+        let plainUpdate = ObservationCenter.current._withObservationStashed {
+            plain.update()
+        }
+        XCTAssertEqual(plainUpdate.value.0, 1)
+        XCTAssertFalse(plainUpdate.value.1)
+        XCTAssertFalse(plainUpdate.accessOccurred)
+
+        stored = 2
+        let trackedUpdate = ObservationCenter.current._withObservationStashed {
+            tracked.update()
+        }
+        XCTAssertEqual(trackedUpdate.value.0, 2)
+        XCTAssertTrue(trackedUpdate.value.1)
+        XCTAssertTrue(trackedUpdate.accessOccurred)
+    }
+
     func testStoredLocationReadHookPreservesAttributeDependency() {
         let graph = AttributeGraph()
         var derived: Attribute<Int>!
@@ -202,6 +272,20 @@ private struct LocationProjectionFirst: Projection {
 
     func set(base: inout LocationProjectionPair, newValue: Int) {
         base.first = newValue
+    }
+}
+
+private struct ObservationAccessLocation<Value>: _Location {
+    var get: () -> Value
+    var set: (Value, Transaction) -> Void
+
+    func getValue() -> Value {
+        ObservationCenter.current.accessOccurred()
+        return get()
+    }
+
+    func setValue(_ value: Value, transaction: Transaction) {
+        set(value, transaction)
     }
 }
 

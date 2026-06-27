@@ -64,6 +64,16 @@ extension Transaction {
 extension Transaction: Sendable {
 }
 
+public enum _ScrollViewAnimationMode: Hashable {
+    case never
+    case discreteChanges
+    case always
+}
+
+@available(*, unavailable)
+extension _ScrollViewAnimationMode: Sendable {
+}
+
 public protocol TransactionKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }
@@ -363,6 +373,14 @@ private struct ScrollContentOffsetAdjustmentBehaviorKey: TransactionKey {
     static var defaultValue: ScrollContentOffsetAdjustmentBehavior { .automatic }
 }
 
+private struct ScrollViewAnimatesKey: TransactionKey {
+    nonisolated(unsafe) static let defaultValue: _ScrollViewAnimationMode = .never
+}
+
+private struct ScrollInfoKey: TransactionKey {
+    static var defaultValue: [UInt32: ScrollViewCommitInfo] { [:] }
+}
+
 extension Transaction {
     /// Whether this transaction arose from a continuous (gesture-driven) interaction.
     /// When `true`, the animation system uses velocity data for physics-based animations.
@@ -414,6 +432,22 @@ extension Transaction {
     public var scrollContentOffsetAdjustmentBehavior: ScrollContentOffsetAdjustmentBehavior {
         get { self[ScrollContentOffsetAdjustmentBehaviorKey.self] }
         set { self[ScrollContentOffsetAdjustmentBehaviorKey.self] = newValue }
+    }
+
+    public var _scrollViewAnimates: _ScrollViewAnimationMode {
+        get { self[ScrollViewAnimatesKey.self] }
+        set { self[ScrollViewAnimatesKey.self] = newValue }
+    }
+
+    subscript(scrollInfo id: UInt32) -> ScrollViewCommitInfo? {
+        get {
+            self[ScrollInfoKey.self][id]
+        }
+        set {
+            var storage = self[ScrollInfoKey.self]
+            storage[id] = newValue
+            self[ScrollInfoKey.self] = storage
+        }
     }
 
     var isAnimated: Bool { animation != nil }

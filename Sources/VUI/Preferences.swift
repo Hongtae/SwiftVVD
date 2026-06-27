@@ -714,6 +714,14 @@ struct PreferencesInputs {
     }
 }
 
+private func preferenceValuesCompareEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
+    withUnsafeBytes(of: lhs) { lhsBytes in
+        withUnsafeBytes(of: rhs) { rhsBytes in
+            lhsBytes.elementsEqual(rhsBytes)
+        }
+    }
+}
+
 /// The preferences produced by a view during `_makeView`.
 /// Each entry pairs the preference key's metatype with a type-erased AG node ID
 /// that will hold the accumulated value for that key.
@@ -928,12 +936,10 @@ extension PreferencesOutputs {
         transformAttr: Attribute<(inout K.Value) -> Void>,
         graph: AttributeGraph
     ) {
-        // Collect existing nodes for K from child outputs.
         let existingNodes = values(for: K.self)
         let weakNodes = existingNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
 
-        // Create a new AG rule: reduce existing children, then apply transform.
-        let transformedAttr: Attribute<K.Value> = graph.makeRule {
+        let baseAttr: Attribute<K.Value> = graph.makeRule {
             var value = K.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
                 let val = Attribute<K.Value>(weakNode.toStrong()).value
@@ -943,11 +949,37 @@ extension PreferencesOutputs {
             return value
         }
 
-        // Replace old K entries with the single transformed node.
+        let targetAttr = graph.makeInput(value: K.defaultValue)
+        let targetWeak = targetAttr.asWeak()
+        let host = GraphHost.currentHost
+        var previousValue: K.Value?
+
+        graph.makeSideEffectRule {
+            let value = baseAttr.value
+            if let previousValue,
+               preferenceValuesCompareEqual(previousValue, value) {
+                return
+            }
+            previousValue = value
+
+            Update.enqueueAction(reason: 0x11) { [weak host] in
+                guard let host else {
+                    return
+                }
+                host.asyncTransaction(
+                    Transaction.current,
+                    id: Transaction.id,
+                    mutation: AssignmentGraphMutation(attribute: targetWeak, value: value),
+                    style: .deferred,
+                    mayDeferUpdate: true
+                )
+            }
+        }
+
         preferences.removeAll(where: {
             ObjectIdentifier($0.key) == ObjectIdentifier(K.self)
         })
-        append(K.self, node: transformedAttr.identifier)
+        append(K.self, node: targetAttr.identifier)
     }
 
     func values(for key: any PreferenceKey.Type) -> [AGAttribute] {

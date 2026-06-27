@@ -95,6 +95,30 @@ final class BindingPropagationTransactionTests: XCTestCase {
         )
     }
 
+    func testCollectionElementLocalCompletionFallsBackWhenLocalTransactionIsIgnored() {
+        let recorder = BindingPropagationRecorder([0.0])
+        let binding = recorder.binding
+        var events: [String] = []
+
+        var local = Transaction(animation: .linear(duration: 0.20))
+        local.disablesAnimations = true
+        local.addAnimationCompletion(criteria: .removed) {
+            events.append("local removed")
+        }
+
+        binding[0].transaction(local).wrappedValue = 1
+        events.append("returned")
+
+        XCTAssertEqual(recorder.value, [1])
+        XCTAssertEqual(
+            recorder.transactions,
+            [.init(hasAnimation: false, disablesAnimations: false)]
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(events, ["returned", "local removed"])
+    }
+
     func testCollectionDynamicMemberBindingKeepsCollectionTransactionBoundary() {
         let recorder = BindingPropagationRecorder([BindingPropagationModel(value: 0)])
         let binding = recorder.binding
@@ -124,5 +148,29 @@ final class BindingPropagationTransactionTests: XCTestCase {
                 .init(hasAnimation: true, disablesAnimations: false),
             ]
         )
+    }
+
+    func testCollectionDynamicMemberLocalCompletionFallsBackWhenLocalTransactionIsIgnored() {
+        let recorder = BindingPropagationRecorder([BindingPropagationModel(value: 0)])
+        let binding = recorder.binding
+        var events: [String] = []
+
+        var local = Transaction(animation: .linear(duration: 0.20))
+        local.disablesAnimations = true
+        local.addAnimationCompletion(criteria: .removed) {
+            events.append("local removed")
+        }
+
+        binding[0].value.transaction(local).wrappedValue = 1
+        events.append("returned")
+
+        XCTAssertEqual(recorder.value, [BindingPropagationModel(value: 1)])
+        XCTAssertEqual(
+            recorder.transactions,
+            [.init(hasAnimation: false, disablesAnimations: false)]
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(events, ["returned", "local removed"])
     }
 }

@@ -101,6 +101,22 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
         return Content._makeView(modifier: modifier[\.content], inputs: modifiedInputs, body: body)
     }
 
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.base.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeRule {
+            let m = modifier._attribute.value
+            var t = parentTransAttr.value
+            m.base.transform(&t)
+            return t
+        }
+        var modifiedInputs = inputs
+        modifiedInputs.base.transaction = newTransAttr
+        return Content._makeViewList(modifier: modifier[\.content], inputs: modifiedInputs, body: body)
+    }
+
     public typealias Body = Never
 }
 

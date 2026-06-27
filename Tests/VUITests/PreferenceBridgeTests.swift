@@ -289,6 +289,8 @@ final class PreferenceBridgeTests: XCTestCase {
 
     func testPreferenceTransformModifierDoesNotInstallBaseTransaction() {
         let host = GraphHost()
+        var transformed: AGAttribute!
+        var observedCurrent: [String] = []
 
         host.data.withCurrent {
             let graph = host.data.graph
@@ -303,7 +305,6 @@ final class PreferenceBridgeTests: XCTestCase {
                 hostKeys: hostKeys,
                 transaction: baseTransaction
             )
-            var observedCurrent: [String] = []
             let modifier = graph.makeInput(
                 value: _PreferenceTransformModifier<AppendingPreferenceKey> { value in
                     let current = Transaction.current[PreferenceTransformBaseTransactionKey.self]
@@ -321,9 +322,168 @@ final class PreferenceBridgeTests: XCTestCase {
                 return outputs
             }
 
-            let transformed = outputs.preferences.value(for: AppendingPreferenceKey.self)
+            transformed = outputs.preferences.value(for: AppendingPreferenceKey.self)
+            XCTAssertEqual(Attribute<String>(transformed).value, "")
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
             XCTAssertEqual(Attribute<String>(transformed!).value, "root|empty")
             XCTAssertEqual(observedCurrent, ["empty"])
+        }
+    }
+
+    func testPreferenceTransformQueuedTargetUpdatePropagatesDispatchTransaction() {
+        let host = GraphHost()
+        var transformed: AGAttribute!
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let source = graph.makeInput(value: "root")
+            let transform = graph.makeInput(value: { (value: inout String) in
+                value += "|queued"
+            })
+            var outputs = PreferencesOutputs()
+            outputs.append(AppendingPreferenceKey.self, node: source.identifier)
+
+            var transaction = Transaction()
+            transaction[PreferenceTransformBaseTransactionKey.self] = "queued"
+
+            Update.begin()
+            defer {
+                if Update.isActive {
+                    Update.end()
+                }
+            }
+
+            withTransaction(transaction) {
+                outputs.makePreferenceTransformer(
+                    key: AppendingPreferenceKey.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
+                transformed = outputs.value(for: AppendingPreferenceKey.self)
+                XCTAssertEqual(Attribute<String>(transformed).value, "")
+                XCTAssertEqual(Update.queuedActionReasons, [0x11])
+                Update.end()
+            }
+
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<String>(transformed).value, "root|queued")
+            let propagated = host.data.graph.transaction(for: transformed)
+            XCTAssertEqual(propagated?[PreferenceTransformBaseTransactionKey.self], "queued")
+        }
+    }
+
+    func testPreferenceTransformSuppressesDuplicateTargetUpdateAfterEquivalentBaseValue() {
+        let host = GraphHost()
+        var transformed: AGAttribute!
+        var transform: Attribute<(inout Int) -> Void>!
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let source = graph.makeInput(value: 1)
+            transform = graph.makeInput(value: { (value: inout Int) in
+                value += 1
+            })
+            var outputs = PreferencesOutputs()
+            outputs.append(SecondaryPreferenceKey.self, node: source.identifier)
+
+            Update.begin()
+            outputs.makePreferenceTransformer(
+                key: SecondaryPreferenceKey.self,
+                transformAttr: transform,
+                graph: graph
+            )
+            transformed = outputs.value(for: SecondaryPreferenceKey.self)
+            XCTAssertEqual(Attribute<Int>(transformed).value, 0)
+            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            Update.end()
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<Int>(transformed).value, 2)
+            XCTAssertFalse(host.hasPendingTransactions)
+
+            Update.begin()
+            transform.setValue({ (value: inout Int) in
+                value += 1
+            })
+            XCTAssertEqual(Update.queuedActionReasons, [])
+            Update.end()
+            XCTAssertFalse(host.hasPendingTransactions)
+
+            Update.begin()
+            transform.setValue({ (value: inout Int) in
+                value += 2
+            })
+            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            Update.end()
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<Int>(transformed).value, 3)
+        }
+    }
+
+    func testPreferenceTransformDoesNotDeepCompareArrayPreferenceValues() {
+        let host = GraphHost()
+        var transformed: AGAttribute!
+        var transform: Attribute<(inout [Int]) -> Void>!
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let source = graph.makeInput(value: [1, 2, 3])
+            transform = graph.makeInput(value: { (value: inout [Int]) in
+                value = value.map { $0 }
+            })
+            var outputs = PreferencesOutputs()
+            outputs.append(ArrayPreferenceKey.self, node: source.identifier)
+
+            Update.begin()
+            outputs.makePreferenceTransformer(
+                key: ArrayPreferenceKey.self,
+                transformAttr: transform,
+                graph: graph
+            )
+            transformed = outputs.value(for: ArrayPreferenceKey.self)
+            XCTAssertEqual(Attribute<[Int]>(transformed).value, [])
+            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            Update.end()
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<[Int]>(transformed).value, [1, 2, 3])
+            XCTAssertFalse(host.hasPendingTransactions)
+
+            Update.begin()
+            transform.setValue({ (value: inout [Int]) in
+                value = value.map { $0 }
+            })
+            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            Update.end()
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<[Int]>(transformed).value, [1, 2, 3])
         }
     }
 
@@ -746,6 +906,14 @@ private struct SecondaryPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout Int, nextValue: () -> Int) {
         value += nextValue()
+    }
+}
+
+private struct ArrayPreferenceKey: PreferenceKey {
+    static let defaultValue: [Int] = []
+
+    static func reduce(value: inout [Int], nextValue: () -> [Int]) {
+        value.append(contentsOf: nextValue())
     }
 }
 

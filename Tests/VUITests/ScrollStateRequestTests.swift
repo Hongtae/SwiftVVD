@@ -1323,6 +1323,15 @@ final class ScrollStateRequestTests: XCTestCase {
         XCTAssertEqual(collection.scrolledCollectionIDs.count, 1)
         XCTAssertEqual(collection.scrolledCollectionIDs[0].explicitID, AnyHashable("row"))
         XCTAssertNil(collection.scrolledCollectionAnchors[0])
+
+        var transaction = Transaction()
+        transaction.scrollTargetAnchor = .bottom
+        withTransaction(transaction) {
+            XCTAssertTrue(collection.scroll(to: "anchored"))
+        }
+        XCTAssertEqual(collection.scrolledCollectionIDs.count, 2)
+        XCTAssertEqual(collection.scrolledCollectionIDs[1].explicitID, AnyHashable("anchored"))
+        XCTAssertEqual(collection.scrolledCollectionAnchors[1], .bottom)
     }
 
     func testScrollStateRequestTransformPublishesNearestVisibleUpdateRequest() {
@@ -1483,6 +1492,44 @@ final class ScrollStateRequestTests: XCTestCase {
             stored = ScrollPosition(id: "other")
             graph.markNeedsEvaluation(ruleAttr.identifier)
             XCTAssertTrue(ruleAttr.value.isEmpty)
+        }
+    }
+
+    func testScrollStateRequestTransformUsesTargetDistanceTolerance() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            let collection = RecordingCollectionScrollable(shouldScroll: true)
+            let collectionAttr = graph.makeInput(value: collection as any ScrollableCollection)
+            let position = ScrollPosition(_scrollPositionID: "visible")
+            let binding = Binding<ScrollPosition>(
+                get: { position },
+                set: { _, _ in }
+            )
+            var transform = ScrollStateRequestTransform(
+                collection: collectionAttr,
+                inputs: makeViewInputs(graph: graph)
+            )
+            transform.request = UpdateScrollStateRequest(
+                binding: binding,
+                newPosition: position,
+                isVisible: true,
+                targetDistance: 0
+            )
+
+            XCTAssertFalse(transform.shouldUpdate(to: UpdateScrollStateRequest(
+                binding: binding,
+                newPosition: position,
+                isVisible: true,
+                targetDistance: 0.099
+            )))
+            XCTAssertTrue(transform.shouldUpdate(to: UpdateScrollStateRequest(
+                binding: binding,
+                newPosition: position,
+                isVisible: true,
+                targetDistance: 0.1
+            )))
         }
     }
 

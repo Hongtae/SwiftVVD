@@ -9,6 +9,70 @@ private struct CountedAnimationContent: View, Equatable, _PrimitiveView {
     }
 }
 
+private struct AnimationViewTransactionMarkerKey: TransactionKey {
+    static let defaultValue = 0
+}
+
+private struct TransactionReportingAnimationViewList: ViewList {
+    var countValue: Int
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        countValue
+    }
+}
+
+private struct TransactionReportingAnimationContent: View, Equatable, _PrimitiveView {
+    var equalityKey: Int
+    var width: CGFloat
+
+    typealias Body = Never
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.equalityKey == rhs.equalityKey
+    }
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        }
+        let transaction = inputs.base.transaction
+        let layout = graph.makeRule {
+            let content = view._attribute.value
+            let currentTransaction = transaction.value
+            let duration = currentTransaction.animation?.box.duration ?? -1
+            let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+            return LayoutComputer.fixed(
+                CGSize(
+                    width: content.width,
+                    height: CGFloat(marker) + CGFloat(duration * 100)
+                )
+            )
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let transaction = inputs.base.transaction
+        let list: Attribute<any ViewList> = graph.makeRule {
+            let content = view._attribute.value
+            let currentTransaction = transaction.value
+            let duration = currentTransaction.animation?.box.duration ?? -1
+            let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+            return TransactionReportingAnimationViewList(
+                countValue: Int(content.width) + marker + Int(duration * 100)
+            )
+        }
+        return _ViewListOutputs(
+            views: .dynamicList(list, nil),
+            nextImplicitID: 0,
+            staticCount: nil
+        )
+    }
+}
+
 final class AnimationViewListCountTests: XCTestCase {
     func testAnimationViewForwardsStaticViewListCountToContent() {
         let graph = AttributeGraph()
@@ -37,5 +101,573 @@ final class AnimationViewListCountTests: XCTestCase {
                 3
             )
         }
+    }
+
+    func testAnimationViewGatesContentAndTransactionByContentEquality() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 20
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+
+            assertLayout(layout, width: 10, height: 800)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 30
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+
+            assertLayout(layout, width: 30, height: 725)
+        }
+    }
+
+    func testAnimationViewNilAnimationClearsInheritedAnimationOnContentChange() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: nil
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 20
+                    ),
+                    animation: nil
+                )
+            )
+
+            assertLayout(layout, width: 20, height: 600)
+        }
+    }
+
+    func testAnimationViewHonorsInheritedDisablesAnimations() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent.disablesAnimations = true
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 20
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+
+            assertLayout(layout, width: 20, height: 800)
+        }
+    }
+
+    func testAnimationViewListGatesContentAndTransactionByContentEquality() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            )
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 810)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 20
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 810)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 30
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 755)
+        }
+    }
+
+    func testAnimationViewListNilAnimationClearsInheritedAnimationOnContentChange() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: nil
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            )
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 810)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 20
+                    ),
+                    animation: nil
+                )
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 620)
+        }
+    }
+
+    func testAnimationViewListHonorsInheritedDisablesAnimations() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent.disablesAnimations = true
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let source = graph.makeInput(
+                value: _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 1,
+                        width: 10
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            let outputs = _AnimationView<TransactionReportingAnimationContent>._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            )
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 810)
+
+            source.setValue(
+                _AnimationView(
+                    content: TransactionReportingAnimationContent(
+                        equalityKey: 2,
+                        width: 20
+                    ),
+                    animation: .linear(duration: 0.25)
+                )
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 820)
+        }
+    }
+
+    func testAnimationModifierInjectsAnimationOnlyAfterObservedValueChanges() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                TransactionReportingAnimationContent._makeView(
+                    view: _GraphValue(_attribute: content),
+                    inputs: inputs
+                )
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            assertLayout(layout, width: 10, height: 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            assertLayout(layout, width: 10, height: 725)
+        }
+    }
+
+    func testAnimationModifierListInjectsAnimationOnlyAfterObservedValueChanges() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                let transaction = inputs.base.transaction
+                let list: Attribute<any ViewList> = graph.makeRule {
+                    let currentTransaction = transaction.value
+                    let duration = currentTransaction.animation?.box.duration ?? -1
+                    let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+                    return TransactionReportingAnimationViewList(
+                        countValue: marker + Int(duration * 100)
+                    )
+                }
+                return _ViewListOutputs(
+                    views: .dynamicList(list, nil),
+                    nextImplicitID: 0,
+                    staticCount: nil
+                )
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 725)
+        }
+    }
+
+    func testAnimationModifierListNilAnimationClearsInheritedAnimationOnValueChange() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                let transaction = inputs.base.transaction
+                let list: Attribute<any ViewList> = graph.makeRule {
+                    let currentTransaction = transaction.value
+                    let duration = currentTransaction.animation?.box.duration ?? -1
+                    let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+                    return TransactionReportingAnimationViewList(
+                        countValue: marker + Int(duration * 100)
+                    )
+                }
+                return _ViewListOutputs(
+                    views: .dynamicList(list, nil),
+                    nextImplicitID: 0,
+                    staticCount: nil
+                )
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 600)
+        }
+    }
+
+    func testAnimationModifierListHonorsInheritedDisablesAnimations() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent.disablesAnimations = true
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                let transaction = inputs.base.transaction
+                let list: Attribute<any ViewList> = graph.makeRule {
+                    let currentTransaction = transaction.value
+                    let duration = currentTransaction.animation?.box.duration ?? -1
+                    let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+                    return TransactionReportingAnimationViewList(
+                        countValue: marker + Int(duration * 100)
+                    )
+                }
+                return _ViewListOutputs(
+                    views: .dynamicList(list, nil),
+                    nextImplicitID: 0,
+                    staticCount: nil
+                )
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+        }
+    }
+
+    func testAnimationModifierNilAnimationClearsInheritedAnimationOnValueChange() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                TransactionReportingAnimationContent._makeView(
+                    view: _GraphValue(_attribute: content),
+                    inputs: inputs
+                )
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+            assertLayout(layout, width: 10, height: 600)
+        }
+    }
+
+    func testAnimationModifierHonorsInheritedDisablesAnimations() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent.disablesAnimations = true
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                TransactionReportingAnimationContent._makeView(
+                    view: _GraphValue(_attribute: content),
+                    inputs: inputs
+                )
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            assertLayout(layout, width: 10, height: 800)
+        }
+    }
+
+    private func makeViewInputs(
+        graph: AttributeGraph,
+        transaction: Transaction
+    ) -> _ViewInputs {
+        _ViewInputs(
+            base: _GraphInputs(
+                customInputs: PropertyList(),
+                time: graph.makeInput(value: Time(seconds: 0)),
+                cachedEnvironment: MutableBox(
+                    CachedEnvironment(
+                        environment: graph.makeInput(value: EnvironmentValues())
+                    )
+                ),
+                phase: graph.makeInput(value: Phase()),
+                transaction: graph.makeInput(value: transaction),
+                changedDebugProperties: 0,
+                options: [],
+                mergedInputs: []
+            ),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
+    }
+
+    private func makeViewListInputs(
+        graph: AttributeGraph,
+        transaction: Transaction
+    ) -> _ViewListInputs {
+        _ViewListInputs(
+            base: _GraphInputs(
+                customInputs: PropertyList(),
+                time: graph.makeInput(value: Time(seconds: 0)),
+                cachedEnvironment: MutableBox(
+                    CachedEnvironment(
+                        environment: graph.makeInput(value: EnvironmentValues())
+                    )
+                ),
+                phase: graph.makeInput(value: Phase()),
+                transaction: graph.makeInput(value: transaction),
+                changedDebugProperties: 0,
+                options: [],
+                mergedInputs: []
+            ),
+            implicitID: 0,
+            options: 0,
+            _traits: OptionalAttribute(),
+            traitKeys: nil,
+            containerContext: nil,
+            contentOffset: nil,
+            debugReplaceableViewCount: nil
+        )
+    }
+
+    private func dynamicListAttribute(
+        from outputs: _ViewListOutputs,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Attribute<any ViewList>? {
+        guard case .dynamicList(let list, _) = outputs.views else {
+            XCTFail("Expected dynamic view list output.", file: file, line: line)
+            return nil
+        }
+        return list
+    }
+
+    private func assertLayout(
+        _ layout: Attribute<LayoutComputer>,
+        width: CGFloat,
+        height: CGFloat,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let size = layout.value.sizeThatFits(.unspecified)
+        XCTAssertEqual(size.width, width, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(size.height, height, accuracy: 0.001, file: file, line: line)
     }
 }

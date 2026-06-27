@@ -60,6 +60,10 @@ struct LayoutProxy {
         return attr.value
     }
 
+    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+        layoutComputer.dimensions(in: proposal)
+    }
+
     /// The child's ViewTraitCollection if a traitsList attribute is present.
     /// Reading the traitsList attribute registers a layout dependency.
     /// Returns nil if no traitsList attribute is set.
@@ -71,6 +75,23 @@ struct LayoutProxy {
     /// Returns the trait value for key K.
     subscript<K: _ViewTraitKey>(key: K.Type) -> K.Value {
         traits?[key] ?? K.defaultValue
+    }
+
+    func finallyPlaced(
+        at placement: _Placement,
+        in size: CGSize,
+        layoutDirection: LayoutDirection
+    ) -> ViewGeometry {
+        let proposal = ProposedViewSize(placement.proposedSize)
+        let resolvedDimensions = self.dimensions(in: proposal)
+        var origin = CGPoint(
+            x: placement.anchorPosition.x - resolvedDimensions.width * placement.anchor.x,
+            y: placement.anchorPosition.y - resolvedDimensions.height * placement.anchor.y
+        )
+        if layoutDirection == .rightToLeft {
+            origin.x = size.width - origin.x
+        }
+        return ViewGeometry(origin: origin, dimensions: resolvedDimensions)
     }
 }
 

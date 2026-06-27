@@ -153,7 +153,7 @@ struct ViewFrame: Equatable {
 struct CachedEnvironment {
 
     // Direct Int identity used for cache lookup.
-    struct ID {
+    struct ID: Hashable {
         var value: Int
     }
 
@@ -200,6 +200,24 @@ struct CachedEnvironment {
         self.animatedFrame = nil
         self.resolvedShapeStyles = nil
         self.platformCache = nil
+    }
+
+    mutating func attribute<Value>(
+        id: ID,
+        _ value: @escaping (EnvironmentValues) -> Value
+    ) -> Attribute<Value> {
+        if let item = mapItems.first(where: { $0.key == id }) {
+            return Attribute<Value>(item.value)
+        }
+        guard let graph = AttributeGraph.current else {
+            fatalError("CachedEnvironment.attribute(id:_:) called outside an active AttributeGraph context.")
+        }
+        let environment = environment
+        let attribute = graph.makeRule {
+            value(environment.value)
+        }
+        mapItems.append(MapItem(key: id, value: attribute.identifier))
+        return attribute
     }
 }
 
