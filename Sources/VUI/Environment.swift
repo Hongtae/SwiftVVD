@@ -8,6 +8,19 @@
 import Foundation
 import Observation
 
+@attached(accessor)
+@attached(peer, names: prefixed(__Key_))
+public macro Entry() = #externalMacro(
+    module: "VUIMacros",
+    type: "EntryMacro"
+)
+
+@attached(accessor)
+public macro __EntryDefaultValue() = #externalMacro(
+    module: "VUIMacros",
+    type: "EntryDefaultValueMacro"
+)
+
 public protocol EnvironmentKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }

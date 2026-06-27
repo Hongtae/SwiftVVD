@@ -1,6 +1,7 @@
 // swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
+import CompilerPluginSupport
 import PackageDescription
 
 let arch = {
@@ -44,6 +45,7 @@ let package = Package(
                  path: "SupportPackages/Vulkan"),
         .package(name: "Wayland",
                  path: "SupportPackages/Wayland"),
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -110,6 +112,7 @@ let package = Package(
             name: "VUI",
             dependencies: [
                 .target(name: "VVD"),
+                .target(name: "VUIMacros"),
             ],
             exclude: [
                 "Resources/Shaders/GLSL",
@@ -120,6 +123,12 @@ let package = Package(
                 .copy("Resources/Shaders/SPIRV")
             ],
             swiftSettings: [
+            ]),
+        .macro(
+            name: "VUIMacros",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]),
         .target(
             name: "VGame",

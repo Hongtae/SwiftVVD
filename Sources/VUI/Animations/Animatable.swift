@@ -182,6 +182,52 @@ public func _animatableMacroKind() -> AnimatableValues<> {
     return result
 }
 
+@attached(extension, conformances: Animatable)
+@attached(member, names: named(animatableData))
+public macro Animatable() = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatableValuesMacro"
+)
+
+@attached(accessor, names: named(willSet))
+public macro AnimatableIgnored() = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatableIgnoredMacro"
+)
+
+@freestanding(declaration)
+public macro _SwiftUIAnimatableDataProperty(
+    animatableMacroContext: String,
+    kind: AnimatableValues<>
+) = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatableValuesDataPropertyMacro"
+)
+
+@attached(accessor)
+public macro _AnimatableData() = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatableValuesDataMacro"
+)
+
+@attached(accessor)
+public macro _AnimatablePairData() = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatablePairDataMacro"
+)
+
+@freestanding(expression)
+public macro _SwiftUIAnimatableProperty<T>(_ t: T.Type) -> T.Type = #externalMacro(
+    module: "VUIMacros",
+    type: "AnimatablePropertyMacro"
+) where T: VectorArithmetic
+
+@freestanding(expression)
+public macro _SwiftUIAnimatableProperty<T>(_ t: T.Type) -> EmptyAnimatableData.Type = #externalMacro(
+    module: "VUIMacros",
+    type: "InvalidAnimatablePropertyMacro"
+)
+
 extension Animatable {
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
         guard let graph = AttributeGraph.current else {
