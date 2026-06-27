@@ -263,13 +263,15 @@ final class ScrollStateRequestTests: XCTestCase {
             let scrollableAttr = graph.makeInput(value: scrollable as any Scrollable)
             var stored = ScrollPosition(id: "old")
             var observedBindingTransactions: [Transaction] = []
+            var bindingTransaction = Transaction()
+            bindingTransaction[ScrollBindingMarkerKey.self] = 66
             let binding = Binding<ScrollPosition>(
                 get: { stored },
                 set: { value, transaction in
                     stored = value
                     observedBindingTransactions.append(transaction)
                 }
-            )
+            ).transaction(bindingTransaction)
             var base = Transaction()
             base[ScrollRequestMarkerKey.self] = 44
             let value = ScrollPosition(id: "target", anchor: .bottom)
@@ -300,6 +302,60 @@ final class ScrollStateRequestTests: XCTestCase {
             XCTAssertEqual(scrollable.observedTransactions.map(\.scrollTargetAnchor), [.top])
             XCTAssertEqual(stored, value)
             XCTAssertEqual(observedBindingTransactions.count, 1)
+            XCTAssertEqual(observedBindingTransactions[0][ScrollRequestMarkerKey.self], 0)
+            XCTAssertEqual(observedBindingTransactions[0][ScrollBindingMarkerKey.self], 66)
+            XCTAssertNil(observedBindingTransactions[0].scrollTargetAnchor)
+        }
+    }
+
+    func testScrollToRequestRestoresAmbientTransactionBeforeBindingSetter() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            let scrollable = RecordingScrollable(shouldScroll: true)
+            let scrollableAttr = graph.makeInput(value: scrollable as any Scrollable)
+            var stored = ScrollPosition(id: "old")
+            var observedBindingTransactions: [Transaction] = []
+            var bindingTransaction = Transaction()
+            bindingTransaction[ScrollBindingMarkerKey.self] = 66
+            let binding = Binding<ScrollPosition>(
+                get: { stored },
+                set: { value, transaction in
+                    stored = value
+                    observedBindingTransactions.append(transaction)
+                }
+            ).transaction(bindingTransaction)
+            XCTAssertEqual(binding.transaction[ScrollBindingMarkerKey.self], 66)
+            var requestTransaction = Transaction()
+            requestTransaction[ScrollRequestMarkerKey.self] = 44
+            var ambientTransaction = Transaction()
+            ambientTransaction[ScrollAmbientMarkerKey.self] = 88
+            let value = ScrollPosition(id: "target")
+            var request = ScrollToScrollStateRequest(
+                binding: binding,
+                anchor: .top,
+                id: ObjectIdentifier(scrollable),
+                value: value,
+                baseTransaction: requestTransaction
+            )
+            XCTAssertEqual(request.binding.transaction[ScrollBindingMarkerKey.self], 66)
+            request.updateScrollable(scrollableAttr)
+
+            Transaction.withScopedThreadTransaction(ambientTransaction) {
+                XCTAssertTrue(request.update())
+            }
+
+            XCTAssertEqual(scrollable.observedTransactions.count, 1)
+            XCTAssertEqual(scrollable.observedTransactions[0][ScrollRequestMarkerKey.self], 44)
+            XCTAssertEqual(scrollable.observedTransactions[0][ScrollAmbientMarkerKey.self], 88)
+            XCTAssertEqual(scrollable.observedTransactions[0].scrollTargetAnchor, .top)
+            XCTAssertEqual(stored, value)
+            XCTAssertEqual(observedBindingTransactions.count, 1)
+            XCTAssertEqual(observedBindingTransactions[0][ScrollRequestMarkerKey.self], 0)
+            XCTAssertEqual(observedBindingTransactions[0][ScrollAmbientMarkerKey.self], 0)
+            XCTAssertEqual(observedBindingTransactions[0][ScrollBindingMarkerKey.self], 66)
+            XCTAssertNil(observedBindingTransactions[0].scrollTargetAnchor)
         }
     }
 
@@ -1709,5 +1765,13 @@ private final class FixedVisibleCollectionScrollable: ScrollableCollection {
 }
 
 private struct ScrollRequestMarkerKey: TransactionKey {
+    static let defaultValue = 0
+}
+
+private struct ScrollAmbientMarkerKey: TransactionKey {
+    static let defaultValue = 0
+}
+
+private struct ScrollBindingMarkerKey: TransactionKey {
     static let defaultValue = 0
 }

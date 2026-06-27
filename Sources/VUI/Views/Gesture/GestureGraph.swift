@@ -874,6 +874,21 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         }
     }
 
+    /// Enqueues an action ahead of ordinary gesture callbacks for the same event turn.
+    ///
+    /// Gesture-state terminal cleanup must run before terminal callbacks observe the
+    /// state. This preserves ordinary callback append ordering while giving cleanup
+    /// work a deterministic earlier drain slot.
+    func enqueueActionBeforeCallbacks(_ action: @escaping () -> Void) {
+        if _isProcessingEvents {
+            pendingActions.insert(action, at: 0)
+        } else if delegate != nil {
+            enqueueAction(action)
+        } else {
+            data.graph.actionOutbox.insert(action, at: 0)
+        }
+    }
+
     func gestureCategory() -> GestureCategory? { nil }
 
     func isAutoScrollEnabled() -> Bool { false }

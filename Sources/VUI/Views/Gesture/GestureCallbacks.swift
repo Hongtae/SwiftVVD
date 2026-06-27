@@ -33,7 +33,9 @@ struct EndedCallbacks<Value>: GestureCallbacks {
     typealias StateType = Void
     static var initialState: Void { () }
     func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
-        if case .ended(let value) = phase { ended(value) }
+        if case .ended(let value) = phase {
+            return { ended(value) }
+        }
         return nil
     }
     func cancel(state: Void) -> (() -> ())? { nil }
@@ -45,16 +47,18 @@ struct ChangedCallbacks<Value>: GestureCallbacks {
     typealias StateType = Void
     static var initialState: Void { () }
     func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
-        if case .active(let value) = phase { changed(value) }
+        if case .active(let value) = phase {
+            return { changed(value) }
+        }
         return nil
     }
     func cancel(state: Void) -> (() -> ())? { nil }
 }
 
 /// State for FullGestureCallbacks.
-/// Tracks firing state and last phase for change detection.
+/// Tracks whether the gesture has become active and the last dispatched phase.
 struct FullGestureCallbacksState<Value: Equatable> {
-    var hasFired:  Bool = false
+    var hasBecomeActive: Bool = false
     var lastPhase: GesturePhase<Value> = .possible(nil)
 }
 
@@ -70,18 +74,17 @@ struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
     static var initialState: FullGestureCallbacksState<Value> { .init() }
 
     func dispatch(phase: GesturePhase<Value>, state: inout FullGestureCallbacksState<Value>) -> (() -> ())? {
+        guard phase != state.lastPhase else { return nil }
         defer { state.lastPhase = phase }
         switch phase {
         case .possible(let v):
-            // fire possible only when the value differs from the last possible value
-            if case .possible(let prev) = state.lastPhase, prev == v { break }
-            possible?(v)
+            state.hasBecomeActive = false
+            return possible.map { callback in
+                { callback(v) }
+            }
         case .active(let v):
-            // fire changed only when entering active or when the value changes
-            let shouldFire: Bool
-            if case .active(let prev) = state.lastPhase { shouldFire = prev != v }
-            else { shouldFire = true }
-            if shouldFire, let cb = changed {
+            state.hasBecomeActive = true
+            if let cb = changed {
                 let value = v
                 return {
                     var transaction = Transaction()
@@ -92,16 +95,10 @@ struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
                 }
             }
         case .ended(let v):
-            if !state.hasFired {
-                state.hasFired = true
-                let cb = ended
-                return cb.map { closure in { closure(v) } }
-            }
+            let cb = ended
+            return cb.map { closure in { closure(v) } }
         case .failed:
-            if !state.hasFired {
-                state.hasFired = true
-                return failed.map { closure in { closure() } }
-            }
+            return failed.map { closure in { closure() } }
         }
         return nil
     }
@@ -118,7 +115,9 @@ struct FailedCallbacks<Value>: GestureCallbacks {
     typealias StateType = Void
     static var initialState: Void { () }
     func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
-        if case .failed = phase { failed() }
+        if case .failed = phase {
+            return { failed() }
+        }
         return nil
     }
     func cancel(state: Void) -> (() -> ())? { nil }
@@ -128,7 +127,6 @@ struct FailedCallbacks<Value>: GestureCallbacks {
 /// StateType is Bool: true while pressing, false otherwise.
 ///
 /// Dispatch algorithm:
-///   - isPressing = phase.isActive
 ///   - pressing(isPressing) fired only when state changes from previous value
 ///   - phase==.ended && was pressing: pressed() fires
 ///
@@ -143,20 +141,30 @@ struct PressableGestureCallbacks<Value>: GestureCallbacks {
     static var initialState: Bool { false }
 
     func dispatch(phase: GesturePhase<Value>, state: inout Bool) -> (() -> ())? {
-        let isPressing: Bool
-        if case .active = phase { isPressing = true } else { isPressing = false }
-
-        if isPressing != state {
-            state = isPressing
-            if let cb = pressing {
-                let val = isPressing
-                return { cb(val) }
+        switch phase {
+        case .active:
+            guard !state else { return nil }
+            state = true
+            return pressing.map { callback in
+                { callback(true) }
+            }
+        case .ended:
+            guard state else { return nil }
+            state = false
+            let pressingCallback = pressing
+            let pressedCallback = pressed
+            guard pressingCallback != nil || pressedCallback != nil else { return nil }
+            return {
+                pressingCallback?(false)
+                pressedCallback?()
+            }
+        case .possible, .failed:
+            guard state else { return nil }
+            state = false
+            return pressing.map { callback in
+                { callback(false) }
             }
         }
-        if case .ended = phase {
-            return pressed
-        }
-        return nil
     }
 
     // Cancel clears the pressing UI state only if it was active.
@@ -173,7 +181,7 @@ struct PressableGestureCallbacks<Value>: GestureCallbacks {
 /// pass-through: output phase = inner phase (from phaseAttr).
 /// side-effect: calls callbacks.dispatch(phase:state:) on each phase change.
 ///
-struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule {
+struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule, RemovableAttribute {
     typealias Value = GesturePhase<C.Value>
 
     let modifierAttr:    Attribute<CallbacksGesture<C>>
@@ -218,8 +226,8 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule 
         let currentPhase = phaseAttr.value
         let callbacks = modifierAttr.value.callbacks
 
-        // Invoke dispatch to fire user callbacks. withoutTracking is required to prevent
-        // AG dependency pollution. The return value is an animation completion closure.
+        // Dispatch may mutate generic callback state and may return work that must run
+        // after the stateful rule evaluation has left dependency tracking.
         var stateRef = state
         let animCompletion: (() -> Void)? = AttributeGraph.withoutTracking {
             callbacks.dispatch(phase: currentPhase, state: &stateRef)
@@ -232,7 +240,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule 
             if let gg = gestureGraph {
                 gg.enqueueAction(action)
             } else {
-                action()
+                Update.enqueueAction(action)
             }
         }
 

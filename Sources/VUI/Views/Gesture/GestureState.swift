@@ -215,10 +215,16 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
             case .active(let v):
                 didRunTerminalReset.value = false
                 let current = Update.dispatchImmediately {
-                    Self.projectedStateBinding(
-                        location: location,
-                        stateAttribute: stateAttr
-                    ).wrappedValue
+                    // The seed read happens while this side-effect rule is
+                    // evaluating. Do not make the storage attribute an input
+                    // of the rule, or the queued writeback would immediately
+                    // re-enter the same active phase.
+                    AttributeGraph.withoutTracking {
+                        Self.projectedStateBinding(
+                            location: location,
+                            stateAttribute: stateAttr
+                        ).wrappedValue
+                    }
                 }
                 var tx = Transaction()
                 tx.tracksVelocity = true
@@ -236,7 +242,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
             case .ended, .failed:
                 guard !didRunTerminalReset.value else { break }
                 didRunTerminalReset.value = true
-                enqueuePhaseAction {
+                enqueuePhaseAction(beforeCallbacks: true) {
                     // Gesture terminated: apply reset and restore initial value.
                     var resetValue = Self.projectedStateBinding(
                         location: location,
@@ -278,7 +284,10 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         )
     }
 
-    private static func enqueuePhaseAction(_ action: @escaping () -> Void) {
+    private static func enqueuePhaseAction(
+        beforeCallbacks: Bool = false,
+        _ action: @escaping () -> Void
+    ) {
         guard let graphRef = AttributeGraphRef.current else {
             Update.enqueueAction(action)
             return
@@ -291,7 +300,11 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         }
 
         if let gestureGraph = graphRef.context as? GestureGraph {
-            gestureGraph.enqueueAction(scopedAction)
+            if beforeCallbacks {
+                gestureGraph.enqueueActionBeforeCallbacks(scopedAction)
+            } else {
+                gestureGraph.enqueueAction(scopedAction)
+            }
         } else {
             Update.enqueueAction(scopedAction)
         }

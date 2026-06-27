@@ -76,8 +76,12 @@ public enum GesturePhase<V> {
         return false
     }
     public var isActive: Bool {
-        if case .active = self { return true }
-        return false
+        switch self {
+        case .active, .ended:
+            return true
+        default:
+            return false
+        }
     }
     public var isEnded: Bool {
         if case .ended = self { return true }
@@ -91,10 +95,9 @@ public enum GesturePhase<V> {
 
     public var unwrapped: V? {
         switch self {
-        case .possible(let v): return v
         case .active(let v): return v
         case .ended(let v): return v
-        case .failed: return nil
+        default: return nil
         }
     }
 
@@ -131,7 +134,7 @@ extension GesturePhase: Equatable where V: Equatable {
 
 extension GesturePhase {
     /// The default phase: waiting for input, no pre-computed value.
-    public static var defaultValue: GesturePhase<V> { .possible(nil) }
+    public static var defaultValue: GesturePhase<V> { .failed }
 
     /// Combines two phases into a single phase carrying a tuple value.
     /// Both must be active/ended for the result to be active/ended;

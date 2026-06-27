@@ -287,6 +287,46 @@ final class PreferenceBridgeTests: XCTestCase {
         }
     }
 
+    func testPreferenceTransformModifierDoesNotInstallBaseTransaction() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            var baseTransaction = Transaction()
+            baseTransaction[PreferenceTransformBaseTransactionKey.self] = "base"
+            var keys = PreferenceKeys()
+            keys.insert(AppendingPreferenceKey.self)
+            let hostKeys = graph.makeInput(value: keys)
+            let inputs = makeViewInputs(
+                graph: graph,
+                preferenceKeys: keys,
+                hostKeys: hostKeys,
+                transaction: baseTransaction
+            )
+            var observedCurrent: [String] = []
+            let modifier = graph.makeInput(
+                value: _PreferenceTransformModifier<AppendingPreferenceKey> { value in
+                    let current = Transaction.current[PreferenceTransformBaseTransactionKey.self]
+                    observedCurrent.append(current)
+                    value += "|\(current)"
+                }
+            )
+            let outputs = _PreferenceTransformModifier<AppendingPreferenceKey>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                let value = graph.makeInput(value: "root")
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(AppendingPreferenceKey.self, node: value.identifier)
+                return outputs
+            }
+
+            let transformed = outputs.preferences.value(for: AppendingPreferenceKey.self)
+            XCTAssertEqual(Attribute<String>(transformed!).value, "root|empty")
+            XCTAssertEqual(observedCurrent, ["empty"])
+        }
+    }
+
     func testPreferenceBridgeUpdateHostValuesInvalidatesHostKeys() {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -664,7 +704,8 @@ final class PreferenceBridgeTests: XCTestCase {
     private func makeViewInputs(
         graph: AttributeGraph,
         preferenceKeys: PreferenceKeys,
-        hostKeys: Attribute<PreferenceKeys>
+        hostKeys: Attribute<PreferenceKeys>,
+        transaction: Transaction = Transaction()
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues.tracking())
         let graphInputs = _GraphInputs(
@@ -672,7 +713,7 @@ final class PreferenceBridgeTests: XCTestCase {
             time: graph.makeInput(value: Time(seconds: 0)),
             cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
+            transaction: graph.makeInput(value: transaction),
             changedDebugProperties: 0,
             options: [],
             mergedInputs: []
@@ -710,4 +751,8 @@ private struct SecondaryPreferenceKey: PreferenceKey {
 
 private struct InvalidateProbePropertyKey: PropertyKey {
     static let defaultValue = false
+}
+
+private struct PreferenceTransformBaseTransactionKey: TransactionKey {
+    static let defaultValue = "empty"
 }

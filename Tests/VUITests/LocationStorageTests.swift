@@ -152,6 +152,35 @@ final class LocationStorageTests: XCTestCase {
         XCTAssertEqual(updates, [2, 4])
     }
 
+    func testProjectedLocationWriteForwardsTransactionToBaseLocation() {
+        var commits: [LocationProjectionCommit] = []
+        let location = StoredLocation<LocationProjectionPair>(
+            initialValue: LocationProjectionPair(first: 1, second: 2),
+            onCommit: { value, transaction in
+                commits.append(.init(
+                    value: value,
+                    marker: transaction[LocationProjectionTransactionKey.self],
+                    tracksVelocity: transaction.tracksVelocity
+                ))
+            }
+        )
+        let projected = location.projecting(LocationProjectionFirst())
+        var transaction = Transaction()
+        transaction[LocationProjectionTransactionKey.self] = 44
+        transaction.tracksVelocity = true
+
+        projected.setValue(9, transaction: transaction)
+
+        XCTAssertEqual(location.getValue(), LocationProjectionPair(first: 9, second: 2))
+        XCTAssertEqual(commits, [
+            .init(
+                value: LocationProjectionPair(first: 9, second: 2),
+                marker: 44,
+                tracksVelocity: true
+            )
+        ])
+    }
+
     private func makeSignal(in host: GraphHost) -> AGWeakAttribute {
         var signal: AGWeakAttribute!
         host.data.withCurrent {
@@ -159,4 +188,29 @@ final class LocationStorageTests: XCTestCase {
         }
         return signal
     }
+}
+
+private struct LocationProjectionPair: Equatable {
+    var first: Int
+    var second: Int
+}
+
+private struct LocationProjectionFirst: Projection {
+    func get(base: LocationProjectionPair) -> Int {
+        base.first
+    }
+
+    func set(base: inout LocationProjectionPair, newValue: Int) {
+        base.first = newValue
+    }
+}
+
+private struct LocationProjectionCommit: Equatable {
+    var value: LocationProjectionPair
+    var marker: Int
+    var tracksVelocity: Bool
+}
+
+private struct LocationProjectionTransactionKey: TransactionKey {
+    static let defaultValue = 0
 }

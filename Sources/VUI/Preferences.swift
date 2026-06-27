@@ -926,7 +926,6 @@ extension PreferencesOutputs {
     mutating func makePreferenceTransformer<K: PreferenceKey>(
         key: K.Type,
         transformAttr: Attribute<(inout K.Value) -> Void>,
-        transactionAttr: Attribute<Transaction>,
         graph: AttributeGraph
     ) {
         // Collect existing nodes for K from child outputs.
@@ -940,10 +939,7 @@ extension PreferencesOutputs {
                 let val = Attribute<K.Value>(weakNode.toStrong()).value
                 K.reduce(value: &value) { val }
             }
-            let transaction = transactionAttr.value
-            withTransaction(transaction) {
-                transformAttr.value(&value)
-            }
+            transformAttr.value(&value)
             return value
         }
 

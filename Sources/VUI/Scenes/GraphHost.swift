@@ -375,6 +375,9 @@ class GraphHost {
                     style: .deferred,
                     mayDeferUpdate: true
                 )
+                if Self.isFlushingGlobalTransactions {
+                    flushTransactions()
+                }
             }
             return
         }
@@ -439,12 +442,23 @@ class GraphHost {
             let transactions = globalTransactionState.pendingTransactions
             globalTransactionState.pendingTransactions.removeAll()
             globalTransactionState.isFlushScheduled = false
+            globalTransactionState.isFlushing = true
             return transactions
+        }
+        defer {
+            globalTransactionState.withLock {
+                globalTransactionState.isFlushing = false
+            }
         }
 
         for transaction in transactions {
             transaction.apply()
         }
+        // Observer invalidations can enqueue ordinary host transactions while a
+        // global transaction is being applied. Drain those fallback actions
+        // before leaving the global flush boundary so all live observers see
+        // the same completed mutation pass.
+        Update.dispatchActions()
     }
 
     func flushTransactions() {
@@ -568,6 +582,12 @@ class GraphHost {
 
     private static let globalTransactionState = GlobalTransactionState()
 
+    private static var isFlushingGlobalTransactions: Bool {
+        globalTransactionState.withLock {
+            globalTransactionState.isFlushing
+        }
+    }
+
     private static func scheduleGlobalTransactionFlush() {
         guard !globalTransactionState.isFlushScheduled else { return }
         globalTransactionState.isFlushScheduled = true
@@ -673,6 +693,7 @@ class GraphHost {
         private let lock = NSRecursiveLock()
         var pendingTransactions: [GlobalTransaction] = []
         var isFlushScheduled = false
+        var isFlushing = false
 
         func withLock<R>(_ body: () throws -> R) rethrows -> R {
             lock.lock()

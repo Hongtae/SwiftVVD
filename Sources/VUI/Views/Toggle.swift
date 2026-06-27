@@ -343,7 +343,6 @@ private struct PlatformItemToggleStateModifier: ViewModifier {
         outputs.preferences.makePreferenceTransformer(
             key: PlatformItemList.Key.self,
             transformAttr: transformAttr,
-            transactionAttr: inputs.base.transaction,
             graph: graph
         )
         return outputs
