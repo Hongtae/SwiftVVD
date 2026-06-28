@@ -38,8 +38,7 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
             //Log.debug("ShapeView: size=\(viewSize), position=\(position)")
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
-                list.recordInterpolationBounds(frame)
-                list.items.append { context in
+                list.appendItem(kind: .shapeFill, bounds: frame) { context in
                     if let drawer = v.shape as? ShapeDrawer {
                         drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
                     } else {

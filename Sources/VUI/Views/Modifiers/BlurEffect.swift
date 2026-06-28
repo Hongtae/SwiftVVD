@@ -76,6 +76,16 @@ private enum _BlurEffectSupport {
         var result = DisplayList()
         result.debugItems.append(contentsOf: source.debugItems)
         result.recordInterpolationBounds(source.interpolationBounds)
+        for effect in source.effects {
+            result.appendEffect(
+                effect.effect,
+                contents: displayList(
+                    effect.contents,
+                    applyingBlur: radius,
+                    isOpaque: isOpaque
+                )
+            )
+        }
 
         guard !source.items.isEmpty else { return result }
         guard radius >= .ulpOfOne else {
@@ -84,7 +94,11 @@ private enum _BlurEffectSupport {
         }
 
         let items = source.items
-        result.items.append { context in
+        result.appendBlurItem(
+            bounds: source.interpolationBounds,
+            radius: radius,
+            isOpaque: isOpaque
+        ) { context in
             context.drawLayer { layerContext in
                 let options: GraphicsContext.BlurOptions = isOpaque ? .opaque : []
                 layerContext.addFilter(.blur(radius: radius, options: options))

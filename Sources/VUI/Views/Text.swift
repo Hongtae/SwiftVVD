@@ -490,10 +490,7 @@ extension Text: View {
                     frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
                     frame.size.height = measuredSize.height
                 }
-                if frame.width > 0 && frame.height > 0 {
-                    list.recordInterpolationBounds(frame)
-                }
-                list.items.append { context in
+                list.appendItem(kind: .text, bounds: frame) { context in
                     if frame.width > 0 && frame.height > 0 {
                         context.draw(resolved, in: frame, shading: foreground)
                     }

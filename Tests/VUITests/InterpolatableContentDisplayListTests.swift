@@ -55,17 +55,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let retained = makeDisplayList(debugItemCount: 2, itemCount: 1)
         let ignored = makeDisplayList(debugItemCount: 3, itemCount: 3)
 
-        list.effects.append(
-            DisplayList.EffectItem(
-                effect: .contentTransition(ContentTransition.State(transition: .opacity)),
-                contents: retained
-            )
+        list.appendEffect(
+            .contentTransition(ContentTransition.State(transition: .opacity)),
+            contents: retained
         )
-        list.effects.append(
-            DisplayList.EffectItem(
-                effect: .state(StrongHash(words: (1, 2, 3, 4, 5))),
-                contents: ignored
-            )
+        list.appendEffect(
+            .state(StrongHash(words: (1, 2, 3, 4, 5))),
+            contents: ignored
         )
 
         var renderItemCount = 0
@@ -74,6 +70,675 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
 
         XCTAssertEqual(renderItemCount, 6)
+    }
+
+    func testDisplayListItemsCarryRecordMetadataWithClosureStorage() throws {
+        var source = DisplayList()
+        source.appendItem(
+            kind: .image,
+            bounds: CGRect(x: 1, y: 2, width: 3, height: 4)
+        ) { _ in }
+        source.appendDebugItem(
+            bounds: CGRect(x: 5, y: 6, width: 7, height: 8)
+        ) { _ in }
+
+        var copied = DisplayList()
+        copied.items.append(try XCTUnwrap(source.items.first))
+        copied.debugItems.append(try XCTUnwrap(source.debugItems.first))
+
+        XCTAssertEqual(copied.itemRecords.first?.kind, .image)
+        XCTAssertEqual(copied.itemRecords.first?.bounds, CGRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertEqual(copied.debugItemRecords.first?.kind, .debug)
+        XCTAssertEqual(copied.debugItemRecords.first?.bounds, CGRect(x: 5, y: 6, width: 7, height: 8))
+    }
+
+    func testDisplayListItemRecordsParticipateInLayerSurfaceMatching() {
+        var layer = DisplayList.InterpolatorLayer()
+        let first = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .shapeFill
+        )
+        let sameSurface = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .shapeFill
+        )
+        let changedKind = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .image
+        )
+
+        layer.setDisplayList(
+            first,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        layer.setDisplayList(
+            sameSurface,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .shapeFill)
+
+        layer.setDisplayList(
+            changedKind,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .image)
+        XCTAssertEqual(layer.removedCount, 0)
+    }
+
+    func testDisplayListEffectItemRecordKindParticipatesInSurfaceMatching() {
+        var layer = DisplayList.InterpolatorLayer()
+        let opacity = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .effect,
+            itemEffectKind: .opacity
+        )
+        let sameOpacity = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .effect,
+            itemEffectKind: .opacity
+        )
+        let blur = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .effect,
+            itemEffectKind: .blur
+        )
+
+        layer.setDisplayList(
+            opacity,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        layer.setDisplayList(
+            sameOpacity,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.effectKind, .opacity)
+
+        layer.setDisplayList(
+            blur,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.effectKind, .blur)
+        XCTAssertEqual(layer.removedCount, 0)
+    }
+
+    func testDisplayListEffectRecordsParticipateInSurfaceMatching() {
+        var layer = DisplayList.InterpolatorLayer()
+        let contents = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        let opacityEffect = DisplayList.effect(
+            .contentTransition(ContentTransition.State(transition: .opacity)),
+            contents: contents
+        )
+        let sameOpacityEffect = DisplayList.effect(
+            .contentTransition(ContentTransition.State(transition: .opacity)),
+            contents: contents
+        )
+        let identityEffect = DisplayList.effect(
+            .contentTransition(ContentTransition.State(transition: .identity)),
+            contents: contents
+        )
+
+        layer.setDisplayList(
+            opacityEffect,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        layer.setDisplayList(
+            sameOpacityEffect,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.effects.count, 1)
+
+        layer.setDisplayList(
+            identityEffect,
+            origin: .zero,
+            version: DisplayList.Version(value: 1)
+        )
+        XCTAssertEqual(layer.contents.displayList.effects.count, 1)
+        XCTAssertEqual(layer.removedCount, 0)
+        switch layer.contents.displayList.effects.first?.effect {
+        case let .contentTransition(state):
+            XCTAssertEqual(state.transition, .identity)
+        default:
+            XCTFail("Expected content-transition effect record.")
+        }
+    }
+
+    func testRBDisplayListInterpolatorRecursivelyInterpolatesMatchingEffectContents() throws {
+        let state = ContentTransition.State(transition: .opacity)
+        let sourceContents = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 20),
+            itemKind: .shapeFill
+        )
+        let targetContents = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 20, y: 5, width: 30, height: 40),
+            itemKind: .shapeFill
+        )
+        let source = DisplayList.effect(.contentTransition(state), contents: sourceContents)
+        let target = DisplayList.effect(.contentTransition(state), contents: targetContents)
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: state.transition.rbTransition]
+        )
+
+        XCTAssertEqual(interpolator.activeDuration, 1)
+        XCTAssertEqual(
+            interpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 10, y: 2.5, width: 20, height: 30)
+        )
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.items.count, 0)
+        XCTAssertEqual(midpoint.effects.count, 1)
+
+        let effectItem = try XCTUnwrap(midpoint.effects.first)
+        switch effectItem.effect {
+        case let .contentTransition(outputState):
+            XCTAssertEqual(outputState, state)
+        default:
+            XCTFail("Expected content-transition effect record.")
+        }
+
+        XCTAssertEqual(effectItem.contents.items.count, 1)
+        XCTAssertEqual(effectItem.contents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(effectItem.contents.itemRecords.first?.effectKind, .crossFade)
+        XCTAssertEqual(effectItem.contents.itemRecords.first?.sourceFraction, 0.5)
+        XCTAssertEqual(effectItem.contents.itemRecords.first?.targetFraction, 0.5)
+        XCTAssertEqual(
+            effectItem.contents.interpolationBounds,
+            CGRect(x: 10, y: 2.5, width: 20, height: 30)
+        )
+    }
+
+    func testRBDisplayListInterpolatorKeepsNestedEffectCarrierForAnimationIndexTransition() throws {
+        let state = ContentTransition.State(transition: .opacity)
+        let sourceContents = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 20),
+            itemKind: .shapeFill
+        )
+        let targetContents = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 20, y: 5, width: 30, height: 40),
+            itemKind: .shapeFill
+        )
+        let source = DisplayList.effect(.contentTransition(state), contents: sourceContents)
+        let target = DisplayList.effect(.contentTransition(state), contents: targetContents)
+
+        let baseline = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: state.transition.rbTransition]
+        )
+
+        let animationIndexTransition = RBTransition()
+        animationIndexTransition.method = ContentTransition.Method.diff.method
+        let animationIndexEffect = RBTransitionEffect()
+        animationIndexEffect.type = ContentTransition.EffectType.opacity.type
+        animationIndexEffect.events = 3
+        animationIndexEffect.animationIndex = 1
+        animationIndexTransition.addEffect(animationIndexEffect)
+
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: animationIndexTransition]
+        )
+
+        XCTAssertEqual(interpolator.activeDuration, baseline.activeDuration)
+        XCTAssertEqual(interpolator.maxAbsoluteVelocity(withProgress: 0.5), 0)
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0), baseline.boundingRect(withProgress: 0))
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0.5), baseline.boundingRect(withProgress: 0.5))
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 1), baseline.boundingRect(withProgress: 1))
+
+        let baselineMidpoint = try XCTUnwrap(baseline.copyContents(withProgress: 0.5).effects.first)
+        let midpoint = try XCTUnwrap(interpolator.copyContents(withProgress: 0.5).effects.first)
+        XCTAssertEqual(midpoint.contents.interpolationBounds, baselineMidpoint.contents.interpolationBounds)
+        XCTAssertEqual(midpoint.contents.itemRecords, baselineMidpoint.contents.itemRecords)
+    }
+
+    func testRBDisplayListInterpolatorUsesItemRecordBoundsForMultiItemInterpolation() {
+        let source = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: 15, y: 5, width: 10, height: 15),
+            ],
+            itemKind: .shapeFill
+        )
+        let target = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+            ],
+            itemKind: .shapeFill
+        )
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0), CGRect(x: 0, y: 0, width: 25, height: 20))
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0.5), CGRect(x: 10, y: 5, width: 15, height: 22.5))
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 1), CGRect(x: 5, y: 10, width: 35, height: 25))
+
+        let sourceEndpoint = interpolator.copyContents(withProgress: 0)
+        XCTAssertEqual(sourceEndpoint.items.count, 2)
+        XCTAssertEqual(sourceEndpoint.itemRecords.map(\.kind), [.effect, .effect])
+        XCTAssertEqual(sourceEndpoint.itemRecords.map(\.effectKind), [.crossFade, .crossFade])
+        XCTAssertEqual(sourceEndpoint.itemRecords.map(\.sourceFraction), [0, 0])
+        XCTAssertEqual(sourceEndpoint.itemRecords.map(\.targetFraction), [0, 0])
+        XCTAssertEqual(
+            sourceEndpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: 15, y: 5, width: 10, height: 15),
+            ]
+        )
+        XCTAssertEqual(sourceEndpoint.interpolationBounds, CGRect(x: 0, y: 0, width: 25, height: 20))
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.items.count, 2)
+        XCTAssertEqual(midpoint.itemRecords.map(\.kind), [.effect, .effect])
+        XCTAssertEqual(midpoint.itemRecords.map(\.effectKind), [.crossFade, .crossFade])
+        XCTAssertEqual(midpoint.itemRecords.map(\.sourceFraction), [0.5, 0.5])
+        XCTAssertEqual(midpoint.itemRecords.map(\.targetFraction), [0.5, 0.5])
+        XCTAssertEqual(
+            midpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 10, y: 5, width: 15, height: 15),
+                CGRect(x: 10, y: 15, width: 12.5, height: 12.5),
+            ]
+        )
+        XCTAssertEqual(midpoint.interpolationBounds, CGRect(x: 10, y: 5, width: 15, height: 22.5))
+
+        let targetEndpoint = interpolator.copyContents(withProgress: 1)
+        XCTAssertEqual(targetEndpoint.items.count, 2)
+        XCTAssertEqual(targetEndpoint.itemRecords.map(\.kind), [.effect, .effect])
+        XCTAssertEqual(targetEndpoint.itemRecords.map(\.effectKind), [.crossFade, .crossFade])
+        XCTAssertEqual(targetEndpoint.itemRecords.map(\.sourceFraction), [1, 1])
+        XCTAssertEqual(targetEndpoint.itemRecords.map(\.targetFraction), [1, 1])
+        XCTAssertEqual(
+            targetEndpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+            ]
+        )
+        XCTAssertEqual(targetEndpoint.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
+
+        let reversedTarget = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+            ],
+            itemKind: .shapeFill
+        )
+        let reversedTargetInterpolator = RBDisplayListInterpolator(
+            from: source,
+            to: reversedTarget,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+        XCTAssertEqual(
+            reversedTargetInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 2.5, y: 7.5, width: 30, height: 17.5)
+        )
+
+        let reversedTargetMidpoint = reversedTargetInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(
+            reversedTargetMidpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 2.5, y: 12.5, width: 12.5, height: 10),
+                CGRect(x: 17.5, y: 7.5, width: 15, height: 17.5),
+            ]
+        )
+        XCTAssertEqual(reversedTargetMidpoint.interpolationBounds, CGRect(x: 2.5, y: 7.5, width: 30, height: 17.5))
+
+        let sourceExtra = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: -40, y: 30, width: 5, height: 5),
+            ],
+            itemKind: .shapeFill
+        )
+        let singleTarget = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+            ],
+            itemKind: .shapeFill
+        )
+        let sourceExtraInterpolator = RBDisplayListInterpolator(
+            from: sourceExtra,
+            to: singleTarget,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+        XCTAssertEqual(
+            sourceExtraInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: -40, y: 5, width: 65, height: 30)
+        )
+        XCTAssertEqual(
+            sourceExtraInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: -40, y: 0, width: 50, height: 35)
+        )
+        XCTAssertEqual(
+            sourceExtraInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: -40, y: 10, width: 80, height: 25)
+        )
+
+        let sourceExtraStart = sourceExtraInterpolator.copyContents(withProgress: 0)
+        XCTAssertEqual(
+            sourceExtraStart.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: -40, y: 30, width: 5, height: 5),
+            ]
+        )
+        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.sourceFraction), [0, 0])
+        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.targetFraction), [0, 0])
+        XCTAssertEqual(sourceExtraStart.interpolationBounds, CGRect(x: -40, y: 0, width: 50, height: 35))
+
+        let sourceExtraMidpoint = sourceExtraInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(
+            sourceExtraMidpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 10, y: 5, width: 15, height: 15),
+                CGRect(x: -40, y: 30, width: 5, height: 5),
+            ]
+        )
+        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0.5])
+        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0])
+        XCTAssertEqual(sourceExtraMidpoint.interpolationBounds, CGRect(x: -40, y: 5, width: 65, height: 30))
+
+        let sourceExtraEnd = sourceExtraInterpolator.copyContents(withProgress: 1)
+        XCTAssertEqual(
+            sourceExtraEnd.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+                CGRect(x: -40, y: 30, width: 5, height: 5),
+            ]
+        )
+        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.sourceFraction), [1, 1])
+        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.targetFraction), [1, 0])
+        XCTAssertEqual(sourceExtraEnd.interpolationBounds, CGRect(x: -40, y: 10, width: 80, height: 25))
+
+        let targetExtraInterpolator = RBDisplayListInterpolator(
+            from: makeDisplayList(
+                itemBounds: [CGRect(x: 0, y: 0, width: 10, height: 10)],
+                itemKind: .shapeFill
+            ),
+            to: target,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+        XCTAssertEqual(
+            targetExtraInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 5, y: 5, width: 20, height: 30)
+        )
+        XCTAssertEqual(
+            targetExtraInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 20, height: 35)
+        )
+        XCTAssertEqual(
+            targetExtraInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 5, y: 10, width: 35, height: 25)
+        )
+
+        let targetExtraStart = targetExtraInterpolator.copyContents(withProgress: 0)
+        XCTAssertEqual(
+            targetExtraStart.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+            ]
+        )
+        XCTAssertEqual(targetExtraStart.itemRecords.map(\.sourceFraction), [0, 0])
+        XCTAssertEqual(targetExtraStart.itemRecords.map(\.targetFraction), [0, 0])
+        XCTAssertEqual(targetExtraStart.interpolationBounds, CGRect(x: 0, y: 0, width: 20, height: 35))
+
+        let targetExtraMidpoint = targetExtraInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(
+            targetExtraMidpoint.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 10, y: 5, width: 15, height: 15),
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+            ]
+        )
+        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0])
+        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0.5])
+        XCTAssertEqual(targetExtraMidpoint.interpolationBounds, CGRect(x: 5, y: 5, width: 20, height: 30))
+
+        let targetExtraEnd = targetExtraInterpolator.copyContents(withProgress: 1)
+        XCTAssertEqual(
+            targetExtraEnd.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 20, y: 10, width: 20, height: 20),
+                CGRect(x: 5, y: 25, width: 15, height: 10),
+            ]
+        )
+        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.sourceFraction), [1, 0])
+        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.targetFraction), [1, 1])
+        XCTAssertEqual(targetExtraEnd.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
+    }
+
+    func testRBDisplayListInterpolatorKeepsDebugCountMismatchOnFallbackBounds() {
+        var source = DisplayList()
+        source.appendDebugItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
+        source.appendDebugItem(bounds: CGRect(x: -40, y: 30, width: 5, height: 5)) { _ in }
+
+        var target = DisplayList()
+        target.appendDebugItem(bounds: CGRect(x: 20, y: 10, width: 20, height: 20)) { _ in }
+
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+        let expectedMidpointBounds = CGRect(x: -10, y: 5, width: 35, height: 27.5)
+
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0.5), expectedMidpointBounds)
+        XCTAssertEqual(interpolator.copyContents(withProgress: 0).debugItems.count, 2)
+        XCTAssertEqual(interpolator.copyContents(withProgress: 1).debugItems.count, 1)
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.items.count, 0)
+        XCTAssertEqual(midpoint.debugItems.count, 1)
+        XCTAssertEqual(midpoint.debugItemRecords.map(\.bounds), [expectedMidpointBounds])
+        XCTAssertEqual(midpoint.interpolationBounds, expectedMidpointBounds)
+    }
+
+    func testRBDisplayListInterpolatorUsesNestedEffectItemRecordBounds() throws {
+        let state = ContentTransition.State(transition: .opacity)
+        let source = DisplayList.effect(
+            .contentTransition(state),
+            contents: makeDisplayList(
+                itemBounds: [
+                    CGRect(x: 0, y: 0, width: 10, height: 10),
+                    CGRect(x: 15, y: 5, width: 10, height: 15),
+                ],
+                itemKind: .shapeFill
+            )
+        )
+        let target = DisplayList.effect(
+            .contentTransition(state),
+            contents: makeDisplayList(
+                itemBounds: [
+                    CGRect(x: 20, y: 10, width: 20, height: 20),
+                    CGRect(x: 5, y: 25, width: 15, height: 10),
+                ],
+                itemKind: .shapeFill
+            )
+        )
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: state.transition.rbTransition]
+        )
+
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0.5), CGRect(x: 10, y: 5, width: 15, height: 22.5))
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.interpolationBounds, CGRect(x: 10, y: 5, width: 15, height: 22.5))
+
+        let effect = try XCTUnwrap(midpoint.effects.first)
+        XCTAssertEqual(effect.contents.items.count, 2)
+        XCTAssertEqual(effect.contents.interpolationBounds, CGRect(x: 10, y: 5, width: 15, height: 22.5))
+        XCTAssertEqual(
+            effect.contents.itemRecords.map(\.bounds),
+            [
+                CGRect(x: 10, y: 5, width: 15, height: 15),
+                CGRect(x: 10, y: 15, width: 12.5, height: 12.5),
+            ]
+        )
+    }
+
+    func testDisplayListModifierWrappersPreserveNestedContentTransitionEffects() throws {
+        let source = makeEffectCarrierDisplayList()
+
+        let opacityOutput = try displayList(
+            applying: _OpacityEffect(opacity: 0.5),
+            to: source
+        )
+        let opacityContents = try contentTransitionContents(in: opacityOutput)
+        XCTAssertEqual(opacityContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(opacityContents.itemRecords.first?.effectKind, .opacity)
+        XCTAssertEqual(opacityContents.itemRecords.first?.opacity, 0.5)
+
+        let blurOutput = try displayList(
+            applying: _BlurEffect(radius: 2, opaque: false),
+            to: source
+        )
+        let blurContents = try contentTransitionContents(in: blurOutput)
+        XCTAssertEqual(blurContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(blurContents.itemRecords.first?.effectKind, .blur)
+        XCTAssertEqual(blurContents.itemRecords.first?.blurRadius, 2)
+        XCTAssertEqual(blurContents.itemRecords.first?.blurIsOpaque, false)
+
+        let geometryOutput = try displayList(
+            applying: _OffsetEffect(offset: CGSize(width: 3, height: 4)),
+            to: source
+        )
+        let geometryContents = try contentTransitionContents(in: geometryOutput)
+        XCTAssertEqual(geometryContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(geometryContents.itemRecords.first?.effectKind, .geometry)
+        let transform = try XCTUnwrap(geometryContents.itemRecords.first?.affineTransform)
+        XCTAssertEqual(transform.tx, 3, accuracy: 0.000001)
+        XCTAssertEqual(transform.ty, 4, accuracy: 0.000001)
+        XCTAssertEqual(
+            geometryContents.interpolationBounds,
+            CGRect(x: 3, y: 4, width: 10, height: 10)
+        )
+    }
+
+    func testDisplayListModifierPayloadsParticipateInSurfaceMatching() throws {
+        let source = makeEffectCarrierDisplayList()
+
+        let opacityA = try contentTransitionContents(in: displayList(
+            applying: _OpacityEffect(opacity: 0.4),
+            to: source
+        ))
+        let opacityB = try contentTransitionContents(in: displayList(
+            applying: _OpacityEffect(opacity: 0.6),
+            to: source
+        ))
+        XCTAssertFalse(opacityA.hasSameInterpolationSurface(as: opacityB))
+
+        let blurA = try contentTransitionContents(in: displayList(
+            applying: _BlurEffect(radius: 2, opaque: false),
+            to: source
+        ))
+        let blurB = try contentTransitionContents(in: displayList(
+            applying: _BlurEffect(radius: 4, opaque: false),
+            to: source
+        ))
+        XCTAssertFalse(blurA.hasSameInterpolationSurface(as: blurB))
+
+        let opaqueBlur = try contentTransitionContents(in: displayList(
+            applying: _BlurEffect(radius: 2, opaque: true),
+            to: source
+        ))
+        XCTAssertFalse(blurA.hasSameInterpolationSurface(as: opaqueBlur))
+    }
+
+    func testRBDisplayListInterpolatorUsesSurfaceRecordsForChangeDetection() {
+        let shape = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .shapeFill
+        )
+        let image = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .image
+        )
+        let transition = ContentTransition.opacity.rbTransition
+        let itemInterpolator = RBDisplayListInterpolator(
+            from: shape,
+            to: image,
+            options: [.transition: transition]
+        )
+        XCTAssertEqual(itemInterpolator.activeDuration, 1)
+
+        let effectContents = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .shapeFill
+        )
+        let opacityEffect = DisplayList.effect(
+            .contentTransition(ContentTransition.State(transition: .opacity)),
+            contents: effectContents
+        )
+        let identityEffect = DisplayList.effect(
+            .contentTransition(ContentTransition.State(transition: .identity)),
+            contents: effectContents
+        )
+        let effectInterpolator = RBDisplayListInterpolator(
+            from: opacityEffect,
+            to: identityEffect,
+            options: [.transition: transition]
+        )
+        XCTAssertEqual(effectInterpolator.activeDuration, 1)
+    }
+
+    func testDisplayListItemRecordsIgnoreEmptyBoundsForInterpolationBounds() {
+        var list = DisplayList()
+        list.appendItem(
+            kind: .text,
+            bounds: CGRect(x: 4, y: 5, width: 0, height: 10)
+        ) { _ in }
+        list.appendDebugItem(
+            bounds: CGRect(x: 4, y: 5, width: 10, height: 0)
+        ) { _ in }
+
+        XCTAssertEqual(list.itemRecords.first?.kind, .text)
+        XCTAssertNil(list.itemRecords.first?.bounds)
+        XCTAssertNil(list.debugItemRecords.first?.bounds)
+        XCTAssertNil(list.interpolationBounds)
+
+        list.recordInterpolationBounds(.null)
+        list.recordInterpolationBounds(CGRect(x: 4, y: 5, width: 0, height: 10))
+        XCTAssertNil(list.interpolationBounds)
+
+        list.recordInterpolationBounds(CGRect(x: 14, y: 15, width: -10, height: -5))
+        XCTAssertEqual(list.interpolationBounds, CGRect(x: 4, y: 10, width: 10, height: 5))
     }
 
     func testInterpolatorAnimationAndEffectCarrierSurface() {
@@ -217,6 +882,36 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(drawableInterpolator.copyContents(withProgress: 0).items.count, 1)
         XCTAssertEqual(drawableInterpolator.copyContents(withProgress: 1).items.count, 1)
 
+        let noTransitionInterpolator = RBDisplayListInterpolator(
+            from: drawableFrom,
+            to: drawableTo
+        )
+        XCTAssertEqual(noTransitionInterpolator.activeDuration, 1)
+        XCTAssertFalse(noTransitionInterpolator.onlyFades)
+        XCTAssertEqual(
+            noTransitionInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 10, y: 2.5, width: 20, height: 30)
+        )
+        XCTAssertEqual(
+            noTransitionInterpolator.copyContents(withProgress: 0).itemRecords.first?.effectKind,
+            .crossFade
+        )
+        XCTAssertEqual(
+            noTransitionInterpolator.copyContents(withProgress: 0.5).interpolationBounds,
+            CGRect(x: 10, y: 2.5, width: 20, height: 30)
+        )
+        XCTAssertEqual(
+            noTransitionInterpolator.copyContents(withProgress: 1).itemRecords.first?.effectKind,
+            .crossFade
+        )
+
+        let noTransitionSameObjectInterpolator = RBDisplayListInterpolator(
+            from: drawableFrom,
+            to: drawableFrom
+        )
+        XCTAssertEqual(noTransitionSameObjectInterpolator.activeDuration, 0)
+        XCTAssertFalse(noTransitionSameObjectInterpolator.onlyFades)
+
         let renderOptionInterpolator = RBDisplayListInterpolator(
             from: from,
             to: to,
@@ -249,7 +944,32 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             to: to,
             options: [.animation: Animation.linear(duration: 0.5).rbAnimation]
         )
-        XCTAssertEqual(animationOnly.activeDuration, 0)
+        XCTAssertEqual(animationOnly.activeDuration, 0.5)
+
+        let noTransitionAnimatedInterpolator = RBDisplayListInterpolator(
+            from: from,
+            to: to,
+            options: [.animation: Animation.linear(duration: 2).rbAnimation]
+        )
+        XCTAssertEqual(noTransitionAnimatedInterpolator.activeDuration, 2)
+        XCTAssertEqual(
+            noTransitionAnimatedInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 10, y: 2.5, width: 20, height: 30)
+        )
+        let noTransitionAnimatedVelocitySamples: [(Float, Double)] = [
+            (0, 0),
+            (0.5, 32.97887742519379),
+            (1, 37.5),
+            (1.5, 32.97887742519379),
+            (2, 0),
+        ]
+        for (progress, expectedVelocity) in noTransitionAnimatedVelocitySamples {
+            XCTAssertEqual(
+                noTransitionAnimatedInterpolator.maxAbsoluteVelocity(withProgress: progress),
+                expectedVelocity,
+                accuracy: 0.0005
+            )
+        }
 
         let copied = interpolator.copy() as? RBDisplayListInterpolator
         XCTAssertFalse(copied === interpolator)
@@ -283,6 +1003,57 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             animatedInterpolator.boundingRect(withProgress: 1),
             CGRect(x: 10, y: 2.5, width: 20, height: 30)
         )
+        let animatedVelocitySamples: [(Float, Double)] = [
+            (0, 0),
+            (0.25, 25.829273462295532),
+            (0.5, 32.97887742519379),
+            (0.75, 36.43839657306671),
+            (1, 37.5),
+            (1.5, 32.97887742519379),
+            (2, 0),
+        ]
+        for (progress, expectedVelocity) in animatedVelocitySamples {
+            XCTAssertEqual(
+                animatedInterpolator.maxAbsoluteVelocity(withProgress: progress),
+                expectedVelocity,
+                accuracy: 0.0005
+            )
+        }
+
+        func transitionWithAnimationIndex(_ index: UInt, animation: Animation?) -> RBTransition {
+            let transition = RBTransition()
+            transition.method = ContentTransition.Method.diff.method
+            transition.animation = animation
+            let effect = RBTransitionEffect()
+            effect.type = ContentTransition.EffectType.opacity.type
+            effect.events = 3
+            effect.animationIndex = index
+            transition.addEffect(effect)
+            return transition
+        }
+
+        for transition in [
+            transitionWithAnimationIndex(0, animation: .linear(duration: 2)),
+            transitionWithAnimationIndex(1, animation: nil),
+            transitionWithAnimationIndex(1, animation: .linear(duration: 2)),
+        ] {
+            let transitionAnimationInterpolator = RBDisplayListInterpolator(
+                from: from,
+                to: to,
+                options: [.transition: transition]
+            )
+            XCTAssertEqual(transitionAnimationInterpolator.activeDuration, 1)
+            XCTAssertEqual(
+                transitionAnimationInterpolator.boundingRect(withProgress: 1),
+                CGRect(x: 20, y: 5, width: 30, height: 40)
+            )
+            for progress in [Float(0), Float(0.5), Float(1), Float(2)] {
+                XCTAssertEqual(
+                    transitionAnimationInterpolator.maxAbsoluteVelocity(withProgress: progress),
+                    0
+                )
+            }
+        }
 
         let customEffect = ContentTransition.Effect(
             type: ContentTransition.EffectType(type: 3),
@@ -328,6 +1099,26 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(effectInterpolator.activeDuration, 1)
             XCTAssertEqual(effectInterpolator.onlyFades, expectedOnlyFades)
             XCTAssertEqual(effectInterpolator.maxAbsoluteVelocity(withProgress: 0.5), 0)
+            XCTAssertEqual(
+                effectInterpolator.boundingRect(withProgress: 0),
+                CGRect(x: 0, y: 0, width: 10, height: 20)
+            )
+            XCTAssertEqual(
+                effectInterpolator.boundingRect(withProgress: 0.5),
+                CGRect(x: 10, y: 2.5, width: 20, height: 30)
+            )
+            XCTAssertEqual(
+                effectInterpolator.boundingRect(withProgress: 1),
+                CGRect(x: 20, y: 5, width: 30, height: 40)
+            )
+            XCTAssertEqual(
+                effectInterpolator.copyContents(withProgress: 0).interpolationBounds,
+                CGRect(x: 0, y: 0, width: 10, height: 20)
+            )
+            XCTAssertEqual(
+                effectInterpolator.copyContents(withProgress: 1).interpolationBounds,
+                CGRect(x: 20, y: 5, width: 30, height: 40)
+            )
             XCTAssertEqual(midpoint.items.count, drawableMidpoint.items.count)
             XCTAssertEqual(midpoint.debugItems.count, drawableMidpoint.debugItems.count)
             XCTAssertEqual(midpoint.interpolationBounds, drawableMidpoint.interpolationBounds)
@@ -335,6 +1126,12 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testRBAnimationAndSequencerCarrierSurface() {
+        let empty = RBAnimation()
+        XCTAssertEqual(empty.activeDuration, 0)
+        XCTAssertEqual(empty.evaluateAtTime(-0.25), 0)
+        XCTAssertEqual(empty.evaluateAtTime(0), 0)
+        XCTAssertEqual(empty.evaluateAtTime(0.25), 1)
+
         let linear = Animation.linear(duration: 0.25).rbAnimation
         XCTAssertEqual(linear.activeDuration, 0.25)
         XCTAssertEqual(linear.evaluateAtTime(0), 0)
@@ -355,6 +1152,310 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(repeated.evaluateAtTime(0.375), 0.5, accuracy: 0.001)
         XCTAssertEqual(repeated.evaluateAtTime(0.5), 0)
 
+        let sampled = RBAnimation()
+        let sampledPairs: [Float] = [0, 0, 0.5, 0.25, 1, 1]
+        sampledPairs.withUnsafeBufferPointer { buffer in
+            sampled.addSampledFunction(
+                withDuration: 2,
+                count: 3,
+                values: buffer.baseAddress!
+            )
+        }
+        XCTAssertEqual(sampled.activeDuration, 2)
+        XCTAssertEqual(sampled.evaluateAtTime(0), 0)
+        XCTAssertEqual(sampled.evaluateAtTime(0.5), 0.125, accuracy: 0.001)
+        XCTAssertEqual(sampled.evaluateAtTime(1), 0.25, accuracy: 0.001)
+        XCTAssertEqual(sampled.evaluateAtTime(1.5), 0.625, accuracy: 0.001)
+        XCTAssertEqual(sampled.evaluateAtTime(2), 1)
+
+        let singleSample = RBAnimation()
+        let singlePair: [Float] = [0.3, 0.7]
+        singlePair.withUnsafeBufferPointer { buffer in
+            singleSample.addSampledFunction(
+                withDuration: 2,
+                count: 1,
+                values: buffer.baseAddress!
+            )
+        }
+        XCTAssertEqual(singleSample.activeDuration, 2)
+        XCTAssertEqual(singleSample.evaluateAtTime(0), 0)
+        XCTAssertEqual(singleSample.evaluateAtTime(1), 0.5, accuracy: 0.001)
+        XCTAssertEqual(singleSample.evaluateAtTime(2), 1)
+
+        let offsetSample = RBAnimation()
+        let offsetPairs: [Float] = [0.25, 0.5, 0.75, 1]
+        offsetPairs.withUnsafeBufferPointer { buffer in
+            offsetSample.addSampledFunction(
+                withDuration: 2,
+                count: 2,
+                values: buffer.baseAddress!
+            )
+        }
+        XCTAssertEqual(offsetSample.evaluateAtTime(0), 0.5, accuracy: 0.001)
+        XCTAssertEqual(offsetSample.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+        XCTAssertEqual(offsetSample.evaluateAtTime(1), 0.75, accuracy: 0.001)
+        XCTAssertEqual(offsetSample.evaluateAtTime(2), 1, accuracy: 0.001)
+
+        let preset0 = RBAnimation()
+        preset0.addPreset(0, duration: 1)
+        XCTAssertEqual(preset0.activeDuration, 1)
+        XCTAssertEqual(preset0.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+
+        let preset1 = RBAnimation()
+        preset1.addPreset(1, duration: 1)
+        XCTAssertEqual(preset1.evaluateAtTime(0.25), 0.15625, accuracy: 0.001)
+        XCTAssertEqual(preset1.evaluateAtTime(0.75), 0.84375, accuracy: 0.001)
+
+        let preset2 = RBAnimation()
+        preset2.addPreset(2, duration: 1)
+        XCTAssertEqual(preset2.evaluateAtTime(0.5), 0.315338, accuracy: 0.001)
+
+        let preset3 = RBAnimation()
+        preset3.addPreset(3, duration: 1)
+        XCTAssertEqual(preset3.evaluateAtTime(0.5), 0.684662, accuracy: 0.001)
+
+        let preset4 = RBAnimation()
+        preset4.addPreset(4, duration: 1)
+        XCTAssertEqual(preset4.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+        XCTAssertEqual(preset4.evaluateAtTime(0.75), 0.871109, accuracy: 0.001)
+
+        let preset5 = RBAnimation()
+        preset5.addPreset(5, duration: 1)
+        XCTAssertEqual(preset5.activeDuration, 1.5)
+        XCTAssertEqual(preset5.evaluateAtTime(0.25), 0.465584, accuracy: 0.001)
+        XCTAssertEqual(preset5.evaluateAtTime(1), 0.986399, accuracy: 0.001)
+
+        let preset6 = RBAnimation()
+        preset6.addPreset(6, duration: 1)
+        XCTAssertEqual(preset6.activeDuration, 1.65, accuracy: 0.0001)
+        XCTAssertEqual(preset6.evaluateAtTime(0.5), 0.952131, accuracy: 0.001)
+        XCTAssertEqual(preset6.evaluateAtTime(0.75), 1.028375, accuracy: 0.001)
+
+        let preset7 = RBAnimation()
+        preset7.addPreset(7, duration: 1)
+        XCTAssertEqual(preset7.activeDuration, 2.075, accuracy: 0.0001)
+        XCTAssertEqual(preset7.evaluateAtTime(0.5), 1.096688, accuracy: 0.001)
+        XCTAssertEqual(preset7.evaluateAtTime(1.25), 0.984773, accuracy: 0.001)
+
+        let preset8 = RBAnimation()
+        preset8.addPreset(8, duration: 1)
+        XCTAssertEqual(preset8.evaluateAtTime(0.5), 0.133975, accuracy: 0.001)
+
+        let preset9 = RBAnimation()
+        preset9.addPreset(9, duration: 1)
+        XCTAssertEqual(preset9.evaluateAtTime(0.5), 0.866025, accuracy: 0.001)
+
+        let preset10 = RBAnimation()
+        preset10.addPreset(10, duration: 1)
+        XCTAssertEqual(preset10.evaluateAtTime(0.25), 0.066987, accuracy: 0.001)
+        XCTAssertEqual(preset10.evaluateAtTime(0.75), 0.933013, accuracy: 0.001)
+
+        let circularUnitCurve = Animation.timingCurve(.circularEaseInOut, duration: 1).rbAnimation
+        let expectedCircularUnitCurve = RBAnimation()
+        expectedCircularUnitCurve.addPreset(10, duration: 1)
+        XCTAssertEqual(circularUnitCurve.activeDuration, expectedCircularUnitCurve.activeDuration)
+        XCTAssertEqual(
+            circularUnitCurve.evaluateAtTime(0.25),
+            expectedCircularUnitCurve.evaluateAtTime(0.25),
+            accuracy: 0.000001
+        )
+        XCTAssertEqual(
+            circularUnitCurve.evaluateAtTime(0.75),
+            expectedCircularUnitCurve.evaluateAtTime(0.75),
+            accuracy: 0.000001
+        )
+
+        let invalidPreset = RBAnimation()
+        invalidPreset.addPreset(11, duration: 1)
+        XCTAssertEqual(invalidPreset.activeDuration, 0)
+        XCTAssertEqual(invalidPreset.evaluateAtTime(0), 0)
+        XCTAssertEqual(invalidPreset.evaluateAtTime(0.25), 1)
+
+        let spring = RBAnimation()
+        spring.addSpringDuration(1, mass: 1, stiffness: 100, damping: 10, initialVelocity: 0)
+        XCTAssertEqual(spring.activeDuration, 1)
+        XCTAssertEqual(spring.evaluateAtTime(0.25), 1.023360, accuracy: 0.001)
+        XCTAssertEqual(spring.evaluateAtTime(0.5), 1.074591, accuracy: 0.001)
+
+        let criticalSpring = RBAnimation()
+        criticalSpring.addSpringDuration(1, mass: 1, stiffness: 100, damping: 30, initialVelocity: 0)
+        XCTAssertEqual(criticalSpring.evaluateAtTime(0.25), 0.712703, accuracy: 0.001)
+        XCTAssertEqual(criticalSpring.evaluateAtTime(0.5), 0.959572, accuracy: 0.001)
+
+        let velocitySpring = RBAnimation()
+        velocitySpring.addSpringDuration(1, mass: 1, stiffness: 100, damping: 10, initialVelocity: 2)
+        XCTAssertEqual(velocitySpring.evaluateAtTime(0.25), 1.078182, accuracy: 0.001)
+
+        let durationSpring = RBAnimation()
+        durationSpring.addSpringDuration(2, mass: 1, stiffness: 100, damping: 10, initialVelocity: 0)
+        XCTAssertEqual(durationSpring.activeDuration, 2)
+        XCTAssertEqual(durationSpring.evaluateAtTime(0.25), spring.evaluateAtTime(0.25), accuracy: 0.001)
+
+        let interpolatingSpring = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 2
+        ).rbAnimation
+        let expectedInterpolatingSpring = RBAnimation()
+        expectedInterpolatingSpring.addSpringDuration(
+            2 * .pi / 10,
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 2
+        )
+        XCTAssertEqual(
+            interpolatingSpring.activeDuration,
+            expectedInterpolatingSpring.activeDuration,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            interpolatingSpring.evaluateAtTime(0.25),
+            expectedInterpolatingSpring.evaluateAtTime(0.25),
+            accuracy: 0.000001
+        )
+
+        let fluidSpring = Animation.spring(response: 0.5, dampingFraction: 1.0).rbAnimation
+        let expectedFluidSpring = RBAnimation()
+        let fluidStiffness = fluidSpringStiffness(response: 0.5)
+        expectedFluidSpring.addSpringDuration(
+            0.5,
+            mass: 1,
+            stiffness: fluidStiffness,
+            damping: 2 * sqrt(fluidStiffness),
+            initialVelocity: 0
+        )
+        XCTAssertEqual(fluidSpring.activeDuration, 0.5)
+        XCTAssertEqual(
+            fluidSpring.evaluateAtTime(0.2),
+            expectedFluidSpring.evaluateAtTime(0.2),
+            accuracy: 0.000001
+        )
+
+        let postCurveDelay = RBAnimation()
+        postCurveDelay.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        postCurveDelay.addDelay(0.5)
+        XCTAssertEqual(postCurveDelay.activeDuration, 1)
+        XCTAssertEqual(postCurveDelay.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+
+        let postCurveSpeed = RBAnimation()
+        postCurveSpeed.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        postCurveSpeed.addSpeed(2)
+        XCTAssertEqual(postCurveSpeed.activeDuration, 1)
+        XCTAssertEqual(postCurveSpeed.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+
+        let postCurveRepeat = RBAnimation()
+        postCurveRepeat.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        postCurveRepeat.addRepeatCount(2, autoreverses: true)
+        XCTAssertEqual(postCurveRepeat.activeDuration, 1)
+        XCTAssertEqual(postCurveRepeat.evaluateAtTime(0.5), 0.5, accuracy: 0.001)
+
+        let secondCurve = RBAnimation()
+        secondCurve.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        secondCurve.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        XCTAssertEqual(secondCurve.activeDuration, 1)
+        XCTAssertEqual(secondCurve.evaluateAtTime(1), 1)
+
+        let equalityLinear = RBAnimation()
+        equalityLinear.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let matchingLinear = RBAnimation()
+        matchingLinear.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let differentCurve = RBAnimation()
+        differentCurve.addBezierDuration(
+            1,
+            controlPoint1: CGPoint(x: 0.42, y: 0),
+            controlPoint2: CGPoint(x: 0.58, y: 1)
+        )
+        let matchingPostCurveDelay = RBAnimation()
+        matchingPostCurveDelay.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        matchingPostCurveDelay.addDelay(0.5)
+        let matchingSecondCurve = RBAnimation()
+        matchingSecondCurve.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        matchingSecondCurve.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+
+        XCTAssertEqual(equalityLinear, matchingLinear)
+        XCTAssertEqual(equalityLinear.hash, matchingLinear.hash)
+        XCTAssertNotEqual(equalityLinear, differentCurve)
+        XCTAssertNotEqual(equalityLinear, postCurveDelay)
+        XCTAssertEqual(postCurveDelay, matchingPostCurveDelay)
+        XCTAssertNotEqual(equalityLinear, secondCurve)
+        XCTAssertNotEqual(secondCurve, matchingSecondCurve)
+
+        let copySource = RBAnimation()
+        copySource.addDelay(0.25)
+        copySource.addBezierDuration(
+            1,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        guard let copiedAnimation = copySource.copy() as? RBAnimation else {
+            XCTFail("Expected RBAnimation copy.")
+            return
+        }
+        XCTAssertFalse(copiedAnimation === copySource)
+        XCTAssertEqual(copiedAnimation, copySource)
+        XCTAssertEqual(copiedAnimation.activeDuration, copySource.activeDuration)
+        XCTAssertEqual(
+            copiedAnimation.evaluateAtTime(0.75),
+            copySource.evaluateAtTime(0.75),
+            accuracy: 0.001
+        )
+        copySource.addDelay(0.5)
+        XCTAssertNotEqual(copiedAnimation, copySource)
+        XCTAssertEqual(copiedAnimation.activeDuration, 1.25)
+
+        secondCurve.removeAll()
+        XCTAssertEqual(secondCurve.activeDuration, 0)
+        XCTAssertEqual(secondCurve.evaluateAtTime(0.5), 1)
+        secondCurve.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        XCTAssertEqual(secondCurve.activeDuration, 2)
+        XCTAssertEqual(secondCurve.evaluateAtTime(1), 0.5, accuracy: 0.001)
+
         let effects = RBAnimationSequencerEffects()
         effects.delayOffset = 0.25
         effects.delayScale = 2
@@ -372,6 +1473,23 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(sequencer.endPoint, CGPoint(x: 3, y: 4))
         XCTAssertEqual(sequencer.added?.delayOffset, 0.25)
         XCTAssertEqual(sequencer.added?.delayScale, 2)
+
+        let matchingEffects = RBAnimationSequencerEffects()
+        matchingEffects.delayOffset = 0.25
+        matchingEffects.delayScale = 2
+        XCTAssertTrue(effects.isEqual(effects))
+        XCTAssertFalse(effects.isEqual(matchingEffects))
+        XCTAssertFalse(effects.responds(to: NSSelectorFromString("copyWithZone:")))
+
+        let matchingSequencer = RBAnimationSequencer()
+        matchingSequencer.distanceMode = 1
+        matchingSequencer.sequencesGlyphs = true
+        matchingSequencer.startPoint = CGPoint(x: 1, y: 2)
+        matchingSequencer.endPoint = CGPoint(x: 3, y: 4)
+        matchingSequencer.added = matchingEffects
+        XCTAssertTrue(sequencer.isEqual(sequencer))
+        XCTAssertFalse(sequencer.isEqual(matchingSequencer))
+        XCTAssertFalse(sequencer.responds(to: NSSelectorFromString("copyWithZone:")))
     }
 
     func testRBDisplayListInterpolatorSequencerDurationSurface() {
@@ -404,6 +1522,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         func makeSequencer(
             distanceMode: Int32 = 1,
+            startPoint: CGPoint = .zero,
             endPoint: CGPoint = CGPoint(x: 100, y: 50),
             added: RBAnimationSequencerEffects? = nil,
             mixed: RBAnimationSequencerEffects? = nil,
@@ -412,7 +1531,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let sequencer = RBAnimationSequencer()
             sequencer.distanceMode = distanceMode
             sequencer.sequencesGlyphs = true
-            sequencer.startPoint = .zero
+            sequencer.startPoint = startPoint
             sequencer.endPoint = endPoint
             sequencer.added = added
             sequencer.mixed = mixed
@@ -430,6 +1549,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 ]
             )
         }
+
+        func makeNoTransitionInterpolator(_ sequencer: RBAnimationSequencer) -> RBDisplayListInterpolator {
+            RBDisplayListInterpolator(
+                from: from,
+                to: to,
+                options: [
+                    .animationSequencer: sequencer,
+                ]
+            )
+        }
+
+        func assertRectApproximatelyEqual(
+            _ actual: CGRect,
+            _ expected: CGRect,
+            accuracy: CGFloat = 0.002,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            XCTAssertEqual(actual.origin.x, expected.origin.x, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.origin.y, expected.origin.y, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.size.width, expected.size.width, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.size.height, expected.size.height, accuracy: accuracy, file: file, line: line)
+        }
+
+        let emptyAnimationKeySequencer = RBDisplayListInterpolator(
+            from: DisplayList(),
+            to: DisplayList(),
+            options: [
+                .transition: transition,
+                .animation: makeSequencer(mixed: makeEffects(offset: 0.25, scale: 2)),
+            ]
+        )
+        XCTAssertEqual(emptyAnimationKeySequencer.activeDuration, 0)
 
         XCTAssertEqual(makeInterpolator(makeSequencer()).activeDuration, 1)
         XCTAssertEqual(
@@ -478,6 +1630,91 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(
             makeInterpolator(
                 makeSequencer(
+                    distanceMode: -1,
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    distanceMode: 2,
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    distanceMode: 3,
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    startPoint: CGPoint(x: 20, y: 10),
+                    endPoint: CGPoint(x: 120, y: 60),
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1.629473328590393,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    startPoint: CGPoint(x: 0, y: 100),
+                    endPoint: CGPoint(x: 100, y: 100),
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            2.905294418334961,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    startPoint: CGPoint(x: 35, y: 25),
+                    endPoint: CGPoint(x: 35, y: 25),
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    startPoint: CGPoint(x: 35, y: 25),
+                    endPoint: CGPoint(x: 35, y: 25),
+                    mixed: makeEffects(offset: 0.25, scale: 0)
+                )
+            ).activeDuration,
+            1,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    startPoint: CGPoint(x: 35, y: 25),
+                    endPoint: CGPoint(x: 35, y: 25),
+                    mixed: makeEffects(offset: 0, scale: 2)
+                )
+            ).activeDuration,
+            1,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
                     endPoint: CGPoint(x: 10, y: 0),
                     mixed: makeEffects(offset: 0.25, scale: 2)
                 )
@@ -491,6 +1728,171 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             ).maxAbsoluteVelocity(withProgress: 0.5),
             0
         )
+
+        let sequencerOnlyInterpolator = makeInterpolator(
+            makeSequencer(mixed: makeEffects(offset: 0.25, scale: 2))
+        )
+        assertRectApproximatelyEqual(
+            sequencerOnlyInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 0, y: 0, width: 10, height: 20)
+        )
+        assertRectApproximatelyEqual(
+            sequencerOnlyInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 0, width: 10, height: 20)
+        )
+        assertRectApproximatelyEqual(
+            sequencerOnlyInterpolator.boundingRect(withProgress: 1.5),
+            CGRect(
+                x: 9.611692428588867,
+                y: 2.402923107147217,
+                width: 19.611692428588867,
+                height: 29.611690521240234
+            )
+        )
+        assertRectApproximatelyEqual(
+            sequencerOnlyInterpolator.boundingRect(withProgress: 2.0194154),
+            CGRect(x: 20, y: 5, width: 30, height: 40)
+        )
+        assertRectApproximatelyEqual(
+            sequencerOnlyInterpolator.copyContents(withProgress: 1.5).interpolationBounds ?? .null,
+            CGRect(
+                x: 9.611692428588867,
+                y: 2.402923107147217,
+                width: 19.611692428588867,
+                height: 29.611690521240234
+            )
+        )
+
+        let noTransitionSequencerInterpolator = makeNoTransitionInterpolator(
+            makeSequencer(mixed: makeEffects(offset: 0.25, scale: 2))
+        )
+        XCTAssertEqual(noTransitionSequencerInterpolator.activeDuration, 2.0194153785705566, accuracy: 0.0005)
+        XCTAssertFalse(noTransitionSequencerInterpolator.onlyFades)
+        assertRectApproximatelyEqual(
+            noTransitionSequencerInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 0, width: 10, height: 20)
+        )
+        assertRectApproximatelyEqual(
+            noTransitionSequencerInterpolator.boundingRect(withProgress: 1.5),
+            CGRect(
+                x: 9.611692428588867,
+                y: 2.402923107147217,
+                width: 19.611692428588867,
+                height: 29.611690521240234
+            )
+        )
+        assertRectApproximatelyEqual(
+            noTransitionSequencerInterpolator.copyContents(withProgress: 1.5).interpolationBounds ?? .null,
+            CGRect(
+                x: 9.611692428588867,
+                y: 2.402923107147217,
+                width: 19.611692428588867,
+                height: 29.611690521240234
+            )
+        )
+        XCTAssertEqual(noTransitionSequencerInterpolator.maxAbsoluteVelocity(withProgress: 1.5), 0)
+
+        let noTransitionCombinedInterpolator = RBDisplayListInterpolator(
+            from: from,
+            to: to,
+            options: [
+                .animation: Animation.linear(duration: 2).rbAnimation,
+                .animationSequencer: makeSequencer(mixed: makeEffects(offset: 0.25, scale: 2)),
+            ]
+        )
+        XCTAssertEqual(noTransitionCombinedInterpolator.activeDuration, 3.0194153785705566, accuracy: 0.0005)
+        assertRectApproximatelyEqual(
+            noTransitionCombinedInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 0, width: 10, height: 20)
+        )
+        assertRectApproximatelyEqual(
+            noTransitionCombinedInterpolator.boundingRect(withProgress: 1.5),
+            CGRect(
+                x: 4.807149887084961,
+                y: 1.2017874717712402,
+                width: 14.807149887084961,
+                height: 24.80714988708496
+            )
+        )
+        assertRectApproximatelyEqual(
+            noTransitionCombinedInterpolator.boundingRect(withProgress: 2),
+            CGRect(
+                x: 9.80585765838623,
+                y: 2.4514644145965576,
+                width: 19.805858612060547,
+                height: 29.805856704711914
+            )
+        )
+        let noTransitionCombinedVelocitySamples: [(Float, Double)] = [
+            (0, 0),
+            (0.5, 32.97887742519379),
+            (1, 37.5),
+            (1.0194154, 37.493717670440674),
+            (1.5, 32.97887742519379),
+            (2, 0),
+            (3.0194154, 0),
+        ]
+        for (progress, expectedVelocity) in noTransitionCombinedVelocitySamples {
+            XCTAssertEqual(
+                noTransitionCombinedInterpolator.maxAbsoluteVelocity(withProgress: progress),
+                expectedVelocity,
+                accuracy: 0.0005
+            )
+        }
+
+        let combinedInterpolator = RBDisplayListInterpolator(
+            from: from,
+            to: to,
+            options: [
+                .transition: transition,
+                .animation: Animation.linear(duration: 2).rbAnimation,
+                .animationSequencer: makeSequencer(mixed: makeEffects(offset: 0.25, scale: 2)),
+            ]
+        )
+        XCTAssertEqual(combinedInterpolator.activeDuration, 3.0194153785705566, accuracy: 0.0005)
+        assertRectApproximatelyEqual(
+            combinedInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 0, width: 10, height: 20)
+        )
+        assertRectApproximatelyEqual(
+            combinedInterpolator.boundingRect(withProgress: 1.5),
+            CGRect(
+                x: 4.807149887084961,
+                y: 1.2017874717712402,
+                width: 14.807149887084961,
+                height: 24.80714988708496
+            )
+        )
+        assertRectApproximatelyEqual(
+            combinedInterpolator.boundingRect(withProgress: 2),
+            CGRect(
+                x: 9.80585765838623,
+                y: 2.4514644145965576,
+                width: 19.805858612060547,
+                height: 29.805856704711914
+            )
+        )
+        assertRectApproximatelyEqual(
+            combinedInterpolator.boundingRect(withProgress: 3.0194154),
+            CGRect(x: 20, y: 5, width: 30, height: 40)
+        )
+
+        let combinedVelocitySamples: [(Float, Double)] = [
+            (0, 0),
+            (0.5, 32.97887742519379),
+            (1, 37.5),
+            (1.0194154, 37.493717670440674),
+            (1.5, 32.97887742519379),
+            (2, 0),
+            (3.0194154, 0),
+        ]
+        for (progress, expectedVelocity) in combinedVelocitySamples {
+            XCTAssertEqual(
+                combinedInterpolator.maxAbsoluteVelocity(withProgress: progress),
+                expectedVelocity,
+                accuracy: 0.0005
+            )
+        }
     }
 
     func testUnaryInterpolatorGroupTracksLayerState() {
@@ -920,19 +2322,88 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     private func makeDisplayList(
         debugItemCount: Int,
         itemCount: Int = 0,
-        bounds: CGRect = CGRect(x: 0, y: 0, width: 10, height: 10)
+        bounds: CGRect = CGRect(x: 0, y: 0, width: 10, height: 10),
+        itemKind: DisplayList.ItemRecord.Kind = .closure,
+        itemEffectKind: DisplayList.ItemRecord.EffectKind? = nil
     ) -> DisplayList {
         var list = DisplayList()
         for _ in 0..<debugItemCount {
-            list.debugItems.append { _ in }
+            list.appendDebugItem(bounds: bounds) { _ in }
         }
         for _ in 0..<itemCount {
-            list.items.append { _ in }
-        }
-        if debugItemCount > 0 || itemCount > 0 {
-            list.recordInterpolationBounds(bounds)
+            list.appendItem(
+                kind: itemKind,
+                bounds: bounds,
+                effectKind: itemEffectKind
+            ) { _ in }
         }
         return list
+    }
+
+    private func makeDisplayList(
+        itemBounds: [CGRect],
+        itemKind: DisplayList.ItemRecord.Kind = .closure,
+        itemEffectKind: DisplayList.ItemRecord.EffectKind? = nil
+    ) -> DisplayList {
+        var list = DisplayList()
+        for bounds in itemBounds {
+            list.appendItem(
+                kind: itemKind,
+                bounds: bounds,
+                effectKind: itemEffectKind
+            ) { _ in }
+        }
+        return list
+    }
+
+    private func makeEffectCarrierDisplayList() -> DisplayList {
+        var source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            itemKind: .shapeFill
+        )
+        source.appendEffect(
+            .contentTransition(ContentTransition.State(transition: .opacity)),
+            contents: makeDisplayList(
+                debugItemCount: 0,
+                itemCount: 1,
+                itemKind: .text
+            )
+        )
+        return source
+    }
+
+    private func displayList<Modifier: ViewModifier>(
+        applying modifier: Modifier,
+        to source: DisplayList
+    ) throws -> DisplayList {
+        let graph = AttributeGraph()
+        return try AttributeGraph.$current.withValue(graph) {
+            let modifierAttr = graph.makeInput(value: modifier)
+            let sourceAttr = graph.makeInput(value: source)
+            let outputs = Modifier._makeView(
+                modifier: _GraphValue(_attribute: modifierAttr),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(DisplayList.Key.self, node: sourceAttr.identifier)
+                return outputs
+            }
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            return Attribute<DisplayList>(outputID).value
+        }
+    }
+
+    private func contentTransitionContents(in list: DisplayList) throws -> DisplayList {
+        XCTAssertEqual(list.effects.count, 1)
+        let effect = try XCTUnwrap(list.effects.first)
+        switch effect.effect {
+        case let .contentTransition(state):
+            XCTAssertEqual(state.transition, .opacity)
+        default:
+            XCTFail("Expected content-transition effect record.")
+        }
+        return effect.contents
     }
 
     private func makeResolvedImage(

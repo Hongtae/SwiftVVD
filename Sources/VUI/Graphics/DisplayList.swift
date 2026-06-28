@@ -66,12 +66,104 @@ struct DisplayList {
         var contents: DisplayList
     }
 
-    typealias Item = (GraphicsContext) -> Void
+    // Lightweight render-item summary used by interpolation before backend typed
+    // commands replace closure-backed drawing.
+    struct ItemRecord: Equatable {
+        enum Kind: UInt8, Equatable {
+            case closure
+            case shapeFill
+            case image
+            case text
+            case effect
+            case debug
+        }
+
+        enum EffectKind: UInt8, Equatable {
+            case generic
+            case opacity
+            case blur
+            case geometry
+            case crossFade
+        }
+
+        var kind: Kind
+        var effectKind: EffectKind?
+        var bounds: CGRect?
+        var opacity: Double?
+        var blurRadius: CGFloat?
+        var blurIsOpaque: Bool?
+        var affineTransform: CGAffineTransform?
+        var sourceFraction: Float?
+        var targetFraction: Float?
+
+        init(
+            kind: Kind,
+            bounds: CGRect? = nil,
+            effectKind: EffectKind? = nil,
+            opacity: Double? = nil,
+            blurRadius: CGFloat? = nil,
+            blurIsOpaque: Bool? = nil,
+            affineTransform: CGAffineTransform? = nil,
+            sourceFraction: Float? = nil,
+            targetFraction: Float? = nil
+        ) {
+            self.kind = kind
+            self.effectKind = kind == .effect ? effectKind ?? .generic : nil
+            self.bounds = bounds
+            if kind == .effect && effectKind == .opacity {
+                self.opacity = opacity
+            } else {
+                self.opacity = nil
+            }
+            if kind == .effect && effectKind == .blur {
+                self.blurRadius = blurRadius
+                self.blurIsOpaque = blurIsOpaque
+            } else {
+                self.blurRadius = nil
+                self.blurIsOpaque = nil
+            }
+            if kind == .effect && effectKind == .geometry {
+                self.affineTransform = affineTransform
+            } else {
+                self.affineTransform = nil
+            }
+            if kind == .effect && effectKind == .crossFade {
+                self.sourceFraction = sourceFraction
+                self.targetFraction = targetFraction
+            } else {
+                self.sourceFraction = nil
+                self.targetFraction = nil
+            }
+        }
+    }
+
+    struct Item {
+        var record: ItemRecord
+        private let body: (GraphicsContext) -> Void
+
+        init(record: ItemRecord, _ body: @escaping (GraphicsContext) -> Void) {
+            self.record = record
+            self.body = body
+        }
+
+        func callAsFunction(_ context: GraphicsContext) {
+            body(context)
+        }
+    }
+
     var items: [Item] = []
     var debugItems: [Item] = []
     var effects: [EffectItem] = []
     // Backend-local bounds used by display-list interpolation before typed command storage exists.
     var interpolationBounds: CGRect?
+
+    var itemRecords: [ItemRecord] {
+        items.map(\.record)
+    }
+
+    var debugItemRecords: [ItemRecord] {
+        debugItems.map(\.record)
+    }
 
     mutating func append(contentsOf other: Self) {
         self.items.append(contentsOf: other.items)
@@ -80,8 +172,112 @@ struct DisplayList {
         self.recordInterpolationBounds(other.interpolationBounds)
     }
 
+    mutating func appendItem(
+        kind: ItemRecord.Kind = .closure,
+        bounds: CGRect? = nil,
+        effectKind: ItemRecord.EffectKind? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(kind: kind, bounds: bounds, effectKind: effectKind)
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendOpacityItem(
+        bounds: CGRect? = nil,
+        opacity: Double,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .opacity,
+            opacity: opacity
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendBlurItem(
+        bounds: CGRect? = nil,
+        radius: CGFloat,
+        isOpaque: Bool,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .blur,
+            blurRadius: radius,
+            blurIsOpaque: isOpaque
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendGeometryItem(
+        bounds: CGRect? = nil,
+        affineTransform: CGAffineTransform,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .geometry,
+            affineTransform: affineTransform
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendCrossFadeItem(
+        bounds: CGRect? = nil,
+        sourceFraction: Float,
+        targetFraction: Float,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .crossFade,
+            sourceFraction: sourceFraction,
+            targetFraction: targetFraction
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendDebugItem(
+        bounds: CGRect? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(kind: .debug, bounds: bounds)
+        debugItems.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendEffect(_ effect: Effect, contents: DisplayList) {
+        effects.append(EffectItem(effect: effect, contents: contents))
+        recordInterpolationBounds(contents.interpolationBounds)
+    }
+
+    private static func itemRecordBounds(_ bounds: CGRect?) -> CGRect? {
+        guard let bounds = bounds?.standardized,
+              !bounds.isNull,
+              bounds.width > 0,
+              bounds.height > 0
+        else { return nil }
+        return bounds
+    }
+
     mutating func recordInterpolationBounds(_ rect: CGRect?) {
-        guard let rect, !rect.isNull else { return }
+        guard let rect = Self.itemRecordBounds(rect) else { return }
         if let current = interpolationBounds {
             interpolationBounds = current.union(rect)
         } else {
@@ -91,8 +287,7 @@ struct DisplayList {
 
     static func effect(_ effect: Effect, contents: DisplayList) -> DisplayList {
         var list = DisplayList()
-        list.effects.append(EffectItem(effect: effect, contents: contents))
-        list.recordInterpolationBounds(contents.interpolationBounds)
+        list.appendEffect(effect, contents: contents)
         return list
     }
 
@@ -114,6 +309,107 @@ struct DisplayList {
         forEachRenderItem(includeDebug: includeDebug) { item in
             item(context)
         }
+    }
+
+    func hasSameInterpolationSurface(as other: DisplayList) -> Bool {
+        itemSurfaceMatches(
+            records: itemRecords,
+            count: items.count,
+            otherRecords: other.itemRecords,
+            otherCount: other.items.count
+        ) &&
+        itemSurfaceMatches(
+            records: debugItemRecords,
+            count: debugItems.count,
+            otherRecords: other.debugItemRecords,
+            otherCount: other.debugItems.count
+        ) &&
+            effectSurfaceMatches(effects, other.effects) &&
+            interpolationBounds == other.interpolationBounds
+    }
+
+    private func itemSurfaceMatches(
+        records: [ItemRecord],
+        count: Int,
+        otherRecords: [ItemRecord],
+        otherCount: Int
+    ) -> Bool {
+        guard count == otherCount else { return false }
+        let hasCompleteRecords = records.count == count && otherRecords.count == otherCount
+        if hasCompleteRecords {
+            return records == otherRecords
+        }
+        return records.isEmpty && otherRecords.isEmpty
+    }
+
+    private func effectSurfaceMatches(
+        _ effects: [EffectItem],
+        _ otherEffects: [EffectItem]
+    ) -> Bool {
+        guard effects.count == otherEffects.count else { return false }
+        return zip(effects, otherEffects).allSatisfy { lhs, rhs in
+            lhs.effect.surfaceRecord == rhs.effect.surfaceRecord &&
+                lhs.contents.hasSameInterpolationSurface(as: rhs.contents)
+        }
+    }
+}
+
+private struct DisplayListEffectSurfaceRecord: Equatable {
+    enum Kind: UInt8, Equatable {
+        case state
+        case contentTransition
+        case interpolatorRoot
+        case interpolatorLayer
+        case interpolatorAnimation
+    }
+
+    var kind: Kind
+    var hash: StrongHash?
+    var contentTransitionState: ContentTransition.State?
+    var groupID: ObjectIdentifier?
+    var origin: CGPoint?
+    var size: CGSize?
+    var layerID: UInt32?
+    var animationValue: StrongHash?
+    var animation: Animation?
+}
+
+private extension DisplayList.Effect {
+    var surfaceRecord: DisplayListEffectSurfaceRecord {
+        switch self {
+        case let .state(hash):
+            return DisplayListEffectSurfaceRecord(kind: .state, hash: hash)
+        case let .contentTransition(state):
+            return DisplayListEffectSurfaceRecord(
+                kind: .contentTransition,
+                contentTransitionState: state
+            )
+        case let .interpolatorRoot(group, origin, size):
+            return DisplayListEffectSurfaceRecord(
+                kind: .interpolatorRoot,
+                groupID: ObjectIdentifier(group),
+                origin: origin,
+                size: size
+            )
+        case let .interpolatorLayer(group, layerID):
+            return DisplayListEffectSurfaceRecord(
+                kind: .interpolatorLayer,
+                groupID: ObjectIdentifier(group),
+                layerID: layerID
+            )
+        case let .interpolatorAnimation(animation):
+            return DisplayListEffectSurfaceRecord(
+                kind: .interpolatorAnimation,
+                animationValue: animation.value,
+                animation: animation.animation
+            )
+        }
+    }
+}
+
+extension DisplayList.Effect {
+    func hasSameSurface(as other: Self) -> Bool {
+        surfaceRecord == other.surfaceRecord
     }
 }
 

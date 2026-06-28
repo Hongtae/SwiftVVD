@@ -57,7 +57,7 @@ func appendDebugOverlay(
     category: DebugLayoutCategory
 ) {
     let color = category.debugColor
-    dl.debugItems.append { ctx in
+    dl.appendDebugItem(bounds: frame) { ctx in
         ctx.stroke(Path(CGRect(origin: frame.origin, size: frame.size)),
                    with: .color(color),
                    lineWidth: 1)

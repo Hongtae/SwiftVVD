@@ -323,10 +323,7 @@ extension Image: View {
 
             if let resolved = resolved {
                 let frame = CGRect(origin: position, size: viewSize)
-                if frame.width > 0 && frame.height > 0 {
-                    list.recordInterpolationBounds(frame)
-                }
-                list.items.append { context in
+                list.appendItem(kind: .image, bounds: frame) { context in
                     // 1. Local rendering frame (origin is the position assigned by the parent)
                     if frame.width > 0 && frame.height > 0 {
                         context.draw(resolved, in: frame)

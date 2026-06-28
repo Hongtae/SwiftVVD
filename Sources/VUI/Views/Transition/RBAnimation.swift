@@ -11,33 +11,43 @@ import Foundation
 // to normalized interpolation progress.
 final class RBAnimation: NSObject, NSCopying {
     // Timing transforms recorded before the curve is installed.
-    private enum Modifier {
+    private enum Modifier: Hashable {
         case delay(Double)
         case speed(Double)
         case repeatCount(Double, Bool)
     }
 
     // Local representation of the supported curve forms used by the interpolator.
-    private enum Curve {
+    private enum Curve: Hashable {
         case bezier(duration: Double, controlPoint1: CGPoint, controlPoint2: CGPoint)
-        case sampled(duration: Double, values: [Float])
+        case preset(duration: Double, preset: Preset)
+        case sampled(duration: Double, points: [SampledPoint])
+        case spring(
+            duration: Double,
+            mass: Double,
+            stiffness: Double,
+            damping: Double,
+            initialVelocity: Double
+        )
         case linear(duration: Double)
 
         var duration: Double {
             switch self {
-            case let .bezier(duration, _, _),
-                 let .sampled(duration, _),
+            case let .bezier(duration, _, _):
+                return max(duration, 0)
+            case let .preset(duration, preset):
+                return preset.activeDuration(for: duration)
+            case let .sampled(duration, _),
+                 let .spring(duration, _, _, _, _),
                  let .linear(duration):
                 return max(duration, 0)
             }
         }
 
         func evaluate(at time: Double) -> Float {
-            let duration = duration
-            guard duration > 0 else { return 1 }
-            let progress = min(max(time / duration, 0), 1)
             switch self {
-            case let .bezier(_, controlPoint1, controlPoint2):
+            case let .bezier(duration, controlPoint1, controlPoint2):
+                let progress = clampedProgress(time: time, duration: duration)
                 let solver = UnitCurve.CubicSolver(
                     startControlPoint: UnitPoint(
                         x: controlPoint1.x,
@@ -49,27 +59,322 @@ final class RBAnimation: NSObject, NSCopying {
                     )
                 )
                 return Float(solver.solve(x: progress))
-            case let .sampled(_, values):
-                guard !values.isEmpty else { return Float(progress) }
-                guard values.count > 1 else { return values[0] }
-                let scaled = progress * Double(values.count - 1)
-                let lower = min(Int(floor(scaled)), values.count - 1)
-                let upper = min(lower + 1, values.count - 1)
-                let fraction = Float(scaled - Double(lower))
-                return values[lower] + (values[upper] - values[lower]) * fraction
-            case .linear:
+            case let .preset(duration, preset):
+                return preset.evaluate(at: time, duration: duration)
+            case let .sampled(duration, points):
+                let progress = clampedProgress(time: time, duration: duration)
+                guard points.count > 1 else { return Float(progress) }
+                let sampleProgress = Float(progress)
+                let first = points[0]
+                guard sampleProgress > first.progress else { return first.value }
+                for index in points.indices.dropFirst() {
+                    let upper = points[index]
+                    guard sampleProgress <= upper.progress else { continue }
+                    let lower = points[points.index(before: index)]
+                    let span = upper.progress - lower.progress
+                    guard span != 0 else { return upper.value }
+                    let fraction = (sampleProgress - lower.progress) / span
+                    return lower.value + (upper.value - lower.value) * fraction
+                }
+                return points[points.index(before: points.endIndex)].value
+            case let .spring(_, mass, stiffness, damping, initialVelocity):
+                return Float(SpringTiming.value(
+                    at: max(time, 0),
+                    mass: mass,
+                    stiffness: stiffness,
+                    damping: damping,
+                    initialVelocity: initialVelocity
+                ))
+            case let .linear(duration):
+                let progress = clampedProgress(time: time, duration: duration)
                 return Float(progress)
             }
+        }
+
+        func speed(at time: Double) -> Double {
+            switch self {
+            case let .bezier(duration, controlPoint1, controlPoint2):
+                guard duration > 0 else { return 0 }
+                let progress = clampedProgress(time: time, duration: duration)
+                guard progress > 0, progress < 1 else { return 0 }
+                let solver = UnitCurve.CubicSolver(
+                    startControlPoint: UnitPoint(
+                        x: controlPoint1.x,
+                        y: controlPoint1.y
+                    ),
+                    endControlPoint: UnitPoint(
+                        x: controlPoint2.x,
+                        y: controlPoint2.y
+                    )
+                )
+                return abs(solver.yDerivative(atX: progress, epsilon: 1e-4) / duration)
+            case let .preset(duration, preset):
+                let activeDuration = preset.activeDuration(for: duration)
+                guard activeDuration > 0, time > 0, time < activeDuration else { return 0 }
+                return abs(preset.speed(at: time, duration: duration))
+            case let .sampled(duration, points):
+                guard duration > 0 else { return 0 }
+                let progress = clampedProgress(time: time, duration: duration)
+                guard progress > 0, progress < 1, points.count > 1 else { return 0 }
+                let sampleProgress = Float(progress)
+                for index in points.indices.dropFirst() {
+                    let upper = points[index]
+                    guard sampleProgress <= upper.progress else { continue }
+                    let lower = points[points.index(before: index)]
+                    let progressSpan = upper.progress - lower.progress
+                    guard progressSpan != 0 else { return 0 }
+                    return abs(Double(upper.value - lower.value) / Double(progressSpan) / duration)
+                }
+                return 0
+            case let .spring(_, mass, stiffness, damping, initialVelocity):
+                return abs(SpringTiming.velocity(
+                    at: max(time, 0),
+                    mass: mass,
+                    stiffness: stiffness,
+                    damping: damping,
+                    initialVelocity: initialVelocity
+                ))
+            case let .linear(duration):
+                guard duration > 0 else { return 0 }
+                let progress = clampedProgress(time: time, duration: duration)
+                guard progress > 0, progress < 1 else { return 0 }
+                return 1 / duration
+            }
+        }
+
+        private func clampedProgress(time: Double, duration: Double) -> Double {
+            guard duration > 0 else { return 1 }
+            return min(max(time / duration, 0), 1)
+        }
+    }
+
+    private struct SampledPoint: Hashable {
+        var progress: Float
+        var value: Float
+    }
+
+    // RenderBox keeps ignored second curve installs visible to equality without
+    // making equal ignored installs from different objects compare equal.
+    private struct IgnoredCurveInstall: Hashable {
+        var id = UUID()
+    }
+
+    private enum Preset: UInt32 {
+        case linear = 0
+        case smoothstep = 1
+        case easeIn = 2
+        case easeOut = 3
+        case easeInOut = 4
+        case springCritical = 5
+        case springDamping075 = 6
+        case springDamping055 = 7
+        case circularEaseIn = 8
+        case circularEaseOut = 9
+        case circularEaseInOut = 10
+
+        func activeDuration(for duration: Double) -> Double {
+            let duration = max(duration, 0)
+            switch self {
+            case .springCritical:
+                return duration * 1.5
+            case .springDamping075:
+                return duration * 1.65
+            case .springDamping055:
+                return duration * 2.075
+            default:
+                return duration
+            }
+        }
+
+        func evaluate(at time: Double, duration: Double) -> Float {
+            guard duration > 0 else { return 1 }
+            let progress = max(time / duration, 0)
+            let clamped = min(progress, 1)
+
+            switch self {
+            case .linear:
+                return Float(clamped)
+            case .smoothstep:
+                return Float(clamped * clamped * (3 - 2 * clamped))
+            case .easeIn:
+                return Float(UnitCurve.easeIn.value(at: clamped))
+            case .easeOut:
+                return Float(UnitCurve.easeOut.value(at: clamped))
+            case .easeInOut:
+                return Float(UnitCurve.easeInOut.value(at: clamped))
+            case .springCritical:
+                return Float(SpringTiming.value(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 1,
+                    initialVelocity: 0
+                ))
+            case .springDamping075:
+                return Float(SpringTiming.value(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 0.75,
+                    initialVelocity: 0
+                ))
+            case .springDamping055:
+                return Float(SpringTiming.value(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 0.55,
+                    initialVelocity: 0
+                ))
+            case .circularEaseIn:
+                return Float(UnitCurve.circularEaseIn.value(at: clamped))
+            case .circularEaseOut:
+                return Float(UnitCurve.circularEaseOut.value(at: clamped))
+            case .circularEaseInOut:
+                return Float(UnitCurve.circularEaseInOut.value(at: clamped))
+            }
+        }
+
+        func speed(at time: Double, duration: Double) -> Double {
+            guard duration > 0 else { return 0 }
+            let progress = max(time / duration, 0)
+            let clamped = min(progress, 1)
+
+            switch self {
+            case .linear:
+                return 1 / duration
+            case .smoothstep:
+                return (6 * clamped * (1 - clamped)) / duration
+            case .easeIn:
+                return UnitCurve.easeIn.velocity(at: clamped) / duration
+            case .easeOut:
+                return UnitCurve.easeOut.velocity(at: clamped) / duration
+            case .easeInOut:
+                return UnitCurve.easeInOut.velocity(at: clamped) / duration
+            case .springCritical:
+                return SpringTiming.velocity(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 1,
+                    initialVelocity: 0
+                ) / duration
+            case .springDamping075:
+                return SpringTiming.velocity(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 0.75,
+                    initialVelocity: 0
+                ) / duration
+            case .springDamping055:
+                return SpringTiming.velocity(
+                    at: progress,
+                    naturalFrequency: 2 * Double.pi,
+                    dampingRatio: 0.55,
+                    initialVelocity: 0
+                ) / duration
+            case .circularEaseIn:
+                return UnitCurve.circularEaseIn.velocity(at: clamped) / duration
+            case .circularEaseOut:
+                return UnitCurve.circularEaseOut.velocity(at: clamped) / duration
+            case .circularEaseInOut:
+                return UnitCurve.circularEaseInOut.velocity(at: clamped) / duration
+            }
+        }
+    }
+
+    private enum SpringTiming {
+        static func value(
+            at time: Double,
+            mass: Double,
+            stiffness: Double,
+            damping: Double,
+            initialVelocity: Double
+        ) -> Double {
+            guard mass > 0, stiffness > 0 else { return 1 }
+
+            let naturalFrequency = sqrt(stiffness / mass)
+            let dampingRatio = damping / (2 * sqrt(stiffness * mass))
+            return value(
+                at: time,
+                naturalFrequency: naturalFrequency,
+                dampingRatio: dampingRatio,
+                initialVelocity: initialVelocity
+            )
+        }
+
+        static func value(
+            at time: Double,
+            naturalFrequency: Double,
+            dampingRatio: Double,
+            initialVelocity: Double
+        ) -> Double {
+            let time = max(time, 0)
+            guard naturalFrequency > 0 else { return 1 }
+
+            if dampingRatio < 1 {
+                let dampedFrequency = naturalFrequency * sqrt(1 - dampingRatio * dampingRatio)
+                let coefficient = (dampingRatio * naturalFrequency - initialVelocity) / dampedFrequency
+                let oscillation = cos(dampedFrequency * time) + coefficient * sin(dampedFrequency * time)
+                return 1 - exp(-dampingRatio * naturalFrequency * time) * oscillation
+            }
+
+            return 1 - (1 + (naturalFrequency - initialVelocity) * time) * exp(-naturalFrequency * time)
+        }
+
+        static func velocity(
+            at time: Double,
+            mass: Double,
+            stiffness: Double,
+            damping: Double,
+            initialVelocity: Double
+        ) -> Double {
+            guard mass > 0, stiffness > 0 else { return 0 }
+
+            let naturalFrequency = sqrt(stiffness / mass)
+            let dampingRatio = damping / (2 * sqrt(stiffness * mass))
+            return velocity(
+                at: time,
+                naturalFrequency: naturalFrequency,
+                dampingRatio: dampingRatio,
+                initialVelocity: initialVelocity
+            )
+        }
+
+        static func velocity(
+            at time: Double,
+            naturalFrequency: Double,
+            dampingRatio: Double,
+            initialVelocity: Double
+        ) -> Double {
+            let time = max(time, 0)
+            guard naturalFrequency > 0 else { return 0 }
+
+            if dampingRatio < 1 {
+                let dampedFrequency = naturalFrequency * sqrt(1 - dampingRatio * dampingRatio)
+                let coefficient = (dampingRatio * naturalFrequency - initialVelocity) / dampedFrequency
+                let decay = exp(-dampingRatio * naturalFrequency * time)
+                let oscillation = cos(dampedFrequency * time) + coefficient * sin(dampedFrequency * time)
+                return decay * (
+                    dampingRatio * naturalFrequency * oscillation +
+                    dampedFrequency * sin(dampedFrequency * time) -
+                    coefficient * dampedFrequency * cos(dampedFrequency * time)
+                )
+            }
+
+            let coefficient = naturalFrequency - initialVelocity
+            let decay = exp(-naturalFrequency * time)
+            return decay * (naturalFrequency * (1 + coefficient * time) - coefficient)
         }
     }
 
     private var pendingModifiers: [Modifier]
     private var curveModifiers: [Modifier]
+    private var ignoredModifiers: [Modifier]
+    private var ignoredCurveInstalls: [IgnoredCurveInstall]
     private var curve: Curve?
 
     override init() {
         self.pendingModifiers = []
         self.curveModifiers = []
+        self.ignoredModifiers = []
+        self.ignoredCurveInstalls = []
         self.curve = nil
         super.init()
     }
@@ -77,10 +382,14 @@ final class RBAnimation: NSObject, NSCopying {
     private init(
         pendingModifiers: [Modifier],
         curveModifiers: [Modifier],
+        ignoredModifiers: [Modifier],
+        ignoredCurveInstalls: [IgnoredCurveInstall],
         curve: Curve?
     ) {
         self.pendingModifiers = pendingModifiers
         self.curveModifiers = curveModifiers
+        self.ignoredModifiers = ignoredModifiers
+        self.ignoredCurveInstalls = ignoredCurveInstalls
         self.curve = curve
         super.init()
     }
@@ -92,7 +401,7 @@ final class RBAnimation: NSObject, NSCopying {
 
     func evaluate(atTime time: Double) -> Float {
         guard let curve else {
-            return Float(min(max(time, 0), 1))
+            return time > 0 ? 1 : 0
         }
         let localTime = applyTimeModifiers(to: time, curveDuration: curve.duration)
         return curve.evaluate(at: localTime)
@@ -100,6 +409,15 @@ final class RBAnimation: NSObject, NSCopying {
 
     func evaluateAtTime(_ time: Double) -> Float {
         evaluate(atTime: time)
+    }
+
+    func speed(atTime time: Double) -> Double {
+        guard let curve else { return 0 }
+        let activeDuration = applyDurationModifiers(to: curve.duration)
+        guard activeDuration > 0, time > 0, time < activeDuration else { return 0 }
+        let transformed = applyTimeModifiersWithScale(to: time, curveDuration: curve.duration)
+        guard transformed.scale > 0 else { return 0 }
+        return abs(curve.speed(at: transformed.time) * transformed.scale)
     }
 
     func addBezierDuration(
@@ -121,7 +439,8 @@ final class RBAnimation: NSObject, NSCopying {
     }
 
     func addPreset(_ preset: UInt32, duration: Double) {
-        installCurve(.linear(duration: duration))
+        guard let preset = Preset(rawValue: preset) else { return }
+        installCurve(.preset(duration: duration, preset: preset))
     }
 
     func addRepeatCount(_ repeatCount: Double, autoreverses: Bool) {
@@ -133,8 +452,13 @@ final class RBAnimation: NSObject, NSCopying {
         count: UInt,
         values: UnsafePointer<Float>
     ) {
-        let samples = (0..<Int(count)).map { values[$0] }
-        installCurve(.sampled(duration: duration, values: samples))
+        let points = (0..<Int(count)).map { index in
+            SampledPoint(
+                progress: values[index * 2],
+                value: values[index * 2 + 1]
+            )
+        }
+        installCurve(.sampled(duration: duration, points: points))
     }
 
     func addSpeed(_ speed: Double) {
@@ -148,12 +472,20 @@ final class RBAnimation: NSObject, NSCopying {
         damping: Double,
         initialVelocity: Double
     ) {
-        installCurve(.linear(duration: duration))
+        installCurve(.spring(
+            duration: duration,
+            mass: mass,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: initialVelocity
+        ))
     }
 
     func removeAll() {
         pendingModifiers.removeAll()
         curveModifiers.removeAll()
+        ignoredModifiers.removeAll()
+        ignoredCurveInstalls.removeAll()
         curve = nil
     }
 
@@ -161,6 +493,8 @@ final class RBAnimation: NSObject, NSCopying {
         RBAnimation(
             pendingModifiers: pendingModifiers,
             curveModifiers: curveModifiers,
+            ignoredModifiers: ignoredModifiers,
+            ignoredCurveInstalls: ignoredCurveInstalls,
             curve: curve
         )
     }
@@ -169,17 +503,36 @@ final class RBAnimation: NSObject, NSCopying {
         guard let other = object as? RBAnimation else {
             return false
         }
-        return activeDuration == other.activeDuration
+        return pendingModifiers == other.pendingModifiers &&
+            curveModifiers == other.curveModifiers &&
+            ignoredModifiers == other.ignoredModifiers &&
+            ignoredCurveInstalls == other.ignoredCurveInstalls &&
+            curve == other.curve
+    }
+
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(pendingModifiers)
+        hasher.combine(curveModifiers)
+        hasher.combine(ignoredModifiers)
+        hasher.combine(ignoredCurveInstalls)
+        hasher.combine(curve)
+        return hasher.finalize()
     }
 
     private func appendModifier(_ modifier: Modifier) {
         if curve == nil {
             pendingModifiers.append(modifier)
+        } else {
+            ignoredModifiers.append(modifier)
         }
     }
 
     private func installCurve(_ curve: Curve) {
-        guard self.curve == nil else { return }
+        guard self.curve == nil else {
+            ignoredCurveInstalls.append(IgnoredCurveInstall())
+            return
+        }
         self.curve = curve
         self.curveModifiers = pendingModifiers
     }
@@ -221,6 +574,36 @@ final class RBAnimation: NSObject, NSCopying {
             }
         }
         return localTime
+    }
+
+    private func applyTimeModifiersWithScale(
+        to time: Double,
+        curveDuration: Double
+    ) -> (time: Double, scale: Double) {
+        var localTime = max(time, 0)
+        var scale = 1.0
+        for modifier in curveModifiers {
+            switch modifier {
+            case let .delay(delay):
+                localTime = max(localTime - delay, 0)
+            case let .speed(speed):
+                if speed > 0 {
+                    localTime *= speed
+                    scale *= speed
+                } else {
+                    localTime = 0
+                    scale = 0
+                }
+            case let .repeatCount(count, autoreverses):
+                localTime = repeatedTime(
+                    localTime,
+                    duration: curveDuration,
+                    count: count,
+                    autoreverses: autoreverses
+                )
+            }
+        }
+        return (localTime, scale)
     }
 
     private func repeatedTime(
@@ -319,10 +702,41 @@ private extension AnimationBoxBase {
                 controlPoint2: points.endControlPoint
             )
         case let box as UnitCurveAnimationBox:
-            appendSampledCurve(
+            switch box.function {
+            case let .circularEaseIn(duration):
+                animation.addPreset(8, duration: duration)
+            case let .circularEaseOut(duration):
+                animation.addPreset(9, duration: duration)
+            case let .circularEaseInOut(duration):
+                animation.addPreset(10, duration: duration)
+            default:
+                appendSampledCurve(
+                    to: animation,
+                    duration: box.storedDuration,
+                    valueAtProgress: box.curve.value(at:)
+                )
+            }
+        case is DefaultAnimationBox:
+            appendFluidSpring(
                 to: animation,
-                duration: box.storedDuration,
-                valueAtProgress: box.curve.value(at:)
+                response: 0.5,
+                dampingFraction: 1.0,
+                initialVelocity: 0
+            )
+        case let box as FluidSpringAnimationBox:
+            appendFluidSpring(
+                to: animation,
+                response: box.response,
+                dampingFraction: box.dampingFraction,
+                initialVelocity: 0
+            )
+        case let box as SpringAnimationBox:
+            animation.addSpringDuration(
+                box.duration,
+                mass: box.mass,
+                stiffness: box.stiffness,
+                damping: box.damping,
+                initialVelocity: box.initialVelocity
             )
         default:
             let duration = max(self.duration, 0)
@@ -334,20 +748,41 @@ private extension AnimationBoxBase {
         }
     }
 
+    func appendFluidSpring(
+        to animation: RBAnimation,
+        response: TimeInterval,
+        dampingFraction: Double,
+        initialVelocity: Double
+    ) {
+        let stiffness = fluidSpringStiffness(response: response)
+        let damping = 2 * dampingFraction * sqrt(stiffness)
+        animation.addSpringDuration(
+            max(response, 0),
+            mass: 1,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: initialVelocity
+        )
+    }
+
     func appendSampledCurve(
         to animation: RBAnimation,
         duration: Double,
         valueAtProgress: (Double) -> Double
     ) {
-        let count = 33
-        let values = (0..<count).map { index in
-            Float(valueAtProgress(Double(index) / Double(count - 1)))
+        let pairCount = 33
+        let values = (0..<pairCount).flatMap { index -> [Float] in
+            let progress = Double(index) / Double(pairCount - 1)
+            return [
+                Float(progress),
+                Float(valueAtProgress(progress)),
+            ]
         }
         values.withUnsafeBufferPointer { buffer in
             guard let baseAddress = buffer.baseAddress else { return }
             animation.addSampledFunction(
                 withDuration: duration,
-                count: UInt(buffer.count),
+                count: UInt(pairCount),
                 values: baseAddress
             )
         }

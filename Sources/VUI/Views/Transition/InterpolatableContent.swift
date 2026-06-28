@@ -212,12 +212,7 @@ extension DisplayList {
                 let elapsed = Float(max(currentTime.seconds - removal.startTime.seconds, 0))
                 let contents = removal.interpolator?.copyContents(withProgress: elapsed)
                     ?? removal.contents.displayList
-                list.effects.append(
-                    DisplayList.EffectItem(
-                        effect: .contentTransition(removal.state),
-                        contents: contents
-                    )
-                )
+                list.appendEffect(.contentTransition(removal.state), contents: contents)
             }
             return true
         }
@@ -427,13 +422,6 @@ extension DisplayList {
 private extension DisplayList {
     var isEmptyForInterpolation: Bool {
         items.isEmpty && debugItems.isEmpty && effects.isEmpty && interpolationBounds == nil
-    }
-
-    func hasSameInterpolationSurface(as other: DisplayList) -> Bool {
-        items.count == other.items.count &&
-        debugItems.count == other.debugItems.count &&
-        effects.count == other.effects.count &&
-            interpolationBounds == other.interpolationBounds
     }
 }
 

@@ -95,9 +95,19 @@ enum _GeometryEffectSupport {
         let items = source.items
         let debugItems = source.debugItems
         var result = DisplayList()
-        result.recordInterpolationBounds(source.interpolationBounds?.applying(affine).standardized)
+        let transformedBounds = source.interpolationBounds?.applying(affine).standardized
+        result.recordInterpolationBounds(transformedBounds)
+        for effect in source.effects {
+            result.appendEffect(
+                effect.effect,
+                contents: displayList(effect.contents, applying: transform, at: position)
+            )
+        }
         if !items.isEmpty {
-            result.items.append { context in
+            result.appendGeometryItem(
+                bounds: transformedBounds,
+                affineTransform: affine
+            ) { context in
                 var context = context
                 context.concatenate(affine)
                 for item in items {
@@ -106,7 +116,7 @@ enum _GeometryEffectSupport {
             }
         }
         if !debugItems.isEmpty {
-            result.debugItems.append { context in
+            result.appendDebugItem(bounds: transformedBounds) { context in
                 var context = context
                 context.concatenate(affine)
                 for item in debugItems {

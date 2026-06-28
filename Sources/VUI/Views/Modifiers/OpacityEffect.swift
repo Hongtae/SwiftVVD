@@ -65,6 +65,12 @@ enum _OpacityEffectSupport {
         var result = DisplayList()
         result.debugItems.append(contentsOf: source.debugItems)
         result.recordInterpolationBounds(source.interpolationBounds)
+        for effect in source.effects {
+            result.appendEffect(
+                effect.effect,
+                contents: displayList(effect.contents, applyingOpacity: opacity)
+            )
+        }
 
         guard !source.items.isEmpty else { return result }
         guard opacity > 0 else { return result }
@@ -74,7 +80,10 @@ enum _OpacityEffectSupport {
         }
 
         let items = source.items
-        result.items.append { context in
+        result.appendOpacityItem(
+            bounds: source.interpolationBounds,
+            opacity: opacity
+        ) { context in
             var context = context
             context.opacity *= opacity
             guard context.opacity > 0 else { return }

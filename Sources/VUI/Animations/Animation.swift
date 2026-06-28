@@ -3918,6 +3918,12 @@ public struct UnitCurve: Sendable, Hashable {
             return derivative(at: solveCurveX(x, epsilon: epsilon))
         }
 
+        func yDerivative(atX x: Double, epsilon: Double = 1e-6) -> Double {
+            if x <= 0 { return sampleDerivativeY(0) }
+            if x >= 1 { return sampleDerivativeY(1) }
+            return sampleDerivativeY(solveCurveX(x, epsilon: epsilon))
+        }
+
         private func derivative(at t: Double) -> Double {
             let dx = sampleDerivativeX(t)
             let dy = sampleDerivativeY(t)
