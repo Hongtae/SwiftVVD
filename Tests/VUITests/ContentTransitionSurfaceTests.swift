@@ -1,0 +1,123 @@
+import XCTest
+@testable import VUI
+
+private final class ContentTransitionEnvironmentRecorder {
+    var environment: Attribute<EnvironmentValues>?
+}
+
+private struct ContentTransitionEnvironmentContent: View, _PrimitiveView {
+    var recorder: ContentTransitionEnvironmentRecorder
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let current = view._attribute.value
+        current.recorder.environment = inputs.base.cachedEnvironment.value.environment
+        return _ViewOutputs()
+    }
+}
+
+final class ContentTransitionSurfaceTests: XCTestCase {
+    func testContentTransitionFactoriesAndEquality() {
+        XCTAssertEqual(ContentTransition.identity, .identity)
+        XCTAssertEqual(ContentTransition.opacity, .opacity)
+        XCTAssertEqual(ContentTransition.interpolate, .interpolate)
+        XCTAssertNotEqual(ContentTransition.identity, .opacity)
+        XCTAssertNotEqual(ContentTransition.opacity, .interpolate)
+
+        XCTAssertEqual(ContentTransition.numericText(), .numericText(countsDown: false))
+        XCTAssertNotEqual(ContentTransition.numericText(), .numericText(countsDown: true))
+        XCTAssertEqual(ContentTransition.numericText(value: 12), .numericText(value: 12))
+        XCTAssertEqual(ContentTransition.numericText(value: 12.5), .numericText(value: 12.5000001))
+        XCTAssertNotEqual(ContentTransition.numericText(value: 12), .numericText(value: 13))
+        XCTAssertNotEqual(ContentTransition.numericText(value: 12.5), .numericText(value: 12.500001))
+        XCTAssertNotEqual(ContentTransition.numericText(value: .nan), .numericText(value: .nan))
+        XCTAssertNotEqual(ContentTransition.numericText(), .numericText(value: 0))
+    }
+
+    func testContentTransitionEnvironmentDefaultsAndWrites() {
+        var values = EnvironmentValues()
+
+        XCTAssertNotEqual(values.contentTransition, .identity)
+        XCTAssertNotEqual(values.contentTransition, .opacity)
+        XCTAssertNotEqual(values.contentTransition, .interpolate)
+        XCTAssertNotEqual(values.contentTransition, .numericText())
+        XCTAssertFalse(values.contentTransitionAddsDrawingGroup)
+
+        values.contentTransition = .numericText(countsDown: true)
+        values.contentTransitionAddsDrawingGroup = true
+
+        XCTAssertEqual(values.contentTransition, .numericText(countsDown: true))
+        XCTAssertTrue(values.contentTransitionAddsDrawingGroup)
+    }
+
+    func testContentTransitionModifierPublishesEnvironmentValue() throws {
+        let graph = AttributeGraph()
+        let recorder = ContentTransitionEnvironmentRecorder()
+
+        try AttributeGraph.$current.withValue(graph) {
+            let view = ContentTransitionEnvironmentContent(recorder: recorder)
+                .contentTransition(.opacity)
+            let viewAttr = graph.makeInput(value: view)
+
+            _ = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let environment = try XCTUnwrap(recorder.environment)
+            XCTAssertEqual(environment.value.contentTransition, .opacity)
+            XCTAssertFalse(environment.value.contentTransitionAddsDrawingGroup)
+        }
+    }
+
+    func testContentTransitionDrawingGroupEnvironmentWrites() throws {
+        let graph = AttributeGraph()
+        let recorder = ContentTransitionEnvironmentRecorder()
+
+        try AttributeGraph.$current.withValue(graph) {
+            let view = ContentTransitionEnvironmentContent(recorder: recorder)
+                .environment(\.contentTransitionAddsDrawingGroup, true)
+                .contentTransition(.interpolate)
+            let viewAttr = graph.makeInput(value: view)
+
+            _ = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let environment = try XCTUnwrap(recorder.environment)
+            XCTAssertEqual(environment.value.contentTransition, .interpolate)
+            XCTAssertTrue(environment.value.contentTransitionAddsDrawingGroup)
+        }
+    }
+
+    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+        let environment = graph.makeInput(value: EnvironmentValues())
+        let base = _GraphInputs(
+            customInputs: PropertyList(),
+            time: graph.makeInput(value: Time(seconds: 0)),
+            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
+            phase: graph.makeInput(value: Phase()),
+            transaction: graph.makeInput(value: Transaction()),
+            changedDebugProperties: 0,
+            options: [],
+            mergedInputs: []
+        )
+        return _ViewInputs(
+            base: base,
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
+    }
+}

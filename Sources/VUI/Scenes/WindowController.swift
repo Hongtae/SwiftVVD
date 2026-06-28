@@ -757,12 +757,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let changeSet = AGChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
                 let displayList = rootDisplayList.value
-                for item in displayList.items {
-                    item(context)
-                }
-                for item in displayList.debugItems {
-                    item(context)
-                }
+                displayList.draw(in: context)
             }
             self.viewChangedWhileDrawing = !changeSet.isEmpty
         }

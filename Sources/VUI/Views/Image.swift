@@ -18,7 +18,7 @@ class AnyImageProviderBox: @unchecked Sendable {
     func isEqual(to other: AnyImageProviderBox) -> Bool {
         return self === other
     }
-    
+
     @TaskLocal
     fileprivate static var _preferredBundle: Bundle?
 }
@@ -52,12 +52,12 @@ final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
                 .main
             ].compactMap(\.self)
         }
-        
+
         for bundle in bundles {
             if let url = bundle.url(forResource: self.name,
                                     withExtension: nil,
                                     subdirectory: nil) {
-                
+
                 let sceneResources = context.sceneResources
                 if let texture = sceneResources.cachedTextures[url.absoluteString] as? Texture {
                     self.scale = sceneResources.contentScaleFactor
@@ -181,7 +181,7 @@ public struct Image: Equatable, Sendable {
                                                  colorMode: colorMode,
                                                  renderer: renderer)
     }
-    
+
     public init(_ name: String, bundle: Bundle? = nil) {
         self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: nil)
     }
@@ -192,6 +192,26 @@ public struct Image: Equatable, Sendable {
 
     public static func == (lhs: Image, rhs: Image) -> Bool {
         lhs.provider.isEqual(to: rhs.provider)
+    }
+}
+
+extension Image {
+    public struct DynamicRange: Hashable, Sendable {
+        enum Storage: UInt8, Hashable, Sendable {
+            case standard
+            case constrainedHigh
+            case high
+        }
+
+        var storage: Storage
+
+        init(_ storage: Storage) {
+            self.storage = storage
+        }
+
+        public static let standard = DynamicRange(.standard)
+        public static let constrainedHigh = DynamicRange(.constrainedHigh)
+        public static let high = DynamicRange(.high)
     }
 }
 
@@ -244,7 +264,7 @@ extension Image: View {
         // 1. Internal state nodes for communication between the resource and layout passes.
         // Caches the fully resolved image object (including GPU texture).
         let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
-        
+
         let inbox = graph.inbox
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
@@ -259,19 +279,19 @@ extension Image: View {
             // Note: For a robust implementation, you might want to compare an image "version"
             // or use a caching mechanism within the ImageProvider.
             if resolvedImageAttr.value != nil {
-                return ResourceList() 
+                return ResourceList()
             }
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
             let bundle = envAttr.value.resourceBundle  // Register AG dependency and capture for closure.
             var list = ResourceList()
-            
+
             list.items.append { context in
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
                     let resolved = context.resolve(image)
                     let boxedResolved = UnsafeBox(resolved)
-                    
+
                     // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                     inbox.enqueue {
                         resolvedImageAttr.setValue(boxedResolved.value)
@@ -302,11 +322,12 @@ extension Image: View {
             var list = DisplayList()
 
             if let resolved = resolved {
+                let frame = CGRect(origin: position, size: viewSize)
+                if frame.width > 0 && frame.height > 0 {
+                    list.recordInterpolationBounds(frame)
+                }
                 list.items.append { context in
                     // 1. Local rendering frame (origin is the position assigned by the parent)
-                    let frame = CGRect(origin: position, size: viewSize)
-                    
-                    // 2. Draw to the screen
                     if frame.width > 0 && frame.height > 0 {
                         context.draw(resolved, in: frame)
                     }

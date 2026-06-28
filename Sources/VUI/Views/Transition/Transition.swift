@@ -2,7 +2,7 @@
 //  File: Transition.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -79,7 +79,28 @@ public struct PlaceholderContentView<Value>: View {
 extension PlaceholderContentView: _PrimitiveView {
 }
 
+// Query payload used by Transition implementations to expose renderer content-transition effects.
 public struct _Transition_ContentTransition {
+    // Operation requested by the content-transition lowering path.
+    enum Operation: Equatable {
+        case hasContentTransition
+        case effects(ContentTransition.Style, CGSize)
+    }
+
+    // Result written back by a Transition implementation.
+    enum Result: Equatable {
+        case none
+        case bool(Bool)
+        case effects([ContentTransition.Effect])
+    }
+
+    var operation: Operation
+    var result: Result
+
+    init(operation: Operation = .hasContentTransition, result: Result = .none) {
+        self.operation = operation
+        self.result = result
+    }
 }
 
 public enum TransitionPhase: Hashable, Sendable {
@@ -114,6 +135,33 @@ extension Transition {
     }
 
     public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+    }
+
+    var hasContentTransition: Bool {
+        var transition = _Transition_ContentTransition(
+            operation: .hasContentTransition,
+            result: .bool(false)
+        )
+        _makeContentTransition(transition: &transition)
+        if case let .bool(value) = transition.result {
+            return value
+        }
+        return false
+    }
+
+    func contentTransitionEffects(
+        style: ContentTransition.Style,
+        size: CGSize
+    ) -> [ContentTransition.Effect] {
+        var transition = _Transition_ContentTransition(
+            operation: .effects(style, size),
+            result: .effects([])
+        )
+        _makeContentTransition(transition: &transition)
+        if case let .effects(effects) = transition.result {
+            return effects
+        }
+        return []
     }
 
     public func apply<V>(content: V, phase: TransitionPhase) -> some View where V: View {
@@ -215,6 +263,15 @@ public struct IdentityTransition: Transition {
         content
     }
 
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case .effects:
+            transition.result = .effects([])
+        }
+    }
+
     public static let properties = TransitionProperties(hasMotion: false)
 }
 
@@ -223,6 +280,20 @@ public struct OpacityTransition: Transition {
 
     public func body(content: Content, phase: TransitionPhase) -> some View {
         content.opacity(phase.isIdentity ? 1 : 0)
+    }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case .effects:
+            transition.result = .effects([
+                ContentTransition.Effect(
+                    type: .opacity,
+                    events: 3
+                )
+            ])
+        }
     }
 
     public static let properties = TransitionProperties(hasMotion: false)
@@ -237,6 +308,32 @@ public struct MoveTransition: Transition {
 
     public func body(content: Content, phase: TransitionPhase) -> some View {
         content.modifier(MoveLayout(edge: phase.isIdentity ? nil : edge))
+    }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case let .effects(_, size):
+            transition.result = .effects([
+                ContentTransition.Effect(
+                    type: .translation(Self.translationOffset(edge: edge, size: size))
+                )
+            ])
+        }
+    }
+
+    static func translationOffset(edge: Edge, size: CGSize) -> CGSize {
+        switch edge {
+        case .top:
+            return CGSize(width: 0, height: -size.height)
+        case .leading:
+            return CGSize(width: -size.width, height: 0)
+        case .bottom:
+            return CGSize(width: 0, height: size.height)
+        case .trailing:
+            return CGSize(width: size.width, height: 0)
+        }
     }
 
     struct MoveLayout: ViewModifier, Animatable {
@@ -383,6 +480,47 @@ public struct PushTransition: Transition {
             .modifier(OpacityRendererEffect(opacity: phase.isIdentity ? 1 : 0))
     }
 
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case let .effects(style, size):
+            let offset = MoveTransition.translationOffset(edge: edge, size: size)
+            let insertionOffset: CGSize
+            let opacityBegin: Float
+            let opacityDuration: Float
+            if style == .default {
+                insertionOffset = offset
+                opacityBegin = 0
+                opacityDuration = 1
+            } else {
+                insertionOffset = CGSize(
+                    width: offset.width * 0.4,
+                    height: offset.height * 0.4
+                )
+                opacityBegin = 0.4
+                opacityDuration = 0.6
+            }
+            let removalOffset = CGSize(width: -offset.width, height: -offset.height)
+            transition.result = .effects([
+                ContentTransition.Effect(
+                    type: .translation(insertionOffset),
+                    events: 1
+                ),
+                ContentTransition.Effect(
+                    type: .translation(removalOffset),
+                    events: 2
+                ),
+                ContentTransition.Effect(
+                    type: .opacity,
+                    begin: opacityBegin,
+                    duration: opacityDuration,
+                    events: 3
+                ),
+            ])
+        }
+    }
+
     private func edge(for phase: TransitionPhase) -> Edge {
         switch phase {
         case .willAppear:
@@ -391,6 +529,83 @@ public struct PushTransition: Transition {
             return edge
         case .didDisappear:
             return edge.opposite
+        }
+    }
+}
+
+// Blur, opacity, and scale transition used for content replacement.
+public struct BlurReplaceTransition: Transition {
+    // Direction preset controlling the removal scale behavior.
+    public struct Configuration: Equatable, Sendable {
+        enum Storage: UInt8, Equatable, Sendable {
+            case downUp = 0
+            case upUp = 1
+        }
+
+        var storage: Storage
+
+        init(storage: Storage) {
+            self.storage = storage
+        }
+
+        public static let downUp = Configuration(storage: .downUp)
+        public static let upUp = Configuration(storage: .upUp)
+    }
+
+    public var configuration: Configuration
+
+    public init(configuration: Configuration) {
+        self.configuration = configuration
+    }
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        content
+            .modifier(OpacityRendererEffect(opacity: phase.isIdentity ? 1 : 0))
+            .blur(radius: phase.isIdentity ? 0 : 7)
+            .scaleEffect(scale(for: phase), anchor: .center)
+    }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case .effects:
+            let begin = Float(bitPattern: 0x3EA8F5C3)
+            let duration = Float(bitPattern: 0x3F2B851E)
+            let scale = CGFloat(Float(bitPattern: 0x3F666666))
+            let flags: UInt32 = configuration == .upUp ? 1 : 0
+            transition.result = .effects([
+                ContentTransition.Effect(
+                    type: .opacity,
+                    begin: begin,
+                    duration: duration,
+                    events: 3
+                ),
+                ContentTransition.Effect(
+                    type: .blur(radius: 7),
+                    begin: begin,
+                    duration: duration,
+                    events: 3
+                ),
+                ContentTransition.Effect(
+                    type: .scale(scale),
+                    begin: begin,
+                    duration: duration,
+                    events: 3,
+                    flags: flags
+                ),
+            ])
+        }
+    }
+
+    private func scale(for phase: TransitionPhase) -> CGFloat {
+        switch phase {
+        case .identity:
+            return 1
+        case .willAppear:
+            return 0.9
+        case .didDisappear:
+            return configuration == .upUp ? 1.1 : 0.9
         }
     }
 }
@@ -429,6 +644,17 @@ public struct ScaleTransition: Transition {
     public func body(content: Content, phase: TransitionPhase) -> some View {
         content.scaleEffect(phase.isIdentity ? 1 : CGFloat(scale), anchor: anchor)
     }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case .effects:
+            transition.result = .effects([
+                ContentTransition.Effect(type: .scale(CGFloat(scale)))
+            ])
+        }
+    }
 }
 
 public struct AsymmetricTransition<Insertion, Removal>: Transition
@@ -455,6 +681,18 @@ public struct AsymmetricTransition<Insertion, Removal>: Transition
 
     public static var properties: TransitionProperties {
         TransitionProperties(hasMotion: Insertion.properties.hasMotion || Removal.properties.hasMotion)
+    }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(insertion.hasContentTransition || removal.hasContentTransition)
+        case let .effects(style, size):
+            transition.result = .effects(
+                insertion.contentTransitionEffects(style: style, size: size) +
+                removal.contentTransitionEffects(style: style, size: size)
+            )
+        }
     }
 }
 
@@ -583,6 +821,18 @@ struct CombiningTransition<First, Second>: Transition where First: Transition, S
     static var properties: TransitionProperties {
         TransitionProperties(hasMotion: First.properties.hasMotion || Second.properties.hasMotion)
     }
+
+    func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(transition1.hasContentTransition || transition2.hasContentTransition)
+        case let .effects(style, size):
+            transition.result = .effects(
+                transition1.contentTransitionEffects(style: style, size: size) +
+                transition2.contentTransitionEffects(style: style, size: size)
+            )
+        }
+    }
 }
 
 extension CombiningTransition: _TransitionTransactionFiltering {
@@ -632,6 +882,10 @@ struct FilteredTransition<Base: Transition>: Transition {
 
     static var properties: TransitionProperties {
         Base.properties
+    }
+
+    func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        self.transition._makeContentTransition(transition: &transition)
     }
 }
 
@@ -684,6 +938,17 @@ struct OffsetTransition: Transition {
 
     func body(content: Content, phase: TransitionPhase) -> some View {
         content.offset(phase.isIdentity ? .zero : offset)
+    }
+
+    func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+        switch transition.operation {
+        case .hasContentTransition:
+            transition.result = .bool(true)
+        case .effects:
+            transition.result = .effects([
+                ContentTransition.Effect(type: .translation(offset))
+            ])
+        }
     }
 }
 
@@ -1092,6 +1357,16 @@ extension Transition where Self == MoveTransition {
 extension Transition where Self == PushTransition {
     public static func push(from edge: Edge) -> Self {
         Self(edge: edge)
+    }
+}
+
+extension Transition where Self == BlurReplaceTransition {
+    public static func blurReplace(_ config: BlurReplaceTransition.Configuration = .downUp) -> Self {
+        Self(configuration: config)
+    }
+
+    public static var blurReplace: BlurReplaceTransition {
+        blurReplace(.downUp)
     }
 }
 

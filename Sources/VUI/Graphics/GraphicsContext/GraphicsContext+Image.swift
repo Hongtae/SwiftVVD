@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -107,5 +107,48 @@ extension GraphicsContext {
                                vertices: vertices,
                                texture: texture,
                                blendState: blendState)
+    }
+}
+
+extension GraphicsContext.ResolvedImage: InterpolatableContent {
+    static var defaultTransition: ContentTransition {
+        _SemanticFeature<Semantics_v4>.isEnabled ? .interpolate : .identity
+    }
+
+    func requiresTransition(to target: Self) -> Bool {
+        if baseline != target.baseline { return true }
+        if scaleFactor != target.scaleFactor { return true }
+        if !textureIdentityEquals(texture, target.texture) { return true }
+        if !textureTransform.isTransitionEqual(to: target.textureTransform) { return true }
+        if shading != nil || target.shading != nil { return true }
+        return false
+    }
+
+    func modifyTransition(state: inout ContentTransition.State, to target: Self) {
+        guard !state.options.contains(.animatesDifferentContent) else { return }
+        guard requiresTransition(to: target) else { return }
+        state.transition = .opacity
+    }
+}
+
+private func textureIdentityEquals(_ lhs: Texture?, _ rhs: Texture?) -> Bool {
+    switch (lhs, rhs) {
+    case (.none, .none):
+        true
+    case let (.some(lhs), .some(rhs)):
+        lhs === rhs
+    default:
+        false
+    }
+}
+
+private extension CGAffineTransform {
+    func isTransitionEqual(to other: CGAffineTransform) -> Bool {
+        a == other.a
+            && b == other.b
+            && c == other.c
+            && d == other.d
+            && tx == other.tx
+            && ty == other.ty
     }
 }

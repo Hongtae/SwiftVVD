@@ -147,6 +147,7 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = Rectangle().path(in: frame)
+                list.recordInterpolationBounds(frame)
                 list.items.append { context in
                     context.fill(path, with: .style(m.style))
                 }
@@ -193,6 +194,7 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
+                list.recordInterpolationBounds(frame)
                 list.items.append { context in
                     context.fill(path, with: .style(m.style), style: m.fillStyle)
                 }
@@ -239,6 +241,7 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
+                list.recordInterpolationBounds(frame)
                 list.items.append { context in
                     context.fill(path, with: .style(m.style), style: m.fillStyle)
                 }

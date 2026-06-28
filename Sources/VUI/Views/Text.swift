@@ -40,6 +40,9 @@ class AnyTextStorage {
     func resolveText(in environment: EnvironmentValues) -> String {
         fatalError("This method should be overridden by subclasses.")
     }
+    func resolveTransitionText(in environment: EnvironmentValues) -> String? {
+        resolveText(in: environment)
+    }
     func isEqual(to other: AnyTextStorage) -> Bool {
         self === other
     }
@@ -96,6 +99,14 @@ class ConcatenatedTextStorage: AnyTextStorage {
         first._resolveText(in: environment) + second._resolveText(in: environment)
     }
 
+    override func resolveTransitionText(in environment: EnvironmentValues) -> String? {
+        guard let first = first._resolveTransitionText(in: environment),
+              let second = second._resolveTransitionText(in: environment) else {
+            return nil
+        }
+        return first + second
+    }
+
     override func isEqual(to other: AnyTextStorage) -> Bool {
         if let other = other as? Self {
             return self.first == other.first && self.second == other.second
@@ -117,6 +128,10 @@ class AttachmentTextStorage: AnyTextStorage {
 
     override func resolveText(in environment: EnvironmentValues) -> String {
         String()
+    }
+
+    override func resolveTransitionText(in environment: EnvironmentValues) -> String? {
+        nil
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
@@ -227,6 +242,16 @@ public struct Text: Equatable {
             return storage.resolveText(in: environment)
         }
         return String()
+    }
+
+    func _resolveTransitionText(in environment: EnvironmentValues) -> String? {
+        if case let .verbatim(text) = self.storage {
+            return text
+        }
+        if case let .anyTextStorage(storage) = self.storage {
+            return storage.resolveTransitionText(in: environment)
+        }
+        return nil
     }
 
     func _resolve(context: GraphicsContext) -> GraphicsContext.ResolvedText {
@@ -350,10 +375,8 @@ extension Text: View {
         }
 
         // 1. Internal state nodes for communication between the resource and layout passes.
-        // Caches the fully resolved text object (including glyphs/metrics).
-        let resolvedTextAttr = graph.makeInput(value: GraphicsContext.ResolvedText?.none)
-        // Tracks the hash of the text content and environment to detect changes.
-        let resolvedEnvVersionAttr = graph.makeInput(value: 0)
+        // Caches the fully resolved styled text object (including glyphs/metrics).
+        let resolvedStyledTextAttr = graph.makeInput(value: ResolvedStyledText())
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
@@ -370,6 +393,7 @@ extension Text: View {
         let resourceAttr: Attribute<ResourceList> = graph.makeRule {
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
+            let transitionText = text._resolveTransitionText(in: environment)
 
             // Generate a unique hash (version) combining text content and environment factors.
             var hasher = Hasher()
@@ -379,8 +403,9 @@ extension Text: View {
             let currentVersion = hasher.finalize()
 
             // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
-            if resolvedEnvVersionAttr.value == currentVersion, resolvedTextAttr.value != nil {
-                return ResourceList() 
+            let resolvedStyledText = resolvedStyledTextAttr.value
+            if resolvedStyledText.version == currentVersion, resolvedStyledText.resolvedText != nil {
+                return ResourceList()
             }
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
@@ -393,8 +418,13 @@ extension Text: View {
 
                 // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                 inbox.enqueue {
-                    resolvedTextAttr.setValue(boxedResolved.value)
-                    resolvedEnvVersionAttr.setValue(currentVersion) // Update cached version
+                    resolvedStyledTextAttr.setValue(
+                        ResolvedStyledText(
+                            resolvedText: boxedResolved.value,
+                            version: currentVersion,
+                            transitionText: transitionText
+                        )
+                    )
                 }
             }
 
@@ -404,7 +434,7 @@ extension Text: View {
         // 3. Layout pass (Layout Rule)
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
-            let resolved = resolvedTextAttr.value
+            let resolved = resolvedStyledTextAttr.value.resolvedText
 
             func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
                 guard let r = resolved else { return .zero } // Return zero size before loading completes
@@ -445,27 +475,25 @@ extension Text: View {
             let environment = cachedEnvironmentAttr.value.environment.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
-            let resolved = resolvedTextAttr.value
+            let resolved = resolvedStyledTextAttr.value.resolvedText
             let debugLayout = debugLayoutAttr.value
             let foreground = text.foregroundShading(in: environment)
 
             var list = DisplayList()
 
             if let resolved = resolved {
+                var frame = CGRect(origin: position, size: viewSize)
+                let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
+
+                if measuredSize.height < frame.height {
+                    let offset = frame.height - measuredSize.height
+                    frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
+                    frame.size.height = measuredSize.height
+                }
+                if frame.width > 0 && frame.height > 0 {
+                    list.recordInterpolationBounds(frame)
+                }
                 list.items.append { context in
-                    // 1. Local rendering frame (origin is the position assigned by the parent)
-                    var frame = CGRect(origin: position, size: viewSize)
-
-                    // 2. Measure actual text size for vertical centering
-                    let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
-
-                    if measuredSize.height < frame.height {
-                        let offset = frame.height - measuredSize.height
-                        frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
-                        frame.size.height = measuredSize.height
-                    }
-
-                    // 3. Draw to the screen
                     if frame.width > 0 && frame.height > 0 {
                         context.draw(resolved, in: frame, shading: foreground)
                     }
@@ -484,6 +512,13 @@ extension Text: View {
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        outputs.applyInterpolatorGroup(
+            DisplayList.InterpolatorGroup(),
+            content: resolvedStyledTextAttr,
+            inputs: inputs,
+            animatesSize: false,
+            defersRender: false
+        )
         if platformItemListShouldCollectStaticItemContributors(inputs) {
             // Plain Text under MenuStyleContext contributes a disabled platform item.
             let textAttr = view._attribute

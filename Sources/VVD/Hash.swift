@@ -2,7 +2,7 @@
 //  File: Hash.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -181,6 +181,28 @@ private class Hash32 {
         }
     }
 
+    func update(bytes: UnsafeRawBufferPointer, hashFunction: HashFunction) {
+        let length = bytes.count
+        guard length > 0 else { return }
+        self.low += UInt64(length) << 3
+
+        var offset = 0
+        while offset < length {
+            let chunkLength = min(length - offset, 64)
+            for index in 0..<chunkLength {
+                self.data.append(bytes[offset + index])
+            }
+
+            while self.data.count >= 64 {
+                self.data.withUnsafeBytes {
+                    hashFunction($0.bindMemory(to: UInt32.self))
+                }
+                self.data.removeFirst(64)
+            }
+            offset += chunkLength
+        }
+    }
+
     func finalize(hashFunction: HashFunction) {
        assert(self.data.count < 64)
         self.data.append(0x80)
@@ -284,6 +306,10 @@ public struct SHA1 {
 
     public mutating func update<D>(data: D) where D : DataProtocol {
         self.hash.update(data: data) { self.updateHash($0) }
+    }
+
+    public mutating func update(bytes: UnsafeRawBufferPointer) {
+        self.hash.update(bytes: bytes) { self.updateHash($0) }
     }
 
     public mutating func finalize() -> Self.Digest {

@@ -95,6 +95,7 @@ enum _GeometryEffectSupport {
         let items = source.items
         let debugItems = source.debugItems
         var result = DisplayList()
+        result.recordInterpolationBounds(source.interpolationBounds?.applying(affine).standardized)
         if !items.isEmpty {
             result.items.append { context in
                 var context = context
