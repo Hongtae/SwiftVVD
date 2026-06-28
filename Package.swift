@@ -41,8 +41,6 @@ let package = Package(
                  path: "SupportPackages/miniaudio"),
         .package(name: "TinyGLTF",
                  path: "SupportPackages/TinyGLTF"),
-        .package(name: "Vulkan",
-                 path: "SupportPackages/Vulkan"),
         .package(name: "Wayland",
                  path: "SupportPackages/Wayland"),
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
@@ -50,6 +48,9 @@ let package = Package(
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
+        .systemLibrary(
+            name: "Vulkan",
+            path: "SupportPackages/Vulkan"),
         .target(
             name: "VVD",
             dependencies: [
@@ -61,9 +62,8 @@ let package = Package(
                          package: "FreeType"),
                 .product(name: "miniaudio",
                          package: "miniaudio"),
-                .product(name: "Vulkan",
-                         package: "Vulkan",
-                         condition: .when(platforms: [.windows, .linux, .android])),
+                .target(name: "Vulkan",
+                        condition: .when(platforms: [.windows, .linux, .android])),
                 .product(name: "Wayland",
                          package: "Wayland",
                          condition: .when(platforms: [.linux])),
