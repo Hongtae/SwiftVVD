@@ -58,6 +58,32 @@ public struct ContentTransition: Equatable, Sendable {
         static let none = Method(method: 7)
     }
 
+    enum SequenceDirection: Hashable, Sendable {
+        case leading
+        case trailing
+        case up
+        case down
+        case forwards
+        case backwards
+
+        var effectType: Int32 {
+            switch self {
+            case .leading:
+                11
+            case .trailing:
+                12
+            case .up:
+                13
+            case .down:
+                14
+            case .forwards:
+                19
+            case .backwards:
+                20
+            }
+        }
+    }
+
     // Encoded renderer effect kind plus the small argument payload used by that effect.
     struct EffectType: Equatable, Sendable {
         enum Arg: Equatable, Sendable {
@@ -77,6 +103,11 @@ public struct ContentTransition: Equatable, Sendable {
         }
 
         static let opacity = EffectType(type: 1)
+        static let matchMove = EffectType(type: 5)
+
+        static func opacity(_ value: Double) -> EffectType {
+            opacity
+        }
 
         static func scale(_ value: CGFloat) -> EffectType {
             EffectType(type: 2, arg0: .float(Float(value)))
@@ -131,6 +162,44 @@ public struct ContentTransition: Equatable, Sendable {
             self.duration = duration
             self.events = events
             self.flags = flags
+        }
+
+        init(
+            _ type: EffectType,
+            timeline: ClosedRange<Float>,
+            appliesOnInsertion: Bool,
+            appliesOnRemoval: Bool
+        ) {
+            var events: UInt32 = 0
+            if appliesOnInsertion {
+                events = appliesOnRemoval ? 3 : 1
+            } else if appliesOnRemoval {
+                events = 2
+            }
+
+            self.init(
+                type: type,
+                begin: timeline.lowerBound,
+                duration: timeline.upperBound - timeline.lowerBound,
+                events: events,
+                flags: 0
+            )
+        }
+
+        static func sequence(
+            direction: SequenceDirection,
+            delay: Double,
+            maxAllowedDurationMultiple: Double,
+            appliesOnInsertion: Bool,
+            appliesOnRemoval: Bool
+        ) -> Effect {
+            Effect(
+                type: EffectType(type: direction.effectType),
+                begin: Float(delay),
+                duration: Float(1 / maxAllowedDurationMultiple),
+                events: 3,
+                flags: 0
+            )
         }
 
         func removeInverts(_ shouldRemove: Bool) -> Effect {

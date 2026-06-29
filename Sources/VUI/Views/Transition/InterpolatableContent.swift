@@ -344,6 +344,12 @@ extension DisplayList {
                 origin: .zero,
                 version: DisplayList.Version(value: Int(contentSeed.value))
             )
+            layer.updateInterpolators(
+                contentsScale: layer.contents.contentsScale,
+                maxDuration: maxDuration,
+                time: time
+            )
+            scheduleNextUpdate(after: time)
         }
 
         override func update(

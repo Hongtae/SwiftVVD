@@ -35,6 +35,43 @@ private typealias BlurReplaceBody = ModifiedContent<
     _ScaleEffect
 >
 
+private struct CountingRendererEffect: _RendererEffect, MultiViewModifier {
+    nonisolated(unsafe) static var effectValueCalls = 0
+
+    var state: ContentTransition.State
+
+    func effectValue(size: CGSize) -> DisplayList.Effect {
+        Self.effectValueCalls += 1
+        return .contentTransition(state)
+    }
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _RendererEffectSupport.makeView(
+            effect: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        _RendererEffectSupport.makeViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
 final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     func testContentTransitionHiddenOptionsAndMethodConstants() {
         XCTAssertEqual(ContentTransition.Options.addsDrawingGroup.rawValue, 1)
@@ -55,6 +92,12 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertEqual(ContentTransition.EffectType.opacity.type, 1)
         XCTAssertEqual(ContentTransition.EffectType.opacity.arg0, .none)
         XCTAssertEqual(ContentTransition.EffectType.opacity.arg1, .none)
+        XCTAssertEqual(ContentTransition.EffectType.opacity(0), .opacity)
+        XCTAssertEqual(ContentTransition.EffectType.opacity(0.25), .opacity)
+        XCTAssertEqual(ContentTransition.EffectType.opacity(.nan), .opacity)
+        XCTAssertEqual(ContentTransition.EffectType.matchMove.type, 5)
+        XCTAssertEqual(ContentTransition.EffectType.matchMove.arg0, .none)
+        XCTAssertEqual(ContentTransition.EffectType.matchMove.arg1, .none)
 
         var identity = ContentTransition.identity
         identity.applyEnvironmentValues(style: .animatedWidget, layoutDirection: .rightToLeft)
@@ -213,6 +256,58 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         }
     }
 
+    func testRendererEffectReadsAnimatedPositionProjection() throws {
+        CountingRendererEffect.effectValueCalls = 0
+
+        let graph = AttributeGraph()
+        try AttributeGraph.$current.withValue(graph) {
+            let state = ContentTransition.State(transition: .opacity)
+            let modifier = graph.makeInput(value: CountingRendererEffect(state: state))
+            let sourceList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))
+            let normalPosition = graph.makeInput(value: CGPoint.zero)
+            let animatedPosition = graph.makeInput(value: CGPoint(x: 2, y: 3))
+            var inputs = makeViewInputs(graph: graph, position: normalPosition)
+            var cachedEnvironment = inputs.base.cachedEnvironment.value
+            cachedEnvironment.animatedFrame = CachedEnvironment.AnimatedFrame(
+                position: normalPosition,
+                size: inputs.size,
+                pixelLength: graph.makeInput(value: CGFloat(1)),
+                time: inputs.base.time,
+                transaction: inputs.base.transaction,
+                viewPhase: inputs.base.phase,
+                animatedFrame: graph.makeInput(
+                    value: ViewFrame(origin: .zero, size: ViewSize(width: 10, height: 10))
+                ),
+                _animatedPosition: animatedPosition,
+                _animatedSize: inputs.size,
+                _animatedCGSize: nil
+            )
+            inputs.base.cachedEnvironment = MutableBox(cachedEnvironment)
+
+            let outputs = _RendererEffectSupport.makeView(
+                effect: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(DisplayList.Key.self, node: sourceList.identifier)
+                return outputs
+            }
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(CountingRendererEffect.effectValueCalls, 1)
+
+            normalPosition.setValue(CGPoint(x: 20, y: 30))
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(CountingRendererEffect.effectValueCalls, 1)
+
+            animatedPosition.setValue(CGPoint(x: 40, y: 50))
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(CountingRendererEffect.effectValueCalls, 2)
+        }
+    }
+
     func testBlurEffectSurface() {
         var effect = _BlurEffect(radius: 3, opaque: true)
         XCTAssertEqual(effect.radius, 3)
@@ -243,6 +338,85 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertNotEqual(custom, .identity)
         XCTAssertEqual(effect.removeInverts(true).flags & 1, 1)
         XCTAssertEqual(effect.removeInverts(false).flags & 1, 0)
+
+        let timelineBoth = ContentTransition.Effect(
+            .matchMove,
+            timeline: 0.25...0.75,
+            appliesOnInsertion: true,
+            appliesOnRemoval: true
+        )
+        XCTAssertEqual(timelineBoth.type, .matchMove)
+        XCTAssertEqual(timelineBoth.begin, 0.25)
+        XCTAssertEqual(timelineBoth.duration, 0.5)
+        XCTAssertEqual(timelineBoth.events, 3)
+        XCTAssertEqual(timelineBoth.flags, 0)
+
+        XCTAssertEqual(
+            ContentTransition.Effect(
+                .opacity,
+                timeline: 0.25...0.75,
+                appliesOnInsertion: true,
+                appliesOnRemoval: false
+            ).events,
+            1
+        )
+        XCTAssertEqual(
+            ContentTransition.Effect(
+                .opacity,
+                timeline: 0.25...0.75,
+                appliesOnInsertion: false,
+                appliesOnRemoval: true
+            ).events,
+            2
+        )
+        XCTAssertEqual(
+            ContentTransition.Effect(
+                .opacity,
+                timeline: 0.25...0.75,
+                appliesOnInsertion: false,
+                appliesOnRemoval: false
+            ).events,
+            0
+        )
+    }
+
+    func testContentTransitionSequenceEffectSurface() {
+        let directions: [(ContentTransition.SequenceDirection, Int32)] = [
+            (.leading, 11),
+            (.trailing, 12),
+            (.up, 13),
+            (.down, 14),
+            (.forwards, 19),
+            (.backwards, 20),
+        ]
+
+        for (direction, type) in directions {
+            let effect = ContentTransition.Effect.sequence(
+                direction: direction,
+                delay: 0.25,
+                maxAllowedDurationMultiple: 2,
+                appliesOnInsertion: true,
+                appliesOnRemoval: false
+            )
+            XCTAssertEqual(effect.type, ContentTransition.EffectType(type: type))
+            XCTAssertEqual(effect.begin, 0.25)
+            XCTAssertEqual(effect.duration, 0.5)
+            XCTAssertEqual(effect.events, 3)
+            XCTAssertEqual(effect.flags, 0)
+        }
+
+        let boolsIgnored = ContentTransition.Effect.sequence(
+            direction: .leading,
+            delay: 0.125,
+            maxAllowedDurationMultiple: 4,
+            appliesOnInsertion: false,
+            appliesOnRemoval: false
+        )
+        XCTAssertEqual(boolsIgnored.type, ContentTransition.EffectType(type: 11))
+        XCTAssertEqual(boolsIgnored.begin, 0.125)
+        XCTAssertEqual(boolsIgnored.duration, 0.25)
+        XCTAssertEqual(boolsIgnored.events, 3)
+        XCTAssertEqual(boolsIgnored.flags, 0)
     }
 
     func testContentTransitionRBTransitionCarrierSurface() {
@@ -369,11 +543,18 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             effect.type = nonGeometryType
             XCTAssertFalse(effect.changesGeometry, "type \(nonGeometryType)")
         }
+        let highBitOpacity = RBTransitionEffect()
+        highBitOpacity.type = 0x100 | ContentTransition.EffectType.opacity.type
+        XCTAssertFalse(highBitOpacity.changesGeometry)
+
         for geometryType in [Int32(2), 3, 4, 10, 15, 16, 17] {
             let effect = RBTransitionEffect()
             effect.type = geometryType
             XCTAssertTrue(effect.changesGeometry, "type \(geometryType)")
         }
+        let highBitScale = RBTransitionEffect()
+        highBitScale.type = 0x100 | ContentTransition.EffectType.scale(1).type
+        XCTAssertTrue(highBitScale.changesGeometry)
 
         let timingTransition = RBTransition()
         timingTransition.addRemoveDuration = 0.25
@@ -401,6 +582,17 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertEqual(floatRaw, integerRaw)
         XCTAssertEqual(floatRaw.hash, integerRaw.hash)
 
+        let opacityIgnoredArguments = RBTransitionEffect()
+        opacityIgnoredArguments.type = ContentTransition.EffectType.opacity.type
+        opacityIgnoredArguments.setArgumentValue(0.25, atIndex: 0)
+        opacityIgnoredArguments.setArgumentValue(0.75, atIndex: 1)
+        let opacityIgnoredArgumentsPeer = RBTransitionEffect()
+        opacityIgnoredArgumentsPeer.type = ContentTransition.EffectType.opacity.type
+        opacityIgnoredArgumentsPeer.setArgumentValue(0.5, atIndex: 0)
+        opacityIgnoredArgumentsPeer.setArgumentValue(1, atIndex: 1)
+        XCTAssertEqual(opacityIgnoredArguments, opacityIgnoredArgumentsPeer)
+        XCTAssertEqual(opacityIgnoredArguments.hash, opacityIgnoredArgumentsPeer.hash)
+
         let ignoredExtra = RBTransitionEffect()
         ignoredExtra.type = 3
         ignoredExtra.setArgumentValue(1, atIndex: 0)
@@ -421,12 +613,46 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         secondSlotPeer.type = 2
         secondSlotPeer.setArgumentValue(0.5, atIndex: 0)
         secondSlotPeer.setArgumentValue(0.75, atIndex: 1)
-        XCTAssertNotEqual(secondSlot, secondSlotPeer)
+        XCTAssertEqual(secondSlot, secondSlotPeer)
+        XCTAssertEqual(secondSlot.hash, secondSlotPeer.hash)
+
+        let firstSlotPeer = RBTransitionEffect()
+        firstSlotPeer.type = 2
+        firstSlotPeer.setArgumentValue(0.75, atIndex: 0)
+        firstSlotPeer.setArgumentValue(0.25, atIndex: 1)
+        XCTAssertNotEqual(secondSlot, firstSlotPeer)
+
+        let twoSlot = RBTransitionEffect()
+        twoSlot.type = 3
+        twoSlot.setArgumentValue(0.5, atIndex: 0)
+        twoSlot.setArgumentValue(0.25, atIndex: 1)
+        let twoSlotPeer = RBTransitionEffect()
+        twoSlotPeer.type = 3
+        twoSlotPeer.setArgumentValue(0.5, atIndex: 0)
+        twoSlotPeer.setArgumentValue(0.75, atIndex: 1)
+        XCTAssertNotEqual(twoSlot, twoSlotPeer)
+
+        let highBitSecondSlot = RBTransitionEffect()
+        highBitSecondSlot.type = 0x100 | ContentTransition.EffectType.scale(1).type
+        highBitSecondSlot.setArgumentValue(0.5, atIndex: 0)
+        highBitSecondSlot.setArgumentValue(0.25, atIndex: 1)
+        let highBitSecondSlotPeer = RBTransitionEffect()
+        highBitSecondSlotPeer.type = 0x100 | ContentTransition.EffectType.scale(1).type
+        highBitSecondSlotPeer.setArgumentValue(0.5, atIndex: 0)
+        highBitSecondSlotPeer.setArgumentValue(0.75, atIndex: 1)
+        XCTAssertEqual(highBitSecondSlot, highBitSecondSlotPeer)
+        XCTAssertEqual(highBitSecondSlot.hash, highBitSecondSlotPeer.hash)
+
+        let differentRawType = RBTransitionEffect()
+        differentRawType.type = ContentTransition.EffectType.scale(1).type
+        differentRawType.setArgumentValue(0.5, atIndex: 0)
+        differentRawType.setArgumentValue(0.25, atIndex: 1)
+        XCTAssertNotEqual(highBitSecondSlot, differentRawType)
     }
 
     func testRBTransitionEffectDirectionAndCustomDurationHelpers() throws {
         let sequenceDuration = RBTransitionEffect()
-        sequenceDuration.type = 17
+        sequenceDuration.type = 0x100 | 17
         sequenceDuration.setArgumentValue(2, atIndex: 1)
         XCTAssertEqual(
             try XCTUnwrap(sequenceDuration.customDuration(for: 1)),
@@ -460,11 +686,11 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertNil(nonDuration.customDuration(for: 1))
 
         let anchor = RBTransitionEffect()
-        anchor.type = 7
+        anchor.type = 0x100 | 7
         XCTAssertEqual(anchor.anchorDirection(event: 1, isFlipped: false), 0)
-        anchor.type = 10
+        anchor.type = 0x100 | 10
         XCTAssertEqual(anchor.anchorDirection(event: 1, isFlipped: false), 3)
-        anchor.type = 11
+        anchor.type = 0x100 | 11
         XCTAssertNil(anchor.anchorDirection(event: 1, isFlipped: false))
 
         let flippedAnchor = RBTransitionEffect()
@@ -477,15 +703,15 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertEqual(flippedAnchor.anchorDirection(event: 2, isFlipped: true), 0)
 
         let sequence = RBTransitionEffect()
-        sequence.type = 11
+        sequence.type = 0x100 | 11
         XCTAssertEqual(sequence.sequenceDirection(event: 1, isFlipped: false), 0)
-        sequence.type = 14
+        sequence.type = 0x100 | 14
         XCTAssertEqual(sequence.sequenceDirection(event: 1, isFlipped: false), 3)
-        sequence.type = 15
+        sequence.type = 0x100 | 15
         XCTAssertNil(sequence.sequenceDirection(event: 1, isFlipped: false))
-        sequence.type = 19
+        sequence.type = 0x100 | 19
         XCTAssertEqual(sequence.sequenceDirection(event: 1, isFlipped: false), 4)
-        sequence.type = 20
+        sequence.type = 0x100 | 20
         XCTAssertEqual(sequence.sequenceDirection(event: 1, isFlipped: false), 5)
 
         let flippedSequence = RBTransitionEffect()
@@ -612,7 +838,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         let bounds = CGRect(x: 10, y: 20, width: 40, height: 10)
 
         let opacity = RBTransitionEffect()
-        opacity.type = ContentTransition.EffectType.opacity.type
+        opacity.type = 0x100 | ContentTransition.EffectType.opacity.type
         opacity.duration = 1
         opacity.events = 3
 
@@ -644,6 +870,20 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             try XCTUnwrap(scaleResults.bounds),
             CGRect(x: 20, y: 22.5, width: 30, height: 7.5)
         )
+
+        scale.flags = 1
+        let invertedScaleRemoval = try XCTUnwrap(
+            transitionEffectResults([scale], progress: 0.25, event: 2, bounds: bounds)
+        )
+        XCTAssertEqual(invertedScaleRemoval.transform.a, 1.25, accuracy: 0.000001)
+        XCTAssertEqual(invertedScaleRemoval.transform.d, 1.25, accuracy: 0.000001)
+        XCTAssertEqual(invertedScaleRemoval.transform.tx, -12.5, accuracy: 0.000001)
+        XCTAssertEqual(invertedScaleRemoval.transform.ty, -7.5, accuracy: 0.000001)
+        XCTAssertEqual(
+            try XCTUnwrap(invertedScaleRemoval.bounds),
+            CGRect(x: 0, y: 17.5, width: 50, height: 12.5)
+        )
+        scale.flags = 0
 
         let translation = RBTransitionEffect()
         translation.type = ContentTransition.EffectType.translation(.zero).type
@@ -716,6 +956,16 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertEqual(alphaBlurBounds.minY, 7.4, accuracy: 0.000001)
         XCTAssertEqual(alphaBlurBounds.width, 65.2, accuracy: 0.000001)
         XCTAssertEqual(alphaBlurBounds.height, 35.2, accuracy: 0.000001)
+
+        let blurThenScaleResults = try XCTUnwrap(
+            transitionEffectResults([blur, scale], progress: 0.5, event: 1, bounds: bounds)
+        )
+        XCTAssertEqual(blurThenScaleResults.blurRadius, 4.5, accuracy: 0.000001)
+        let blurThenScaleBounds = try XCTUnwrap(blurThenScaleResults.bounds)
+        XCTAssertEqual(blurThenScaleBounds.minX, 7.4, accuracy: 0.000001)
+        XCTAssertEqual(blurThenScaleBounds.minY, 9.9, accuracy: 0.000001)
+        XCTAssertEqual(blurThenScaleBounds.width, 55.2, accuracy: 0.000001)
+        XCTAssertEqual(blurThenScaleBounds.height, 32.7, accuracy: 0.000001)
 
         let skippedEvent = RBTransitionEffect()
         skippedEvent.type = ContentTransition.EffectType.opacity.type
@@ -1021,8 +1271,12 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         return list
     }
 
-    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+    private func makeViewInputs(
+        graph: AttributeGraph,
+        position: Attribute<CGPoint>? = nil
+    ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
+        let position = position ?? graph.makeInput(value: CGPoint.zero)
         let base = _GraphInputs(
             customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
@@ -1041,7 +1295,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
                 hostKeys: graph.makeInput(value: PreferenceKeys())
             ),
             transform: graph.makeInput(value: ViewTransform()),
-            position: graph.makeInput(value: CGPoint.zero),
+            position: position,
             containerPosition: graph.makeInput(value: CGPoint.zero),
             size: graph.makeInput(value: ViewSize(width: 10, height: 10)),
             safeAreaInsets: OptionalAttribute(),

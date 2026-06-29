@@ -60,7 +60,32 @@ extension Canvas {
                 }
             )
         }
-        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let canvas = view._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                list.appendCustomItem(
+                    bounds: frame,
+                    isOpaque: canvas.isOpaque,
+                    colorMode: canvas.colorMode,
+                    rendersAsynchronously: canvas.rendersAsynchronously
+                ) { context in
+                    context.drawLayer(in: frame) { layerContext, size in
+                        canvas.renderer(&layerContext, size)
+                    }
+                }
+            }
+            return list
+        }
+
+        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        return outputs
     }
 }
 

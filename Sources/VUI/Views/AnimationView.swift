@@ -64,6 +64,10 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
 extension _AnimationView: _PrimitiveView {
 }
 
+@available(*, unavailable)
+extension _AnimationView: Sendable {
+}
+
 private struct AnimationViewContentRule<Content: View & Equatable>: StatefulRule {
     typealias Value = Content
 

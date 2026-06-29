@@ -419,6 +419,79 @@ final class TransactionModifierTests: XCTestCase {
         }
     }
 
+    func testViewTransactionBodyWrapsPlaceholderContentWithPushPopTransaction() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            let view = TransactionModifierReportingContent(width: 10)
+                .transaction({ transaction in
+                    transaction[TransactionModifierMarkerKey.self] += 25
+                    transaction.animation = .linear(duration: 0.25)
+                }) { content in
+                    content
+                }
+            let viewAttr = graph.makeInput(value: view)
+
+            let outputs = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+            assertLayout(layout, width: 10, height: 750)
+        }
+    }
+
+    func testViewAnimationBodySetsAnimationThroughPushPopTransaction() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            let view = TransactionModifierReportingContent(width: 10)
+                .animation(.linear(duration: 0.25)) { content in
+                    content
+                }
+            let viewAttr = graph.makeInput(value: view)
+
+            let outputs = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+            assertLayout(layout, width: 10, height: 725)
+        }
+    }
+
+    func testViewAnimationBodyRespectsDisabledAnimations() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            parent.disablesAnimations = true
+            let view = TransactionModifierReportingContent(width: 10)
+                .animation(.linear(duration: 0.25)) { content in
+                    content
+                }
+            let viewAttr = graph.makeInput(value: view)
+
+            let outputs = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            )
+
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+            assertLayout(layout, width: 10, height: 800)
+        }
+    }
+
     private func makeGraphInputs(
         graph: AttributeGraph,
         transaction: Transaction

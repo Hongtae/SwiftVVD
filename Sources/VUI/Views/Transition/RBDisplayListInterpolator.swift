@@ -66,7 +66,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return !hasDisplayListContents
         }
         return transition.effects.isEmpty || transition.effects.allSatisfy {
-            $0.type == ContentTransition.EffectType.opacity.type
+            $0.semanticType == ContentTransition.EffectType.opacity.type
         }
     }
 
@@ -132,7 +132,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private func resolvedProgress(at time: Float) -> Float {
         let sequencedTime = Double(time) - (animationSequencerDelayDuration ?? 0)
-        guard let animation else {
+        let resolvedAnimation = hasChangedDisplayLists
+            ? checkedAnimationOption()
+            : animation
+        guard let animation = resolvedAnimation else {
             return Float(sequencedTime)
         }
         return animation.evaluateAtTime(sequencedTime)
@@ -422,13 +425,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         into contents: inout DisplayList
     ) {
         guard sourceEffects.count == targetEffects.count else {
-            contents.effects = sourceEffects
+            appendEffectItems(progress >= 1 ? targetEffects : sourceEffects, into: &contents)
             return
         }
 
         for (source, target) in zip(sourceEffects, targetEffects) {
             guard source.effect.hasSameSurface(as: target.effect) else {
-                contents.appendEffect(source.effect, contents: source.contents)
+                let fallback = progress >= 1 ? target : source
+                contents.appendEffect(fallback.effect, contents: fallback.contents)
                 continue
             }
 
@@ -440,6 +444,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     progress: progress
                 )
             )
+        }
+    }
+
+    private static func appendEffectItems(
+        _ effectItems: [DisplayList.EffectItem],
+        into contents: inout DisplayList
+    ) {
+        for effectItem in effectItems {
+            contents.appendEffect(effectItem.effect, contents: effectItem.contents)
         }
     }
 
@@ -738,13 +751,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private var animationSequencerActiveDuration: Double? {
         guard let sequencer = animationSequencer,
-              let effects = sequencer.mixed else {
+              sequencer.mixed != nil else {
             return nil
         }
-        guard let delayFactor = sequencerDelayFactor(sequencer) else {
+        guard let delay = sequencerDelay(sequencer, phase: .mixed) else {
             return 1
         }
-        return 1 + Double(effects.delayOffset) + Double(effects.delayScale) * delayFactor
+        return 1 + max(0, delay)
     }
 
     private var animationSequencerDelayDuration: Double? {
@@ -754,32 +767,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         return max(0, duration - 1)
     }
 
-    private func sequencerDelayFactor(_ sequencer: RBAnimationSequencer) -> Double? {
+    private func sequencerDelay(
+        _ sequencer: RBAnimationSequencer,
+        phase: RBAnimationSequencer.Phase
+    ) -> Double? {
         guard let bounds = to.interpolationBounds ?? from.interpolationBounds else {
             return nil
         }
-        let distance = hypot(
-            sequencer.endPoint.x - sequencer.startPoint.x,
-            sequencer.endPoint.y - sequencer.startPoint.y
-        )
-        guard distance > 0 else {
-            return nil
-        }
-
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let rawFactor = hypot(
-            center.x - sequencer.startPoint.x,
-            center.y - sequencer.startPoint.y
-        ) / distance
-        let clamped = min(max(rawFactor, 0), 1)
-        switch sequencer.distanceMode {
-        case 0:
-            return floor(Double(clamped) * 100) / 100
-        case 1:
-            return Double(clamped)
-        default:
-            return 0
-        }
+        return sequencer.evalDelay(at: center, phase: phase)
     }
 
     private var hasChangedDisplayLists: Bool {

@@ -115,7 +115,7 @@ extension GraphicsContext {
             var cm = ColorMatrix.identity
             cm.r1 = r
             cm.g2 = r
-            cm.b2 = r
+            cm.b3 = r
             cm.r5 = c
             cm.g5 = c
             cm.b5 = c

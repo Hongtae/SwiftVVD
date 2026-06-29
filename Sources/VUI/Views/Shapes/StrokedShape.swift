@@ -2,13 +2,13 @@
 //  File: StrokedShape.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 public struct _StrokedShape<S>: Shape where S: Shape {
-    public let shape: S
+    public var shape: S
     public var style: StrokeStyle
 
     public init(shape: S, style: StrokeStyle) {
@@ -22,12 +22,17 @@ public struct _StrokedShape<S>: Shape where S: Shape {
 
     public static var role: ShapeRole { .stroke }
 
-    public typealias AnimatableData = AnimatablePair<EmptyAnimatableData, StrokeStyle.AnimatableData>
+    public typealias AnimatableData = AnimatablePair<S.AnimatableData, StrokeStyle.AnimatableData>
     public typealias Body = _ShapeView<Self, ForegroundStyle>
 
     public var animatableData: AnimatableData {
-        get { AnimatableData(.init(), self.style.animatableData)}
-        set { self.style.animatableData = newValue.second }
+        get {
+            AnimatableData(shape.animatableData, style.animatableData)
+        }
+        set {
+            shape.animatableData = newValue.first
+            style.animatableData = newValue.second
+        }
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -44,6 +49,14 @@ public struct _StrokedShape<S>: Shape where S: Shape {
     public var body: Body {
         _ShapeView(shape: self, style: ForegroundStyle())
     }
+}
+
+protocol ShapeStrokeStyleProviding {
+    var strokeStyle: StrokeStyle { get }
+}
+
+extension _StrokedShape: ShapeStrokeStyleProviding {
+    var strokeStyle: StrokeStyle { style }
 }
 
 protocol ShapeDrawer {

@@ -31,6 +31,10 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 }
 
+@available(*, unavailable)
+extension _TransactionModifier: Sendable {
+}
+
 public struct _ValueTransactionModifier<Value>: ViewModifier, _GraphInputsModifier where Value: Equatable {
     public var value: Value
     public var transform: (inout Transaction) -> Void
@@ -55,6 +59,10 @@ public struct _ValueTransactionModifier<Value>: ViewModifier, _GraphInputsModifi
     }
 
     public typealias Body = Never
+}
+
+@available(*, unavailable)
+extension _ValueTransactionModifier: Sendable {
 }
 
 private struct ValueTransactionModifierTransactionRule<Observed: Equatable>: StatefulRule {
@@ -120,6 +128,10 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
     public typealias Body = Never
 }
 
+@available(*, unavailable)
+extension _PushPopTransactionModifier: Sendable {
+}
+
 extension View {
     @inlinable public func transaction(_ transform: @escaping (inout Transaction) -> Void) -> some View {
         return modifier(_TransactionModifier(transform: transform))
@@ -127,6 +139,29 @@ extension View {
 
     @inlinable public func transaction<V>(value: V, _ transform: @escaping (inout Transaction) -> Void) -> some View where V: Equatable {
         return modifier(_ValueTransactionModifier(value: value, transform: transform))
+    }
+
+    public func transaction<V>(
+        _ transform: @escaping (inout Transaction) -> Void,
+        @ViewBuilder body: @escaping (PlaceholderContentView<Self>) -> V
+    ) -> some View where V: View {
+        let content = CustomModifier<Self, V>(
+            result: body(PlaceholderContentView<Self>())
+        )
+        return modifier(
+            _PushPopTransactionModifier(content: content, transform: transform)
+        )
+    }
+
+    public func animation<V>(
+        _ animation: Animation?,
+        @ViewBuilder body: @escaping (PlaceholderContentView<Self>) -> V
+    ) -> some View where V: View {
+        transaction({ transaction in
+            if !transaction.disablesAnimations {
+                transaction.animation = animation
+            }
+        }, body: body)
     }
 }
 

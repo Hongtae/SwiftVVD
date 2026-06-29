@@ -39,7 +39,7 @@ public struct Spacer: View {
 extension Spacer: Sendable {
 }
 
-extension Spacer: _PrimitiveView {
+extension Spacer: _PrimitiveView, PrimitiveSpacer {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")

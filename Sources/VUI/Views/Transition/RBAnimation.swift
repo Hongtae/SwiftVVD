@@ -641,13 +641,19 @@ final class RBAnimationSequencerEffects: NSObject {
 
     override init() {
         self.delayOffset = 0
-        self.delayScale = 1
+        self.delayScale = 0
         super.init()
     }
 }
 
 // Sequencing options passed to display-list interpolation for distance-based transition timing.
 final class RBAnimationSequencer: NSObject {
+    enum Phase {
+        case added
+        case mixed
+        case removed
+    }
+
     var distanceMode: Int32
     var sequencesGlyphs: Bool
     var startPoint: CGPoint
@@ -665,6 +671,94 @@ final class RBAnimationSequencer: NSObject {
         self.mixed = nil
         self.removed = nil
         super.init()
+    }
+
+    func evalDelay(at point: CGPoint, phase: Phase) -> Double? {
+        let effects = effects(for: phase)
+        let offset = Double(effects?.delayOffset ?? 0)
+        let scale = Double(effects?.delayScale ?? 0)
+        guard let factor = delayFactor(at: point) else {
+            return nil
+        }
+        let delay = offset + scale * factor
+        guard delay.isFinite else {
+            return nil
+        }
+        return delay
+    }
+
+    static func phase(forAnimatedOperationType operationType: UInt8) -> Phase {
+        switch operationType {
+        case 0:
+            return .removed
+        case 1:
+            return .added
+        default:
+            return .mixed
+        }
+    }
+
+    static func canCarryAnimationIndex(operationLowNibble operationType: UInt8) -> Bool {
+        guard operationType <= 8 else {
+            return true
+        }
+        return (0x130 & (1 << UInt32(operationType))) == 0
+    }
+
+    static func operationDelay(
+        byAddingSequencerDelay sequencerDelay: Double?,
+        to operationDelay: Float
+    ) -> Float {
+        guard let sequencerDelay,
+              sequencerDelay.isFinite,
+              sequencerDelay > 0 else {
+            return operationDelay
+        }
+        return operationDelay + Float(sequencerDelay)
+    }
+
+    func evalDelay(at point: CGPoint, animatedOperationType operationType: UInt8) -> Double? {
+        evalDelay(at: point, phase: Self.phase(forAnimatedOperationType: operationType))
+    }
+
+    private func effects(for phase: Phase) -> RBAnimationSequencerEffects? {
+        switch phase {
+        case .added:
+            return added
+        case .mixed:
+            return mixed
+        case .removed:
+            return removed
+        }
+    }
+
+    private func delayFactor(at point: CGPoint) -> Double? {
+        let dx = Double(endPoint.x - startPoint.x)
+        let dy = Double(endPoint.y - startPoint.y)
+        switch distanceMode {
+        case 0:
+            let distanceSquared = dx * dx + dy * dy
+            guard distanceSquared > 0 else {
+                return nil
+            }
+            let px = Double(point.x - startPoint.x)
+            let py = Double(point.y - startPoint.y)
+            return Self.clamp((dx * px + dy * py) / distanceSquared)
+        case 1:
+            let distance = hypot(dx, dy)
+            guard distance > 0 else {
+                return nil
+            }
+            let px = Double(point.x - startPoint.x)
+            let py = Double(point.y - startPoint.y)
+            return Self.clamp(hypot(px, py) / distance)
+        default:
+            return 0
+        }
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        min(max(value, 0), 1)
     }
 }
 

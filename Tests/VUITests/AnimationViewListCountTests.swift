@@ -74,6 +74,18 @@ private struct TransactionReportingAnimationContent: View, Equatable, _Primitive
 }
 
 final class AnimationViewListCountTests: XCTestCase {
+    func testAnimationModifierCarriesPrimitiveViewModifierMarker() {
+        func primitiveModifierTypeName<T: PrimitiveViewModifier>(_ modifier: T) -> String {
+            String(describing: T.self)
+        }
+
+        XCTAssertTrue(
+            primitiveModifierTypeName(
+                _AnimationModifier(animation: Animation.linear(duration: 0.25), value: 1)
+            ).contains("_AnimationModifier")
+        )
+    }
+
     func testAnimationViewForwardsStaticViewListCountToContent() {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)

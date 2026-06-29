@@ -46,6 +46,9 @@ final class RBTransitionEffect: NSObject, NSCopying {
     }
     var events: UInt32
     var flags: UInt32
+    var semanticType: Int32 {
+        type & 0x3f
+    }
     var animationIndex: UInt {
         get {
             guard usesAnimationIndexMode, beginTimeByte == durationByte else {
@@ -81,7 +84,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
         }
     }
     var changesGeometry: Bool {
-        let index = type - 2
+        let index = semanticType - 2
         guard index >= 0, index <= 16 else { return false }
         return (Self.geometryChangingEffectTypeMask & (1 << UInt32(index))) != 0
     }
@@ -90,6 +93,20 @@ final class RBTransitionEffect: NSObject, NSCopying {
     private var durationByte: UInt8
     private var usesAnimationIndexMode: Bool
     private var argumentWords: [UInt32]
+
+    private var argumentCount: Int {
+        let counts = Self.effectArgumentCounts
+        let index = Int(semanticType)
+        guard index >= 0, index < counts.count else { return 0 }
+        return min(Int(counts[index]), argumentWords.count)
+    }
+
+    private static let effectArgumentCounts: [UInt8] = [
+        0, 0, 1, 2, 1, 0, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 2,
+        2, 2, 2, 0, 0, 2, 2, 2,
+        2, 0, 0, 0, 1, 0, 0, 0,
+    ]
 
     override init() {
         self.type = 0
@@ -186,7 +203,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
     }
 
     func customDuration(for event: UInt32) -> Float? {
-        switch type & 0x3f {
+        switch semanticType {
         case 17:
             let base: Float = event & 1 == 0 ? 1 / 6 : 0.25
             return base / argumentValue(atIndex: 1)
@@ -199,13 +216,13 @@ final class RBTransitionEffect: NSObject, NSCopying {
     }
 
     func anchorDirection(event: UInt32, isFlipped: Bool) -> UInt32? {
-        let direction = type - 7
+        let direction = semanticType - 7
         guard direction >= 0, direction <= 3 else { return nil }
         return resolvedDirection(UInt32(direction), event: event, isFlipped: isFlipped)
     }
 
     func sequenceDirection(event: UInt32, isFlipped: Bool) -> UInt32? {
-        let index = type - 11
+        let index = semanticType - 11
         guard index >= 0, index < Self.sequenceDirections.count,
               let direction = Self.sequenceDirections[Int(index)] else {
             return nil
@@ -263,7 +280,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
             return false
         }
 
-        switch type {
+        switch semanticType {
         case ContentTransition.EffectType.opacity.type:
             results.alpha *= min(max(effectProgress, 0), 1)
         case ContentTransition.EffectType.scale(1).type:
@@ -420,7 +437,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
             usesAnimationIndexMode == other.usesAnimationIndexMode &&
             events == other.events &&
             flags == other.flags &&
-            argumentWords == other.argumentWords
+            argumentWords.prefix(argumentCount) == other.argumentWords.prefix(other.argumentCount)
     }
 
     override var hash: Int {
@@ -431,7 +448,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
         hasher.combine(usesAnimationIndexMode)
         hasher.combine(events)
         hasher.combine(flags)
-        for word in argumentWords {
+        for word in argumentWords.prefix(argumentCount) {
             hasher.combine(word)
         }
         return hasher.finalize()

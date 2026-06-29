@@ -72,8 +72,11 @@ struct DisplayList {
         enum Kind: UInt8, Equatable {
             case closure
             case shapeFill
+            case shapeStroke
+            case shapeSeparator
             case image
             case text
+            case custom
             case effect
             case debug
         }
@@ -84,32 +87,162 @@ struct DisplayList {
             case blur
             case geometry
             case crossFade
+            case blendMode
+            case shadow
+            case colorFilter
+        }
+
+        enum ShapeStyleRecord: Equatable {
+            case color(Color)
+            case gradient(Gradient)
+        }
+
+        enum ShadingRecord: Equatable {
+            case color(Color)
+        }
+
+        struct ImageRecord: Equatable {
+            var baseline: CGFloat
+            var textureID: ObjectIdentifier?
+            var textureTransform: CGAffineTransform
+            var scaleFactor: CGFloat
+            var hasShading: Bool
+            var shading: ShadingRecord?
+
+            init(
+                _ image: GraphicsContext.ResolvedImage,
+                shading: ShadingRecord?
+            ) {
+                baseline = image.baseline
+                textureID = image.texture.map { ObjectIdentifier($0) }
+                textureTransform = image.textureTransform
+                scaleFactor = image.scaleFactor
+                hasShading = image.shading != nil
+                self.shading = shading
+            }
+        }
+
+        struct TextRecord: Equatable {
+            var foreground: ShadingRecord?
+        }
+
+        struct CustomRecord: Equatable {
+            var isOpaque: Bool
+            var colorMode: ColorRenderingMode
+            var rendersAsynchronously: Bool
+        }
+
+        struct ShadowRecord: Equatable {
+            var color: Color.Resolved
+            var radius: CGFloat
+            var offset: CGSize
+            var blendModeRawValue: Int32
+            var optionsRawValue: UInt32
+        }
+
+        enum ColorFilterKind: UInt8, Equatable {
+            case colorMultiply
+            case hueRotation
+            case saturation
+            case brightness
+            case contrast
+            case colorInvert
+            case grayscale
+            case luminanceToAlpha
+            case colorMatrix
+        }
+
+        struct ColorFilterRecord: Equatable {
+            var kind: ColorFilterKind
+            var amount: Double
+            var color: Color.Resolved?
+            var matrix: ColorMatrix?
+
+            init(
+                kind: ColorFilterKind,
+                amount: Double,
+                color: Color.Resolved? = nil,
+                matrix: ColorMatrix? = nil
+            ) {
+                self.kind = kind
+                self.amount = amount
+                self.color = color
+                self.matrix = matrix
+            }
         }
 
         var kind: Kind
         var effectKind: EffectKind?
         var bounds: CGRect?
+        var shapeStyle: ShapeStyleRecord?
+        var fillStyle: FillStyle?
+        var strokeStyle: StrokeStyle?
+        var image: ImageRecord?
+        var text: TextRecord?
+        var custom: CustomRecord?
         var opacity: Double?
         var blurRadius: CGFloat?
         var blurIsOpaque: Bool?
         var affineTransform: CGAffineTransform?
         var sourceFraction: Float?
         var targetFraction: Float?
+        var blendMode: BlendMode?
+        var shadow: ShadowRecord?
+        var colorFilter: ColorFilterRecord?
 
         init(
             kind: Kind,
             bounds: CGRect? = nil,
             effectKind: EffectKind? = nil,
+            shapeStyle: ShapeStyleRecord? = nil,
+            fillStyle: FillStyle? = nil,
+            strokeStyle: StrokeStyle? = nil,
+            image: ImageRecord? = nil,
+            text: TextRecord? = nil,
+            custom: CustomRecord? = nil,
             opacity: Double? = nil,
             blurRadius: CGFloat? = nil,
             blurIsOpaque: Bool? = nil,
             affineTransform: CGAffineTransform? = nil,
             sourceFraction: Float? = nil,
-            targetFraction: Float? = nil
+            targetFraction: Float? = nil,
+            blendMode: BlendMode? = nil,
+            shadow: ShadowRecord? = nil,
+            colorFilter: ColorFilterRecord? = nil
         ) {
             self.kind = kind
             self.effectKind = kind == .effect ? effectKind ?? .generic : nil
             self.bounds = bounds
+            if kind == .shapeFill || kind == .shapeStroke || kind == .shapeSeparator {
+                self.shapeStyle = shapeStyle
+            } else {
+                self.shapeStyle = nil
+            }
+            if kind == .shapeFill || kind == .shapeSeparator {
+                self.fillStyle = fillStyle
+            } else {
+                self.fillStyle = nil
+            }
+            if kind == .shapeStroke {
+                self.strokeStyle = strokeStyle
+            } else {
+                self.strokeStyle = nil
+            }
+            if kind == .image {
+                self.image = image
+            } else {
+                self.image = nil
+            }
+            if kind == .text {
+                self.text = text
+            } else {
+                self.text = nil
+            }
+            if kind == .custom {
+                self.custom = custom
+            } else {
+                self.custom = nil
+            }
             if kind == .effect && effectKind == .opacity {
                 self.opacity = opacity
             } else {
@@ -133,6 +266,21 @@ struct DisplayList {
             } else {
                 self.sourceFraction = nil
                 self.targetFraction = nil
+            }
+            if kind == .effect && effectKind == .blendMode {
+                self.blendMode = blendMode
+            } else {
+                self.blendMode = nil
+            }
+            if kind == .effect && effectKind == .shadow {
+                self.shadow = shadow
+            } else {
+                self.shadow = nil
+            }
+            if kind == .effect && effectKind == .colorFilter {
+                self.colorFilter = colorFilter
+            } else {
+                self.colorFilter = nil
             }
         }
     }
@@ -180,6 +328,101 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let record = ItemRecord(kind: kind, bounds: bounds, effectKind: effectKind)
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendShapeItem(
+        role: ShapeRole,
+        bounds: CGRect? = nil,
+        fillStyle: FillStyle? = nil,
+        strokeStyle: StrokeStyle? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let kind = Self.itemRecordKind(for: role)
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: kind,
+            bounds: bounds,
+            fillStyle: fillStyle,
+            strokeStyle: strokeStyle
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendShapeItem<S: ShapeStyle>(
+        role: ShapeRole,
+        style: S,
+        bounds: CGRect? = nil,
+        fillStyle: FillStyle? = nil,
+        strokeStyle: StrokeStyle? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: Self.itemRecordKind(for: role),
+            bounds: bounds,
+            shapeStyle: Self.shapeStyleRecord(for: style),
+            fillStyle: fillStyle,
+            strokeStyle: strokeStyle
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendImageItem(
+        _ image: GraphicsContext.ResolvedImage,
+        bounds: CGRect? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .image,
+            bounds: bounds,
+            image: ItemRecord.ImageRecord(
+                image,
+                shading: image.shading.flatMap(Self.shadingRecord(for:))
+            )
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendTextItem(
+        foreground: GraphicsContext.Shading,
+        bounds: CGRect? = nil,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .text,
+            bounds: bounds,
+            text: ItemRecord.TextRecord(
+                foreground: Self.shadingRecord(for: foreground)
+            )
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendCustomItem(
+        bounds: CGRect? = nil,
+        isOpaque: Bool,
+        colorMode: ColorRenderingMode,
+        rendersAsynchronously: Bool,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .custom,
+            bounds: bounds,
+            custom: ItemRecord.CustomRecord(
+                isOpaque: isOpaque,
+                colorMode: colorMode,
+                rendersAsynchronously: rendersAsynchronously
+            )
+        )
         items.append(Item(record: record, item))
         recordInterpolationBounds(bounds)
     }
@@ -252,6 +495,64 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendBlendModeItem(
+        bounds: CGRect? = nil,
+        blendMode: BlendMode,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .blendMode,
+            blendMode: blendMode
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendShadowItem(
+        bounds: CGRect? = nil,
+        color: Color.Resolved,
+        radius: CGFloat,
+        offset: CGSize,
+        blendMode: GraphicsContext.BlendMode = .normal,
+        options: GraphicsContext.ShadowOptions = GraphicsContext.ShadowOptions(),
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .shadow,
+            shadow: ItemRecord.ShadowRecord(
+                color: color,
+                radius: radius,
+                offset: offset,
+                blendModeRawValue: blendMode.rawValue,
+                optionsRawValue: options.rawValue
+            )
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendColorFilterItem(
+        bounds: CGRect? = nil,
+        filter: ItemRecord.ColorFilterRecord,
+        _ item: @escaping (GraphicsContext) -> Void
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord(
+            kind: .effect,
+            bounds: bounds,
+            effectKind: .colorFilter,
+            colorFilter: filter
+        )
+        items.append(Item(record: record, item))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendDebugItem(
         bounds: CGRect? = nil,
         _ item: @escaping (GraphicsContext) -> Void
@@ -274,6 +575,78 @@ struct DisplayList {
               bounds.height > 0
         else { return nil }
         return bounds
+    }
+
+    private static func itemRecordKind(for role: ShapeRole) -> ItemRecord.Kind {
+        switch role {
+        case .fill:
+            return .shapeFill
+        case .stroke:
+            return .shapeStroke
+        case .separator:
+            return .shapeSeparator
+        }
+    }
+
+    private static func shapeStyleRecord<S: ShapeStyle>(
+        for style: S
+    ) -> ItemRecord.ShapeStyleRecord? {
+        shapeStyleRecord(for: style as any ShapeStyle)
+    }
+
+    private static func shapeStyleRecord(
+        for style: any ShapeStyle
+    ) -> ItemRecord.ShapeStyleRecord? {
+        if let color = style as? Color {
+            return .color(color)
+        }
+        if let resolved = style as? Color.Resolved {
+            return .color(Color(resolved))
+        }
+        if let gradient = style as? Gradient {
+            return .gradient(gradient)
+        }
+        if let gradient = style as? AnyGradient {
+            return .gradient(gradient.provider.gradient)
+        }
+        if let erased = style as? AnyShapeStyle {
+            return shapeStyleRecord(for: erased.storage.box.style)
+        }
+        if let foreground = style as? ForegroundStyle {
+            return shapeStyleRecord(resolving: foreground)
+        }
+        if let background = style as? BackgroundStyle {
+            return shapeStyleRecord(resolving: background)
+        }
+        if let separator = style as? SeparatorShapeStyle {
+            return shapeStyleRecord(resolving: separator)
+        }
+        if let hierarchical = style as? HierarchicalShapeStyle {
+            return shapeStyleRecord(resolving: hierarchical)
+        }
+        return nil
+    }
+
+    private static func shapeStyleRecord<S: ShapeStyle>(
+        resolving style: S
+    ) -> ItemRecord.ShapeStyleRecord? {
+        var shape = _ShapeStyle_Shape()
+        style._apply(to: &shape)
+        guard let shading = shape.shading else { return nil }
+        if case let .color(color)? = shadingRecord(for: shading) {
+            return .color(color)
+        }
+        return nil
+    }
+
+    private static func shadingRecord(
+        for shading: GraphicsContext.Shading
+    ) -> ItemRecord.ShadingRecord? {
+        guard shading.properties.count == 1 else { return nil }
+        if case let .color(color) = shading.properties[0] {
+            return .color(color)
+        }
+        return nil
     }
 
     mutating func recordInterpolationBounds(_ rect: CGRect?) {

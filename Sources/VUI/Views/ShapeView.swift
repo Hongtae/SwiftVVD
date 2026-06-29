@@ -38,7 +38,14 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
             //Log.debug("ShapeView: size=\(viewSize), position=\(position)")
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
-                list.appendItem(kind: .shapeFill, bounds: frame) { context in
+                let strokeStyle = (v.shape as? ShapeStrokeStyleProviding)?.strokeStyle
+                list.appendShapeItem(
+                    role: Content.role,
+                    style: v.style,
+                    bounds: frame,
+                    fillStyle: v.fillStyle,
+                    strokeStyle: strokeStyle
+                ) { context in
                     if let drawer = v.shape as? ShapeDrawer {
                         drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
                     } else {
@@ -57,5 +64,5 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     public typealias Body = Never
 }
 
-extension _ShapeView: _PrimitiveView {
+extension _ShapeView: _PrimitiveView, LeafViewLayout {
 }

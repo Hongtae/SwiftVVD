@@ -147,7 +147,12 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = Rectangle().path(in: frame)
-                list.appendItem(kind: .shapeFill, bounds: frame) { context in
+                list.appendShapeItem(
+                    role: .fill,
+                    style: m.style,
+                    bounds: frame,
+                    fillStyle: FillStyle()
+                ) { context in
                     context.fill(path, with: .style(m.style))
                 }
             }
@@ -193,7 +198,12 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
-                list.appendItem(kind: .shapeFill, bounds: frame) { context in
+                list.appendShapeItem(
+                    role: .fill,
+                    style: m.style,
+                    bounds: frame,
+                    fillStyle: m.fillStyle
+                ) { context in
                     context.fill(path, with: .style(m.style), style: m.fillStyle)
                 }
             }

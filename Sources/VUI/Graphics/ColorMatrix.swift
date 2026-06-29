@@ -137,6 +137,164 @@ public struct ColorMatrix: Equatable, Sendable {
     }
 }
 
+public struct _ColorMatrix: Equatable, Codable, Sendable {
+    public var m11: Float
+    public var m12: Float
+    public var m13: Float
+    public var m14: Float
+    public var m15: Float
+
+    public var m21: Float
+    public var m22: Float
+    public var m23: Float
+    public var m24: Float
+    public var m25: Float
+
+    public var m31: Float
+    public var m32: Float
+    public var m33: Float
+    public var m34: Float
+    public var m35: Float
+
+    public var m41: Float
+    public var m42: Float
+    public var m43: Float
+    public var m44: Float
+    public var m45: Float
+
+    @inlinable public init() {
+        self.m11 = 1
+        self.m12 = 0
+        self.m13 = 0
+        self.m14 = 0
+        self.m15 = 0
+        self.m21 = 0
+        self.m22 = 1
+        self.m23 = 0
+        self.m24 = 0
+        self.m25 = 0
+        self.m31 = 0
+        self.m32 = 0
+        self.m33 = 1
+        self.m34 = 0
+        self.m35 = 0
+        self.m41 = 0
+        self.m42 = 0
+        self.m43 = 0
+        self.m44 = 1
+        self.m45 = 0
+    }
+
+    public init(color: Color, in environment: EnvironmentValues) {
+        self.init()
+        let resolved = color.resolve(in: environment)
+        self.m11 = resolved.linearRed
+        self.m22 = resolved.linearGreen
+        self.m33 = resolved.linearBlue
+        self.m44 = resolved.opacity
+    }
+
+    init(_ matrix: ColorMatrix) {
+        self.m11 = matrix.r1
+        self.m12 = matrix.r2
+        self.m13 = matrix.r3
+        self.m14 = matrix.r4
+        self.m15 = matrix.r5
+        self.m21 = matrix.g1
+        self.m22 = matrix.g2
+        self.m23 = matrix.g3
+        self.m24 = matrix.g4
+        self.m25 = matrix.g5
+        self.m31 = matrix.b1
+        self.m32 = matrix.b2
+        self.m33 = matrix.b3
+        self.m34 = matrix.b4
+        self.m35 = matrix.b5
+        self.m41 = matrix.a1
+        self.m42 = matrix.a2
+        self.m43 = matrix.a3
+        self.m44 = matrix.a4
+        self.m45 = matrix.a5
+    }
+
+    var colorMatrix: ColorMatrix {
+        var matrix = ColorMatrix()
+        matrix.r1 = m11
+        matrix.r2 = m12
+        matrix.r3 = m13
+        matrix.r4 = m14
+        matrix.r5 = m15
+        matrix.g1 = m21
+        matrix.g2 = m22
+        matrix.g3 = m23
+        matrix.g4 = m24
+        matrix.g5 = m25
+        matrix.b1 = m31
+        matrix.b2 = m32
+        matrix.b3 = m33
+        matrix.b4 = m34
+        matrix.b5 = m35
+        matrix.a1 = m41
+        matrix.a2 = m42
+        matrix.a3 = m43
+        matrix.a4 = m44
+        matrix.a5 = m45
+        return matrix
+    }
+
+    public static func * (a: _ColorMatrix, b: _ColorMatrix) -> _ColorMatrix {
+        _ColorMatrix(a.colorMatrix.concatenating(b.colorMatrix))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(m11)
+        try container.encode(m12)
+        try container.encode(m13)
+        try container.encode(m14)
+        try container.encode(m15)
+        try container.encode(m21)
+        try container.encode(m22)
+        try container.encode(m23)
+        try container.encode(m24)
+        try container.encode(m25)
+        try container.encode(m31)
+        try container.encode(m32)
+        try container.encode(m33)
+        try container.encode(m34)
+        try container.encode(m35)
+        try container.encode(m41)
+        try container.encode(m42)
+        try container.encode(m43)
+        try container.encode(m44)
+        try container.encode(m45)
+    }
+
+    public init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        self.m11 = try container.decode(Float.self)
+        self.m12 = try container.decode(Float.self)
+        self.m13 = try container.decode(Float.self)
+        self.m14 = try container.decode(Float.self)
+        self.m15 = try container.decode(Float.self)
+        self.m21 = try container.decode(Float.self)
+        self.m22 = try container.decode(Float.self)
+        self.m23 = try container.decode(Float.self)
+        self.m24 = try container.decode(Float.self)
+        self.m25 = try container.decode(Float.self)
+        self.m31 = try container.decode(Float.self)
+        self.m32 = try container.decode(Float.self)
+        self.m33 = try container.decode(Float.self)
+        self.m34 = try container.decode(Float.self)
+        self.m35 = try container.decode(Float.self)
+        self.m41 = try container.decode(Float.self)
+        self.m42 = try container.decode(Float.self)
+        self.m43 = try container.decode(Float.self)
+        self.m44 = try container.decode(Float.self)
+        self.m45 = try container.decode(Float.self)
+    }
+}
+
 extension Color {
     public func applying(_ m: ColorMatrix) -> Color {
         let r = Float(provider.red)

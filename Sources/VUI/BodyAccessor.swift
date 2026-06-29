@@ -34,6 +34,10 @@ protocol BodyAccessor {
     mutating func updateBody(of container: Container, changed: Bool) -> Body
 }
 
+// Category marker for the default View.body accessor path.
+protocol DSLBodyAccessor: BodyAccessor {
+}
+
 // DynamicBody
 // StatefulRule that computes Body when the container has DynamicProperties.
 // updateValue(): reads container (dep), applies DynamicProperty field updates, calls body.
@@ -136,7 +140,7 @@ struct EnvironmentalBodyAccessor<E: EnvironmentalModifier>: BodyAccessor {
 // BodyAccessor conformance for View.body.
 // View._makeView currently uses withObservationTracking directly.
 // ViewBodyAccessor is kept for the alternate body access path.
-struct ViewBodyAccessor<V: View>: BodyAccessor {
+struct ViewBodyAccessor<V: View>: DSLBodyAccessor {
     typealias Container = V
     typealias Body = V.Body
 

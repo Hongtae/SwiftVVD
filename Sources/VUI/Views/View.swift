@@ -151,6 +151,13 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
 protocol _PrimitiveView {
 }
 
+// Category markers used while primitive view families are split by role.
+protocol PrimitiveSpacer: View where Body == Never {
+}
+
+protocol LeafViewLayout {
+}
+
 extension _PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")

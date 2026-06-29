@@ -24,9 +24,11 @@ enum _RendererEffectSupport {
         }
 
         var outputs = body(_Graph(), inputs)
+        let position = inputs.base.cachedEnvironment.value.animatedFrame?._animatedPosition ?? inputs.position
         applyRendererEffect(
             to: &outputs.preferences,
             effect: effect._attribute,
+            position: position,
             size: inputs.size,
             graph: graph
         )
@@ -49,6 +51,7 @@ enum _RendererEffectSupport {
     private static func applyRendererEffect<Effect: _RendererEffect>(
         to preferences: inout PreferencesOutputs,
         effect: Attribute<Effect>,
+        position: Attribute<CGPoint>,
         size: Attribute<ViewSize>,
         graph: AttributeGraph
     ) {
@@ -57,6 +60,7 @@ enum _RendererEffectSupport {
 
         let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
         let transformedAttr: Attribute<DisplayList> = graph.makeRule {
+            _ = position.value
             var combined = DisplayList.Key.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
                 let list = Attribute<DisplayList>(weakNode.toStrong()).value

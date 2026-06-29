@@ -1,5 +1,23 @@
 import XCTest
+import VVD
 @testable import VUI
+
+private final class ProbeTexture: Texture {
+    var width: Int { 1 }
+    var height: Int { 1 }
+    var depth: Int { 1 }
+    var mipmapCount: Int { 1 }
+    var arrayLength: Int { 1 }
+    var sampleCount: Int { 1 }
+    var type: TextureType { .type2D }
+    var pixelFormat: PixelFormat { .rgba8Unorm }
+    var isTransient: Bool { false }
+    var device: GraphicsDevice { fatalError("ProbeTexture.device is unused.") }
+
+    func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
+        nil
+    }
+}
 
 private enum InterpolatableContentProbeLog {
     nonisolated(unsafe) static var modifyTransitionCalls = 0
@@ -31,6 +49,84 @@ private struct VersionedTransitionContent: Equatable, InterpolatableContent {
 }
 
 final class InterpolatableContentDisplayListTests: XCTestCase {
+    func testPrivateColorMatrixSurface() throws {
+        XCTAssertEqual(_ColorMatrix(), _ColorMatrix(_ColorMatrix().colorMatrix))
+
+        var color = _ColorMatrix(color: Color(red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6), in: EnvironmentValues())
+        XCTAssertEqual(color.m11, 0.25)
+        XCTAssertEqual(color.m22, 0.5)
+        XCTAssertEqual(color.m33, 0.75)
+        XCTAssertEqual(color.m44, 0.6)
+        XCTAssertEqual(color.m15, 0)
+        XCTAssertEqual(color.m25, 0)
+        XCTAssertEqual(color.m35, 0)
+        XCTAssertEqual(color.m45, 0)
+
+        var a = _ColorMatrix()
+        a.m11 = 2
+        a.m12 = 3
+        a.m13 = 5
+        a.m14 = 7
+        a.m15 = 11
+        a.m21 = 13
+        a.m22 = 17
+        a.m23 = 19
+        a.m24 = 23
+        a.m25 = 29
+        a.m31 = 31
+        a.m32 = 37
+        a.m33 = 41
+        a.m34 = 43
+        a.m35 = 47
+        a.m41 = 53
+        a.m42 = 59
+        a.m43 = 61
+        a.m44 = 67
+        a.m45 = 71
+
+        var b = _ColorMatrix()
+        b.m11 = 73
+        b.m12 = 79
+        b.m13 = 83
+        b.m14 = 89
+        b.m15 = 97
+        b.m21 = 101
+        b.m22 = 103
+        b.m23 = 107
+        b.m24 = 109
+        b.m25 = 113
+        b.m31 = 127
+        b.m32 = 131
+        b.m33 = 137
+        b.m34 = 139
+        b.m35 = 149
+        b.m41 = 151
+        b.m42 = 157
+        b.m43 = 163
+        b.m44 = 167
+        b.m45 = 173
+
+        let product = a * b
+        XCTAssertEqual(product.m11, 2141)
+        XCTAssertEqual(product.m12, 2221)
+        XCTAssertEqual(product.m13, 2313)
+        XCTAssertEqual(product.m14, 2369)
+        XCTAssertEqual(product.m15, 2500)
+        XCTAssertEqual(product.m21, 8552)
+        XCTAssertEqual(product.m25, 10021)
+        XCTAssertEqual(product.m31, 17700)
+        XCTAssertEqual(product.m35, 20783)
+        XCTAssertEqual(product.m41, 27692)
+        XCTAssertEqual(product.m45, 32559)
+
+        let data = try JSONEncoder().encode(a)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "[2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71]")
+        XCTAssertEqual(try JSONDecoder().decode(_ColorMatrix.self, from: data), a)
+
+        color.m11 = 1
+        XCTAssertNotEqual(color, _ColorMatrix(color: Color(red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6), in: EnvironmentValues()))
+    }
+
     func testDisplayListSeedSurface() {
         XCTAssertEqual(DisplayList.Seed().value, 0)
         XCTAssertEqual(DisplayList.Seed(decodedValue: 42).value, 42)
@@ -129,6 +225,740 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .image)
         XCTAssertEqual(layer.removedCount, 0)
+    }
+
+    func testDisplayListShapeRoleParticipatesInSurfaceMatching() {
+        var fill = DisplayList()
+        fill.appendShapeItem(
+            role: .fill,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ) { _ in }
+
+        var sameFill = DisplayList()
+        sameFill.appendShapeItem(
+            role: .fill,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ) { _ in }
+
+        var stroke = DisplayList()
+        stroke.appendShapeItem(
+            role: .stroke,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ) { _ in }
+
+        var separator = DisplayList()
+        separator.appendShapeItem(
+            role: .separator,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+        ) { _ in }
+
+        XCTAssertEqual(fill.itemRecords.first?.kind, .shapeFill)
+        XCTAssertEqual(stroke.itemRecords.first?.kind, .shapeStroke)
+        XCTAssertEqual(separator.itemRecords.first?.kind, .shapeSeparator)
+        XCTAssertTrue(fill.hasSameInterpolationSurface(as: sameFill))
+        XCTAssertFalse(fill.hasSameInterpolationSurface(as: stroke))
+        XCTAssertFalse(fill.hasSameInterpolationSurface(as: separator))
+        XCTAssertFalse(stroke.hasSameInterpolationSurface(as: separator))
+    }
+
+    func testDisplayListShapeColorPayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        var red = DisplayList()
+        red.appendShapeItem(role: .fill, style: Color.red, bounds: bounds) { _ in }
+
+        var sameRed = DisplayList()
+        sameRed.appendShapeItem(role: .fill, style: Color.red, bounds: bounds) { _ in }
+
+        var blue = DisplayList()
+        blue.appendShapeItem(role: .fill, style: Color.blue, bounds: bounds) { _ in }
+
+        XCTAssertEqual(red.itemRecords.first?.shapeStyle, .color(.red))
+        XCTAssertEqual(blue.itemRecords.first?.shapeStyle, .color(.blue))
+        XCTAssertTrue(red.hasSameInterpolationSurface(as: sameRed))
+        XCTAssertFalse(red.hasSameInterpolationSurface(as: blue))
+    }
+
+    func testDisplayListShapeStyleFamilyParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let redBlue = Gradient(colors: [.red, .blue])
+        let blueGreen = Gradient(colors: [.blue, .green])
+
+        var gradient = DisplayList()
+        gradient.appendShapeItem(role: .fill, style: redBlue, bounds: bounds) { _ in }
+
+        var sameGradient = DisplayList()
+        sameGradient.appendShapeItem(role: .fill, style: redBlue, bounds: bounds) { _ in }
+
+        var changedGradient = DisplayList()
+        changedGradient.appendShapeItem(role: .fill, style: blueGreen, bounds: bounds) { _ in }
+
+        var erasedGradient = DisplayList()
+        erasedGradient.appendShapeItem(
+            role: .fill,
+            style: AnyShapeStyle(redBlue),
+            bounds: bounds
+        ) { _ in }
+
+        var color = DisplayList()
+        color.appendShapeItem(role: .fill, style: Color.red, bounds: bounds) { _ in }
+
+        var foreground = DisplayList()
+        foreground.appendShapeItem(role: .fill, style: ForegroundStyle(), bounds: bounds) { _ in }
+
+        var background = DisplayList()
+        background.appendShapeItem(role: .fill, style: BackgroundStyle(), bounds: bounds) { _ in }
+
+        XCTAssertEqual(gradient.itemRecords.first?.shapeStyle, .gradient(redBlue))
+        XCTAssertEqual(changedGradient.itemRecords.first?.shapeStyle, .gradient(blueGreen))
+        XCTAssertTrue(gradient.hasSameInterpolationSurface(as: sameGradient))
+        XCTAssertTrue(gradient.hasSameInterpolationSurface(as: erasedGradient))
+        XCTAssertFalse(gradient.hasSameInterpolationSurface(as: changedGradient))
+        XCTAssertFalse(gradient.hasSameInterpolationSurface(as: color))
+        XCTAssertEqual(foreground.itemRecords.first?.shapeStyle, .color(Color(.sRGB, white: 0.145)))
+        XCTAssertEqual(background.itemRecords.first?.shapeStyle, .color(Color(.sRGB, white: 1)))
+        XCTAssertFalse(foreground.hasSameInterpolationSurface(as: background))
+    }
+
+    func testDisplayListShapeFillStyleParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let nonZero = FillStyle(eoFill: false, antialiased: true)
+        let evenOdd = FillStyle(eoFill: true, antialiased: true)
+
+        var source = DisplayList()
+        source.appendShapeItem(
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: nonZero
+        ) { _ in }
+
+        var same = DisplayList()
+        same.appendShapeItem(
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: nonZero
+        ) { _ in }
+
+        var changed = DisplayList()
+        changed.appendShapeItem(
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: evenOdd
+        ) { _ in }
+
+        XCTAssertEqual(source.itemRecords.first?.fillStyle, nonZero)
+        XCTAssertEqual(changed.itemRecords.first?.fillStyle, evenOdd)
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changed))
+    }
+
+    func testDisplayListShapeStrokeStyleParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let thinStyle = StrokeStyle(lineWidth: 1)
+        let thickStyle = StrokeStyle(lineWidth: 4)
+
+        var thin = DisplayList()
+        thin.appendShapeItem(
+            role: .stroke,
+            style: Color.red,
+            bounds: bounds,
+            strokeStyle: thinStyle
+        ) { _ in }
+
+        var sameThin = DisplayList()
+        sameThin.appendShapeItem(
+            role: .stroke,
+            style: Color.red,
+            bounds: bounds,
+            strokeStyle: thinStyle
+        ) { _ in }
+
+        var thick = DisplayList()
+        thick.appendShapeItem(
+            role: .stroke,
+            style: Color.red,
+            bounds: bounds,
+            strokeStyle: thickStyle
+        ) { _ in }
+
+        XCTAssertEqual(thin.itemRecords.first?.strokeStyle, thinStyle)
+        XCTAssertEqual(thick.itemRecords.first?.strokeStyle, thickStyle)
+        XCTAssertTrue(thin.hasSameInterpolationSurface(as: sameThin))
+        XCTAssertFalse(thin.hasSameInterpolationSurface(as: thick))
+    }
+
+    func testDisplayListImagePayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+
+        var source = DisplayList()
+        source.appendImageItem(makeResolvedImage(), bounds: bounds) { _ in }
+
+        var same = DisplayList()
+        same.appendImageItem(makeResolvedImage(), bounds: bounds) { _ in }
+
+        var changedBaseline = DisplayList()
+        changedBaseline.appendImageItem(makeResolvedImage(baseline: 2), bounds: bounds) { _ in }
+
+        var changedTransform = DisplayList()
+        changedTransform.appendImageItem(
+            makeResolvedImage(textureTransform: CGAffineTransform(translationX: 1, y: 0)),
+            bounds: bounds
+        ) { _ in }
+
+        var changedScale = DisplayList()
+        changedScale.appendImageItem(makeResolvedImage(scaleFactor: 2), bounds: bounds) { _ in }
+
+        var changedShadingPresence = DisplayList()
+        changedShadingPresence.appendImageItem(
+            makeResolvedImage(shading: .color(.red)),
+            bounds: bounds
+        ) { _ in }
+
+        var sameRedShading = DisplayList()
+        sameRedShading.appendImageItem(
+            makeResolvedImage(shading: .color(.red)),
+            bounds: bounds
+        ) { _ in }
+
+        var changedShadingColor = DisplayList()
+        changedShadingColor.appendImageItem(
+            makeResolvedImage(shading: .color(.blue)),
+            bounds: bounds
+        ) { _ in }
+
+        let texture = ProbeTexture()
+        var sameTexture = DisplayList()
+        sameTexture.appendImageItem(makeResolvedImage(texture: texture), bounds: bounds) { _ in }
+
+        var sameTextureAgain = DisplayList()
+        sameTextureAgain.appendImageItem(makeResolvedImage(texture: texture), bounds: bounds) { _ in }
+
+        var differentTexture = DisplayList()
+        differentTexture.appendImageItem(makeResolvedImage(texture: ProbeTexture()), bounds: bounds) { _ in }
+
+        XCTAssertEqual(source.itemRecords.first?.image?.baseline, 1)
+        XCTAssertEqual(changedScale.itemRecords.first?.image?.scaleFactor, 2)
+        XCTAssertFalse(source.itemRecords.first?.image?.hasShading ?? true)
+        XCTAssertTrue(changedShadingPresence.itemRecords.first?.image?.hasShading ?? false)
+        XCTAssertEqual(changedShadingPresence.itemRecords.first?.image?.shading, .color(.red))
+        XCTAssertEqual(changedShadingColor.itemRecords.first?.image?.shading, .color(.blue))
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedBaseline))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedTransform))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedScale))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedShadingPresence))
+        XCTAssertTrue(changedShadingPresence.hasSameInterpolationSurface(as: sameRedShading))
+        XCTAssertFalse(changedShadingPresence.hasSameInterpolationSurface(as: changedShadingColor))
+        XCTAssertTrue(sameTexture.hasSameInterpolationSurface(as: sameTextureAgain))
+        XCTAssertFalse(sameTexture.hasSameInterpolationSurface(as: differentTexture))
+    }
+
+    func testDisplayListTextForegroundPayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+
+        var red = DisplayList()
+        red.appendTextItem(foreground: .color(.red), bounds: bounds) { _ in }
+
+        var sameRed = DisplayList()
+        sameRed.appendTextItem(foreground: .color(.red), bounds: bounds) { _ in }
+
+        var blue = DisplayList()
+        blue.appendTextItem(foreground: .color(.blue), bounds: bounds) { _ in }
+
+        XCTAssertEqual(red.itemRecords.first?.text?.foreground, .color(.red))
+        XCTAssertEqual(blue.itemRecords.first?.text?.foreground, .color(.blue))
+        XCTAssertTrue(red.hasSameInterpolationSurface(as: sameRed))
+        XCTAssertFalse(red.hasSameInterpolationSurface(as: blue))
+    }
+
+    func testDisplayListCustomPayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+
+        var source = DisplayList()
+        source.appendCustomItem(
+            bounds: bounds,
+            isOpaque: false,
+            colorMode: .nonLinear,
+            rendersAsynchronously: false
+        ) { _ in }
+
+        var same = DisplayList()
+        same.appendCustomItem(
+            bounds: bounds,
+            isOpaque: false,
+            colorMode: .nonLinear,
+            rendersAsynchronously: false
+        ) { _ in }
+
+        var changedOpacity = DisplayList()
+        changedOpacity.appendCustomItem(
+            bounds: bounds,
+            isOpaque: true,
+            colorMode: .nonLinear,
+            rendersAsynchronously: false
+        ) { _ in }
+
+        var changedColorMode = DisplayList()
+        changedColorMode.appendCustomItem(
+            bounds: bounds,
+            isOpaque: false,
+            colorMode: .linear,
+            rendersAsynchronously: false
+        ) { _ in }
+
+        var changedAsync = DisplayList()
+        changedAsync.appendCustomItem(
+            bounds: bounds,
+            isOpaque: false,
+            colorMode: .nonLinear,
+            rendersAsynchronously: true
+        ) { _ in }
+
+        XCTAssertEqual(source.itemRecords.first?.kind, .custom)
+        XCTAssertEqual(source.itemRecords.first?.custom?.isOpaque, false)
+        XCTAssertEqual(source.itemRecords.first?.custom?.colorMode, .nonLinear)
+        XCTAssertEqual(source.itemRecords.first?.custom?.rendersAsynchronously, false)
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedOpacity))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedColorMode))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedAsync))
+    }
+
+    func testCanvasMakeViewEmitsCustomDisplayListItem() throws {
+        let graph = AttributeGraph()
+
+        try AttributeGraph.$current.withValue(graph) {
+            let canvas = Canvas(
+                opaque: true,
+                colorMode: .extendedLinear,
+                rendersAsynchronously: true
+            ) { _, _ in
+            }
+            let canvasAttr = graph.makeInput(value: canvas)
+            let outputs = Canvas<EmptyView>._makeView(
+                view: _GraphValue(_attribute: canvasAttr),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let list = Attribute<DisplayList>(outputID).value
+
+            XCTAssertEqual(list.items.count, 1)
+            XCTAssertEqual(list.itemRecords.first?.kind, .custom)
+            XCTAssertEqual(list.itemRecords.first?.bounds, CGRect(x: 0, y: 0, width: 10, height: 10))
+            XCTAssertEqual(list.itemRecords.first?.custom?.isOpaque, true)
+            XCTAssertEqual(list.itemRecords.first?.custom?.colorMode, .extendedLinear)
+            XCTAssertEqual(list.itemRecords.first?.custom?.rendersAsynchronously, true)
+            XCTAssertEqual(list.interpolationBounds, CGRect(x: 0, y: 0, width: 10, height: 10))
+        }
+    }
+
+    func testBlendModeMapsToGraphicsContextBlendMode() {
+        let expected: [(BlendMode, GraphicsContext.BlendMode)] = [
+            (.normal, .normal),
+            (.multiply, .multiply),
+            (.screen, .screen),
+            (.overlay, .overlay),
+            (.darken, .darken),
+            (.lighten, .lighten),
+            (.colorDodge, .colorDodge),
+            (.colorBurn, .colorBurn),
+            (.softLight, .softLight),
+            (.hardLight, .hardLight),
+            (.difference, .difference),
+            (.exclusion, .exclusion),
+            (.hue, .hue),
+            (.saturation, .saturation),
+            (.color, .color),
+            (.luminosity, .luminosity),
+            (.sourceAtop, .sourceAtop),
+            (.destinationOver, .destinationOver),
+            (.destinationOut, .destinationOut),
+            (.plusDarker, .plusDarker),
+            (.plusLighter, .plusLighter),
+        ]
+
+        for (blendMode, graphicsBlendMode) in expected {
+            XCTAssertEqual(
+                blendMode.graphicsContextBlendMode,
+                graphicsBlendMode
+            )
+        }
+    }
+
+    func testGraphicsContextColorInvertFilterUsesColorDiagonal() throws {
+        let filter = GraphicsContext.Filter.colorInvert(0.25)
+        guard case let .colorMatrix(matrix) = filter.style else {
+            return XCTFail("Expected color matrix filter.")
+        }
+
+        XCTAssertEqual(matrix.r1, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(matrix.g2, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(matrix.b3, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(matrix.b2, 0, accuracy: 0.000001)
+        XCTAssertEqual(matrix.r5, 0.25, accuracy: 0.000001)
+        XCTAssertEqual(matrix.g5, 0.25, accuracy: 0.000001)
+        XCTAssertEqual(matrix.b5, 0.25, accuracy: 0.000001)
+    }
+
+    func testDisplayListBlendModePayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+
+        var multiply = DisplayList()
+        multiply.appendBlendModeItem(bounds: bounds, blendMode: .multiply) { _ in }
+
+        var sameMultiply = DisplayList()
+        sameMultiply.appendBlendModeItem(bounds: bounds, blendMode: .multiply) { _ in }
+
+        var screen = DisplayList()
+        screen.appendBlendModeItem(bounds: bounds, blendMode: .screen) { _ in }
+
+        XCTAssertEqual(multiply.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(multiply.itemRecords.first?.effectKind, .blendMode)
+        XCTAssertEqual(multiply.itemRecords.first?.blendMode, .multiply)
+        XCTAssertEqual(screen.itemRecords.first?.blendMode, .screen)
+        XCTAssertTrue(multiply.hasSameInterpolationSurface(as: sameMultiply))
+        XCTAssertFalse(multiply.hasSameInterpolationSurface(as: screen))
+    }
+
+    func testDisplayListShadowPayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let red = Color.red.resolve(in: EnvironmentValues())
+        let blue = Color.blue.resolve(in: EnvironmentValues())
+
+        var source = DisplayList()
+        source.appendShadowItem(
+            bounds: bounds,
+            color: red,
+            radius: 2,
+            offset: CGSize(width: 3, height: 4)
+        ) { _ in }
+
+        var same = DisplayList()
+        same.appendShadowItem(
+            bounds: bounds,
+            color: red,
+            radius: 2,
+            offset: CGSize(width: 3, height: 4)
+        ) { _ in }
+
+        var changedRadius = DisplayList()
+        changedRadius.appendShadowItem(
+            bounds: bounds,
+            color: red,
+            radius: 4,
+            offset: CGSize(width: 3, height: 4)
+        ) { _ in }
+
+        var changedOffset = DisplayList()
+        changedOffset.appendShadowItem(
+            bounds: bounds,
+            color: red,
+            radius: 2,
+            offset: CGSize(width: 4, height: 3)
+        ) { _ in }
+
+        var changedColor = DisplayList()
+        changedColor.appendShadowItem(
+            bounds: bounds,
+            color: blue,
+            radius: 2,
+            offset: CGSize(width: 3, height: 4)
+        ) { _ in }
+
+        XCTAssertEqual(source.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(source.itemRecords.first?.effectKind, .shadow)
+        XCTAssertEqual(source.itemRecords.first?.shadow?.color, red)
+        XCTAssertEqual(source.itemRecords.first?.shadow?.radius, 2)
+        XCTAssertEqual(source.itemRecords.first?.shadow?.offset, CGSize(width: 3, height: 4))
+        XCTAssertEqual(source.itemRecords.first?.shadow?.blendModeRawValue, GraphicsContext.BlendMode.normal.rawValue)
+        XCTAssertEqual(source.itemRecords.first?.shadow?.optionsRawValue, 0)
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedRadius))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedOffset))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedColor))
+    }
+
+    func testDisplayListColorFilterPayloadParticipatesInSurfaceMatching() {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let red = Color.red.resolve(in: EnvironmentValues())
+        let blue = Color.blue.resolve(in: EnvironmentValues())
+
+        var brightness = DisplayList()
+        brightness.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .brightness,
+                amount: 0.2
+            )
+        ) { _ in }
+
+        var sameBrightness = DisplayList()
+        sameBrightness.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .brightness,
+                amount: 0.2
+            )
+        ) { _ in }
+
+        var changedBrightness = DisplayList()
+        changedBrightness.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .brightness,
+                amount: 0.4
+            )
+        ) { _ in }
+
+        var contrastWithSameAmount = DisplayList()
+        contrastWithSameAmount.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .contrast,
+                amount: 0.2
+            )
+        ) { _ in }
+
+        var multiplyRed = DisplayList()
+        multiplyRed.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMultiply,
+                amount: 1,
+                color: red
+            )
+        ) { _ in }
+
+        var sameMultiplyRed = DisplayList()
+        sameMultiplyRed.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMultiply,
+                amount: 1,
+                color: red
+            )
+        ) { _ in }
+
+        var multiplyBlue = DisplayList()
+        multiplyBlue.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMultiply,
+                amount: 1,
+                color: blue
+            )
+        ) { _ in }
+
+        var matrix = ColorMatrix()
+        matrix.r1 = 0.5
+        matrix.g2 = 0.75
+        var colorMatrix = DisplayList()
+        colorMatrix.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMatrix,
+                amount: 1,
+                matrix: matrix
+            )
+        ) { _ in }
+
+        var sameColorMatrix = DisplayList()
+        sameColorMatrix.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMatrix,
+                amount: 1,
+                matrix: matrix
+            )
+        ) { _ in }
+
+        var changedMatrix = matrix
+        changedMatrix.b3 = 0.25
+        var changedColorMatrix = DisplayList()
+        changedColorMatrix.appendColorFilterItem(
+            bounds: bounds,
+            filter: DisplayList.ItemRecord.ColorFilterRecord(
+                kind: .colorMatrix,
+                amount: 1,
+                matrix: changedMatrix
+            )
+        ) { _ in }
+
+        XCTAssertEqual(brightness.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(brightness.itemRecords.first?.effectKind, .colorFilter)
+        XCTAssertEqual(brightness.itemRecords.first?.colorFilter?.kind, .brightness)
+        XCTAssertEqual(brightness.itemRecords.first?.colorFilter?.amount, 0.2)
+        XCTAssertNil(brightness.itemRecords.first?.colorFilter?.color)
+        XCTAssertEqual(multiplyRed.itemRecords.first?.colorFilter?.kind, .colorMultiply)
+        XCTAssertEqual(multiplyRed.itemRecords.first?.colorFilter?.color, red)
+        XCTAssertEqual(colorMatrix.itemRecords.first?.colorFilter?.kind, .colorMatrix)
+        XCTAssertEqual(colorMatrix.itemRecords.first?.colorFilter?.matrix, matrix)
+        XCTAssertTrue(brightness.hasSameInterpolationSurface(as: sameBrightness))
+        XCTAssertFalse(brightness.hasSameInterpolationSurface(as: changedBrightness))
+        XCTAssertFalse(brightness.hasSameInterpolationSurface(as: contrastWithSameAmount))
+        XCTAssertTrue(multiplyRed.hasSameInterpolationSurface(as: sameMultiplyRed))
+        XCTAssertFalse(multiplyRed.hasSameInterpolationSurface(as: multiplyBlue))
+        XCTAssertTrue(colorMatrix.hasSameInterpolationSurface(as: sameColorMatrix))
+        XCTAssertFalse(colorMatrix.hasSameInterpolationSurface(as: changedColorMatrix))
+    }
+
+    func testBlendModeEffectWrapsDisplayListWithGraphicsContextBlendMode() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: bounds,
+            itemKind: .shapeFill
+        )
+
+        let multiplied = try displayList(
+            applying: _BlendModeEffect(blendMode: .multiply),
+            to: source
+        )
+        XCTAssertEqual(multiplied.items.count, 1)
+        XCTAssertEqual(multiplied.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(multiplied.itemRecords.first?.effectKind, .blendMode)
+        XCTAssertEqual(multiplied.itemRecords.first?.blendMode, .multiply)
+        XCTAssertEqual(multiplied.itemRecords.first?.bounds, bounds)
+
+        let normal = try displayList(
+            applying: _BlendModeEffect(blendMode: .normal),
+            to: source
+        )
+        XCTAssertEqual(normal.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(normal.itemRecords.first?.effectKind)
+        XCTAssertNil(normal.itemRecords.first?.blendMode)
+    }
+
+    func testShadowEffectWrapsDisplayListWithGraphicsContextShadow() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: bounds,
+            itemKind: .shapeFill
+        )
+        let red = Color.red.resolve(in: EnvironmentValues())
+
+        let shadowed = try displayList(
+            applying: _ShadowEffect(
+                color: .red,
+                radius: 2,
+                offset: CGSize(width: 3, height: 4)
+            ),
+            to: source
+        )
+
+        XCTAssertEqual(shadowed.items.count, 1)
+        XCTAssertEqual(shadowed.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(shadowed.itemRecords.first?.effectKind, .shadow)
+        XCTAssertEqual(shadowed.itemRecords.first?.shadow?.color, red)
+        XCTAssertEqual(shadowed.itemRecords.first?.shadow?.radius, 2)
+        XCTAssertEqual(shadowed.itemRecords.first?.shadow?.offset, CGSize(width: 3, height: 4))
+        XCTAssertEqual(shadowed.itemRecords.first?.bounds, bounds)
+
+        let transparent = try displayList(
+            applying: _ShadowEffect(
+                color: .clear,
+                radius: 2,
+                offset: CGSize(width: 3, height: 4)
+            ),
+            to: source
+        )
+        XCTAssertEqual(transparent.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(transparent.itemRecords.first?.effectKind)
+        XCTAssertNil(transparent.itemRecords.first?.shadow)
+    }
+
+    func testColorFilterEffectsWrapDisplayListWithGraphicsContextFilters() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: bounds,
+            itemKind: .shapeFill
+        )
+
+        let brightened = try displayList(
+            applying: _BrightnessEffect(amount: 0.2),
+            to: source
+        )
+        XCTAssertEqual(brightened.items.count, 1)
+        XCTAssertEqual(brightened.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(brightened.itemRecords.first?.effectKind, .colorFilter)
+        XCTAssertEqual(brightened.itemRecords.first?.colorFilter?.kind, .brightness)
+        XCTAssertEqual(brightened.itemRecords.first?.colorFilter?.amount, 0.2)
+        XCTAssertEqual(brightened.itemRecords.first?.bounds, bounds)
+
+        let identityBrightness = try displayList(
+            applying: _BrightnessEffect(amount: 0),
+            to: source
+        )
+        XCTAssertEqual(identityBrightness.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(identityBrightness.itemRecords.first?.effectKind)
+        XCTAssertNil(identityBrightness.itemRecords.first?.colorFilter)
+
+        let hueRotated = try displayList(
+            applying: _HueRotationEffect(angle: .radians(.pi / 2)),
+            to: source
+        )
+        let hueRecord = try XCTUnwrap(hueRotated.itemRecords.first?.colorFilter)
+        XCTAssertEqual(hueRecord.kind, .hueRotation)
+        XCTAssertEqual(hueRecord.amount, .pi / 2, accuracy: 0.000001)
+
+        let inverted = try displayList(
+            applying: _ColorInvertEffect(),
+            to: source
+        )
+        XCTAssertEqual(inverted.itemRecords.first?.colorFilter?.kind, .colorInvert)
+
+        let luminanceToAlpha = try displayList(
+            applying: _LuminanceToAlphaEffect(),
+            to: source
+        )
+        XCTAssertEqual(luminanceToAlpha.itemRecords.first?.colorFilter?.kind, .luminanceToAlpha)
+
+        var matrix = _ColorMatrix()
+        matrix.m11 = 0.5
+        matrix.m22 = 0.75
+        let matrixFiltered = try displayList(
+            applying: _ColorMatrixEffect(matrix: matrix),
+            to: source
+        )
+        XCTAssertEqual(matrixFiltered.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(matrixFiltered.itemRecords.first?.effectKind, .colorFilter)
+        XCTAssertEqual(matrixFiltered.itemRecords.first?.colorFilter?.kind, .colorMatrix)
+        XCTAssertEqual(matrixFiltered.itemRecords.first?.colorFilter?.matrix, matrix.colorMatrix)
+
+        let identityMatrix = try displayList(
+            applying: _ColorMatrixEffect(matrix: _ColorMatrix()),
+            to: source
+        )
+        XCTAssertEqual(identityMatrix.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(identityMatrix.itemRecords.first?.effectKind)
+        XCTAssertNil(identityMatrix.itemRecords.first?.colorFilter)
+
+        let red = Color.red.resolve(in: EnvironmentValues())
+        let multiplied = try displayList(
+            applying: _ColorMultiplyEffect._Resolved(color: red),
+            to: source
+        )
+        XCTAssertEqual(multiplied.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(multiplied.itemRecords.first?.effectKind, .colorFilter)
+        XCTAssertEqual(multiplied.itemRecords.first?.colorFilter?.kind, .colorMultiply)
+        XCTAssertEqual(multiplied.itemRecords.first?.colorFilter?.color, red)
+
+        let white = Color.white.resolve(in: EnvironmentValues())
+        let identityMultiply = try displayList(
+            applying: _ColorMultiplyEffect._Resolved(color: white),
+            to: source
+        )
+        XCTAssertEqual(identityMultiply.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(identityMultiply.itemRecords.first?.effectKind)
+        XCTAssertNil(identityMultiply.itemRecords.first?.colorFilter)
     }
 
     func testDisplayListEffectItemRecordKindParticipatesInSurfaceMatching() {
@@ -266,6 +1096,63 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             effectItem.contents.interpolationBounds,
             CGRect(x: 10, y: 2.5, width: 20, height: 30)
         )
+    }
+
+    func testRBDisplayListInterpolatorEndpointPreservesTargetEffectFallback() throws {
+        let sourceState = ContentTransition.State(transition: .opacity)
+        let targetState = ContentTransition.State(transition: .identity)
+        var source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 20),
+            itemKind: .shapeFill
+        )
+        source.appendEffect(
+            .contentTransition(sourceState),
+            contents: makeDisplayList(
+                debugItemCount: 0,
+                itemCount: 1,
+                bounds: CGRect(x: 5, y: 5, width: 10, height: 10),
+                itemKind: .shapeFill
+            )
+        )
+        var target = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 20, y: 5, width: 30, height: 40),
+            itemKind: .shapeFill
+        )
+        target.appendEffect(
+            .contentTransition(targetState),
+            contents: makeDisplayList(
+                debugItemCount: 0,
+                itemCount: 1,
+                bounds: CGRect(x: 30, y: 15, width: 20, height: 25),
+                itemKind: .shapeFill
+            )
+        )
+
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: sourceState.transition.rbTransition]
+        )
+        let sourceEndpoint = interpolator.copyContents(withProgress: 0)
+        let targetEndpoint = interpolator.copyContents(withProgress: 1)
+
+        switch sourceEndpoint.effects.first?.effect {
+        case let .contentTransition(state):
+            XCTAssertEqual(state, sourceState)
+        default:
+            XCTFail("Expected source content-transition effect.")
+        }
+        switch targetEndpoint.effects.first?.effect {
+        case let .contentTransition(state):
+            XCTAssertEqual(state, targetState)
+        default:
+            XCTFail("Expected target content-transition effect.")
+        }
+        XCTAssertEqual(targetEndpoint.effects.first?.contents.interpolationBounds, CGRect(x: 30, y: 15, width: 20, height: 25))
     }
 
     func testRBDisplayListInterpolatorKeepsNestedEffectCarrierForAnimationIndexTransition() throws {
@@ -646,6 +1533,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             geometryContents.interpolationBounds,
             CGRect(x: 3, y: 4, width: 10, height: 10)
         )
+
+        let blendModeOutput = try displayList(
+            applying: _BlendModeEffect(blendMode: .multiply),
+            to: source
+        )
+        let blendModeContents = try contentTransitionContents(in: blendModeOutput)
+        XCTAssertEqual(blendModeContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(blendModeContents.itemRecords.first?.effectKind, .blendMode)
+        XCTAssertEqual(blendModeContents.itemRecords.first?.blendMode, .multiply)
+
+        let shadowOutput = try displayList(
+            applying: _ShadowEffect(
+                color: .red,
+                radius: 2,
+                offset: CGSize(width: 3, height: 4)
+            ),
+            to: source
+        )
+        let shadowContents = try contentTransitionContents(in: shadowOutput)
+        XCTAssertEqual(shadowContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(shadowContents.itemRecords.first?.effectKind, .shadow)
+        XCTAssertEqual(shadowContents.itemRecords.first?.shadow?.radius, 2)
+        XCTAssertEqual(shadowContents.itemRecords.first?.shadow?.offset, CGSize(width: 3, height: 4))
+
+        let brightnessOutput = try displayList(
+            applying: _BrightnessEffect(amount: 0.2),
+            to: source
+        )
+        let brightnessContents = try contentTransitionContents(in: brightnessOutput)
+        XCTAssertEqual(brightnessContents.itemRecords.first?.kind, .effect)
+        XCTAssertEqual(brightnessContents.itemRecords.first?.effectKind, .colorFilter)
+        XCTAssertEqual(brightnessContents.itemRecords.first?.colorFilter?.kind, .brightness)
+        XCTAssertEqual(brightnessContents.itemRecords.first?.colorFilter?.amount, 0.2)
     }
 
     func testDisplayListModifierPayloadsParticipateInSurfaceMatching() throws {
@@ -676,6 +1596,58 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             to: source
         ))
         XCTAssertFalse(blurA.hasSameInterpolationSurface(as: opaqueBlur))
+
+        let multiplyBlend = try contentTransitionContents(in: displayList(
+            applying: _BlendModeEffect(blendMode: .multiply),
+            to: source
+        ))
+        let screenBlend = try contentTransitionContents(in: displayList(
+            applying: _BlendModeEffect(blendMode: .screen),
+            to: source
+        ))
+        XCTAssertFalse(multiplyBlend.hasSameInterpolationSurface(as: screenBlend))
+
+        let shadowA = try contentTransitionContents(in: displayList(
+            applying: _ShadowEffect(
+                color: .red,
+                radius: 2,
+                offset: CGSize(width: 3, height: 4)
+            ),
+            to: source
+        ))
+        let shadowB = try contentTransitionContents(in: displayList(
+            applying: _ShadowEffect(
+                color: .red,
+                radius: 4,
+                offset: CGSize(width: 3, height: 4)
+            ),
+            to: source
+        ))
+        XCTAssertFalse(shadowA.hasSameInterpolationSurface(as: shadowB))
+
+        let brightnessA = try contentTransitionContents(in: displayList(
+            applying: _BrightnessEffect(amount: 0.2),
+            to: source
+        ))
+        let brightnessB = try contentTransitionContents(in: displayList(
+            applying: _BrightnessEffect(amount: 0.4),
+            to: source
+        ))
+        XCTAssertFalse(brightnessA.hasSameInterpolationSurface(as: brightnessB))
+
+        let redMultiply = try contentTransitionContents(in: displayList(
+            applying: _ColorMultiplyEffect._Resolved(
+                color: Color.red.resolve(in: EnvironmentValues())
+            ),
+            to: source
+        ))
+        let blueMultiply = try contentTransitionContents(in: displayList(
+            applying: _ColorMultiplyEffect._Resolved(
+                color: Color.blue.resolve(in: EnvironmentValues())
+            ),
+            to: source
+        ))
+        XCTAssertFalse(redMultiply.hasSameInterpolationSurface(as: blueMultiply))
     }
 
     func testRBDisplayListInterpolatorUsesSurfaceRecordsForChangeDetection() {
@@ -1069,6 +2041,30 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         XCTAssertFalse(customInterpolator.onlyFades)
 
+        let highBitOpacityTransition = RBTransition()
+        let highBitOpacityEffect = RBTransitionEffect()
+        highBitOpacityEffect.type = 0x100 | ContentTransition.EffectType.opacity.type
+        highBitOpacityEffect.events = 3
+        highBitOpacityTransition.addEffect(highBitOpacityEffect)
+        let highBitOpacityInterpolator = RBDisplayListInterpolator(
+            from: from,
+            to: to,
+            options: [.transition: highBitOpacityTransition]
+        )
+        XCTAssertTrue(highBitOpacityInterpolator.onlyFades)
+
+        let highBitTranslationTransition = RBTransition()
+        let highBitTranslationEffect = RBTransitionEffect()
+        highBitTranslationEffect.type = 0x100 | ContentTransition.EffectType.translation(.zero).type
+        highBitTranslationEffect.events = 3
+        highBitTranslationTransition.addEffect(highBitTranslationEffect)
+        let highBitTranslationInterpolator = RBDisplayListInterpolator(
+            from: from,
+            to: to,
+            options: [.transition: highBitTranslationTransition]
+        )
+        XCTAssertFalse(highBitTranslationInterpolator.onlyFades)
+
         let effectSamples: [(ContentTransition.EffectType, Bool)] = [
             (.opacity, true),
             (.scale(0.5), false),
@@ -1457,6 +2453,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(secondCurve.evaluateAtTime(1), 0.5, accuracy: 0.001)
 
         let effects = RBAnimationSequencerEffects()
+        XCTAssertEqual(effects.delayOffset, 0)
+        XCTAssertEqual(effects.delayScale, 0)
         effects.delayOffset = 0.25
         effects.delayScale = 2
 
@@ -1473,6 +2471,31 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(sequencer.endPoint, CGPoint(x: 3, y: 4))
         XCTAssertEqual(sequencer.added?.delayOffset, 0.25)
         XCTAssertEqual(sequencer.added?.delayScale, 2)
+        XCTAssertEqual(
+            sequencer.evalDelay(at: CGPoint(x: 3, y: 4), phase: .added) ?? -1,
+            2.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            sequencer.evalDelay(at: CGPoint(x: 3, y: 4), phase: .mixed) ?? -1,
+            0,
+            accuracy: 0.0005
+        )
+
+        sequencer.distanceMode = 0
+        sequencer.startPoint = CGPoint(x: 0, y: 100)
+        sequencer.endPoint = CGPoint(x: 100, y: 100)
+        sequencer.mixed = effects
+        XCTAssertEqual(
+            sequencer.evalDelay(at: CGPoint(x: 35, y: 25), phase: .mixed) ?? -1,
+            0.95,
+            accuracy: 0.0005
+        )
+
+        sequencer.distanceMode = 1
+        sequencer.startPoint = CGPoint(x: 35, y: 25)
+        sequencer.endPoint = CGPoint(x: 35, y: 25)
+        XCTAssertNil(sequencer.evalDelay(at: CGPoint(x: 35, y: 25), phase: .mixed))
 
         let matchingEffects = RBAnimationSequencerEffects()
         matchingEffects.delayOffset = 0.25
@@ -1490,6 +2513,78 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(sequencer.isEqual(sequencer))
         XCTAssertFalse(sequencer.isEqual(matchingSequencer))
         XCTAssertFalse(sequencer.responds(to: NSSelectorFromString("copyWithZone:")))
+
+        let phaseSequencer = RBAnimationSequencer()
+        phaseSequencer.startPoint = .zero
+        phaseSequencer.endPoint = CGPoint(x: 10, y: 0)
+        let addedEffects = RBAnimationSequencerEffects()
+        addedEffects.delayOffset = 10
+        addedEffects.delayScale = 2
+        let mixedEffects = RBAnimationSequencerEffects()
+        mixedEffects.delayOffset = 20
+        mixedEffects.delayScale = 2
+        let removedEffects = RBAnimationSequencerEffects()
+        removedEffects.delayOffset = 30
+        removedEffects.delayScale = 2
+        phaseSequencer.added = addedEffects
+        phaseSequencer.mixed = mixedEffects
+        phaseSequencer.removed = removedEffects
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 0))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 1))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 2))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 3))
+        XCTAssertFalse(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 4))
+        XCTAssertFalse(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 5))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 6))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 7))
+        XCTAssertFalse(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 8))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 9))
+        XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 15))
+        XCTAssertEqual(
+            phaseSequencer.evalDelay(at: CGPoint(x: 5, y: 0), animatedOperationType: 0) ?? -1,
+            31,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            phaseSequencer.evalDelay(at: CGPoint(x: 5, y: 0), animatedOperationType: 1) ?? -1,
+            11,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            phaseSequencer.evalDelay(at: CGPoint(x: 5, y: 0), animatedOperationType: 2) ?? -1,
+            21,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            phaseSequencer.evalDelay(at: CGPoint(x: 5, y: 0), animatedOperationType: 7) ?? -1,
+            21,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationDelay(byAddingSequencerDelay: 0.75, to: 1.25),
+            2,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationDelay(byAddingSequencerDelay: 0, to: 1.25),
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationDelay(byAddingSequencerDelay: -0.75, to: 1.25),
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationDelay(byAddingSequencerDelay: nil, to: 1.25),
+            1.25,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationDelay(byAddingSequencerDelay: .infinity, to: 1.25),
+            1.25,
+            accuracy: 0.0005
+        )
     }
 
     func testRBDisplayListInterpolatorSequencerDurationSurface() {
@@ -1625,6 +2720,18 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 )
             ).activeDuration,
             2.009999990463257,
+            accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            makeInterpolator(
+                makeSequencer(
+                    distanceMode: 0,
+                    startPoint: CGPoint(x: 0, y: 100),
+                    endPoint: CGPoint(x: 100, y: 100),
+                    mixed: makeEffects(offset: 0.25, scale: 2)
+                )
+            ).activeDuration,
+            1.95,
             accuracy: 0.0005
         )
         XCTAssertEqual(
@@ -1953,6 +3060,30 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         unary.reset()
         XCTAssertEqual(unary.layer.removedCount, 0)
         XCTAssertFalse(unary.supportsVariableFrameDuration)
+    }
+
+    func testUnaryInterpolatorGroupSetCurrentContentsSynchronizesLayerState() {
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        let target = makeDisplayList(debugItemCount: 2)
+        var rasterizationOptions = RasterizationOptions()
+        rasterizationOptions.isAccelerated = true
+        rasterizationOptions.alphaOnly = true
+
+        unary.setCurrentContents(
+            contentSeed: DisplayList.Seed(decodedValue: 11),
+            target: target,
+            time: Time(seconds: 3.5),
+            supportsVFD: true,
+            rasterizationOptions: rasterizationOptions
+        )
+
+        XCTAssertEqual(unary.lastContentSeed, DisplayList.Seed(decodedValue: 11))
+        XCTAssertTrue(unary.supportsVariableFrameDuration)
+        XCTAssertEqual(unary.rasterizationOptions, rasterizationOptions)
+        XCTAssertEqual(unary.layer.contents.version?.value, 11)
+        XCTAssertEqual(unary.layer.contents.displayList.debugItems.count, 2)
+        XCTAssertEqual(unary.layer.currentTime.seconds, 3.5)
+        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 3.5)
     }
 
     func testInterpolatorLayerOnlyRetainsWhenTransitionStateIsSupplied() {
@@ -2408,13 +3539,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
     private func makeResolvedImage(
         baseline: CGFloat = 1,
+        shading: GraphicsContext.Shading? = nil,
+        texture: Texture? = nil,
         textureTransform: CGAffineTransform = .identity,
         scaleFactor: CGFloat = 1
     ) -> GraphicsContext.ResolvedImage {
         GraphicsContext.ResolvedImage(
             baseline: baseline,
-            shading: nil,
-            texture: nil,
+            shading: shading,
+            texture: texture,
             textureTransform: textureTransform,
             scaleFactor: scaleFactor
         )

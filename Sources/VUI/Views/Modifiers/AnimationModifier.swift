@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
+public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier where Value: Equatable {
     public var animation: Animation?
     public var value: Value
 
@@ -52,6 +52,10 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
 }
 
 extension _AnimationModifier: Equatable {
+}
+
+@available(*, unavailable)
+extension _AnimationModifier: Sendable {
 }
 
 private struct AnimationModifierTransactionRule<Observed: Equatable>: StatefulRule {
