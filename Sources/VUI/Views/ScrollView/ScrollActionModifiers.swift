@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import CoreGraphics
+import Foundation
 
 /// Extra geometry and velocity payload supplied to phase-change callbacks.
 public struct ScrollPhaseChangeContext {

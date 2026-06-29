@@ -47,6 +47,18 @@ public enum CGLineJoin: Int32, Sendable {
     case bevel = 2
 }
 
+public struct CGVector: Hashable, Sendable {
+    public var dx: CGFloat
+    public var dy: CGFloat
+
+    public init(dx: CGFloat, dy: CGFloat) {
+        self.dx = dx
+        self.dy = dy
+    }
+
+    public static let zero = CGVector(dx: 0.0, dy: 0.0)
+}
+
 #endif
 
 extension Float: VectorArithmetic {

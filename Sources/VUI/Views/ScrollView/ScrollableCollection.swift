@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import CoreGraphics
+import Foundation
 
 /// Bitset describing scrollable child groups that should stay pinned.
 struct PinnedScrollableViews: OptionSet, Hashable, Sendable {

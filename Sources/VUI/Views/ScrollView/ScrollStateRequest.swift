@@ -5,7 +5,6 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import CoreGraphics
 import Foundation
 
 /// Runtime scroll target that can apply queued scroll state requests.

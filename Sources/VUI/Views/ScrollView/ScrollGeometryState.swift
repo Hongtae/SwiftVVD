@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import CoreGraphics
+import Foundation
 
 /// Preference payload that couples scroll geometry with its active axes and transform.
 struct ScrollGeometryState: Equatable {

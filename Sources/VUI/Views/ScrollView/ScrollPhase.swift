@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import CoreGraphics
+import Foundation
 
 /// User-visible phase of a scroll interaction.
 public enum ScrollPhase: Hashable, CustomDebugStringConvertible, Sendable {
