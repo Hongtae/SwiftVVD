@@ -182,10 +182,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         if !from.items.isEmpty || !to.items.isEmpty {
             appendInterpolatedItems(
                 fromItems: from.items,
-                fromRecords: from.itemRecords,
+                fromCommands: from.itemCommands,
                 fromFallbackBounds: fromBounds,
                 toItems: to.items,
-                toRecords: to.itemRecords,
+                toCommands: to.itemCommands,
                 toFallbackBounds: toBounds,
                 outputFallbackBounds: outputBounds,
                 progress: clampedProgress,
@@ -196,10 +196,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         if !from.debugItems.isEmpty || !to.debugItems.isEmpty {
             appendInterpolatedDebugItems(
                 fromItems: from.debugItems,
-                fromRecords: from.debugItemRecords,
+                fromCommands: from.debugItemCommands,
                 fromFallbackBounds: fromBounds,
                 toItems: to.debugItems,
-                toRecords: to.debugItemRecords,
+                toCommands: to.debugItemCommands,
                 toFallbackBounds: toBounds,
                 outputFallbackBounds: outputBounds,
                 progress: clampedProgress,
@@ -219,10 +219,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func appendInterpolatedItems(
         fromItems: [DisplayList.Item],
-        fromRecords: [DisplayList.ItemRecord],
+        fromCommands: [DisplayList.ItemCommand],
         fromFallbackBounds: CGRect,
         toItems: [DisplayList.Item],
-        toRecords: [DisplayList.ItemRecord],
+        toCommands: [DisplayList.ItemCommand],
         toFallbackBounds: CGRect,
         outputFallbackBounds: CGRect,
         progress: CGFloat,
@@ -230,14 +230,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) {
         if canInterpolateRecordedItems(
             fromItems: fromItems,
-            fromRecords: fromRecords,
+            fromCommands: fromCommands,
             toItems: toItems,
-            toRecords: toRecords
+            toCommands: toCommands
         ) {
             let pairedCount = min(fromItems.count, toItems.count)
             for index in 0..<pairedCount {
-                let sourceBounds = fromRecords[index].bounds!
-                let targetBounds = toRecords[index].bounds!
+                let sourceBounds = fromCommands[index].bounds!
+                let targetBounds = toCommands[index].bounds!
                 let outputBounds = interpolatedBounds(
                     from: sourceBounds,
                     to: targetBounds,
@@ -269,13 +269,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
             appendSourceExtraItems(
                 fromItems[pairedCount...],
-                records: fromRecords[pairedCount...],
+                commands: fromCommands[pairedCount...],
                 progress: progress,
                 into: &contents
             )
             appendTargetExtraItems(
                 toItems[pairedCount...],
-                records: toRecords[pairedCount...],
+                commands: toCommands[pairedCount...],
                 progress: progress,
                 into: &contents
             )
@@ -306,10 +306,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func appendInterpolatedDebugItems(
         fromItems: [DisplayList.Item],
-        fromRecords: [DisplayList.ItemRecord],
+        fromCommands: [DisplayList.ItemCommand],
         fromFallbackBounds: CGRect,
         toItems: [DisplayList.Item],
-        toRecords: [DisplayList.ItemRecord],
+        toCommands: [DisplayList.ItemCommand],
         toFallbackBounds: CGRect,
         outputFallbackBounds: CGRect,
         progress: CGFloat,
@@ -317,14 +317,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) {
         if canInterpolateMatchingRecordedItems(
             fromItems: fromItems,
-            fromRecords: fromRecords,
+            fromCommands: fromCommands,
             toItems: toItems,
-            toRecords: toRecords
+            toCommands: toCommands
         ) {
             let pairedCount = min(fromItems.count, toItems.count)
             for index in 0..<pairedCount {
-                let sourceBounds = fromRecords[index].bounds!
-                let targetBounds = toRecords[index].bounds!
+                let sourceBounds = fromCommands[index].bounds!
+                let targetBounds = toCommands[index].bounds!
                 let outputBounds = interpolatedBounds(
                     from: sourceBounds,
                     to: targetBounds,
@@ -372,12 +372,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func appendSourceExtraItems(
         _ items: ArraySlice<DisplayList.Item>,
-        records: ArraySlice<DisplayList.ItemRecord>,
+        commands: ArraySlice<DisplayList.ItemCommand>,
         progress: CGFloat,
         into contents: inout DisplayList
     ) {
-        for (item, record) in zip(items, records) {
-            let bounds = record.bounds!
+        for (item, command) in zip(items, commands) {
+            let bounds = command.bounds!
             contents.appendCrossFadeItem(
                 bounds: bounds,
                 sourceFraction: Float(progress),
@@ -396,12 +396,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func appendTargetExtraItems(
         _ items: ArraySlice<DisplayList.Item>,
-        records: ArraySlice<DisplayList.ItemRecord>,
+        commands: ArraySlice<DisplayList.ItemCommand>,
         progress: CGFloat,
         into contents: inout DisplayList
     ) {
-        for (item, record) in zip(items, records) {
-            let bounds = record.bounds!
+        for (item, command) in zip(items, commands) {
+            let bounds = command.bounds!
             contents.appendCrossFadeItem(
                 bounds: bounds,
                 sourceFraction: 0,
@@ -533,9 +533,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         if !fromList.items.isEmpty || !toList.items.isEmpty {
             guard let itemBounds = interpolatedRecordedItemBounds(
                 fromItems: fromList.items,
-                fromRecords: fromList.itemRecords,
+                fromCommands: fromList.itemCommands,
                 toItems: toList.items,
-                toRecords: toList.itemRecords,
+                toCommands: toList.itemCommands,
                 progress: progress,
                 allowsCountMismatch: true
             ) else { return nil }
@@ -545,9 +545,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         if !fromList.debugItems.isEmpty || !toList.debugItems.isEmpty {
             guard let debugBounds = interpolatedRecordedItemBounds(
                 fromItems: fromList.debugItems,
-                fromRecords: fromList.debugItemRecords,
+                fromCommands: fromList.debugItemCommands,
                 toItems: toList.debugItems,
-                toRecords: toList.debugItemRecords,
+                toCommands: toList.debugItemCommands,
                 progress: progress,
                 allowsCountMismatch: false
             ) else { return nil }
@@ -606,18 +606,18 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
         if canInterpolateRecordedItems(
             fromItems: source.items,
-            fromRecords: source.itemRecords,
+            fromCommands: source.itemCommands,
             toItems: target.items,
-            toRecords: target.itemRecords
+            toCommands: target.itemCommands
         ) {
             return true
         }
 
         if canInterpolateMatchingRecordedItems(
             fromItems: source.debugItems,
-            fromRecords: source.debugItemRecords,
+            fromCommands: source.debugItemCommands,
             toItems: target.debugItems,
-            toRecords: target.debugItemRecords
+            toCommands: target.debugItemCommands
         ) {
             return true
         }
@@ -648,41 +648,41 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func interpolatedRecordedItemBounds(
         fromItems: [DisplayList.Item],
-        fromRecords: [DisplayList.ItemRecord],
+        fromCommands: [DisplayList.ItemCommand],
         toItems: [DisplayList.Item],
-        toRecords: [DisplayList.ItemRecord],
+        toCommands: [DisplayList.ItemCommand],
         progress: CGFloat,
         allowsCountMismatch: Bool
     ) -> CGRect? {
         let canInterpolate = allowsCountMismatch
             ? canInterpolateRecordedItems(
                 fromItems: fromItems,
-                fromRecords: fromRecords,
+                fromCommands: fromCommands,
                 toItems: toItems,
-                toRecords: toRecords
+                toCommands: toCommands
             )
             : canInterpolateMatchingRecordedItems(
                 fromItems: fromItems,
-                fromRecords: fromRecords,
+                fromCommands: fromCommands,
                 toItems: toItems,
-                toRecords: toRecords
+                toCommands: toCommands
             )
         guard canInterpolate else { return nil }
 
-        let pairedCount = min(fromRecords.count, toRecords.count)
+        let pairedCount = min(fromCommands.count, toCommands.count)
         var bounds = (0..<pairedCount).reduce(nil) { partial, index in
             let bounds = interpolatedBounds(
-                from: fromRecords[index].bounds!,
-                to: toRecords[index].bounds!,
+                from: fromCommands[index].bounds!,
+                to: toCommands[index].bounds!,
                 progress: progress
             )
             return union(partial, bounds)
         }
-        bounds = fromRecords[pairedCount...].reduce(bounds) { partial, record in
-            union(partial, record.bounds!)
+        bounds = fromCommands[pairedCount...].reduce(bounds) { partial, command in
+            union(partial, command.bounds!)
         }
-        bounds = toRecords[pairedCount...].reduce(bounds) { partial, record in
-            union(partial, record.bounds!)
+        bounds = toCommands[pairedCount...].reduce(bounds) { partial, command in
+            union(partial, command.bounds!)
         }
         return bounds
     }
@@ -695,32 +695,32 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func canInterpolateRecordedItems(
         fromItems: [DisplayList.Item],
-        fromRecords: [DisplayList.ItemRecord],
+        fromCommands: [DisplayList.ItemCommand],
         toItems: [DisplayList.Item],
-        toRecords: [DisplayList.ItemRecord]
+        toCommands: [DisplayList.ItemCommand]
     ) -> Bool {
         guard !fromItems.isEmpty,
               !toItems.isEmpty,
-              fromRecords.count == fromItems.count,
-              toRecords.count == toItems.count else {
+              fromCommands.count == fromItems.count,
+              toCommands.count == toItems.count else {
             return false
         }
-        return fromRecords.allSatisfy { $0.bounds != nil } &&
-            toRecords.allSatisfy { $0.bounds != nil }
+        return fromCommands.allSatisfy { $0.bounds != nil } &&
+            toCommands.allSatisfy { $0.bounds != nil }
     }
 
     private static func canInterpolateMatchingRecordedItems(
         fromItems: [DisplayList.Item],
-        fromRecords: [DisplayList.ItemRecord],
+        fromCommands: [DisplayList.ItemCommand],
         toItems: [DisplayList.Item],
-        toRecords: [DisplayList.ItemRecord]
+        toCommands: [DisplayList.ItemCommand]
     ) -> Bool {
         fromItems.count == toItems.count &&
             canInterpolateRecordedItems(
                 fromItems: fromItems,
-                fromRecords: fromRecords,
+                fromCommands: fromCommands,
                 toItems: toItems,
-                toRecords: toRecords
+                toCommands: toCommands
             )
     }
 

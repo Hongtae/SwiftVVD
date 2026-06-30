@@ -168,7 +168,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(renderItemCount, 6)
     }
 
-    func testDisplayListItemsCarryRecordMetadataWithClosureStorage() throws {
+    func testDisplayListItemsDeriveRecordsFromTypedCommands() throws {
         var source = DisplayList()
         source.appendItem(
             kind: .image,
@@ -186,9 +186,55 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(copied.itemRecords.first?.bounds, CGRect(x: 1, y: 2, width: 3, height: 4))
         XCTAssertEqual(copied.debugItemRecords.first?.kind, .debug)
         XCTAssertEqual(copied.debugItemRecords.first?.bounds, CGRect(x: 5, y: 6, width: 7, height: 8))
+
+        guard case let .image(image, imageBounds)? = copied.items.first?.command else {
+            XCTFail("missing image command")
+            return
+        }
+        XCTAssertEqual(imageBounds, CGRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertEqual(image.scaleFactor, 1)
+        XCTAssertFalse(image.hasShading)
+
+        guard case let .debug(debugBounds)? = copied.debugItems.first?.command else {
+            XCTFail("missing debug command")
+            return
+        }
+        XCTAssertEqual(debugBounds, CGRect(x: 5, y: 6, width: 7, height: 8))
+
+        var shape = DisplayList()
+        shape.appendShapeItem(
+            role: .stroke,
+            style: Color.red,
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10),
+            strokeStyle: StrokeStyle(lineWidth: 2)
+        ) { _ in }
+        guard case let .shape(role, style, _, strokeStyle, bounds)? = shape.items.first?.command else {
+            XCTFail("missing shape command")
+            return
+        }
+        XCTAssertEqual(role, .stroke)
+        XCTAssertEqual(style, .color(.red))
+        XCTAssertEqual(strokeStyle, StrokeStyle(lineWidth: 2))
+        XCTAssertEqual(bounds, CGRect(x: 0, y: 0, width: 10, height: 10))
+        XCTAssertEqual(shape.itemRecords.first?.kind, .shapeStroke)
+        XCTAssertEqual(shape.itemRecords.first?.shapeStyle, .color(.red))
+
+        var opacity = DisplayList()
+        opacity.appendOpacityItem(
+            bounds: CGRect(x: 0, y: 0, width: 10, height: 10),
+            opacity: 0.25
+        ) { _ in }
+        guard case let .effect(.opacity(opacityValue), opacityBounds)? = opacity.items.first?.command else {
+            XCTFail("missing opacity command")
+            return
+        }
+        XCTAssertEqual(opacityValue, 0.25)
+        XCTAssertEqual(opacityBounds, CGRect(x: 0, y: 0, width: 10, height: 10))
+        XCTAssertEqual(opacity.itemRecords.first?.effectKind, .opacity)
+        XCTAssertEqual(opacity.itemRecords.first?.opacity, 0.25)
     }
 
-    func testDisplayListItemRecordsParticipateInLayerSurfaceMatching() {
+    func testDisplayListItemCommandsParticipateInLayerSurfaceMatching() {
         var layer = DisplayList.InterpolatorLayer()
         let first = makeDisplayList(
             debugItemCount: 0,
@@ -1204,7 +1250,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(midpoint.contents.itemRecords, baselineMidpoint.contents.itemRecords)
     }
 
-    func testRBDisplayListInterpolatorUsesItemRecordBoundsForMultiItemInterpolation() {
+    func testRBDisplayListInterpolatorUsesItemCommandBoundsForMultiItemInterpolation() {
         let source = makeDisplayList(
             itemBounds: [
                 CGRect(x: 0, y: 0, width: 10, height: 10),
@@ -1242,6 +1288,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: 15, y: 5, width: 10, height: 15),
             ]
         )
+        XCTAssertEqual(sourceEndpoint.itemCommands.map(\.bounds), sourceEndpoint.itemRecords.map(\.bounds))
         XCTAssertEqual(sourceEndpoint.interpolationBounds, CGRect(x: 0, y: 0, width: 25, height: 20))
 
         let midpoint = interpolator.copyContents(withProgress: 0.5)
@@ -1257,6 +1304,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: 10, y: 15, width: 12.5, height: 12.5),
             ]
         )
+        XCTAssertEqual(midpoint.itemCommands.map(\.bounds), midpoint.itemRecords.map(\.bounds))
         XCTAssertEqual(midpoint.interpolationBounds, CGRect(x: 10, y: 5, width: 15, height: 22.5))
 
         let targetEndpoint = interpolator.copyContents(withProgress: 1)
@@ -1272,6 +1320,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: 5, y: 25, width: 15, height: 10),
             ]
         )
+        XCTAssertEqual(targetEndpoint.itemCommands.map(\.bounds), targetEndpoint.itemRecords.map(\.bounds))
         XCTAssertEqual(targetEndpoint.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
 
         let reversedTarget = makeDisplayList(
@@ -1452,7 +1501,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(midpoint.interpolationBounds, expectedMidpointBounds)
     }
 
-    func testRBDisplayListInterpolatorUsesNestedEffectItemRecordBounds() throws {
+    func testRBDisplayListInterpolatorUsesNestedEffectItemCommandBounds() throws {
         let state = ContentTransition.State(transition: .opacity)
         let source = DisplayList.effect(
             .contentTransition(state),
