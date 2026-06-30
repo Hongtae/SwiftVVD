@@ -66,6 +66,36 @@ struct DisplayList {
         var contents: DisplayList
     }
 
+    // Backend-local style metadata recorded on the display list before exact private style
+    // storage and renderer lowering exist.
+    enum StyleCommand: Equatable {
+        struct AnimationStyle: Equatable {
+            static let defaultFlags: UInt32 = 0x111
+
+            var animation: RBAnimation
+            var id: UUID?
+            var flags: UInt32
+
+            init(
+                animation: RBAnimation,
+                id: UUID?,
+                flags: UInt32
+            ) {
+                self.animation = animation.copy() as? RBAnimation ?? RBAnimation()
+                self.id = id
+                self.flags = flags
+            }
+
+            static func == (lhs: AnimationStyle, rhs: AnimationStyle) -> Bool {
+                lhs.animation.isEqual(rhs.animation) &&
+                    lhs.id == rhs.id &&
+                    lhs.flags == rhs.flags
+            }
+        }
+
+        case animation(AnimationStyle)
+    }
+
     // Lightweight render-item summary used by interpolation before backend typed
     // commands replace closure-backed drawing.
     struct ItemRecord: Equatable {
@@ -441,6 +471,7 @@ struct DisplayList {
     var items: [Item] = []
     var debugItems: [Item] = []
     var effects: [EffectItem] = []
+    var styles: [StyleCommand] = []
     // Backend-local bounds used by display-list interpolation before exact private command storage exists.
     var interpolationBounds: CGRect?
 
@@ -464,6 +495,7 @@ struct DisplayList {
         self.items.append(contentsOf: other.items)
         self.debugItems.append(contentsOf: other.debugItems)
         self.effects.append(contentsOf: other.effects)
+        self.styles.append(contentsOf: other.styles)
         self.recordInterpolationBounds(other.interpolationBounds)
     }
 
@@ -692,6 +724,18 @@ struct DisplayList {
         recordInterpolationBounds(contents.interpolationBounds)
     }
 
+    mutating func appendAnimationStyle(
+        _ animation: RBAnimation,
+        id: UUID? = nil,
+        flags: UInt32 = StyleCommand.AnimationStyle.defaultFlags
+    ) {
+        styles.append(.animation(StyleCommand.AnimationStyle(
+            animation: animation,
+            id: id,
+            flags: flags
+        )))
+    }
+
     private static func itemRecordBounds(_ bounds: CGRect?) -> CGRect? {
         guard let bounds = bounds?.standardized,
               !bounds.isNull,
@@ -900,6 +944,7 @@ struct DisplayList {
             commands: debugItemCommands,
             otherCommands: other.debugItemCommands
         ) &&
+            styles == other.styles &&
             effectSurfaceMatches(effects, other.effects) &&
             interpolationBounds == other.interpolationBounds
     }

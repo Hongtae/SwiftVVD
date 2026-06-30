@@ -85,4 +85,35 @@ final class AnimationFinishingDefinitionTests: XCTestCase {
             )
         )
     }
+
+    func testFluidSpringAnimateUsesInstalledViewFrameFinishingDefinition() {
+        var environment = EnvironmentValues()
+        environment.defaultPixelLength = 2
+        let target = ViewFrame.AnimatableData(
+            CGPoint(x: 1.0, y: 1.0).animatableData,
+            ViewSize(width: 3.0, height: 3.0).animatableData
+        )
+        let spring = FluidSpringAnimationBox(
+            response: 0.35,
+            dampingFraction: 0.7,
+            blendDuration: 0
+        )
+
+        var plainContext = AnimationContext<ViewFrame.AnimatableData>(
+            state: AnimationState(),
+            environment: environment
+        )
+        XCTAssertNotNil(
+            spring.animate(value: target, time: 0, context: &plainContext)
+        )
+
+        var finishingContext = makeAnimationContext(
+            for: ViewFrame.self,
+            state: AnimationState<ViewFrame.AnimatableData>(),
+            environment: environment
+        )
+        XCTAssertNil(
+            spring.animate(value: target, time: 0, context: &finishingContext)
+        )
+    }
 }

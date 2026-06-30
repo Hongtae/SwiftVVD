@@ -235,7 +235,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         XCTAssertEqual(completionRecorder.events, ["active removed"])
     }
 
-    func testNoAnimationRetargetBeforeLogicalDrainFinishesRemovedBeforeLogicalOnce() {
+    func testNoAnimationRetargetBeforeLogicalDrainKeepsSplitLogicalBeforeRemoved() {
         let completionRecorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
@@ -253,7 +253,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.2)
+        harness.setTime(0.4)
+        _ = harness.currentValue()
+        harness.setTime(0.6)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(beforeRetarget, 0)
         XCTAssertLessThan(beforeRetarget, 1)
@@ -271,25 +273,84 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(5.0)
+        harness.setTime(1.25)
         _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["active logical"])
+
+        completionRecorder.removeAll()
+        harness.setTime(2.05)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["active removed"])
+
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["active removed"])
+    }
+
+    func testNoAnimationRetargetOwnCompletionFallsBackWhileOldRecordsStayPending() {
+        let completionRecorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: completionTransaction(
+                animation: Animation.linear(duration: 1).logicallyComplete(after: 0.8),
+                label: "active",
+                recorder: completionRecorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(completionRecorder.events, [])
+
+        harness.setTime(0.4)
+        _ = harness.currentValue()
+        harness.setTime(0.6)
+        let beforeRetarget = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(beforeRetarget, 0)
+        XCTAssertLessThan(beforeRetarget, 1)
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, [])
+
+        let nilTransaction = completionTransaction(
+            animation: nil,
+            label: "nil",
+            recorder: completionRecorder
+        )
+        withTransaction(nilTransaction) {
+            harness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 2))
+        }
+        let afterRetarget = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(afterRetarget, beforeRetarget)
+        XCTAssertLessThan(afterRetarget, 2)
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
             [
-                "active removed",
-                "active logical",
+                "nil removed",
+                "nil logical",
             ]
         )
 
+        completionRecorder.removeAll()
+        harness.setTime(1.25)
+        _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "active removed",
-                "active logical",
-            ]
-        )
+        XCTAssertEqual(completionRecorder.events, ["active logical"])
+
+        completionRecorder.removeAll()
+        harness.setTime(2.05)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["active removed"])
+
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["active removed"])
     }
 
     private func makeStartedLogicalSplitHarness(

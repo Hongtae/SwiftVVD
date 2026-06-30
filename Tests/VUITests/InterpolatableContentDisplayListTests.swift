@@ -273,6 +273,68 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(layer.removedCount, 0)
     }
 
+    func testDisplayListAnimationStyleParticipatesInSurfaceMatching() throws {
+        let id = try XCTUnwrap(UUID(uuidString: "00112233-4455-6677-8899-AABBCCDDEEFF"))
+        let animation = RBAnimation()
+        animation.addBezierDuration(
+            2,
+            controlPoint1: CGPoint(x: 0.25, y: 0),
+            controlPoint2: CGPoint(x: 0.75, y: 1)
+        )
+
+        var source = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        source.appendAnimationStyle(animation, id: id)
+
+        let matchingAnimation = RBAnimation()
+        matchingAnimation.addBezierDuration(
+            2,
+            controlPoint1: CGPoint(x: 0.25, y: 0),
+            controlPoint2: CGPoint(x: 0.75, y: 1)
+        )
+        var same = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        same.appendAnimationStyle(matchingAnimation, id: id)
+
+        guard case let .animation(style)? = source.styles.first else {
+            XCTFail("missing animation style")
+            return
+        }
+        XCTAssertEqual(style.id, id)
+        XCTAssertEqual(style.flags, DisplayList.StyleCommand.AnimationStyle.defaultFlags)
+        XCTAssertTrue(style.animation.isEqual(matchingAnimation))
+        XCTAssertFalse(style.animation === animation)
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+
+        animation.addDelay(1)
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+
+        var changedAnimation = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        let delayedAnimation = RBAnimation()
+        delayedAnimation.addDelay(1)
+        delayedAnimation.addBezierDuration(
+            2,
+            controlPoint1: CGPoint(x: 0.25, y: 0),
+            controlPoint2: CGPoint(x: 0.75, y: 1)
+        )
+        changedAnimation.appendAnimationStyle(delayedAnimation, id: id)
+
+        var changedID = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        changedID.appendAnimationStyle(
+            matchingAnimation,
+            id: try XCTUnwrap(UUID(uuidString: "FFEEDDCC-BBAA-9988-7766-554433221100"))
+        )
+
+        var changedFlags = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
+        changedFlags.appendAnimationStyle(matchingAnimation, id: id, flags: 0x211)
+
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedAnimation))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedID))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedFlags))
+
+        var appended = DisplayList()
+        appended.append(contentsOf: source)
+        XCTAssertEqual(appended.styles, source.styles)
+    }
+
     func testDisplayListShapeRoleParticipatesInSurfaceMatching() {
         var fill = DisplayList()
         fill.appendShapeItem(
@@ -2501,6 +2563,68 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(secondCurve.activeDuration, 2)
         XCTAssertEqual(secondCurve.evaluateAtTime(1), 0.5, accuracy: 0.001)
 
+        var animationTable = RBAnimationTable(defaultAnimationIndex: 3)
+        let emptyTableAnimation = RBAnimation()
+        let tableAnimation = RBAnimation()
+        tableAnimation.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let matchingTableAnimation = RBAnimation()
+        matchingTableAnimation.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let delayedTableAnimation = RBAnimation()
+        delayedTableAnimation.addDelay(0.5)
+        delayedTableAnimation.addBezierDuration(
+            2,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+
+        XCTAssertEqual(animationTable.internAnimation(nil), 3)
+        XCTAssertEqual(animationTable.internAnimation(emptyTableAnimation), -1)
+        XCTAssertEqual(animationTable.internAnimation(tableAnimation), 1)
+        XCTAssertEqual(animationTable.internAnimation(matchingTableAnimation), 1)
+        XCTAssertEqual(animationTable.internAnimation(delayedTableAnimation), 2)
+        XCTAssertEqual(animationTable.entries.count, 2)
+        XCTAssertEqual(animationTable.entries[0].index, 1)
+        XCTAssertEqual(animationTable.entries[0].activeDuration, 2)
+        XCTAssertEqual(animationTable.animation(at: 1)?.activeDuration, 2)
+        XCTAssertNil(animationTable.animation(at: 0))
+        tableAnimation.addDelay(10)
+        XCTAssertEqual(animationTable.animation(at: 1)?.activeDuration, 2)
+        XCTAssertEqual(
+            animationTable.evaluate(animationIndex: 1, time: 1),
+            0.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            animationTable.evaluate(animationIndex: 1, sequence: 7, time: 1),
+            0.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(animationTable.evaluate(animationIndex: 0, time: 0.25), 0.25)
+        XCTAssertEqual(animationTable.evaluate(animationIndex: -2, time: 0.25), 0.25)
+        XCTAssertEqual(animationTable.evaluate(animationIndex: -1, time: 0), 0)
+        XCTAssertEqual(animationTable.evaluate(animationIndex: -1, time: 0.25), 1)
+        XCTAssertEqual(animationTable.activeDuration(animationIndex: 2), 2.5)
+        XCTAssertEqual(animationTable.maximumDuration(animationIndex: 0), 1)
+        XCTAssertEqual(animationTable.maximumDuration(animationIndex: 2), 2.5)
+        XCTAssertEqual(
+            animationTable.maxSpeed(animationIndex: 1, time: 1),
+            0.75,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            animationTable.maxSpeed(atTime: 1),
+            0.75,
+            accuracy: 0.001
+        )
+
         let effects = RBAnimationSequencerEffects()
         XCTAssertEqual(effects.delayOffset, 0)
         XCTAssertEqual(effects.delayScale, 0)
@@ -2590,6 +2714,38 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 9))
         XCTAssertTrue(RBAnimationSequencer.canCarryAnimationIndex(operationLowNibble: 15))
         XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationIndex(
+                operationLowNibble: 4,
+                resolvedAnimationIndex: 7,
+                defaultAnimationIndex: 3
+            ),
+            -1
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationIndex(
+                operationLowNibble: 8,
+                resolvedAnimationIndex: nil,
+                defaultAnimationIndex: 3
+            ),
+            -1
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationIndex(
+                operationLowNibble: 2,
+                resolvedAnimationIndex: 7,
+                defaultAnimationIndex: 3
+            ),
+            7
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationIndex(
+                operationLowNibble: 2,
+                resolvedAnimationIndex: nil,
+                defaultAnimationIndex: 3
+            ),
+            3
+        )
+        XCTAssertEqual(
             phaseSequencer.evalDelay(at: CGPoint(x: 5, y: 0), animatedOperationType: 0) ?? -1,
             31,
             accuracy: 0.0005
@@ -2633,6 +2789,26 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             RBAnimationSequencer.operationDelay(byAddingSequencerDelay: .infinity, to: 1.25),
             1.25,
             accuracy: 0.0005
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationRecord(
+                operationLowNibble: 2,
+                resolvedAnimationIndex: 7,
+                defaultAnimationIndex: 3,
+                operationDelay: 1.25,
+                sequencerDelay: 0.75
+            ),
+            RBAnimationSequencer.OperationAnimationRecord(animationIndex: 7, delay: 2)
+        )
+        XCTAssertEqual(
+            RBAnimationSequencer.operationAnimationRecord(
+                operationLowNibble: 5,
+                resolvedAnimationIndex: 7,
+                defaultAnimationIndex: 3,
+                operationDelay: 1.25,
+                sequencerDelay: 0.75
+            ),
+            RBAnimationSequencer.OperationAnimationRecord(animationIndex: -1, delay: 2)
         )
     }
 

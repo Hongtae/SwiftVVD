@@ -104,6 +104,18 @@ final class AnimatableAttributeHarness {
         }
     }
 
+    func nextUpdateInterval() -> Double {
+        viewGraph.nextUpdateInterval
+    }
+
+    func nextUpdateReasons() -> Set<UInt32> {
+        viewGraph.nextUpdateReasons
+    }
+
+    func resetNextUpdate() {
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+    }
+
     func finalizeTransactionBody() {
         Transaction.dispatchPendingListeners().forEach { $0() }
         flushCompletionActions()
@@ -416,6 +428,14 @@ final class AnimatableFrameAttributeHarness {
 
     func nextUpdateInterval() -> Double {
         viewGraph.nextUpdateInterval
+    }
+
+    func nextUpdateReasons() -> Set<UInt32> {
+        viewGraph.nextUpdateReasons
+    }
+
+    func resetNextUpdate() {
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
     }
 
     func flushCompletionActions() {

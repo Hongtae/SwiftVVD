@@ -369,6 +369,172 @@ final class AnimationCompletionObserverTests: XCTestCase {
         XCTAssertEqual(fired, ["removed", "logical"])
     }
 
+    func testRegisteredMixedCriteriaCompletionsPreserveGroupInsertionOrder() throws {
+        var fired: [String] = []
+        var transaction = Transaction()
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical1")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed1")
+        }
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical2")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed2")
+        }
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical3")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed3")
+        }
+
+        let listener = try XCTUnwrap(transaction.combinedAnimationListener)
+        XCTAssertTrue(listener is ListenerPair)
+        XCTAssertTrue(
+            try XCTUnwrap(transaction.animationCompletionObserver)
+                .bodyDidFinish()
+                .isEmpty
+        )
+
+        listener.animationWasAdded()
+        listener.animationWasRemoved().forEach { $0() }
+
+        XCTAssertEqual(
+            fired,
+            [
+                "removed1",
+                "removed2",
+                "removed3",
+                "logical1",
+                "logical2",
+                "logical3",
+            ]
+        )
+    }
+
+    func testRegisteredSplitCriteriaPreservesInsertionOrderAtEachBoundary() throws {
+        var fired: [String] = []
+        var transaction = Transaction()
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical1")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed1")
+        }
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical2")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed2")
+        }
+
+        let logicalListener = try XCTUnwrap(transaction.animationLogicalListener)
+        let removedListener = try XCTUnwrap(transaction.animationListener)
+        logicalListener.animationWasAdded()
+        removedListener.animationWasAdded()
+        XCTAssertTrue(
+            try XCTUnwrap(transaction.animationCompletionObserver)
+                .bodyDidFinish()
+                .isEmpty
+        )
+
+        logicalListener.animationWasRemoved().forEach { $0() }
+        XCTAssertEqual(fired, ["logical1", "logical2"])
+
+        removedListener.animationWasRemoved().forEach { $0() }
+        XCTAssertEqual(fired, ["logical1", "logical2", "removed1", "removed2"])
+    }
+
+    func testRetainedTransitionRemovalListenerUsesAnimatedNoRegisteredFallback() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        var seed: Attribute<UInt32>!
+        ref.withCurrent {
+            seed = graph.makeInput(value: UInt32(0))
+        }
+
+        let listener = DynamicContainer.TransitionRemovalListener(
+            seed: seed,
+            inbox: graph.inbox
+        )
+        var transaction = Transaction(animation: .linear(duration: 0.02))
+        XCTAssertNotNil(listener.installCompletion(into: &transaction))
+
+        ref.withCurrent {
+            listener.readSeed()
+            XCTAssertEqual(seed.value, 0)
+        }
+
+        finalizeAnimationCompletions(
+            in: transaction,
+            animation: transaction.animation
+        )
+
+        XCTAssertFalse(listener.isComplete)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+        XCTAssertFalse(listener.isComplete)
+
+        waitForMainQueue(until: { listener.isComplete })
+        XCTAssertTrue(listener.isComplete)
+
+        ref.withCurrent {
+            graph.inbox.drain()
+            XCTAssertEqual(seed.value, 1)
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        ref.withCurrent {
+            graph.inbox.drain()
+            XCTAssertEqual(seed.value, 1)
+        }
+    }
+
+    func testRetainedTransitionRemovalListenerInstallsCompletionOnlyOnce() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        var seed: Attribute<UInt32>!
+        ref.withCurrent {
+            seed = graph.makeInput(value: UInt32(0))
+        }
+
+        let listener = DynamicContainer.TransitionRemovalListener(
+            seed: seed,
+            inbox: graph.inbox
+        )
+        var firstTransaction = Transaction(animation: .linear(duration: 0.02))
+        XCTAssertNotNil(listener.installCompletion(into: &firstTransaction))
+
+        var secondTransaction = Transaction(animation: .linear(duration: 0.02))
+        XCTAssertNil(listener.installCompletion(into: &secondTransaction))
+
+        finalizeAnimationCompletions(
+            in: secondTransaction,
+            animation: secondTransaction.animation
+        )
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertFalse(listener.isComplete)
+        ref.withCurrent {
+            listener.readSeed()
+            graph.inbox.drain()
+            XCTAssertEqual(seed.value, 0)
+        }
+
+        finalizeAnimationCompletions(
+            in: firstTransaction,
+            animation: firstTransaction.animation
+        )
+        waitForMainQueue(until: { listener.isComplete })
+
+        ref.withCurrent {
+            graph.inbox.drain()
+            XCTAssertEqual(seed.value, 1)
+        }
+    }
+
     func testStandaloneTransactionCompletionDispatchesPendingListeners() {
         var fired: [String] = []
         func XCTAssertFiredBefore(
@@ -833,5 +999,15 @@ final class AnimationCompletionObserverTests: XCTestCase {
             "withTransaction normal returned",
             "withTransaction normal completion",
         ])
+    }
+
+    private func waitForMainQueue(
+        timeout: TimeInterval = 0.20,
+        until condition: () -> Bool
+    ) {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while !condition() && Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+        }
     }
 }

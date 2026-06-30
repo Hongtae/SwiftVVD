@@ -456,12 +456,9 @@ private struct DynamicLayoutMap {
         let activeItems = info.activeItems
         let orderedItems: [DynamicContainer.ItemInfo]
         if let displayMap = info.displayMap {
-            // When retained removals are present, displayMap starts with the active
-            // segment and then appends a retained-inclusive segment.
-            // Retained transition layout is incomplete. DynamicContainer.Info builds
-            // the retained segment, but LayoutSubviews only consumes the active prefix
-            // until transition listener/completion and removed-item placement semantics
-            // are implemented.
+            // Retained removal items stay alive for rendering and completion, but
+            // layout itself consumes the active prefix so siblings collapse into
+            // their target slots immediately.
             let activeDisplayMap = info.removedCount > 0 ?
                 displayMap.prefix(activeItems.count) : displayMap[...]
             orderedItems = activeDisplayMap.compactMap { index in

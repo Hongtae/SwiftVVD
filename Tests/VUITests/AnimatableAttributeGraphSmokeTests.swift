@@ -55,6 +55,59 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         XCTAssertEqual(sampleRecorder.events, ["phase animate", "phase animate"])
     }
 
+    func testAnimatorStateNextUpdateUsesTransactionFrameIntervalAndReason() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+
+        var transaction = Transaction(animation: .linear(duration: 1))
+        transaction.animationFrameInterval = 1.0 / 30.0
+        transaction.animationReason = 0xA11
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: transaction
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xA11])
+    }
+
+    func testAnimatorStateRetargetRefreshesNextUpdateFrameIntervalAndReason() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+
+        var initialTransaction = Transaction(animation: .linear(duration: 1))
+        initialTransaction.animationFrameInterval = 1.0 / 30.0
+        initialTransaction.animationReason = 0xA11
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: initialTransaction
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        harness.setTime(0.5)
+        _ = harness.currentValue()
+        harness.setTime(0.6)
+        let runningValue = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(runningValue, 0)
+        XCTAssertLessThan(runningValue, 1)
+
+        harness.resetNextUpdate()
+        var retargetTransaction = Transaction(animation: .linear(duration: 1))
+        retargetTransaction.animationFrameInterval = 1.0 / 120.0
+        retargetTransaction.animationReason = 0xB22
+        harness.setSource(
+            _OpacityEffect(opacity: 2),
+            transaction: retargetTransaction
+        )
+        _ = harness.currentValue()
+
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xB22])
+    }
+
     func testNoChangeAnimatedTransactionSkipsRetargetRegistrationAndContinuesActiveSampling() {
         let listener = CountingAnimationListener()
         let harness = AnimatableAttributeHarness(
@@ -163,6 +216,65 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         XCTAssertEqual(finalFrame.size.height, 60, accuracy: 0.000_001)
         XCTAssertEqual(harness.currentPosition().x, 100, accuracy: 0.000_001)
         XCTAssertEqual(harness.currentSize().width, 50, accuracy: 0.000_001)
+    }
+
+    func testAnimatableFrameAttributeNextUpdateUsesTransactionFrameIntervalAndReason() {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20)
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+
+        var transaction = Transaction(animation: .linear(duration: 1))
+        transaction.animationFrameInterval = 1.0 / 30.0
+        transaction.animationReason = 0xF11
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 40),
+            size: ViewSize(width: 50, height: 60),
+            transaction: transaction
+        )
+
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xF11])
+    }
+
+    func testAnimatableFrameAttributeRetargetRefreshesNextUpdateFrameIntervalAndReason() {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20)
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+
+        var initialTransaction = Transaction(animation: .linear(duration: 1))
+        initialTransaction.animationFrameInterval = 1.0 / 30.0
+        initialTransaction.animationReason = 0xF11
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 40),
+            size: ViewSize(width: 50, height: 60),
+            transaction: initialTransaction
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+        harness.setTime(0.5)
+        _ = harness.currentFrame()
+        harness.setTime(0.6)
+        let runningFrame = harness.currentFrame()
+        XCTAssertGreaterThanOrEqual(runningFrame.origin.x, 0)
+        XCTAssertLessThan(runningFrame.origin.x, 100)
+
+        harness.resetNextUpdate()
+        var retargetTransaction = Transaction(animation: .linear(duration: 1))
+        retargetTransaction.animationFrameInterval = 1.0 / 120.0
+        retargetTransaction.animationReason = 0xF22
+        harness.setFrame(
+            position: CGPoint(x: 200, y: 80),
+            size: ViewSize(width: 70, height: 90),
+            transaction: retargetTransaction
+        )
+        _ = harness.currentFrame()
+
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xF22])
     }
 
     func testAnimatableFrameAttributeNoChangeAnimatedTransactionSkipsListenerRegistration() {
@@ -454,6 +566,68 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
             ]
         )
     }
+
+    func testAnimatableFrameAttributeVFDNextUpdateUsesTransactionFrameIntervalAndReason() {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20),
+            supportsVFD: true
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+
+        var transaction = Transaction(animation: .linear(duration: 1))
+        transaction.animationFrameInterval = 1.0 / 30.0
+        transaction.animationReason = 0xF31
+        harness.setFrame(
+            position: CGPoint(x: 10, y: 4),
+            size: ViewSize(width: 12, height: 22),
+            transaction: transaction
+        )
+
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xF31])
+    }
+
+    func testAnimatableFrameAttributeVFDRetargetRefreshesNextUpdateFrameIntervalAndReason() {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20),
+            supportsVFD: true
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+
+        var initialTransaction = Transaction(animation: .linear(duration: 1))
+        initialTransaction.animationFrameInterval = 1.0 / 30.0
+        initialTransaction.animationReason = 0xF31
+        harness.setFrame(
+            position: CGPoint(x: 10, y: 4),
+            size: ViewSize(width: 12, height: 22),
+            transaction: initialTransaction
+        )
+        XCTAssertEqual(harness.currentFrame().origin.x, 0, accuracy: 0.000_001)
+        harness.setTime(0.5)
+        _ = harness.currentFrame()
+        harness.setTime(0.6)
+        let runningFrame = harness.currentFrame()
+        XCTAssertGreaterThanOrEqual(runningFrame.origin.x, 0)
+        XCTAssertLessThan(runningFrame.origin.x, 10)
+
+        harness.resetNextUpdate()
+        var retargetTransaction = Transaction(animation: .linear(duration: 1))
+        retargetTransaction.animationFrameInterval = 1.0 / 120.0
+        retargetTransaction.animationReason = 0xF42
+        harness.setFrame(
+            position: CGPoint(x: 20, y: 8),
+            size: ViewSize(width: 14, height: 24),
+            transaction: retargetTransaction
+        )
+        _ = harness.currentFrame()
+
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xF42])
+    }
+
     func testAnimatableFrameAttributeVFDSchedulesHighFrameRateForFastFrameMotion() {
         let harness = AnimatableFrameAttributeHarness(
             initialPosition: .zero,
@@ -1052,6 +1226,134 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
             ]
         )
     }
+
+    func testAnimatorStateForkListenersPruneCompletedNonPrefixFork() {
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+
+        func logicalTransaction(
+            label: String,
+            logicalAt: TimeInterval
+        ) -> Transaction {
+            var transaction = Transaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: logicalAt,
+                        nilAt: 10,
+                        recorder: sampleRecorder
+                    )
+                )
+            )
+            transaction.animationListener = RecordingAnimationListener(
+                label: "\(label) removed",
+                recorder: recorder
+            )
+            transaction.animationLogicalListener = RecordingAnimationListener(
+                label: "\(label) logical",
+                recorder: recorder
+            )
+            return transaction
+        }
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: logicalTransaction(label: "old", logicalAt: 0.8)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "old removed added",
+                "old logical added",
+            ]
+        )
+        recorder.removeAll()
+        harness.setTime(0.5)
+        _ = harness.currentValue()
+        harness.setTime(0.6)
+        _ = harness.currentValue()
+
+        harness.setSource(
+            _OpacityEffect(opacity: 2),
+            transaction: logicalTransaction(label: "middle", logicalAt: 0.35)
+        )
+        harness.finalizeTransactionBody()
+        harness.setTime(0.8)
+        _ = harness.currentValue()
+        harness.setTime(0.9)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "middle removed added",
+                "middle logical added",
+            ]
+        )
+        recorder.removeAll()
+
+        harness.setSource(
+            _OpacityEffect(opacity: 3),
+            transaction: logicalTransaction(label: "active", logicalAt: 10)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "active removed added",
+                "active logical added",
+            ]
+        )
+        recorder.removeAll()
+
+        sampleRecorder.removeAll()
+        harness.setTime(1.2)
+        _ = harness.currentValue()
+        harness.setTime(1.3)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        let sampledBeforePrune = sampleRecorder.samples.map(\.label)
+        XCTAssertTrue(sampledBeforePrune.contains("middle"))
+        XCTAssertTrue(sampledBeforePrune.contains("active"))
+        XCTAssertEqual(recorder.events, ["middle logical removed"])
+
+        sampleRecorder.removeAll()
+        harness.setTime(6.0)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        let sampledAfterPrune = sampleRecorder.samples.map(\.label)
+        XCTAssertTrue(sampledAfterPrune.contains("old"))
+        XCTAssertTrue(sampledAfterPrune.contains("middle"))
+        XCTAssertTrue(sampledAfterPrune.contains("active"))
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "middle logical removed",
+                "old logical removed",
+            ]
+        )
+
+        harness.setTime(7.0)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "middle logical removed",
+                "old logical removed",
+            ]
+        )
+    }
+
     func testFiniteRetargetRemovesRawMixedListenersInGenerationOrder() {
         let recorder = AnimationCompletionRecorder()
         let oldRemovedListener = RecordingAnimationListener(
@@ -1232,6 +1534,88 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
                 testCase.label
             )
 
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "old removed",
+                    "replacement removed",
+                    "replacement logical",
+                    "old logical",
+                ],
+                testCase.label
+            )
+        }
+    }
+
+    func testCircularUnitCurveRetargetUsesFiniteNonResidualBoundary() {
+        let cases: [(
+            label: String,
+            oldAnimation: Animation,
+            replacementAnimation: Animation
+        )] = [
+            (
+                "circularToLinear",
+                .timingCurve(.circularEaseInOut, duration: 0.90),
+                .linear(duration: 0.15)
+            ),
+            (
+                "linearToCircular",
+                .linear(duration: 0.90),
+                .timingCurve(.circularEaseInOut, duration: 0.15)
+            ),
+            (
+                "circularToCircular",
+                .timingCurve(.circularEaseInOut, duration: 0.90),
+                .timingCurve(.circularEaseInOut, duration: 0.15)
+            ),
+        ]
+
+        for testCase in cases {
+            let recorder = AnimationCompletionRecorder()
+            let harness = AnimatableAttributeHarness(
+                initialValue: _OpacityEffect(opacity: 0)
+            )
+            XCTAssertEqual(harness.currentValue().opacity, 0, testCase.label)
+
+            harness.setSource(
+                _OpacityEffect(opacity: 1),
+                transaction: completionTransaction(
+                    animation: testCase.oldAnimation,
+                    label: "old",
+                    recorder: recorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            XCTAssertEqual(harness.currentValue().opacity, 0, testCase.label)
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(0.25)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setSource(
+                _OpacityEffect(opacity: 2),
+                transaction: completionTransaction(
+                    animation: testCase.replacementAnimation,
+                    label: "replacement",
+                    recorder: recorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(0.35)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(0.70)
+            _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
                 recorder.events,
@@ -3252,6 +3636,134 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         }
     }
 
+    func testCombinedCustomInteractiveRepeatForeverLogicalOrderingVariants() {
+        let cases: [(
+            label: String,
+            animation: Animation,
+            oldDuration: TimeInterval,
+            secondDuration: TimeInterval,
+            checkpoints: [(time: TimeInterval, expected: [String])]
+        )] = [
+            (
+                "interactivePropertyRepeat",
+                Animation.interactiveSpring.repeatForever(autoreverses: false),
+                3.0,
+                3.4,
+                [
+                    (
+                        2.6,
+                        ["interactivePropertyRepeat logical"]
+                    ),
+                    (
+                        3.8,
+                        [
+                            "interactivePropertyRepeat logical",
+                            "old logical",
+                        ]
+                    ),
+                    (
+                        4.6,
+                        [
+                            "interactivePropertyRepeat logical",
+                            "old logical",
+                            "second logical",
+                        ]
+                    ),
+                ]
+            ),
+            (
+                "interactiveResponseRepeat",
+                Animation.interactiveSpring(
+                    response: 0.30,
+                    dampingFraction: 0.82,
+                    blendDuration: 0.0
+                ).repeatForever(autoreverses: false),
+                0.95,
+                3.4,
+                [
+                    (
+                        2.0,
+                        [
+                            "old logical",
+                            "interactiveResponseRepeat logical",
+                        ]
+                    ),
+                    (
+                        4.6,
+                        [
+                            "old logical",
+                            "interactiveResponseRepeat logical",
+                            "second logical",
+                        ]
+                    ),
+                ]
+            ),
+            (
+                "interactiveDurationRepeat",
+                Animation.interactiveSpring(
+                    duration: 0.30,
+                    extraBounce: 0.0,
+                    blendDuration: 0.0
+                ).repeatForever(autoreverses: false),
+                3.0,
+                3.4,
+                [
+                    (
+                        2.6,
+                        ["interactiveDurationRepeat logical"]
+                    ),
+                    (
+                        3.8,
+                        [
+                            "interactiveDurationRepeat logical",
+                            "old logical",
+                        ]
+                    ),
+                    (
+                        4.6,
+                        [
+                            "interactiveDurationRepeat logical",
+                            "old logical",
+                            "second logical",
+                        ]
+                    ),
+                ]
+            ),
+        ]
+
+        for testCase in cases {
+            let setup = makeCombinedTwoChildHarness(
+                oldDuration: testCase.oldDuration,
+                secondDuration: testCase.secondDuration
+            )
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+            let harness = setup.harness
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: testCase.animation,
+                    label: testCase.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.2)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+            for checkpoint in testCase.checkpoints {
+                harness.setTime(checkpoint.time)
+                _ = harness.currentValue()
+                harness.flushCompletionActions()
+                XCTAssertEqual(completionRecorder.events, checkpoint.expected, testCase.label)
+            }
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+        }
+    }
+
     func testCombinedCustomFluidSpringPropertyAliasNestedRepeatForeverDrainsReplacementLogicalOnly() {
         let cases: [(label: String, animation: Animation)] = [
             (
@@ -3981,6 +4493,67 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         )
     }
 
+    func testCombinedCustomDirectFiniteVariantsKeepGroupedBoundaryOrder() {
+        let cubicUnitCurve = UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: 0.42, y: 0),
+            endControlPoint: UnitPoint(x: 0.58, y: 1)
+        )
+        let cases: [(label: String, animation: Animation)] = [
+            ("linear", .linear(duration: 0.30)),
+            (
+                "p1p2",
+                .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.30)
+            ),
+            ("easeInOut", .easeInOut(duration: 0.30)),
+            ("easeIn", .easeIn(duration: 0.30)),
+            ("easeOut", .easeOut(duration: 0.30)),
+            ("circularIn", .timingCurve(.circularEaseIn, duration: 0.30)),
+            ("circularOut", .timingCurve(.circularEaseOut, duration: 0.30)),
+            ("circularInOut", .timingCurve(.circularEaseInOut, duration: 0.30)),
+            ("cubic", .timingCurve(cubicUnitCurve, duration: 0.30)),
+        ]
+
+        for testCase in cases {
+            let setup = makeCombinedTwoChildHarness()
+            let harness = setup.harness
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: testCase.animation,
+                    label: testCase.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.2)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("\(testCase.label) ") }, testCase.label)
+
+            harness.setTime(1.6)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "old removed",
+                    "second removed",
+                    "\(testCase.label) removed",
+                    "\(testCase.label) logical",
+                    "old logical",
+                    "second logical",
+                ],
+                testCase.label
+            )
+        }
+    }
+
     func testCombinedCustomZeroDurationRetargetFinishesImmediateGroup() {
         let cases: [(label: String, animation: Animation)] = [
             ("zero", .linear(duration: 0)),
@@ -4573,18 +5146,58 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
     }
 
     func testCombinedCustomFiniteWrapperVariantsKeepGroupedBoundaryOrder() {
+        let cubicUnitCurve = UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: 0.42, y: 0),
+            endControlPoint: UnitPoint(x: 0.58, y: 1)
+        )
         let cases: [(label: String, animation: Animation)] = [
             (
                 "p1p2Delay",
                 .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.30).delay(0.20)
             ),
             (
+                "p1p2Speed",
+                .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.90).speed(2.0)
+            ),
+            (
+                "p1p2Repeat",
+                .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.22).repeatCount(2, autoreverses: false)
+            ),
+            (
+                "namedDelay",
+                .easeInOut(duration: 0.30).delay(0.20)
+            ),
+            (
                 "namedSpeed",
                 .easeIn(duration: 0.90).speed(2.0)
             ),
             (
-                "circularRepeat",
-                .timingCurve(.circularEaseOut, duration: 0.22).repeatCount(2, autoreverses: false)
+                "namedRepeat",
+                .easeOut(duration: 0.22).repeatCount(2, autoreverses: false)
+            ),
+            (
+                "circularInDelay",
+                .timingCurve(.circularEaseIn, duration: 0.30).delay(0.20)
+            ),
+            (
+                "circularOutSpeed",
+                .timingCurve(.circularEaseOut, duration: 0.90).speed(2.0)
+            ),
+            (
+                "circularInOutRepeat",
+                .timingCurve(.circularEaseInOut, duration: 0.22).repeatCount(2, autoreverses: false)
+            ),
+            (
+                "cubicDelay",
+                .timingCurve(cubicUnitCurve, duration: 0.30).delay(0.20)
+            ),
+            (
+                "cubicSpeed",
+                .timingCurve(cubicUnitCurve, duration: 0.90).speed(2.0)
+            ),
+            (
+                "cubicRepeat",
+                .timingCurve(cubicUnitCurve, duration: 0.22).repeatCount(2, autoreverses: false)
             ),
         ]
         for testCase in cases {
@@ -4626,6 +5239,87 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
                 testCase.label
             )
         }
+    }
+
+    func testCombinedCustomLogicalCompletionWrapperDrainsReplacementLogicalBeforeGroupedBoundary() {
+        let setup = makeCombinedTwoChildHarness()
+        let harness = setup.harness
+        let completionRecorder = setup.completionRecorder
+        let sampleRecorder = setup.sampleRecorder
+
+        harness.setSource(
+            _OpacityEffect(opacity: 0.75),
+            transaction: completionTransaction(
+                animation: Animation.linear(duration: 0.82).logicallyComplete(after: 0.25),
+                label: "logicalWrapper",
+                recorder: completionRecorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        harness.setTime(1.4)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
+        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
+        XCTAssertEqual(completionRecorder.events, [])
+
+        harness.setTime(1.8)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["logicalWrapper logical"])
+
+        harness.setTime(2.4)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "logicalWrapper logical",
+                "old removed",
+                "second removed",
+                "logicalWrapper removed",
+                "old logical",
+                "second logical",
+            ]
+        )
+    }
+
+    func testCombinedCustomDefaultLogicalCompletionWrapperDrainsSourceLogicalBeforeRemovedBoundary() {
+        let setup = makeCombinedTwoChildHarness()
+        let harness = setup.harness
+        let completionRecorder = setup.completionRecorder
+        let sampleRecorder = setup.sampleRecorder
+
+        harness.setSource(
+            _OpacityEffect(opacity: 0.75),
+            transaction: completionTransaction(
+                animation: Animation.default.logicallyComplete(after: 0.25),
+                label: "defaultLogicalWrapper",
+                recorder: completionRecorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        harness.setTime(1.3)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
+        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
+        XCTAssertEqual(completionRecorder.events, ["defaultLogicalWrapper logical"])
+
+        harness.setTime(3.0)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "defaultLogicalWrapper logical",
+                "old logical",
+                "second logical",
+                "old removed",
+                "second removed",
+                "defaultLogicalWrapper removed",
+            ]
+        )
     }
 
     func testCombinedCustomFiniteRepeatSecondNilDrainsLogicalBeforeFinalRepeatBoundary() {

@@ -520,6 +520,14 @@ final class RBAnimation: NSObject, NSCopying {
         return hasher.finalize()
     }
 
+    var hasStoredTerms: Bool {
+        curve != nil ||
+            !pendingModifiers.isEmpty ||
+            !curveModifiers.isEmpty ||
+            !ignoredModifiers.isEmpty ||
+            !ignoredCurveInstalls.isEmpty
+    }
+
     private func appendModifier(_ modifier: Modifier) {
         if curve == nil {
             pendingModifiers.append(modifier)
@@ -634,6 +642,87 @@ final class RBAnimation: NSObject, NSCopying {
     }
 }
 
+// Local animation table used by future display-list operation storage.
+struct RBAnimationTable {
+    struct Entry {
+        var index: Int32
+        var animation: RBAnimation
+        var activeDuration: Double
+    }
+
+    var defaultAnimationIndex: Int32
+    private(set) var entries: [Entry]
+
+    init(defaultAnimationIndex: Int32 = -1) {
+        self.defaultAnimationIndex = defaultAnimationIndex
+        self.entries = []
+    }
+
+    @discardableResult
+    mutating func internAnimation(_ animation: RBAnimation?) -> Int32 {
+        guard let animation else {
+            return defaultAnimationIndex
+        }
+        guard animation.hasStoredTerms else {
+            return -1
+        }
+
+        if let entry = entries.first(where: { $0.animation.isEqual(animation) }) {
+            return entry.index
+        }
+        guard entries.count < Int(Int32.max) else {
+            fatalError("RBAnimationTable animation index overflow.")
+        }
+
+        let storedAnimation = animation.copy() as? RBAnimation ?? RBAnimation()
+        let index = Int32(entries.count + 1)
+        entries.append(Entry(
+            index: index,
+            animation: storedAnimation,
+            activeDuration: storedAnimation.activeDuration
+        ))
+        return index
+    }
+
+    func animation(at index: Int32) -> RBAnimation? {
+        guard index > 0 else { return nil }
+        let offset = Int(index - 1)
+        guard offset >= 0, offset < entries.count else { return nil }
+        return entries[offset].animation
+    }
+
+    func activeDuration(animationIndex index: Int32) -> Double {
+        animation(at: index)?.activeDuration ?? 0
+    }
+
+    func maximumDuration(animationIndex index: Int32) -> Double {
+        guard index != 0 else { return 1 }
+        return animation(at: index)?.activeDuration ?? 0
+    }
+
+    func evaluate(animationIndex index: Int32, sequence: UInt32 = 0, time: Double) -> Float {
+        switch index {
+        case -1:
+            return time > 0 ? 1 : 0
+        case 0, -2:
+            return Float(time)
+        default:
+            _ = sequence
+            return animation(at: index)?.evaluateAtTime(time) ?? Float(time)
+        }
+    }
+
+    func maxSpeed(animationIndex index: Int32, time: Double) -> Double {
+        animation(at: index)?.speed(atTime: time) ?? 0
+    }
+
+    func maxSpeed(atTime time: Double) -> Double {
+        entries.reduce(0) { result, entry in
+            max(result, entry.animation.speed(atTime: time))
+        }
+    }
+}
+
 // Per-phase sequencing offsets used when an interpolator staggers add, mix, and remove work.
 final class RBAnimationSequencerEffects: NSObject {
     var delayOffset: Float
@@ -661,6 +750,11 @@ final class RBAnimationSequencer: NSObject {
     var added: RBAnimationSequencerEffects?
     var mixed: RBAnimationSequencerEffects?
     var removed: RBAnimationSequencerEffects?
+
+    struct OperationAnimationRecord: Equatable {
+        var animationIndex: Int32
+        var delay: Float
+    }
 
     override init() {
         self.distanceMode = 0
@@ -705,6 +799,17 @@ final class RBAnimationSequencer: NSObject {
         return (0x130 & (1 << UInt32(operationType))) == 0
     }
 
+    static func operationAnimationIndex(
+        operationLowNibble operationType: UInt8,
+        resolvedAnimationIndex: Int32?,
+        defaultAnimationIndex: Int32
+    ) -> Int32 {
+        guard canCarryAnimationIndex(operationLowNibble: operationType) else {
+            return -1
+        }
+        return resolvedAnimationIndex ?? defaultAnimationIndex
+    }
+
     static func operationDelay(
         byAddingSequencerDelay sequencerDelay: Double?,
         to operationDelay: Float
@@ -715,6 +820,26 @@ final class RBAnimationSequencer: NSObject {
             return operationDelay
         }
         return operationDelay + Float(sequencerDelay)
+    }
+
+    static func operationAnimationRecord(
+        operationLowNibble operationType: UInt8,
+        resolvedAnimationIndex: Int32?,
+        defaultAnimationIndex: Int32,
+        operationDelay: Float,
+        sequencerDelay: Double?
+    ) -> OperationAnimationRecord {
+        OperationAnimationRecord(
+            animationIndex: operationAnimationIndex(
+                operationLowNibble: operationType,
+                resolvedAnimationIndex: resolvedAnimationIndex,
+                defaultAnimationIndex: defaultAnimationIndex
+            ),
+            delay: Self.operationDelay(
+                byAddingSequencerDelay: sequencerDelay,
+                to: operationDelay
+            )
+        )
     }
 
     func evalDelay(at point: CGPoint, animatedOperationType operationType: UInt8) -> Double? {

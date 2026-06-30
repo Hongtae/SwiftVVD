@@ -838,7 +838,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                 isLogicallyComplete: sample.isLogicallyComplete,
                 logicalCompletionListeners: logicalListeners,
                 terminalCompletion: UpdateResult.TerminalCompletion(
-                    listeners: logicalListeners.union(removedListenersForCompletionRecords()),
+                    listeners: logicalListeners.union(drainRemovedListenersForCompletionRecords()),
                     discardedBaseLayerGenerations: baseLayerGenerations()
                 )
             )
@@ -1250,26 +1250,18 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     }
 
     func removeListeners() {
-        let actions = finishRemovedListenersBeforeClearingStorage()
+        var actions: [() -> Void] = []
+        drainRemovedListenersBeforeClearingStorage { listener in
+            actions.append(contentsOf: listener.finish())
+        }
         enqueueAnimationCompletionActions(actions)
     }
 
-    private func removedListenersForCompletionRecords() -> ListenerSnapshot {
+    private func drainRemovedListenersForCompletionRecords() -> ListenerSnapshot {
         var removed = ListenerSnapshot()
-        listeners.forEach {
-            removed = removed.inserting(Listener(listener: $0, criteria: .removed))
+        drainRemovedListenersBeforeClearingStorage { listener in
+            removed = removed.inserting(listener)
         }
-        logicalListeners.forEach {
-            removed = removed.inserting(Listener(listener: $0, criteria: .logicallyComplete))
-        }
-        for fork in forks {
-            fork.listeners.forEach {
-                removed = removed.inserting(Listener(listener: $0, criteria: .logicallyComplete))
-            }
-        }
-        listeners.removeAll()
-        logicalListeners.removeAll()
-        forks.removeAll()
         return removed
     }
 
@@ -1279,23 +1271,23 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         forks.removeAll()
     }
 
-    private func finishRemovedListenersBeforeClearingStorage() -> [() -> Void] {
-        var actions: [() -> Void] = []
-        actions.append(contentsOf: listeners.flatMap {
-            Listener(listener: $0, criteria: .removed).finish()
-        })
+    private func drainRemovedListenersBeforeClearingStorage(
+        onCompletion: (Listener) -> Void
+    ) {
+        listeners.forEach {
+            onCompletion(Listener(listener: $0, criteria: .removed))
+        }
         listeners.removeAll()
-        actions.append(contentsOf: logicalListeners.flatMap {
-            Listener(listener: $0, criteria: .logicallyComplete).finish()
-        })
+        logicalListeners.forEach {
+            onCompletion(Listener(listener: $0, criteria: .logicallyComplete))
+        }
         logicalListeners.removeAll()
         for fork in forks {
-            actions.append(contentsOf: fork.listeners.flatMap {
-                Listener(listener: $0, criteria: .logicallyComplete).finish()
-            })
+            fork.listeners.forEach {
+                onCompletion(Listener(listener: $0, criteria: .logicallyComplete))
+            }
         }
         forks.removeAll()
-        return actions
     }
 
     private func forkListeners(
@@ -2209,41 +2201,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             guard let terminalCompletion = update.terminalCompletion else {
                 fatalError("Terminal animation update missing completion snapshot")
             }
-            // Terminal samples let completion-record ordering own criteria
-            // priority. Drained logical state tokens are still present in the
-            // copied records, so finishing them here would reorder the boundary.
-            if isCombinedFiniteCompletionGroupReplacement(currentGeneration) {
-                AttributeGraph.setStatefulOutput(targetValue)
-                let completions = finishCombinedFiniteCompletionGroup()
-                enqueueAnimationCompletionActions(completions)
-                return
-            }
-            if isCombinedResidualCompletionGroupReplacement(currentGeneration) {
-                finishAnimation(
-                    with: targetValue,
-                    at: now,
-                    discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
-                )
-                return
-            }
-            if isCustomReplacementCompletionGroupReplacement(currentGeneration) {
-                AttributeGraph.setStatefulOutput(targetValue)
-                // The replacement nil boundary owns this handoff; discarded
-                // side-effect layers should not be sampled again after it.
-                let completions = finishCustomReplacementCompletionGroup(at: now)
-                enqueueAnimationCompletionActions(completions)
-                return
-            }
-            let listenerCompletions = finishCompletionRecords(
-                matching: terminalCompletion.listeners
-            )
-            enqueueAnimationCompletionActions(listenerCompletions)
-            let completions = finishDueCompletionRecords(at: now)
-            enqueueAnimationCompletionActions(completions)
-            finishAnimation(
+            finishTerminalAnimationSample(
+                terminalCompletion,
                 with: targetValue,
-                at: now,
-                discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+                at: now
             )
             return
         }
@@ -2272,45 +2233,98 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             )
             enqueueAnimationCompletionActions(completions)
         }
-        if update.isLogicallyComplete,
-           let currentGeneration,
-           !contextLogicalCompletionSuppressedGenerations.contains(currentGeneration),
-           !deadlineOwnedLogicalCompletionGenerations.contains(currentGeneration) {
-            var completions =
-                finishCombinedResidualDueSourceLogicalBeforeReplacementLogicalIfNeeded(
-                    for: currentGeneration,
-                    at: now
-                )
-            if !hasPendingCombinedResidualSourceLogicalBeforeReplacement(
-                for: currentGeneration
-            ) {
-                let prefersSourceLogicalBeforeReplacement =
-                    prefersCombinedResidualSourceLogicalBeforeReplacementLogical(
-                        for: currentGeneration
-                    )
-                let logicalListeners = update.logicalCompletionListeners
-                completions.append(
-                    contentsOf: logicalListeners.isEmpty
-                        ? finishCompletionRecords(
-                            for: currentGeneration,
-                            matching: {
-                                $0.criteria != .removed &&
-                                $0.orderGeneration == currentGeneration
-                            }
-                        )
-                        : finishCompletionRecords(
-                            matching: logicalListeners,
-                            preferLogicalBeforeRemoved: prefersSourceLogicalBeforeReplacement
-                        )
-                )
-            }
-            enqueueAnimationCompletionActions(completions)
-        }
+        finishContinuingLogicalCompletionRecords(update, at: now)
         if isCombinedResidualCompletionGroupPresentationDue(at: now) {
             finishAnimation(with: targetValue, at: now)
             return
         }
         let completions = finishDueCompletionRecords(at: now)
+        enqueueAnimationCompletionActions(completions)
+    }
+
+    private mutating func finishTerminalAnimationSample(
+        _ terminalCompletion: AnimatorState<AnimatedValue>.UpdateResult.TerminalCompletion,
+        with targetValue: AnimatedValue,
+        at now: Time
+    ) {
+        // Terminal samples let completion-record ordering own criteria
+        // priority. Drained logical state tokens are still present in the
+        // copied records, so finishing them directly from helper/state would
+        // reorder the boundary.
+        if isCombinedFiniteCompletionGroupReplacement(currentGeneration) {
+            AttributeGraph.setStatefulOutput(targetValue)
+            let completions = finishCombinedFiniteCompletionGroup()
+            enqueueAnimationCompletionActions(completions)
+            return
+        }
+        if isCombinedResidualCompletionGroupReplacement(currentGeneration) {
+            finishAnimation(
+                with: targetValue,
+                at: now,
+                discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+            )
+            return
+        }
+        if isCustomReplacementCompletionGroupReplacement(currentGeneration) {
+            AttributeGraph.setStatefulOutput(targetValue)
+            // The replacement nil boundary owns this handoff; discarded
+            // side-effect layers should not be sampled again after it.
+            let completions = finishCustomReplacementCompletionGroup(at: now)
+            enqueueAnimationCompletionActions(completions)
+            return
+        }
+        let listenerCompletions = finishCompletionRecords(
+            matching: terminalCompletion.listeners
+        )
+        enqueueAnimationCompletionActions(listenerCompletions)
+        let completions = finishDueCompletionRecords(at: now)
+        enqueueAnimationCompletionActions(completions)
+        finishAnimation(
+            with: targetValue,
+            at: now,
+            discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+        )
+    }
+
+    private mutating func finishContinuingLogicalCompletionRecords(
+        _ update: AnimatorState<AnimatedValue>.UpdateResult,
+        at now: Time
+    ) {
+        guard update.isLogicallyComplete,
+              let currentGeneration,
+              !contextLogicalCompletionSuppressedGenerations.contains(currentGeneration),
+              !deadlineOwnedLogicalCompletionGenerations.contains(currentGeneration) else {
+            return
+        }
+
+        var completions =
+            finishCombinedResidualDueSourceLogicalBeforeReplacementLogicalIfNeeded(
+                for: currentGeneration,
+                at: now
+            )
+        if !hasPendingCombinedResidualSourceLogicalBeforeReplacement(
+            for: currentGeneration
+        ) {
+            let prefersSourceLogicalBeforeReplacement =
+                prefersCombinedResidualSourceLogicalBeforeReplacementLogical(
+                    for: currentGeneration
+                )
+            let logicalListeners = update.logicalCompletionListeners
+            completions.append(
+                contentsOf: logicalListeners.isEmpty
+                    ? finishCompletionRecords(
+                        for: currentGeneration,
+                        matching: {
+                            $0.criteria != .removed &&
+                            $0.orderGeneration == currentGeneration
+                        }
+                    )
+                    : finishCompletionRecords(
+                        matching: logicalListeners,
+                        preferLogicalBeforeRemoved: prefersSourceLogicalBeforeReplacement
+                    )
+            )
+        }
         enqueueAnimationCompletionActions(completions)
     }
 
@@ -3397,6 +3411,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private func isCombinedResidualOldSourceLogicalBeforeRemovedWrapper(
         _ box: AnimationBoxBase
     ) -> Bool {
+        if let logicalCompletion = box as? LogicalCompletionAnimationBox {
+            return logicalCompletion.base.presentationDuration > logicalCompletion.base.duration &&
+                hasCombinedResidualOldSourceLogicalBeforeRemovedBase(logicalCompletion.base)
+        }
         guard hasResidualWrapperPresentation(box) else {
             return false
         }
