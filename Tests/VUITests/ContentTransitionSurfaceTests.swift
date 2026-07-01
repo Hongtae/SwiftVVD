@@ -55,7 +55,7 @@ final class ContentTransitionSurfaceTests: XCTestCase {
         let graph = AttributeGraph()
         let recorder = ContentTransitionEnvironmentRecorder()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let view = ContentTransitionEnvironmentContent(recorder: recorder)
                 .contentTransition(.opacity)
             let viewAttr = graph.makeInput(value: view)
@@ -75,7 +75,7 @@ final class ContentTransitionSurfaceTests: XCTestCase {
         let graph = AttributeGraph()
         let recorder = ContentTransitionEnvironmentRecorder()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let view = ContentTransitionEnvironmentContent(recorder: recorder)
                 .environment(\.contentTransitionAddsDrawingGroup, true)
                 .contentTransition(.interpolate)

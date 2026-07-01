@@ -13,7 +13,7 @@ import Synchronization
 // AttributeGraph instance occur on a single thread (or equivalent serial context).
 //
 // All methods on AttributeGraph require that AttributeGraph.current is already bound
-// to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
+// to this instance (via AttributeGraph.withCurrent(self) { ... }) before
 // they are called. Violating this precondition causes a runtime assertion failure.
 
 struct AGComparisonOptions: RawRepresentable, Equatable, Sendable {
@@ -653,15 +653,15 @@ struct AttributeGraphRef: @unchecked Sendable {
             // Dependency tracking is graph-local. Cross-graph re-entry must not
             // inherit the outer graph's currently evaluating node.
             return try AttributeGraph.withoutTracking {
-                try AttributeGraphRef.$current.withValue(self) {
-                    try AttributeGraph.$current.withValue(graph) {
-                        try body()
-                    }
-                }
+                try withCurrentBinding(body)
             }
         }
+        return try withCurrentBinding(body)
+    }
+
+    private func withCurrentBinding<R>(_ body: () throws -> R) rethrows -> R {
         return try AttributeGraphRef.$current.withValue(self) {
-            try AttributeGraph.$current.withValue(graph) {
+            try AttributeGraph.withCurrent(graph) {
                 try body()
             }
         }
@@ -829,12 +829,115 @@ class AttributeGraph: @unchecked Sendable {
 
     typealias ChangeSet = AGChangeSet
 
-    @TaskLocal static var current: AttributeGraph?
+    @TaskLocal fileprivate static var currentStorage: AttributeGraph?
     @TaskLocal static var changeSet: ChangeSet?
     @TaskLocal private static var currentlyEvaluatingNode: AGAttribute?
     @TaskLocal private static var currentlyUpdatingGraphs: Set<ObjectIdentifier>?
 
+#if DEBUG
+    // Reference identity for one active graph-current binding generation.
+    private final class AGExecutionToken: @unchecked Sendable {}
+
+    // Stored on the graph so different TaskLocal lineages contend on one state.
+    private struct AGExecutionState {
+        var token: AGExecutionToken?
+        var depth: Int = 0
+    }
+
+    // Child tasks inherit this map, so same-lineage graph use can pass validation.
+    @TaskLocal private static var currentExecutionTokens: [ObjectIdentifier: AGExecutionToken]?
+    private let debugExecutionState = Mutex(AGExecutionState())
+#endif
+
+    static var current: AttributeGraph? {
+        guard let graph = currentStorage else { return nil }
+#if DEBUG
+        graph._debugValidateCurrentContext()
+#endif
+        return graph
+    }
+
     init() {}
+
+    // Binds the raw graph. DEBUG builds also validate TaskLocal lineage ownership.
+    static func withCurrent<R>(_ graph: AttributeGraph, _ body: () throws -> R) rethrows -> R {
+#if DEBUG
+        return try graph._debugWithCurrentExecutionContext {
+            try AttributeGraph.$currentStorage.withValue(graph) {
+                try body()
+            }
+        }
+#else
+        return try AttributeGraph.$currentStorage.withValue(graph) {
+            try body()
+        }
+#endif
+    }
+
+#if DEBUG
+    // Installs this graph's active token into the current TaskLocal lineage.
+    fileprivate func _debugWithCurrentExecutionContext<R>(_ body: () throws -> R) rethrows -> R {
+        let token = _debugEnterCurrentContext()
+        defer { _debugLeaveCurrentContext(token) }
+
+        var tokens = AttributeGraph.currentExecutionTokens ?? [:]
+        tokens[ObjectIdentifier(self)] = token
+        return try AttributeGraph.$currentExecutionTokens.withValue(tokens) {
+            try body()
+        }
+    }
+
+    // Allows same-lineage re-entry, but rejects independent concurrent binding.
+    private func _debugEnterCurrentContext() -> AGExecutionToken {
+        let graphID = ObjectIdentifier(self)
+        let inheritedToken = AttributeGraph.currentExecutionTokens?[graphID]
+
+        return debugExecutionState.withLock { state in
+            if let activeToken = state.token {
+                guard inheritedToken === activeToken else {
+                    fatalError("AttributeGraph entered outside its active TaskLocal execution context.")
+                }
+                state.depth += 1
+                return activeToken
+            }
+
+            guard inheritedToken == nil else {
+                fatalError("AttributeGraph TaskLocal execution context escaped after the graph context ended.")
+            }
+
+            let token = AGExecutionToken()
+            state.token = token
+            state.depth = 1
+            return token
+        }
+    }
+
+    // Balances re-entry depth and retires the token at the outermost exit.
+    private func _debugLeaveCurrentContext(_ token: AGExecutionToken) {
+        debugExecutionState.withLock { state in
+            guard state.token === token, state.depth > 0 else {
+                fatalError("AttributeGraph execution context state is corrupted.")
+            }
+            state.depth -= 1
+            if state.depth == 0 {
+                state.token = nil
+            }
+        }
+    }
+
+    // Catches direct/stale currentStorage bindings before callers use the graph.
+    private func _debugValidateCurrentContext() {
+        let graphID = ObjectIdentifier(self)
+        guard let token = AttributeGraph.currentExecutionTokens?[graphID] else {
+            fatalError("AttributeGraph.current used outside its active TaskLocal execution context.")
+        }
+        debugExecutionState.withLock { state in
+            guard state.token === token else {
+                fatalError("AttributeGraph.current used with a stale TaskLocal execution context.")
+            }
+        }
+    }
+#endif
 
     func graphCounter(lane: UInt32) -> UInt {
         switch lane {

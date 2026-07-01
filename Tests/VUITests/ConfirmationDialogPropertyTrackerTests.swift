@@ -7,7 +7,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.modalSessionUsingPlatformWindow = false
             let environmentAttr = graph.makeInput(value: environment)
@@ -51,7 +51,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
         let presentation = BoolBox(true)
         let icon = Image("tracked-confirmation-icon")
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.explicitPreferredColorScheme = .dark
             let environmentAttr = graph.makeInput(value: environment)
@@ -118,7 +118,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             let environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(

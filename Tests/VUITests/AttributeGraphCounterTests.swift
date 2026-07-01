@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import VUI
 
@@ -125,6 +126,44 @@ final class AttributeGraphCounterTests: XCTestCase {
         }
     }
 
+    func testCurrentContextTokenPropagatesToChildTask() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        let probe = CurrentContextTaskProbe(graph: graph)
+
+        ref.withCurrent {
+            Task {
+                probe.run()
+            }
+            XCTAssertEqual(probe.wait(), .success)
+        }
+
+        XCTAssertTrue(probe.observed)
+    }
+
+    func testCurrentContextTokenMapAllowsReturningToOuterGraph() {
+        let outerGraph = AttributeGraph()
+        let outerRef = AttributeGraphRef(graph: outerGraph)
+        let innerGraph = AttributeGraph()
+        let innerRef = AttributeGraphRef(graph: innerGraph)
+
+        outerRef.withCurrent {
+            XCTAssertTrue(AttributeGraph.current === outerGraph)
+
+            innerRef.withCurrent {
+                XCTAssertTrue(AttributeGraph.current === innerGraph)
+
+                outerRef.withCurrent {
+                    XCTAssertTrue(AttributeGraph.current === outerGraph)
+                }
+
+                XCTAssertTrue(AttributeGraph.current === innerGraph)
+            }
+
+            XCTAssertTrue(AttributeGraph.current === outerGraph)
+        }
+    }
+
     func testParentInvalidationMarksKeyPathChildInputsChanged() {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)
@@ -221,6 +260,31 @@ private struct KeyPathChangedInputRule: StatefulRule {
 
 private final class TrackingIsolationRecorder {
     var values: [Int] = []
+}
+
+private final class CurrentContextTaskProbe: @unchecked Sendable {
+    let graph: AttributeGraph
+    private let semaphore = DispatchSemaphore(value: 0)
+    private let observedCurrent = Mutex(false)
+
+    init(graph: AttributeGraph) {
+        self.graph = graph
+    }
+
+    func run() {
+        observedCurrent.withLock { value in
+            value = AttributeGraph.current === graph
+        }
+        semaphore.signal()
+    }
+
+    func wait() -> DispatchTimeoutResult {
+        semaphore.wait(timeout: .now() + 2)
+    }
+
+    var observed: Bool {
+        observedCurrent.withLock { $0 }
+    }
 }
 
 private struct TrackingIsolationRule: StatefulRule {

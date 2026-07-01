@@ -6,7 +6,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.modalSessionUsingPlatformWindow = false
             let environmentAttr = graph.makeInput(value: environment)
@@ -55,7 +55,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
@@ -91,7 +91,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
@@ -126,7 +126,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let presentation = BoolBox(true)
         let icon = Image("tracked-dialog-icon")
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.explicitPreferredColorScheme = .dark
             let environmentAttr = graph.makeInput(value: environment)
@@ -187,7 +187,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.accessibilityEnabled = false
             let environmentAttr = graph.makeInput(value: environment)
@@ -224,7 +224,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         let graph = AttributeGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             let environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(

@@ -5,7 +5,7 @@ final class LayoutProxyPlacementContextTests: XCTestCase {
     func testLayoutProxyCanBeCreatedForPlacementOutsideRuleEvaluation() {
         let graph = AttributeGraph()
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             _ = graph.makeInput(value: 0)
             let layoutComputer = LayoutComputer.fixed(CGSize(width: 12, height: 34))
             let layoutComputerAttr = graph.makeInput(value: layoutComputer)

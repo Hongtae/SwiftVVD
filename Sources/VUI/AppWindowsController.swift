@@ -55,7 +55,7 @@ class AppWindowsController: @unchecked Sendable {
                                in graph: AttributeGraph) {
         guard let attr = sceneListAttr else { return }
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             let items = attr.value
             let activeKeys = Set(items.map { $0.windowKey })
 

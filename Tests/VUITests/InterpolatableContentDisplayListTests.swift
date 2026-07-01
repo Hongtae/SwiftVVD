@@ -637,7 +637,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testCanvasMakeViewEmitsCustomDisplayListItem() throws {
         let graph = AttributeGraph()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let canvas = Canvas(
                 opaque: true,
                 colorMode: .extendedLinear,
@@ -3345,7 +3345,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testInterpolatedDisplayListRetainsPreviousListOnFirstSameSurfaceChange() throws {
         let graph = AttributeGraph()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let firstList = makeDisplayList(debugItemCount: 1)
             let secondList = makeDisplayList(debugItemCount: 1)
             let displayList = graph.makeInput(value: firstList)
@@ -3386,7 +3386,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let graph = AttributeGraph()
         InterpolatableContentProbeLog.reset()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let firstList = makeDisplayList(debugItemCount: 1)
             let secondList = makeDisplayList(debugItemCount: 1)
             let displayList = graph.makeInput(value: firstList)
@@ -3559,7 +3559,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testApplyInterpolatorGroupReplacesDisplayListOutput() throws {
         let graph = AttributeGraph()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let sourceList = makeDisplayList(debugItemCount: 1)
             let displayList = graph.makeInput(value: sourceList)
             let content = graph.makeInput(value: ProbeInterpolatableContent(value: 0))
@@ -3584,7 +3584,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testTextMakeViewAppliesResolvedStyledTextInterpolator() throws {
         let graph = AttributeGraph()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let text = graph.makeInput(value: Text("Hello"))
             let outputs = Text._makeView(
                 view: _GraphValue(_attribute: text),
@@ -3601,7 +3601,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testResolvedStyledTextInterpolatorEmitsContentTransitionEffect() throws {
         let graph = AttributeGraph()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let sourceList = makeDisplayList(debugItemCount: 1)
             let displayList = graph.makeInput(value: sourceList)
             let content = graph.makeInput(value: ResolvedStyledText(version: 0))
@@ -3645,7 +3645,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let graph = AttributeGraph()
         InterpolatableContentProbeLog.reset()
 
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let displayList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))
             let content = graph.makeInput(value: ProbeInterpolatableContent(value: 0))
             var outputs = _ViewOutputs()
@@ -3734,7 +3734,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         to source: DisplayList
     ) throws -> DisplayList {
         let graph = AttributeGraph()
-        return try AttributeGraph.$current.withValue(graph) {
+        return try AttributeGraph.withCurrent(graph) {
             let modifierAttr = graph.makeInput(value: modifier)
             let sourceAttr = graph.makeInput(value: source)
             let outputs = Modifier._makeView(

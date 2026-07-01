@@ -54,7 +54,7 @@ final class PropertyListTrackerDependencyTests: XCTestCase {
         let graph = AttributeGraph()
         var mergedValues: EnvironmentValues!
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             var primaryList = PropertyList()
             primaryList[EnvironmentPropertyKey<TrackerDependencyNameKey>.self] = "primary"
             let primaryValues = EnvironmentValues.tracking(primaryList)

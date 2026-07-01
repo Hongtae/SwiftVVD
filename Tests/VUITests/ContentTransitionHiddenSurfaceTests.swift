@@ -214,7 +214,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         }
 
         let graph = AttributeGraph()
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let modifier = graph.makeInput(value: effect)
             var source = makeDisplayList(debugItemCount: 1)
             source.appendEffect(
@@ -260,7 +260,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         CountingRendererEffect.effectValueCalls = 0
 
         let graph = AttributeGraph()
-        try AttributeGraph.$current.withValue(graph) {
+        try AttributeGraph.withCurrent(graph) {
             let state = ContentTransition.State(transition: .opacity)
             let modifier = graph.makeInput(value: CountingRendererEffect(state: state))
             let sourceList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))

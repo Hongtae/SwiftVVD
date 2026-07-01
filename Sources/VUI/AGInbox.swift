@@ -24,7 +24,7 @@ import Synchronization
 /// }
 ///
 /// // Render pass start (AG thread):
-/// AttributeGraph.$current.withValue(graph) {
+/// AttributeGraph.withCurrent(graph) {
 ///     graph.inbox.drain()   // AG.current is already bound; closures can use it freely
 ///     // … evaluate …
 /// }

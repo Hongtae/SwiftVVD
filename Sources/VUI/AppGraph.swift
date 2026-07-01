@@ -31,7 +31,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         var sceneList: Attribute<[SceneList.Item]>? = nil
         var runtimeConfig: Attribute<_RuntimeWindowConfig>? = nil
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             // Stub AG input nodes for _GraphInputs fields.
             let timeAttr        = graph.makeInput(value: time)
             let phaseAttr       = graph.makeInput(value: Phase())

@@ -126,7 +126,7 @@ final class LocationStorageTests: XCTestCase {
         var derived: Attribute<Int>!
         var location: StoredLocation<Int>!
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             let sourceAttribute = graph.makeInput(value: 1)
             let inbox = graph.inbox
             location = StoredLocation<Int>(
@@ -155,7 +155,7 @@ final class LocationStorageTests: XCTestCase {
 
         location.setValue(7, transaction: Transaction())
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.withCurrent(graph) {
             graph.inbox.drain()
             XCTAssertEqual(derived.value, 17)
         }

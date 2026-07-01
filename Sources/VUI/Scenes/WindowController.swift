@@ -617,7 +617,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             // draining it here would make one AttributeGraph run on two threads.
             return
         }
-        AttributeGraph.$current.withValue(sourceGraph) {
+        AttributeGraph.withCurrent(sourceGraph) {
             sourceGraph.inbox.drain()
             sourceGraph.drainActions()
         }

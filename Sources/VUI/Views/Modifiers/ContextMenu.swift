@@ -284,7 +284,7 @@ final class ContextMenuPresentationSession {
             // The live refresh rule belongs to the source graph, not the popup
             // child graph. Bind that graph while invalidating so weak handles and
             // deferred graph actions resolve against the owner.
-            AttributeGraph.$current.withValue(sourceGraph) {
+            AttributeGraph.withCurrent(sourceGraph) {
                 subgraph.invalidate()
             }
         }
