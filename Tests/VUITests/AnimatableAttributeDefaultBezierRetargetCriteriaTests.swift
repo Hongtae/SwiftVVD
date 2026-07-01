@@ -31,6 +31,34 @@ final class AnimatableAttributeDefaultBezierRetargetCriteriaTests: XCTestCase {
             ],
             label: "easeToFluid"
         )
+        assertRetargetOrder(
+            oldAnimation: .default,
+            oldRole: "firstDefault",
+            replacementAnimation: Self.snappyAlias,
+            replacementRole: "secondSnappy",
+            retargetTime: 0.12,
+            expectedEvents: [
+                "secondSnappyLogical",
+                "firstDefaultRemoved",
+                "secondSnappyRemoved",
+                "firstDefaultLogical",
+            ],
+            label: "defaultToSnappy"
+        )
+        assertRetargetOrder(
+            oldAnimation: .easeInOut(duration: 0.90),
+            oldRole: "firstEase",
+            replacementAnimation: Self.snappyAlias,
+            replacementRole: "secondSnappy",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "secondSnappyLogical",
+                "firstEaseRemoved",
+                "secondSnappyRemoved",
+                "firstEaseLogical",
+            ],
+            label: "easeToSnappy"
+        )
     }
 
     func testFluidSpringRetargetedToDefaultAndBezierKeepSampledCriteriaOrder() {
@@ -61,6 +89,34 @@ final class AnimatableAttributeDefaultBezierRetargetCriteriaTests: XCTestCase {
                 "firstFluidLogical",
             ],
             label: "fluidToEase"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.bouncyAlias,
+            oldRole: "firstBouncy",
+            replacementAnimation: .easeInOut(duration: 0.55),
+            replacementRole: "secondEase",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "firstBouncyRemoved",
+                "secondEaseRemoved",
+                "secondEaseLogical",
+                "firstBouncyLogical",
+            ],
+            label: "bouncyToEase"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.bouncyAlias,
+            oldRole: "firstBouncy",
+            replacementAnimation: .default,
+            replacementRole: "secondDefault",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "secondDefaultLogical",
+                "firstBouncyRemoved",
+                "secondDefaultRemoved",
+                "firstBouncyLogical",
+            ],
+            label: "bouncyToDefault"
         )
     }
 
@@ -165,5 +221,13 @@ final class AnimatableAttributeDefaultBezierRetargetCriteriaTests: XCTestCase {
             dampingFraction: 0.70,
             blendDuration: 0.0
         )
+    }
+
+    private static var snappyAlias: Animation {
+        .snappy(duration: 0.15, extraBounce: 0.0)
+    }
+
+    private static var bouncyAlias: Animation {
+        .bouncy(duration: 1.20, extraBounce: 0.0)
     }
 }

@@ -74,6 +74,18 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         )
     }
 
+    func testInfiniteWrappersRetargetedToLinearGroupMixedCriteriaAtReplacementBoundary() {
+        assertInfiniteWrapperFiniteReplacementCriteriaRetarget(
+            oldAnimation: Animation.linear(duration: 0.20)
+                .repeatForever(autoreverses: false),
+            label: "repeatForeverToLinear"
+        )
+        assertInfiniteWrapperFiniteReplacementCriteriaRetarget(
+            oldAnimation: Animation.linear(duration: 0.40).speed(0.0),
+            label: "speedZeroToLinear"
+        )
+    }
+
     private enum Boundary {
         case old
         case replacement
@@ -150,6 +162,73 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         XCTAssertEqual(recorder.events.count, 2, label, file: file, line: line)
     }
 
+    private func assertInfiniteWrapperFiniteReplacementCriteriaRetarget(
+        oldAnimation: Animation,
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let recorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let replacementAnimation = Animation.linear(duration: 0.30)
+        let replacementTarget = -0.5
+        let retargetTime = 0.45
+        let frame = replacementAnimation.box.defaultDisplayFrameInterval
+
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: criteriaCompletionTransaction(
+                animation: oldAnimation,
+                label: "old",
+                recorder: recorder
+            )
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        harness.setTime(retargetTime)
+        _ = harness.currentValue()
+        harness.setSource(
+            _OpacityEffect(opacity: replacementTarget),
+            transaction: criteriaCompletionTransaction(
+                animation: replacementAnimation,
+                label: "replacement",
+                recorder: recorder
+            )
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        let replacementBoundary = retargetTime + replacementAnimation.box.duration
+        harness.setTime(replacementBoundary - frame)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        harness.setTime(replacementBoundary + frame)
+        let snappedValue = harness.currentValue().opacity
+        harness.flushCompletionActions()
+        XCTAssertEqual(snappedValue, replacementTarget, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "old removed",
+                "replacement removed",
+                "replacement logical",
+                "old logical",
+            ],
+            label,
+            file: file,
+            line: line
+        )
+    }
+
     private func makeRetargetedHarness(
         oldAnimation: Animation,
         replacementAnimation: Animation,
@@ -202,6 +281,21 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         var transaction = Transaction(animation: animation)
         transaction.addAnimationCompletion(criteria: .logicallyComplete) {
             recorder.record("\(label) logical")
+        }
+        return transaction
+    }
+
+    private func criteriaCompletionTransaction(
+        animation: Animation?,
+        label: String,
+        recorder: AnimationCompletionRecorder
+    ) -> Transaction {
+        var transaction = Transaction(animation: animation)
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            recorder.record("\(label) logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            recorder.record("\(label) removed")
         }
         return transaction
     }

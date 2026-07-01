@@ -58,6 +58,39 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
         XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
+    func testDeferredAsyncTransactionFlushDoesNotFinalizeCompletionListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        let host = GraphHost()
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        host.asyncTransaction(
+            transaction,
+            id: Transaction.ID(value: 111),
+            mutation: RecordingGraphMutation {
+                events.append("mutation")
+                Transaction.ThreadStorage.markMutation(for: Transaction.current)
+            }
+        )
+
+        host.flushTransactions()
+
+        XCTAssertEqual(events, ["mutation"])
+
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+        XCTAssertEqual(events, ["mutation", "completion"])
+
+        withExtendedLifetime(transaction) {}
+    }
+
     func testSameTransactionIDAppendsToPendingTransaction() {
         let host = GraphHost()
         var events: [String] = []

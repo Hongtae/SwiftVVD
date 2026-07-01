@@ -539,8 +539,14 @@ final class _ViewList_Subgraph {
 
     func invalidate() {
         guard AGSubgraphIsValid(subgraph) else { return }
+        guard let graph = _AGGraph.current else {
+            fatalError("_ViewList_Subgraph.invalidate() called outside an active _AGGraph context.")
+        }
+        Update.begin()
+        defer { Update.end() }
         subgraph.willRemove()
         subgraph.invalidate()
+        graph.drainActionOutbox()
         subgraph.removeFromParent()
     }
 }

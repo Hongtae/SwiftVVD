@@ -296,8 +296,14 @@ enum DynamicContainer {
         }
 
         func invalidate() {
+            guard let graph = _AGGraph.current else {
+                fatalError("DynamicContainer.ItemInfo.invalidate() called outside an active _AGGraph context.")
+            }
+            Update.begin()
+            defer { Update.end() }
             subgraph.willRemove()
             subgraph.invalidate()
+            graph.drainActionOutbox()
             subgraph.removeFromParent()
         }
     }

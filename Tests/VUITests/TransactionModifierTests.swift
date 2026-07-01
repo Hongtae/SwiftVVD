@@ -347,6 +347,137 @@ final class TransactionModifierTests: XCTestCase {
         }
     }
 
+    func testNestedValueTransactionModifierClearThenSetKeepsContentAdjacentSetAsFinalWriter() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            var graphInputs = makeGraphInputs(graph: graph, transaction: parent)
+            let outerClear = graph.makeInput(
+                value: valueTransactionModifierClearing(value: 1, marker: 200)
+            )
+            let innerSet = graph.makeInput(
+                value: valueTransactionModifier(value: 1, marker: 300, duration: 0.3)
+            )
+
+            _ValueTransactionModifier<Int>._makeInputs(
+                modifier: _GraphValue(_attribute: outerClear),
+                inputs: &graphInputs.inputs
+            )
+            _ValueTransactionModifier<Int>._makeInputs(
+                modifier: _GraphValue(_attribute: innerSet),
+                inputs: &graphInputs.inputs
+            )
+
+            assertTransaction(
+                graphInputs.inputs.transaction.value,
+                marker: 700,
+                duration: 1.0
+            )
+
+            outerClear.setValue(
+                valueTransactionModifierClearing(value: 2, marker: 200)
+            )
+            innerSet.setValue(
+                valueTransactionModifier(value: 2, marker: 300, duration: 0.3)
+            )
+
+            assertTransaction(
+                graphInputs.inputs.transaction.value,
+                marker: 300,
+                duration: 0.3
+            )
+        }
+    }
+
+    func testNestedValueTransactionModifierSetThenClearKeepsContentAdjacentClearAsFinalWriter() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            var graphInputs = makeGraphInputs(graph: graph, transaction: parent)
+            let outerSet = graph.makeInput(
+                value: valueTransactionModifier(value: 1, marker: 200, duration: 0.2)
+            )
+            let innerClear = graph.makeInput(
+                value: valueTransactionModifierClearing(value: 1, marker: 300)
+            )
+
+            _ValueTransactionModifier<Int>._makeInputs(
+                modifier: _GraphValue(_attribute: outerSet),
+                inputs: &graphInputs.inputs
+            )
+            _ValueTransactionModifier<Int>._makeInputs(
+                modifier: _GraphValue(_attribute: innerClear),
+                inputs: &graphInputs.inputs
+            )
+
+            assertTransaction(
+                graphInputs.inputs.transaction.value,
+                marker: 700,
+                duration: 1.0
+            )
+
+            outerSet.setValue(
+                valueTransactionModifier(value: 2, marker: 200, duration: 0.2)
+            )
+            innerClear.setValue(
+                valueTransactionModifierClearing(value: 2, marker: 300)
+            )
+
+            assertTransaction(
+                graphInputs.inputs.transaction.value,
+                marker: 300,
+                duration: nil
+            )
+        }
+    }
+
+    func testNestedValueTransactionModifierViewListKeepsContentAdjacentTransformAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[TransactionModifierMarkerKey.self] = 700
+            let graphInputs = makeGraphInputs(graph: graph, transaction: parent)
+            let outer = graph.makeInput(
+                value: valueTransactionModifier(value: 1, marker: 200, duration: 0.2)
+            )
+            let inner = graph.makeInput(
+                value: valueTransactionModifier(value: 1, marker: 300, duration: 0.3)
+            )
+
+            let outputs = _ValueTransactionModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: outer),
+                inputs: makeViewListInputs(base: graphInputs.inputs)
+            ) { _, outerInputs in
+                _ValueTransactionModifier<Int>._makeViewList(
+                    modifier: _GraphValue(_attribute: inner),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    self.makeTransactionReportingViewList(graph: graph, inputs: innerInputs)
+                }
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            outer.setValue(
+                valueTransactionModifier(value: 2, marker: 200, duration: 0.2)
+            )
+            inner.setValue(
+                valueTransactionModifier(value: 2, marker: 300, duration: 0.3)
+            )
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 330)
+        }
+    }
+
     func testPushPopTransactionModifierAppliesBaseTransformBeforeWrappedModifier() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -606,6 +737,16 @@ final class TransactionModifierTests: XCTestCase {
         _ValueTransactionModifier(value: value) { transaction in
             transaction[TransactionModifierMarkerKey.self] = marker
             transaction.animation = .linear(duration: duration)
+        }
+    }
+
+    private func valueTransactionModifierClearing(
+        value: Int,
+        marker: Int
+    ) -> _ValueTransactionModifier<Int> {
+        _ValueTransactionModifier(value: value) { transaction in
+            transaction[TransactionModifierMarkerKey.self] = marker
+            transaction.animation = nil
         }
     }
 

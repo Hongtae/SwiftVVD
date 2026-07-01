@@ -334,6 +334,42 @@ final class PreferenceBridgeTests: XCTestCase {
         }
     }
 
+    func testOptionalMakeViewRelaysRequestedPreferencesForSomeAndNone() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            var keys = PreferenceKeys()
+            keys.insert(OptionalRelayPreferenceKey.self)
+            let inputs = makeViewInputs(
+                graph: graph,
+                preferenceKeys: keys,
+                hostKeys: graph.makeInput(value: keys)
+            )
+
+            let some = graph.makeInput(
+                value: Optional<OptionalRelayEmitter>.some(OptionalRelayEmitter(value: "some"))
+            )
+            let someOutputs = Optional<OptionalRelayEmitter>._makeView(
+                view: _GraphValue(_attribute: some),
+                inputs: inputs
+            )
+            let somePreference = try XCTUnwrap(
+                someOutputs.preferences.value(for: OptionalRelayPreferenceKey.self)
+            )
+            XCTAssertEqual(Attribute<String>(somePreference).value, "some")
+
+            let none = graph.makeInput(value: Optional<OptionalRelayEmitter>.none)
+            let noneOutputs = Optional<OptionalRelayEmitter>._makeView(
+                view: _GraphValue(_attribute: none),
+                inputs: inputs
+            )
+            let nonePreference = try XCTUnwrap(
+                noneOutputs.preferences.value(for: OptionalRelayPreferenceKey.self)
+            )
+            XCTAssertEqual(Attribute<String>(nonePreference).value, "")
+        }
+    }
+
     func testPreferenceTransformQueuedTargetUpdatePropagatesDispatchTransaction() {
         let host = GraphHost()
         var transformed: AGAttribute!
@@ -914,6 +950,36 @@ private struct ArrayPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [Int], nextValue: () -> [Int]) {
         value.append(contentsOf: nextValue())
+    }
+}
+
+private struct OptionalRelayPreferenceKey: PreferenceKey {
+    static let defaultValue = ""
+
+    static func reduce(value: inout String, nextValue: () -> String) {
+        value += nextValue()
+    }
+}
+
+private struct OptionalRelayEmitter: View {
+    typealias Body = Never
+
+    var value: String
+
+    var body: Never {
+        neverBody()
+    }
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        var outputs = _ViewOutputs()
+        outputs.preferences.append(
+            OptionalRelayPreferenceKey.self,
+            node: view[\.value]._attribute.identifier
+        )
+        return outputs
     }
 }
 

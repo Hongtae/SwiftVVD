@@ -131,4 +131,74 @@ final class TransactionAsyncLifetimeTests: XCTestCase {
             ]
         )
     }
+
+    @MainActor
+    func testAsyncWorkScheduledInsideKeyPathTransactionsDoesNotInheritCurrentTransaction() async {
+        var events: [String] = []
+
+        withTransaction(\.disablesAnimations, true) {
+            XCTAssertTrue(Transaction.current.disablesAnimations)
+            events.append("sync body")
+        }
+        events.append(Transaction.current.isEmpty ? "sync restored" : "sync leaked")
+
+        let dispatchWaiter = MainActorWaiter()
+        withTransaction(\.disablesAnimations, true) {
+            XCTAssertTrue(Transaction.current.disablesAnimations)
+            events.append("dispatch body")
+            DispatchQueue.main.async {
+                events.append(Transaction.current.isEmpty ? "dispatch empty" : "dispatch inherited")
+                dispatchWaiter.resume()
+            }
+        }
+        events.append("dispatch returned")
+        await dispatchWaiter.wait()
+
+        let taskWaiter = MainActorWaiter()
+        withTransaction(\.animation, Optional.some(Animation.linear(duration: 0.20))) {
+            XCTAssertNotNil(Transaction.current.animation)
+            events.append("task body")
+            Task { @MainActor in
+                events.append(Transaction.current.isEmpty ? "task empty" : "task inherited")
+                taskWaiter.resume()
+            }
+        }
+        events.append("task returned")
+        await taskWaiter.wait()
+
+        let nestedWaiter = MainActorWaiter()
+        withTransaction(\.tracksVelocity, true) {
+            XCTAssertTrue(Transaction.current.tracksVelocity)
+            withTransaction(\.disablesAnimations, true) {
+                XCTAssertTrue(Transaction.current.tracksVelocity)
+                XCTAssertTrue(Transaction.current.disablesAnimations)
+                events.append("nested body")
+                Task { @MainActor in
+                    events.append(Transaction.current.isEmpty ? "nested task empty" : "nested task inherited")
+                    nestedWaiter.resume()
+                }
+            }
+            events.append("nested inner returned")
+        }
+        events.append("nested outer returned")
+        await nestedWaiter.wait()
+
+        XCTAssertEqual(
+            events,
+            [
+                "sync body",
+                "sync restored",
+                "dispatch body",
+                "dispatch returned",
+                "dispatch empty",
+                "task body",
+                "task returned",
+                "task empty",
+                "nested body",
+                "nested inner returned",
+                "nested outer returned",
+                "nested task empty",
+            ]
+        )
+    }
 }

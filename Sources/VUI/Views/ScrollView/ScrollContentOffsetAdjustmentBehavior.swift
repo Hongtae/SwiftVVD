@@ -7,9 +7,22 @@
 
 /// Policy for preserving or disabling content-offset adjustment when scroll content changes.
 public struct ScrollContentOffsetAdjustmentBehavior {
-    private enum Role: UInt8 {
-        case automatic = 0
-        case disabled = 2
+    private struct Role: CustomStringConvertible {
+        var rawValue: UInt8
+
+        static let automatic = Role(rawValue: 0)
+        static let disabled = Role(rawValue: 2)
+
+        var description: String {
+            switch rawValue {
+            case 0:
+                "automatic"
+            case 2:
+                "disabled"
+            default:
+                "unknown(\(rawValue))"
+            }
+        }
     }
 
     private var role: Role

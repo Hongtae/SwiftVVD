@@ -39,15 +39,49 @@ final class AnimationLogicalCompletionSurfaceTests: XCTestCase {
         )
     }
 
+    func testLongLogicalCompletionDrainsAtBaseTerminalBoundary() {
+        let recorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        let transaction = completionTransaction(
+            animation: Animation.linear(duration: 0.8).logicallyComplete(after: 1.2),
+            label: "late",
+            recorder: recorder
+        )
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: transaction
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        harness.setTime(0.4)
+        _ = harness.currentValue()
+        harness.setTime(0.5)
+        let runningValue = harness.currentValue().opacity
+        XCTAssertGreaterThan(runningValue, 0)
+        XCTAssertLessThan(runningValue, 1)
+        harness.setTime(1.3)
+
+        XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001)
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, ["late removed", "late logical"])
+    }
+
     func testLogicalCompletionEqualityHashAndNestedStorage() throws {
         let earlyA = Animation.linear(duration: 1.0).logicallyComplete(after: 0.25)
         let earlyB = Animation.linear(duration: 1.0).logicallyComplete(after: 0.25)
         let late = Animation.linear(duration: 1.0).logicallyComplete(after: 0.75)
+        let zero = Animation.linear(duration: 1.0).logicallyComplete(after: 0)
+        let negative = Animation.linear(duration: 1.0).logicallyComplete(after: -0.25)
         let nested = earlyA.logicallyComplete(after: 0.5)
 
         XCTAssertEqual(earlyA, earlyB)
         XCTAssertEqual(earlyA.hashValue, earlyB.hashValue)
         XCTAssertNotEqual(earlyA, late)
+        XCTAssertNotEqual(zero, negative)
         XCTAssertNotEqual(earlyA, nested)
 
         let outer = try XCTUnwrap(nested.box as? LogicalCompletionAnimationBox)

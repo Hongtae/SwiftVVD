@@ -5,24 +5,46 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
     func testFiniteOldRetargetedToDirectSpringMovesRemovedToSpringFinalSnap() {
         assertFiniteToSpringRetarget(
             oldAnimation: .linear(duration: 0.90),
+            replacementAnimation: Self.fastSpring,
             label: "linearToSpring"
         )
         assertFiniteToSpringRetarget(
             oldAnimation: .linear(duration: 0.65).delay(0.25),
+            replacementAnimation: Self.fastSpring,
             label: "delayToSpring"
+        )
+        assertFiniteToSpringRetarget(
+            oldAnimation: .linear(duration: 0.90),
+            replacementAnimation: Self.fastSpringValueAnimation,
+            label: "linearToSpringValue"
         )
     }
 
     func testDirectSpringRetargetedToFiniteDelayGroupsAtFiniteBoundary() {
+        assertSpringToFiniteDelayRetarget(
+            oldAnimation: Self.slowSpring,
+            label: "springToDelay"
+        )
+        assertSpringToFiniteDelayRetarget(
+            oldAnimation: Self.slowDurationSpring,
+            label: "durationSpringToDelay"
+        )
+    }
+
+    private func assertSpringToFiniteDelayRetarget(
+        oldAnimation: Animation,
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         let recorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
-        let oldAnimation = Self.slowSpring
         let replacementAnimation = Animation.linear(duration: 0.25).delay(0.30)
         let retargetTime = 0.25
 
-        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         harness.setSource(
             _OpacityEffect(opacity: 1),
             transaction: completionTransaction(
@@ -31,14 +53,14 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
                 recorder: recorder
             )
         )
-        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         harness.finalizeTransactionBody()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         harness.setTime(retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -51,13 +73,13 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         let replacementBoundary = retargetTime + replacementAnimation.box.duration
         harness.setTime(replacementBoundary - replacementAnimation.box.defaultDisplayFrameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         harness.setTime(replacementBoundary + replacementAnimation.box.defaultDisplayFrameInterval)
         _ = harness.currentValue()
@@ -69,12 +91,16 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
                 "replacement removed",
                 "replacement logical",
                 "old logical",
-            ]
+            ],
+            label,
+            file: file,
+            line: line
         )
     }
 
     private func assertFiniteToSpringRetarget(
         oldAnimation: Animation,
+        replacementAnimation: Animation,
         label: String,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -83,7 +109,6 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
-        let replacementAnimation = Self.fastSpring
         let retargetTime = 0.25
         let target = -0.5
 
@@ -186,5 +211,16 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
             damping: 5.0,
             initialVelocity: 0.0
         )
+    }
+
+    private static var fastSpringValueAnimation: Animation {
+        .interpolatingSpring(
+            Spring(mass: 1.0, stiffness: 100.0, damping: 10.0),
+            initialVelocity: 0.0
+        )
+    }
+
+    private static var slowDurationSpring: Animation {
+        .interpolatingSpring(duration: 1.20, bounce: 0.0, initialVelocity: 0.0)
     }
 }

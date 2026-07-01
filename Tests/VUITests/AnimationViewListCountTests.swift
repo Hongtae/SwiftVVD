@@ -403,6 +403,144 @@ final class AnimationViewListCountTests: XCTestCase {
         }
     }
 
+    func testNestedAnimationModifiersKeepContentAdjacentAnimationAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outer = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.2), value: 1)
+            )
+            let inner = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.3), value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: outer),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeView(
+                    modifier: _GraphValue(_attribute: inner),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    TransactionReportingAnimationContent._makeView(
+                        view: _GraphValue(_attribute: content),
+                        inputs: innerInputs
+                    )
+                }
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            outer.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.2), value: 2)
+            )
+            inner.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.3), value: 2)
+            )
+
+            assertLayout(layout, width: 10, height: 730)
+        }
+    }
+
+    func testNestedAnimationModifierClearThenSetKeepsContentAdjacentSetAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outerClear = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let innerSet = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.3), value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: outerClear),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeView(
+                    modifier: _GraphValue(_attribute: innerSet),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    TransactionReportingAnimationContent._makeView(
+                        view: _GraphValue(_attribute: content),
+                        inputs: innerInputs
+                    )
+                }
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            outerClear.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+            innerSet.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.3), value: 2)
+            )
+
+            assertLayout(layout, width: 10, height: 730)
+        }
+    }
+
+    func testNestedAnimationModifierSetThenClearKeepsContentAdjacentClearAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outerSet = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.2), value: 1)
+            )
+            let innerClear = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: outerSet),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeView(
+                    modifier: _GraphValue(_attribute: innerClear),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    TransactionReportingAnimationContent._makeView(
+                        view: _GraphValue(_attribute: content),
+                        inputs: innerInputs
+                    )
+                }
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            outerSet.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.2), value: 2)
+            )
+            innerClear.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+
+            assertLayout(layout, width: 10, height: 600)
+        }
+    }
+
     func testAnimationModifierListInjectsAnimationOnlyAfterObservedValueChanges() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -526,6 +664,123 @@ final class AnimationViewListCountTests: XCTestCase {
                 _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
             )
             XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+        }
+    }
+
+    func testNestedAnimationModifierListKeepsContentAdjacentAnimationAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outer = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.2), value: 1)
+            )
+            let inner = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.3), value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: outer),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeViewList(
+                    modifier: _GraphValue(_attribute: inner),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    self.makeTransactionReportingViewList(graph: graph, inputs: innerInputs)
+                }
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            outer.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.2), value: 2)
+            )
+            inner.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.3), value: 2)
+            )
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 730)
+        }
+    }
+
+    func testNestedAnimationModifierListClearThenSetKeepsContentAdjacentSetAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outerClear = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let innerSet = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.3), value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: outerClear),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeViewList(
+                    modifier: _GraphValue(_attribute: innerSet),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    self.makeTransactionReportingViewList(graph: graph, inputs: innerInputs)
+                }
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            outerClear.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+            innerSet.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.3), value: 2)
+            )
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 730)
+        }
+    }
+
+    func testNestedAnimationModifierListSetThenClearKeepsContentAdjacentClearAsFinalWriter() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let outerSet = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.2), value: 1)
+            )
+            let innerClear = graph.makeInput(
+                value: _AnimationModifier(animation: nil, value: 1)
+            )
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: outerSet),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, outerInputs in
+                _AnimationModifier<Int>._makeViewList(
+                    modifier: _GraphValue(_attribute: innerClear),
+                    inputs: outerInputs
+                ) { _, innerInputs in
+                    self.makeTransactionReportingViewList(graph: graph, inputs: innerInputs)
+                }
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 800)
+
+            outerSet.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.2), value: 2)
+            )
+            innerClear.setValue(
+                _AnimationModifier(animation: nil, value: 2)
+            )
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 600)
         }
     }
 
@@ -656,6 +911,26 @@ final class AnimationViewListCountTests: XCTestCase {
             containerContext: nil,
             contentOffset: nil,
             debugReplaceableViewCount: nil
+        )
+    }
+
+    private func makeTransactionReportingViewList(
+        graph: _AGGraph,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        let transaction = inputs.base.transaction
+        let list: Attribute<any ViewList> = graph.makeRule {
+            let currentTransaction = transaction.value
+            let duration = currentTransaction.animation?.box.duration ?? -1
+            let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+            return TransactionReportingAnimationViewList(
+                countValue: marker + Int(duration * 100)
+            )
+        }
+        return _ViewListOutputs(
+            views: .dynamicList(list, nil),
+            nextImplicitID: 0,
+            staticCount: nil
         )
     }
 

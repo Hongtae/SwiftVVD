@@ -47,6 +47,36 @@ final class AnimatableAttributeDefaultSpringRetargetCriteriaTests: XCTestCase {
         )
     }
 
+    func testDefaultRetargetedToSpringValueKeepsOldLogicalBeforeReplacementLogical() {
+        assertDefaultSpringRetarget(
+            oldAnimation: .default,
+            replacementAnimation: Self.fastSpringValueAnimation,
+            label: "defaultToSpringValue",
+            logicalOrdering: .oldBeforeReplacement,
+            expectedFinalEvents: [
+                "old logical",
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
+    func testDurationSpringRetargetedToDefaultClampsOldLogicalToFinalSnap() {
+        assertDefaultSpringRetarget(
+            oldAnimation: Self.slowDurationSpring,
+            replacementAnimation: .default,
+            label: "durationSpringToDefault",
+            logicalOrdering: .replacementBeforeClampedOld,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+                "old logical",
+            ]
+        )
+    }
+
     private enum LogicalOrdering {
         case oldBeforeReplacement
         case replacementBeforeClampedOld
@@ -179,6 +209,17 @@ final class AnimatableAttributeDefaultSpringRetargetCriteriaTests: XCTestCase {
             mass: 1.0,
             stiffness: 25.0,
             damping: 5.0,
+            initialVelocity: 0.0
+        )
+    }
+
+    private static var slowDurationSpring: Animation {
+        .interpolatingSpring(duration: 1.20, bounce: 0.0, initialVelocity: 0.0)
+    }
+
+    private static var fastSpringValueAnimation: Animation {
+        .interpolatingSpring(
+            Spring(mass: 1.0, stiffness: 100.0, damping: 10.0),
             initialVelocity: 0.0
         )
     }

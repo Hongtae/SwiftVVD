@@ -56,6 +56,60 @@ final class AnimatableAttributeResidualSpringCrossRetargetCompletionTests: XCTes
         )
     }
 
+    func testFluidSpringOldRetargetedToSpringValueAliasKeepsOldLogicalBeforeFinalSnap() {
+        assertResidualCrossRetarget(
+            oldAnimation: Self.slowFluidSpring,
+            replacementAnimation: Self.fastSpringValue,
+            label: "fluidToSpringValue",
+            expectedEventsAfterReplacementLogical: ["replacement logical"],
+            expectedEventsAfterOldLogical: [
+                "replacement logical",
+                "old logical",
+            ],
+            expectedFinalEvents: [
+                "replacement logical",
+                "old logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
+    func testSpringValueAliasOldRetargetedToFluidSpringKeepsEarlierOldLogicalBeforeFinalSnap() {
+        assertResidualCrossRetarget(
+            oldAnimation: Self.fastSpringValue,
+            replacementAnimation: Self.fastFluidSpring,
+            label: "springValueToFluid",
+            expectedEventsAfterReplacementLogical: ["replacement logical"],
+            expectedEventsAfterOldLogical: [
+                "replacement logical",
+                "old logical",
+            ],
+            expectedFinalEvents: [
+                "replacement logical",
+                "old logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
+    func testDurationSpringAliasOldRetargetedToFluidSpringClampsOldLogicalToFinalSnap() {
+        assertResidualCrossRetarget(
+            oldAnimation: Self.slowDurationSpring,
+            replacementAnimation: Self.fastFluidSpring,
+            label: "durationSpringToFluid",
+            expectedEventsAfterReplacementLogical: ["replacement logical"],
+            expectedEventsAfterOldLogical: nil,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+                "old logical",
+            ]
+        )
+    }
+
     private func assertResidualCrossRetarget(
         oldAnimation: Animation,
         replacementAnimation: Animation,
@@ -168,6 +222,17 @@ final class AnimatableAttributeResidualSpringCrossRetargetCompletionTests: XCTes
             damping: 5.0,
             initialVelocity: 0.0
         )
+    }
+
+    private static var fastSpringValue: Animation {
+        .interpolatingSpring(
+            Spring(mass: 1.0, stiffness: 100.0, damping: 10.0),
+            initialVelocity: 0.0
+        )
+    }
+
+    private static var slowDurationSpring: Animation {
+        .interpolatingSpring(duration: 1.20, bounce: 0.0, initialVelocity: 0.0)
     }
 
     private static var fastFluidSpring: Animation {

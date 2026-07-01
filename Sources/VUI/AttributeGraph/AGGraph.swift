@@ -139,6 +139,15 @@ final class _AGGraph: @unchecked Sendable {
     // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
     // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
     var actionOutbox: [() -> Void] = []
+
+    func drainActionOutbox() {
+        while !actionOutbox.isEmpty {
+            let actions = actionOutbox
+            actionOutbox.removeAll()
+            actions.forEach { $0() }
+        }
+    }
+
     var updateCounter: UInt = 0
 
     // Closures enqueued here are executed during drainActions().

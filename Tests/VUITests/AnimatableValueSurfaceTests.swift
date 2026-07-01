@@ -2,6 +2,17 @@ import XCTest
 @testable import VUI
 
 final class AnimatableValueSurfaceTests: XCTestCase {
+    func testViewSizeAnimatableDataPreservesProposalMetadata() {
+        let proposal = ProposedViewSize(width: 160, height: 34)
+        var size = ViewSize(width: 80, height: 20, proposal: proposal)
+
+        size.animatableData = CGSize(width: 120, height: 30).animatableData
+
+        XCTAssertEqual(size.width, 120)
+        XCTAssertEqual(size.height, 30)
+        XCTAssertEqual(size.proposal, proposal)
+    }
+
     func testAnimatableValuesPackOperationsMatchElementWiseSurface() {
         let direct = AnimatableValues(3.0, CGFloat(4.0))
         let typed = AnimatableValues(Double.self, CGFloat.self)

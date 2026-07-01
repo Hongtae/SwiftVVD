@@ -50,6 +50,61 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["setter nil", "body", "returned", "completion"])
     }
 
+    func testCustomSetterSameStoredLocationWriteDoesNotMarkScopedTransactionMutated() {
+        let location = StoredLocationBase<Int>(initialValue: 1)
+        var events: [String] = []
+        let binding = Binding<Int>(
+            get: { location.getValue() },
+            set: { _ in
+                events.append("setter")
+                location.setValue(1, transaction: Transaction.current)
+            }
+        )
+
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        withTransaction(transaction) {
+            binding.wrappedValue = 2
+            events.append("body")
+        }
+        events.append("returned")
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(events, ["setter", "body", "returned", "completion"])
+    }
+
+    func testCustomSetterChangedStoredLocationWriteMarksScopedTransactionMutated() {
+        let location = StoredLocationBase<String>(initialValue: "A")
+        var events: [String] = []
+        let binding = Binding<String>(
+            get: { location.getValue() },
+            set: { newValue in
+                events.append("setter")
+                location.setValue(newValue, transaction: Transaction.current)
+            }
+        )
+
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        withTransaction(transaction) {
+            binding.wrappedValue = "B"
+            events.append("body")
+        }
+        events.append("returned")
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(events, ["setter", "body", "returned"])
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        XCTAssertEqual(events, ["setter", "body", "returned", "completion"])
+    }
+
     func testTransactionAwareSetterReceivesBindingLocalTransaction() {
         var records: [String] = []
         let binding = Binding<Double>(

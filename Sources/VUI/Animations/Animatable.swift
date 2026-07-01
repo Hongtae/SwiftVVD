@@ -414,11 +414,45 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     }
 
     struct ListenerRegistration {
-        let records: [Listener]
-        let immediateActions: [() -> Void]
+        private let records: [CompletionListener]
+        private let immediateActions: [() -> Void]
 
-        init(
-            records: [Listener] = [],
+        static var empty: ListenerRegistration {
+            ListenerRegistration(records: [], immediateActions: [])
+        }
+
+        static func records(_ records: [CompletionListener]) -> ListenerRegistration {
+            ListenerRegistration(records: records, immediateActions: [])
+        }
+
+        static func immediateActions(_ immediateActions: [() -> Void]) -> ListenerRegistration {
+            ListenerRegistration(records: [], immediateActions: immediateActions)
+        }
+
+        func appending(_ registration: ListenerRegistration) -> ListenerRegistration {
+            ListenerRegistration(
+                records: records + registration.records,
+                immediateActions: immediateActions + registration.immediateActions
+            )
+        }
+
+        func reversingRecordOrder() -> ListenerRegistration {
+            ListenerRegistration(
+                records: Array(records.reversed()),
+                immediateActions: immediateActions
+            )
+        }
+
+        func mapRecords<Record>(_ transform: (CompletionListener) -> Record) -> [Record] {
+            records.map(transform)
+        }
+
+        func enqueueImmediateActions() {
+            enqueueAnimationCompletionActions(immediateActions)
+        }
+
+        private init(
+            records: [CompletionListener] = [],
             immediateActions: [() -> Void] = []
         ) {
             self.records = records
@@ -478,13 +512,13 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         let finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
     }
 
-    struct Listener {
+    struct CompletionListener {
         struct Identity: Hashable {
             let listenerID: ObjectIdentifier
             let criteria: AnimationCompletionCriteria
         }
 
-        let listener: AnimationListener
+        private let listener: AnimationListener
         let criteria: AnimationCompletionCriteria
 
         var identity: Identity {
@@ -497,20 +531,44 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         func finish() -> [() -> Void] {
             listener.animationWasRemoved()
         }
+
+        fileprivate init(
+            listener: AnimationListener,
+            criteria: AnimationCompletionCriteria
+        ) {
+            self.listener = listener
+            self.criteria = criteria
+        }
+    }
+
+    private struct Listener {
+        let listener: AnimationListener
+        let criteria: AnimationCompletionCriteria
+
+        var completionListener: CompletionListener {
+            CompletionListener(
+                listener: listener,
+                criteria: criteria
+            )
+        }
+
+        func finish() -> [() -> Void] {
+            completionListener.finish()
+        }
     }
 
     struct ListenerSnapshot {
-        private let listenerIdentities: Set<Listener.Identity>
+        private let listenerIdentities: Set<CompletionListener.Identity>
 
         init() {
             listenerIdentities = []
         }
 
-        private init(listenerIdentities: Set<Listener.Identity>) {
+        private init(listenerIdentities: Set<CompletionListener.Identity>) {
             self.listenerIdentities = listenerIdentities
         }
 
-        func inserting(_ listener: Listener) -> ListenerSnapshot {
+        func inserting(_ listener: CompletionListener) -> ListenerSnapshot {
             var identities = listenerIdentities
             identities.insert(listener.identity)
             return ListenerSnapshot(listenerIdentities: identities)
@@ -526,8 +584,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             listenerIdentities.isEmpty
         }
 
-        func contains(_ identity: Listener.Identity) -> Bool {
-            listenerIdentities.contains(identity)
+        func contains(_ listener: CompletionListener) -> Bool {
+            listenerIdentities.contains(listener.identity)
         }
     }
 
@@ -536,18 +594,104 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     // were drained by this sample; AnimatableAttribute only reads the snapshot
     // to reconcile its copied records and deadline/group ordering.
     struct UpdateResult {
+        struct ContinuingCompletion {
+            private let isLogicallyComplete: Bool
+            private let logicalCompletionListeners: ListenerSnapshot
+
+            func isReadyForLogicalCompletion(
+                currentGeneration: UInt64?,
+                suppressedGenerations: Set<UInt64>,
+                deadlineOwnedGenerations: Set<UInt64>
+            ) -> Bool {
+                guard isLogicallyComplete,
+                      let currentGeneration,
+                      !suppressedGenerations.contains(currentGeneration),
+                      !deadlineOwnedGenerations.contains(currentGeneration) else {
+                    return false
+                }
+                return true
+            }
+
+            var hasLogicalCompletionListeners: Bool {
+                !logicalCompletionListeners.isEmpty
+            }
+
+            func containsLogicalCompletionListener(
+                _ listener: CompletionListener
+            ) -> Bool {
+                logicalCompletionListeners.contains(listener)
+            }
+
+            fileprivate static func snapshot(
+                isLogicallyComplete: Bool,
+                logicalCompletionListeners: ListenerSnapshot
+            ) -> ContinuingCompletion {
+                ContinuingCompletion(
+                    isLogicallyComplete: isLogicallyComplete,
+                    logicalCompletionListeners: logicalCompletionListeners
+                )
+            }
+
+            private init(
+                isLogicallyComplete: Bool,
+                logicalCompletionListeners: ListenerSnapshot
+            ) {
+                self.isLogicallyComplete = isLogicallyComplete
+                self.logicalCompletionListeners = logicalCompletionListeners
+            }
+        }
+
         struct TerminalCompletion {
-            let listeners: ListenerSnapshot
-            let discardedBaseLayerGenerations: Set<UInt64>
+            private let listeners: ListenerSnapshot
+            private let discardedBaseLayerGenerations: Set<UInt64>
+
+            func containsDrainedListener(_ listener: CompletionListener) -> Bool {
+                listeners.contains(listener)
+            }
+
+            func discardedBaseLayerGenerations(
+                adding generations: Set<UInt64> = []
+            ) -> Set<UInt64> {
+                generations.union(discardedBaseLayerGenerations)
+            }
+
+            fileprivate static func snapshot(
+                listeners: ListenerSnapshot,
+                discardedBaseLayerGenerations: Set<UInt64>
+            ) -> TerminalCompletion {
+                TerminalCompletion(
+                    listeners: listeners,
+                    discardedBaseLayerGenerations: discardedBaseLayerGenerations
+                )
+            }
+
+            private init(
+                listeners: ListenerSnapshot,
+                discardedBaseLayerGenerations: Set<UInt64>
+            ) {
+                self.listeners = listeners
+                self.discardedBaseLayerGenerations = discardedBaseLayerGenerations
+            }
+        }
+
+        private enum CompletionKind {
+            case continuing(ContinuingCompletion)
+            case terminal(TerminalCompletion)
         }
 
         let time: Time
-        let isLogicallyComplete: Bool
-        let logicalCompletionListeners: ListenerSnapshot
-        let terminalCompletion: TerminalCompletion?
+        private let completionKind: CompletionKind
 
-        var continues: Bool {
-            terminalCompletion == nil
+        func resolveCompletion<Result>(
+            continuing: (ContinuingCompletion) -> Result,
+            terminal: (TerminalCompletion) -> Result
+        ) -> Result {
+            switch completionKind {
+            case .continuing(let completion):
+                continuing(completion)
+            case .terminal(let completion):
+                terminal(completion)
+            }
         }
 
         static func continuing(
@@ -557,36 +701,37 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         ) -> UpdateResult {
             UpdateResult(
                 time: time,
-                isLogicallyComplete: isLogicallyComplete,
-                logicalCompletionListeners: logicalCompletionListeners,
-                terminalCompletion: nil
+                completionKind: .continuing(
+                    ContinuingCompletion.snapshot(
+                        isLogicallyComplete: isLogicallyComplete,
+                        logicalCompletionListeners: logicalCompletionListeners
+                    )
+                ),
             )
         }
 
         static func terminal(
             time: Time,
-            isLogicallyComplete: Bool,
-            logicalCompletionListeners: ListenerSnapshot,
-            terminalCompletion: TerminalCompletion
+            terminalListeners: ListenerSnapshot,
+            discardedBaseLayerGenerations: Set<UInt64>
         ) -> UpdateResult {
             UpdateResult(
                 time: time,
-                isLogicallyComplete: isLogicallyComplete,
-                logicalCompletionListeners: logicalCompletionListeners,
-                terminalCompletion: terminalCompletion
+                completionKind: .terminal(
+                    TerminalCompletion.snapshot(
+                        listeners: terminalListeners,
+                        discardedBaseLayerGenerations: discardedBaseLayerGenerations
+                    )
+                )
             )
         }
 
         private init(
             time: Time,
-            isLogicallyComplete: Bool,
-            logicalCompletionListeners: ListenerSnapshot,
-            terminalCompletion: TerminalCompletion?
+            completionKind: CompletionKind
         ) {
             self.time = time
-            self.isLogicallyComplete = isLogicallyComplete
-            self.logicalCompletionListeners = logicalCompletionListeners
-            self.terminalCompletion = terminalCompletion
+            self.completionKind = completionKind
         }
     }
 
@@ -835,12 +980,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         if sample.output == nil {
             return .terminal(
                 time: time,
-                isLogicallyComplete: sample.isLogicallyComplete,
-                logicalCompletionListeners: logicalListeners,
-                terminalCompletion: UpdateResult.TerminalCompletion(
-                    listeners: logicalListeners.union(drainRemovedListenersForCompletionRecords()),
-                    discardedBaseLayerGenerations: baseLayerGenerations()
-                )
+                terminalListeners: logicalListeners.union(drainRemovedListenersForCompletionRecords()),
+                discardedBaseLayerGenerations: baseLayerGenerations()
             )
         }
         return .continuing(
@@ -929,7 +1070,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                 targetData: targetData,
                 animationValue: output
             )
-            recordSampledAnimationValue(value, at: time)
+            recordSampledAnimationValue(output, at: time)
             if updatesMergeStateWithAnimation {
                 mergeState = context.state
             }
@@ -994,11 +1135,10 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             return nil
         }
 
-        if update.continues {
-            value.animatableData = targetData
-        } else {
-            value = targetValue
-        }
+        update.resolveCompletion(
+            continuing: { _ in value.animatableData = targetData },
+            terminal: { _ in value = targetValue }
+        )
         return update
     }
 
@@ -1088,7 +1228,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         // The state-owned path can finish already-complete listeners
         // immediately because no outer record sorter needs to copy them first.
         let registration = registerListeners(transaction: transaction)
-        enqueueAnimationCompletionActions(registration.immediateActions)
+        registration.enqueueImmediateActions()
     }
 
     func addListenersForCompletionRecords(
@@ -1105,35 +1245,31 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     ) -> ListenerRegistration {
         guard transaction.animationListener != nil ||
               transaction.animationLogicalListener != nil else {
-            return ListenerRegistration()
+            return .empty
         }
 
-        var registeredListeners: [Listener] = []
-        var immediateActions: [() -> Void] = []
+        var registration = ListenerRegistration.empty
         if let animationListener = transaction.animationListener {
-            let registration = registerListener(
-                animationListener,
-                isLogical: false
+            registration = registration.appending(
+                registerListener(
+                    animationListener,
+                    isLogical: false
+                )
             )
-            registeredListeners.append(contentsOf: registration.records)
-            immediateActions.append(contentsOf: registration.immediateActions)
         }
         if let animationLogicalListener = transaction.animationLogicalListener {
-            let registration = registerListener(
-                animationLogicalListener,
-                isLogical: true
+            registration = registration.appending(
+                registerListener(
+                    animationLogicalListener,
+                    isLogical: true
+                )
             )
-            registeredListeners.append(contentsOf: registration.records)
-            immediateActions.append(contentsOf: registration.immediateActions)
         }
 
         // Completion ordering prepends newly registered records one at a time.
         // Return the reversed batch so inserting at the front keeps the same
         // newest-first record order while registration moves into AnimatorState.
-        return ListenerRegistration(
-            records: registeredListeners.reversed(),
-            immediateActions: immediateActions
-        )
+        return registration.reversingRecordOrder()
     }
 
     private func registerListener(
@@ -1151,19 +1287,15 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         if isLogical {
             if !isLogicallyComplete {
                 logicalListeners.append(animationListener)
-                return ListenerRegistration(records: [record])
+                return .records([record.completionListener])
             }
             // A logical listener registered after logical completion should see
             // an add/remove pair immediately instead of entering live storage.
-            return ListenerRegistration(
-                immediateActions: record.finish()
-            )
+            return .immediateActions(record.finish())
         }
 
         listeners.append(animationListener)
-        return ListenerRegistration(
-            records: [record]
-        )
+        return .records([record.completionListener])
     }
 
     private func updateListeners(
@@ -1193,7 +1325,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             time: time,
             environment: environment
         ) { listener in
-            completed = completed.inserting(listener)
+            completed = completed.inserting(listener.completionListener)
         }
         return completed
     }
@@ -1260,15 +1392,15 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     private func drainRemovedListenersForCompletionRecords() -> ListenerSnapshot {
         var removed = ListenerSnapshot()
         drainRemovedListenersBeforeClearingStorage { listener in
-            removed = removed.inserting(listener)
+            removed = removed.inserting(listener.completionListener)
         }
         return removed
     }
 
     func clearListenersForCompletionRecords() {
-        listeners.removeAll()
-        logicalListeners.removeAll()
-        forks.removeAll()
+        // Completion-record callers already copied listener identities; keep
+        // the same storage drain order as removeListeners(), but drop callbacks.
+        drainRemovedListenersBeforeClearingStorage { _ in }
     }
 
     private func drainRemovedListenersBeforeClearingStorage(
@@ -1504,6 +1636,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private var combinedFiniteCompletionGroup: CombinedFiniteCompletionGroup?
     private var velocityTrackingImmediateCompletionGroup: CustomReplacementCompletionGroup?
     private var noAnimationRetargetPresentationDeadline: Time?
+    private var deferredTerminalPresentationDeadline: Time?
     private var contextLogicalCompletionSuppressedGenerations: Set<UInt64> = []
     private var deadlineOwnedLogicalCompletionGenerations: Set<UInt64> = []
     // A generation identifies one target activation. `generation` can be
@@ -1518,10 +1651,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private var completionRecords: [CompletionRecord] = []
 
     private typealias AnimationLayer = AnimatorState<AnimatedValue>.PresentationLayer
-    private typealias StateListener = AnimatorState<AnimatedValue>.Listener
+    private typealias StateCompletionListener = AnimatorState<AnimatedValue>.CompletionListener
 
     private struct CompletionRecord {
-        let listener: StateListener
+        private let listener: StateCompletionListener
         // Deadline decides readiness. The final drain still applies criteria and
         // generation ordering, so a ready record is not necessarily run first.
         var deadline: Time
@@ -1532,12 +1665,32 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             listener.criteria
         }
 
-        var identity: StateListener.Identity {
-            listener.identity
-        }
-
         func finish() -> [() -> Void] {
             listener.finish()
+        }
+
+        func isMatched(
+            by continuingCompletion: AnimatorState<AnimatedValue>.UpdateResult.ContinuingCompletion
+        ) -> Bool {
+            continuingCompletion.containsLogicalCompletionListener(listener)
+        }
+
+        func isMatched(
+            by terminalCompletion: AnimatorState<AnimatedValue>.UpdateResult.TerminalCompletion
+        ) -> Bool {
+            terminalCompletion.containsDrainedListener(listener)
+        }
+
+        init(
+            listener: StateCompletionListener,
+            deadline: Time,
+            generation: UInt64,
+            orderGeneration: UInt64
+        ) {
+            self.listener = listener
+            self.deadline = deadline
+            self.generation = generation
+            self.orderGeneration = orderGeneration
         }
     }
 
@@ -1569,6 +1722,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         combinedFiniteCompletionGroup = nil
         velocityTrackingImmediateCompletionGroup = nil
         noAnimationRetargetPresentationDeadline = nil
+        deferredTerminalPresentationDeadline = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         deadlineOwnedLogicalCompletionGenerations.removeAll()
         if clearingGeneration {
@@ -1659,13 +1813,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
         var updateValue = (value: _source.value, changed: false)
         let sourceID = _source.identifier
-        // Resolve the transaction before comparing the model value. A target
-        // change needs the transaction that produced this source update, not a
-        // later ambient transaction read after the attribute has sampled.
+        // Keep transaction lookup lazy. The helper owns the model-data changed
+        // gate and only resolves the source transaction for a real retarget.
         let updateInputs = helper.beginUpdate(
             value: &updateValue,
             defaultAnimation: nil,
-            transaction: {
+            transactionForChangedTarget: {
                 graph.transaction(for: sourceID)
             }
         )
@@ -1733,6 +1886,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         time now: Time
     ) {
         noAnimationRetargetPresentationDeadline = nil
+        deferredTerminalPresentationDeadline = nil
         let start = currentOutput
         guard start.animatableData != target.animatableData else {
             finishValue(with: target, at: now)
@@ -1868,7 +2022,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         let deadlineStartValue = merged ? mergedStart : start
         let deadlineInterval = animatableDelta(from: deadlineStartValue, to: target)
         let presentationDuration = animation.box.presentationDuration(for: deadlineInterval)
+        let resolvedPresentationDuration = resolvedCompletionPresentationDuration(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation,
+            previousSamplingLayers: previousSamplingLayers,
+            valuePresentationDuration: presentationDuration
+        )
         let deadline = completionStart + animation.box.duration
+        if resolvedPresentationDuration > presentationDuration {
+            deferredTerminalPresentationDeadline =
+                completionStart + resolvedPresentationDuration
+        }
         velocityTrackingImmediateCompletionGroup = nil
         var holdsCombinedResidualReplacementLogicalUntilPresentation = false
         // The active AnimatorState owns sampling and listener movement. The
@@ -1932,7 +2096,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         } else if shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
             previousAnimation: previousAnimation,
             replacementAnimation: animation,
-            presentationDuration: presentationDuration
+            presentationDuration: resolvedPresentationDuration
         ), let customReplacementCompletionGroup {
             let oldGenerations = customReplacementCompletionGroup.oldGenerations
                 .union([customReplacementCompletionGroup.replacementGeneration])
@@ -1976,7 +2140,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 activeContextIsLogicallyComplete = false
             }
             if shouldHoldCombinedResidualReplacementLogicalUntilFinalization(
+                previousAnimation: previousAnimation,
                 replacementAnimation: animation,
+                previousSamplingLayers: previousSamplingLayers,
                 value: deadlineInterval
             ) {
                 // Keep context from draining the replacement logical callback
@@ -2113,9 +2279,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
            shouldMoveMergedCompletionRecordsToPresentation(
                previousAnimation: previousAnimation,
                replacementAnimation: animation,
-               presentationDuration: presentationDuration
+               presentationDuration: resolvedPresentationDuration
            ) {
-            let presentationDeadline = completionStart + presentationDuration
+            let presentationDeadline = completionStart + resolvedPresentationDuration
             if shouldGroupResidualWrapperReplacementCompletionRecords(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
@@ -2142,9 +2308,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         } else if shouldMoveResidualCompletionRecordsToPresentation(
             previousAnimation: previousAnimation,
             replacementAnimation: animation,
-            presentationDuration: presentationDuration
+            presentationDuration: resolvedPresentationDuration
         ) {
-            let presentationDeadline = completionStart + presentationDuration
+            let presentationDeadline = completionStart + resolvedPresentationDuration
             if shouldGroupResidualWrapperReplacementCompletionRecords(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
@@ -2212,7 +2378,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         startValue = activeStart
         targetValue = target
         let activeInterval = animatableDelta(from: activeStart, to: target)
-        let presentationDeadline = completionStart + max(animation.box.duration, presentationDuration)
+        let presentationDeadline = completionStart + max(
+            animation.box.duration,
+            resolvedPresentationDuration
+        )
         let holdsNewLogicalUntilPresentation =
             shouldHoldDefaultReplacementCompletionUntilPresentation(
                 previousAnimation: previousAnimation,
@@ -2237,7 +2406,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         // copied here become the outer rule's durable sorter; later helper clears
         // must not drop or reorder these callbacks.
         let newCompletionRecords = completionRecords(
-            from: listenerRegistration.records,
+            from: listenerRegistration,
             generation: replacementGeneration,
             orderGeneration: replacementGeneration
         ) { criteria in
@@ -2252,17 +2421,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         // New records stay at the front so same-generation ties preserve the
         // newest registration before the final criterion ordering pass.
         completionRecords.insert(contentsOf: newCompletionRecords, at: 0)
-        enqueueAnimationCompletionActions(listenerRegistration.immediateActions)
+        listenerRegistration.enqueueImmediateActions()
         currentGeneration = replacementGeneration
     }
 
     private func completionRecords(
-        from listeners: [StateListener],
+        from registration: AnimatorState<AnimatedValue>.ListenerRegistration,
         generation: UInt64,
         orderGeneration: UInt64,
         deadline: (AnimationCompletionCriteria) -> Time
     ) -> [CompletionRecord] {
-        listeners.map { listener in
+        registration.mapRecords { listener in
             CompletionRecord(
                 listener: listener,
                 deadline: deadline(listener.criteria),
@@ -2294,15 +2463,20 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         let now = update.time
-        guard update.continues else {
-            guard let terminalCompletion = update.terminalCompletion else {
-                fatalError("Terminal animation update missing completion snapshot")
-            }
-            finishTerminalAnimationSample(
-                terminalCompletion,
-                with: targetValue,
-                at: now
+        let continuingCompletion:
+            AnimatorState<AnimatedValue>.UpdateResult.ContinuingCompletion?
+            = update.resolveCompletion(
+                continuing: { .some($0) },
+                terminal: { terminalCompletion in
+                    finishTerminalAnimationSample(
+                        terminalCompletion,
+                        with: targetValue,
+                        at: now
+                    )
+                    return nil
+                }
             )
+        guard let continuingCompletion else {
             return
         }
         let output = updateValue.value
@@ -2334,7 +2508,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             )
             enqueueAnimationCompletionActions(completions)
         }
-        finishContinuingLogicalCompletionRecords(update, at: now)
+        finishContinuingLogicalCompletionRecords(continuingCompletion, at: now)
         if isCombinedResidualCompletionGroupPresentationDue(at: now) {
             finishAnimation(with: targetValue, at: now)
             return
@@ -2348,6 +2522,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         with targetValue: AnimatedValue,
         at now: Time
     ) {
+        if shouldDeferTerminalAnimationSample(at: now) {
+            _AGGraph.setStatefulOutput(targetValue)
+            let completions = finishDueCompletionRecords(at: now)
+            enqueueAnimationCompletionActions(completions)
+            return
+        }
         // Terminal samples let completion-record ordering own criteria
         // priority. Drained logical state tokens are still present in the
         // copied records, so finishing them directly from helper/state would
@@ -2362,7 +2542,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             finishAnimation(
                 with: targetValue,
                 at: now,
-                discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+                discardedBaseLayerGenerations:
+                    terminalCompletion.discardedBaseLayerGenerations()
             )
             return
         }
@@ -2386,31 +2567,45 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             finishAnimation(
                 with: targetValue,
                 at: now,
-                discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+                discardedBaseLayerGenerations:
+                    terminalCompletion.discardedBaseLayerGenerations()
             )
             return
         }
-        let listenerCompletions = finishCompletionRecords(
-            matching: terminalCompletion.listeners
+        let completions = finishTerminalCompletionRecords(
+            matching: terminalCompletion,
+            at: now
         )
-        enqueueAnimationCompletionActions(listenerCompletions)
-        let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
         finishAnimation(
             with: targetValue,
             at: now,
-            discardedBaseLayerGenerations: terminalCompletion.discardedBaseLayerGenerations
+            discardedBaseLayerGenerations:
+                terminalCompletion.discardedBaseLayerGenerations()
         )
     }
 
+    private mutating func shouldDeferTerminalAnimationSample(at now: Time) -> Bool {
+        guard let deadline = deferredTerminalPresentationDeadline else {
+            return false
+        }
+        if now.seconds < deadline.seconds {
+            return true
+        }
+        deferredTerminalPresentationDeadline = nil
+        return false
+    }
+
     private mutating func finishContinuingLogicalCompletionRecords(
-        _ update: AnimatorState<AnimatedValue>.UpdateResult,
+        _ continuingCompletion: AnimatorState<AnimatedValue>.UpdateResult.ContinuingCompletion,
         at now: Time
     ) {
-        guard update.isLogicallyComplete,
-              let currentGeneration,
-              !contextLogicalCompletionSuppressedGenerations.contains(currentGeneration),
-              !deadlineOwnedLogicalCompletionGenerations.contains(currentGeneration) else {
+        guard continuingCompletion.isReadyForLogicalCompletion(
+            currentGeneration: currentGeneration,
+            suppressedGenerations: contextLogicalCompletionSuppressedGenerations,
+            deadlineOwnedGenerations: deadlineOwnedLogicalCompletionGenerations
+        ),
+              let currentGeneration else {
             return
         }
 
@@ -2426,9 +2621,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 prefersCombinedResidualSourceLogicalBeforeReplacementLogical(
                     for: currentGeneration
                 )
-            let logicalListeners = update.logicalCompletionListeners
+            if hasDueRemovedCompletionRecord(
+                for: currentGeneration,
+                at: now
+            ) {
+                enqueueAnimationCompletionActions(completions)
+                return
+            }
             completions.append(
-                contentsOf: logicalListeners.isEmpty
+                contentsOf: !continuingCompletion.hasLogicalCompletionListeners
                     ? finishCompletionRecords(
                         for: currentGeneration,
                         matching: {
@@ -2437,7 +2638,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                         }
                     )
                     : finishCompletionRecords(
-                        matching: logicalListeners,
+                        matching: continuingCompletion,
                         preferLogicalBeforeRemoved: prefersSourceLogicalBeforeReplacement
                     )
             )
@@ -2445,11 +2646,25 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         enqueueAnimationCompletionActions(completions)
     }
 
+    private func hasDueRemovedCompletionRecord(
+        for generation: UInt64,
+        at now: Time
+    ) -> Bool {
+        completionRecords.contains {
+            $0.generation == generation &&
+                $0.criteria == .removed &&
+                ($0.deadline < now || $0.deadline == now)
+        }
+    }
+
     mutating func destroy() {
         // Node removal is the last chance to finish listeners that were waiting
         // on this animatable value but no longer have a live output node.
+        let teardownActiveGeneration = currentGeneration
         clearAnimationRuntimeState()
-        let completions = finishAllCompletionRecords()
+        let completions = finishAllCompletionRecords(
+            teardownActiveGeneration: teardownActiveGeneration
+        )
         enqueueAnimationCompletionActions(completions)
     }
 
@@ -2460,10 +2675,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         startValue = nil
         targetValue = value
         helper.commitTarget(value)
+        let teardownActiveGeneration = currentGeneration
         clearCompletionRecordSideState()
         nextGeneration = 1
         _AGGraph.setStatefulOutput(value)
-        let completions = finishAllCompletionRecords()
+        let completions = finishAllCompletionRecords(
+            teardownActiveGeneration: teardownActiveGeneration
+        )
         enqueueAnimationCompletionActions(completions)
     }
 
@@ -2607,10 +2825,20 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     private mutating func finishDueCompletionRecords(at now: Time) -> [() -> Void] {
-        let residualDeferredRemovedGeneration =
-            currentDirectResidualAnimationHasSeparatePresentation() && helper.isAnimating
-            ? currentGeneration
-            : nil
+        let residualDeferredRemovedDeadline: Time?
+        if currentDirectResidualAnimationHasSeparatePresentation(),
+           helper.isAnimating,
+           let currentGeneration {
+            residualDeferredRemovedDeadline = completionRecords
+                .filter {
+                    $0.generation == currentGeneration &&
+                        $0.criteria == .removed
+                }
+                .map(\.deadline)
+                .min { $0.seconds < $1.seconds }
+        } else {
+            residualDeferredRemovedDeadline = nil
+        }
         let sourceCustomResidualGroup = sourceCustomResidualReplacementCompletionGroup
         let residualWrapperReplacementGroup = residualWrapperReplacementCompletionGroup
         if let residualWrapperReplacementGroup,
@@ -2626,9 +2854,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             guard record.deadline < now || record.deadline == now else {
                 return false
             }
-            if let residualDeferredRemovedGeneration,
-               record.generation == residualDeferredRemovedGeneration,
-               record.criteria == .removed {
+            if let residualDeferredRemovedDeadline,
+               record.deadline.seconds >= residualDeferredRemovedDeadline.seconds {
                 return false
             }
             if Self.isResidualWrapperReplacementGroupRemovedRecord(
@@ -2689,8 +2916,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             group.oldGenerations.contains(record.orderGeneration)
     }
 
-    private mutating func finishAllCompletionRecords() -> [() -> Void] {
-        finishRecords(takeAllCompletionRecords())
+    private mutating func finishAllCompletionRecords(
+        teardownActiveGeneration: UInt64? = nil
+    ) -> [() -> Void] {
+        let records = takeAllCompletionRecords()
+        guard let teardownActiveGeneration else {
+            return finishRecords(records)
+        }
+        return finishTeardownCompletionRecords(
+            records,
+            activeGeneration: teardownActiveGeneration
+        )
     }
 
     private mutating func finishCombinedResidualCompletionGroup(
@@ -2799,13 +3035,24 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return finishRecords(readyRecords)
     }
 
-    private mutating func finishCompletionRecords(
-        matching listeners: AnimatorState<AnimatedValue>.ListenerSnapshot,
-        preferLogicalBeforeRemoved: Bool = false
+    private mutating func finishTerminalCompletionRecords(
+        matching terminalCompletion: AnimatorState<AnimatedValue>.UpdateResult.TerminalCompletion,
+        at now: Time
     ) -> [() -> Void] {
-        guard !listeners.isEmpty else { return [] }
         let readyRecords = takeCompletionRecords { record in
-            listeners.contains(record.identity)
+            record.isMatched(by: terminalCompletion) ||
+                record.deadline < now ||
+                record.deadline == now
+        }
+        return finishRecords(readyRecords)
+    }
+
+    private mutating func finishCompletionRecords(
+        matching continuingCompletion: AnimatorState<AnimatedValue>.UpdateResult.ContinuingCompletion,
+        preferLogicalBeforeRemoved: Bool
+    ) -> [() -> Void] {
+        let readyRecords = takeCompletionRecords { record in
+            record.isMatched(by: continuingCompletion)
         }
         return finishRecords(
             readyRecords,
@@ -2929,6 +3176,37 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             .sorted {
                 if $0.element.orderGeneration != $1.element.orderGeneration {
                     return $0.element.orderGeneration > $1.element.orderGeneration
+                }
+                return $0.offset < $1.offset
+            }
+            .map { $0.element }
+        return (removedRecords + otherRecords).flatMap { $0.finish() }
+    }
+
+    private func finishTeardownCompletionRecords(
+        _ records: [CompletionRecord],
+        activeGeneration: UInt64
+    ) -> [() -> Void] {
+        let indexedRecords = records.enumerated()
+        let removedRecords = indexedRecords
+            .filter { $0.element.criteria == .removed }
+            .sorted {
+                if $0.element.orderGeneration != $1.element.orderGeneration {
+                    return $0.element.orderGeneration < $1.element.orderGeneration
+                }
+                return $0.offset < $1.offset
+            }
+            .map { $0.element }
+        let otherRecords = indexedRecords
+            .filter { $0.element.criteria != .removed }
+            .sorted {
+                let lhsIsActive = $0.element.orderGeneration == activeGeneration
+                let rhsIsActive = $1.element.orderGeneration == activeGeneration
+                if lhsIsActive != rhsIsActive {
+                    return lhsIsActive
+                }
+                if $0.element.orderGeneration != $1.element.orderGeneration {
+                    return $0.element.orderGeneration < $1.element.orderGeneration
                 }
                 return $0.offset < $1.offset
             }
@@ -3666,14 +3944,43 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             )
     }
 
-    private func shouldHoldCombinedResidualReplacementLogicalUntilFinalization(
+    private func resolvedCompletionPresentationDuration(
+        previousAnimation: Animation?,
         replacementAnimation: Animation,
+        previousSamplingLayers: [AnimationLayer],
+        valuePresentationDuration: TimeInterval
+    ) -> TimeInterval {
+        guard let fluidSpring = replacementAnimation.box as? FluidSpringAnimationBox,
+              isSampledDurationBounceFluidSpringSameBoundaryAlias(fluidSpring),
+              hasDirectRepeatForeverSource(
+                previousAnimation: previousAnimation,
+                previousSamplingLayers: previousSamplingLayers
+              ) else {
+            return valuePresentationDuration
+        }
+        return max(valuePresentationDuration, replacementAnimation.box.presentationDuration)
+    }
+
+    private func shouldHoldCombinedResidualReplacementLogicalUntilFinalization(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation,
+        previousSamplingLayers: [AnimationLayer],
         value: AnimatedValue.AnimatableData
     ) -> Bool {
         guard let fluidSpring = replacementAnimation.box as? FluidSpringAnimationBox else {
             return false
         }
-        return fluidSpring.reachesTargetAtLogicalDuration(for: value)
+        guard fluidSpring.reachesTargetAtLogicalDuration(for: value) else {
+            return false
+        }
+        if isSampledDurationBounceFluidSpringSameBoundaryAlias(fluidSpring),
+           hasDirectRepeatForeverSource(
+            previousAnimation: previousAnimation,
+            previousSamplingLayers: previousSamplingLayers
+           ) {
+            return false
+        }
+        return true
     }
 
     private func shouldLetDeadlineOwnCombinedResidualReplacementLogical(
@@ -3797,6 +4104,38 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         approximatelyEqual(box.response, 0.5) &&
             approximatelyEqual(box.dampingFraction, 0.8) &&
             approximatelyEqual(box.blendDuration, 0)
+    }
+
+    private func hasDirectRepeatForeverSource(
+        previousAnimation: Animation?,
+        previousSamplingLayers: [AnimationLayer]
+    ) -> Bool {
+        if let previousAnimation,
+           containsDirectRepeatForeverAnimation(previousAnimation.box) {
+            return true
+        }
+        return previousSamplingLayers.contains {
+            containsDirectRepeatForeverAnimation($0.animation.box)
+        }
+    }
+
+    private func containsDirectRepeatForeverAnimation(_ box: AnimationBoxBase) -> Bool {
+        if isDirectRepeatForeverAnimation(box) {
+            return true
+        }
+        if let combinedBox = box as? CustomAnimationBox<DefaultCombiningAnimation> {
+            return combinedBox.base.entries.contains {
+                containsDirectRepeatForeverAnimation($0.animation.box)
+            }
+        }
+        return false
+    }
+
+    private func isDirectRepeatForeverAnimation(_ box: AnimationBoxBase) -> Bool {
+        guard let repeatBox = box as? RepeatAnimationBox else {
+            return false
+        }
+        return repeatBox.repeatCount == nil
     }
 
     private func approximatelyEqual(_ lhs: Double, _ rhs: Double) -> Bool {
@@ -4410,18 +4749,24 @@ private struct AnimatableFrameAttribute: StatefulRule {
             size: _size.value,
             pixelLength: _pixelLength.value
         )
+        if animationsDisabled {
+            finishValue(target)
+            return
+        }
+
         var value = (value: target, changed: false)
         let update = helper.beginStandaloneUpdate(
             value: &value,
-            defaultAnimation: nil
-        ) {
-            graph.transaction(for: _position.identifier) ??
-                graph.transaction(for: _size.identifier)
-        }
+            defaultAnimation: nil,
+            transactionForChangedTarget: {
+                graph.transaction(for: _position.identifier) ??
+                    graph.transaction(for: _size.identifier)
+            }
+        )
 
         let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
 
-        if update.didReset || animationsDisabled || previousOutput == nil {
+        if update.didReset || previousOutput == nil {
             finishValue(update.target)
             return
         }
@@ -4520,18 +4865,24 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
             size: _size.value,
             pixelLength: _pixelLength.value
         )
+        if animationsDisabled {
+            finishValue(target)
+            return
+        }
+
         var value = (value: target, changed: false)
         let update = helper.beginStandaloneUpdate(
             value: &value,
-            defaultAnimation: nil
-        ) {
-            graph.transaction(for: _position.identifier) ??
-                graph.transaction(for: _size.identifier)
-        }
+            defaultAnimation: nil,
+            transactionForChangedTarget: {
+                graph.transaction(for: _position.identifier) ??
+                    graph.transaction(for: _size.identifier)
+            }
+        )
 
         let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
 
-        if update.didReset || animationsDisabled || previousOutput == nil {
+        if update.didReset || previousOutput == nil {
             finishValue(update.target)
             return
         }
@@ -4620,7 +4971,7 @@ func makeAnimatableFrameAttributes(
     let pixelLength: Attribute<CGFloat> = graph.makeRule {
         environment.value.animationPixelLength
     }
-    let disabled = animationsDisabled ?? inputs.transaction.value.disablesAnimations
+    let disabled = animationsDisabled ?? inputs.options.contains(.animationsDisabled)
     let usesVFD = supportsVFD ?? inputs.options.contains(.supportsVariableFrameDuration)
     let frame: Attribute<ViewFrame>
     if usesVFD {
@@ -4926,13 +5277,13 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         transaction: Transaction
     ) -> AnimatorState<AnimatedValue>.ListenerRegistration {
         return animatorState?.addListenersForCompletionRecords(transaction: transaction) ??
-            AnimatorState<AnimatedValue>.ListenerRegistration()
+            AnimatorState<AnimatedValue>.ListenerRegistration.empty
     }
 
     mutating func beginUpdate(
         value: inout (value: AnimatedValue, changed: Bool),
         defaultAnimation: Animation?,
-        transaction: () -> Transaction?
+        transactionForChangedTarget: () -> Transaction?
     ) -> UpdateInputs {
         // The completion-record path lets the outer rule drain copied records
         // after a phase reset, while the helper clears its own optional state.
@@ -4944,7 +5295,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         let branch = targetChanged
             ? targetAnimationBranch(
                 defaultAnimation: defaultAnimation,
-                transaction: transaction
+                transactionForChangedTarget: transactionForChangedTarget
             )
             : nil
         return UpdateInputs(
@@ -4958,7 +5309,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     mutating func beginStandaloneUpdate(
         value: inout (value: AnimatedValue, changed: Bool),
         defaultAnimation: Animation?,
-        transaction: () -> Transaction?
+        transactionForChangedTarget: () -> Transaction?
     ) -> UpdateInputs {
         let didReset = checkReset()
         let targetChanged = hasModelDataChanged(value.value.animatableData)
@@ -4968,7 +5319,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         let branch = targetChanged
             ? targetAnimationBranch(
                 defaultAnimation: defaultAnimation,
-                transaction: transaction
+                transactionForChangedTarget: transactionForChangedTarget
             )
             : nil
         return UpdateInputs(
@@ -5025,17 +5376,21 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         // Mark the caller payload changed exactly once after a real state
         // sample. Terminal cleanup below must not overwrite that sample result.
         value.changed = true
-        if update.continues {
-            // The matcher bridge has no caller sample collector; it only needs
-            // the state to schedule its next frame before returning identities to
-            // the outer completion-record sorter.
-            animatorState.nextUpdate()
-        } else {
-            // Listener identities needed for completion ordering are already in
-            // `update`; removing listeners here would be too late and would risk
-            // changing callback order. Drop only the live animator container.
-            dropCompletedAnimatorStateForCompletionRecords()
-        }
+        update.resolveCompletion(
+            continuing: { _ in
+                // The matcher bridge has no caller sample collector; it only
+                // needs the state to schedule its next frame before returning
+                // identities to the outer completion-record sorter.
+                animatorState.nextUpdate()
+            },
+            terminal: { _ in
+                // Listener identities needed for completion ordering are
+                // already in `update`; removing listeners here would be too
+                // late and would risk changing callback order. Drop only the
+                // live animator container.
+                dropCompletedAnimatorStateForCompletionRecords()
+            }
+        )
         return update
     }
 
@@ -5113,9 +5468,9 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     private func targetAnimationBranch(
         defaultAnimation: Animation?,
-        transaction: () -> Transaction?
+        transactionForChangedTarget: () -> Transaction?
     ) -> TargetAnimationBranch {
-        let transaction = transaction() ?? _transaction.value
+        let transaction = transactionForChangedTarget() ?? _transaction.value
         guard let animation = transaction.effectiveAnimation ?? defaultAnimation else {
             return .noAnimation
         }

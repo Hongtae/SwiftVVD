@@ -22,6 +22,25 @@ final class AnimatableAttributeZeroDurationRetargetCriteriaTests: XCTestCase {
             replacementAnimation: .linear(duration: 0.20).delay(-0.20),
             label: "linearToZeroDelay"
         )
+        assertZeroRetargetOrder(
+            oldAnimation: .linear(duration: 0.80),
+            replacementAnimation: .linear(duration: -0.20),
+            label: "linearToNegativeLinear"
+        )
+        assertZeroRetargetOrder(
+            oldAnimation: .linear(duration: 0.80),
+            replacementAnimation: .timingCurve(.circularEaseInOut, duration: -0.20),
+            label: "linearToNegativeCircular"
+        )
+        assertZeroRetargetOrder(
+            oldAnimation: .linear(duration: 0.80),
+            replacementAnimation: .interpolatingSpring(
+                duration: -0.20,
+                bounce: 0.15,
+                initialVelocity: 0
+            ),
+            label: "linearToNegativeInterpolatingSpring"
+        )
     }
 
     private func assertZeroRetargetOrder(

@@ -203,6 +203,124 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         }
     }
 
+    func testContinueTransactionInvalidatingFallbackDoesNotFinalizeCapturedCompletionListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        let host = GraphHost()
+        var input: Attribute<Int>!
+        var output: Attribute<Int>!
+        var weakInput: AGWeakAttribute!
+        var evaluations = 0
+        var events: [String] = []
+
+        host.data.withCurrent {
+            input = host.data.graph.makeInput(value: 3)
+            output = host.data.graph.makeRule {
+                evaluations += 1
+                return input.value * 2
+            }
+            weakInput = input.asWeak().raw
+
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 1)
+        }
+
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        Update.begin()
+        defer {
+            if Update.isActive {
+                Update.end()
+            }
+        }
+
+        let previousBox = Transaction.ThreadStorage.currentBox
+        Transaction.ThreadStorage.currentBox = Transaction.ThreadStorageBox(transaction: transaction)
+        do {
+            host.continueTransaction(invalidating: weakInput)
+            XCTAssertFalse(host.hasPendingTransactions)
+        }
+        Transaction.ThreadStorage.currentBox = previousBox
+
+        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+
+        Update.end()
+
+        XCTAssertTrue(host.hasPendingTransactions)
+        XCTAssertTrue(events.isEmpty)
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 2)
+        }
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertFalse(host.hasPendingTransactions)
+
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+        XCTAssertEqual(events, ["completion"])
+
+        withExtendedLifetime(transaction) {}
+    }
+
+    func testContinueTransactionGenericFallbackDoesNotCaptureAmbientTransaction() {
+        let host = GraphHost()
+        var observed: [Int] = []
+        var transaction = Transaction()
+        transaction[ContinueTransactionKey.self] = 87
+
+        withTransaction(transaction) {
+            host.continueTransaction(
+                ContinueRecordingGraphMutation {
+                    observed.append(Transaction.current[ContinueTransactionKey.self])
+                }
+            )
+
+            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertTrue(observed.isEmpty)
+        }
+
+        XCTAssertTrue(Transaction.current.isEmpty)
+        host.flushTransactions()
+
+        XCTAssertEqual(observed, [0])
+        XCTAssertFalse(host.hasPendingTransactions)
+    }
+
+    func testContinueTransactionSettingFallbackDoesNotCaptureAmbientTransaction() {
+        let host = GraphHost()
+        var attribute: Attribute<Int>!
+        var weakAttribute: WeakAttribute<Int>!
+        host.data.withCurrent {
+            attribute = host.data.graph.makeInput(value: 1)
+            weakAttribute = attribute.asWeak()
+        }
+
+        var transaction = Transaction()
+        transaction[ContinueTransactionKey.self] = 99
+        withTransaction(transaction) {
+            host.continueTransaction(setting: weakAttribute, to: 2)
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        XCTAssertTrue(Transaction.current.isEmpty)
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(attribute.value, 2)
+            XCTAssertNil(host.data.graph.transaction(for: attribute.identifier))
+        }
+        XCTAssertFalse(host.hasPendingTransactions)
+    }
+
     func testContinueTransactionWithoutUpdatingHostFallbackBatchesThroughAsyncTransaction() {
         let host = GraphHost()
         var events: [String] = []

@@ -99,6 +99,93 @@ final class AnimatableAttributeUnitCurveRetargetCriteriaTests: XCTestCase {
         )
     }
 
+    func testCircularUnitCurveWrappersRetargetAcrossSampledFamiliesKeepsCriteriaOrder() {
+        assertRetargetOrder(
+            oldAnimation: Self.circularDelay,
+            oldRole: "firstCircularDelay",
+            replacementAnimation: .linear(duration: 0.15),
+            replacementRole: "secondLinear",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "firstCircularDelayRemoved",
+                "secondLinearRemoved",
+                "secondLinearLogical",
+                "firstCircularDelayLogical",
+            ],
+            label: "circularDelayToLinear"
+        )
+        assertRetargetOrder(
+            oldAnimation: .linear(duration: 0.90),
+            oldRole: "firstLinear",
+            replacementAnimation: Self.circularRepeat,
+            replacementRole: "secondCircularRepeat",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "firstLinearRemoved",
+                "secondCircularRepeatRemoved",
+                "secondCircularRepeatLogical",
+                "firstLinearLogical",
+            ],
+            label: "linearToCircularRepeat"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.circularSpeed,
+            oldRole: "firstCircularSpeed",
+            replacementAnimation: .default,
+            replacementRole: "secondDefault",
+            retargetTime: 0.12,
+            expectedEvents: [
+                "firstCircularSpeedLogical",
+                "secondDefaultLogical",
+                "firstCircularSpeedRemoved",
+                "secondDefaultRemoved",
+            ],
+            label: "circularSpeedToDefault"
+        )
+        assertRetargetOrder(
+            oldAnimation: .default,
+            oldRole: "firstDefault",
+            replacementAnimation: Self.circularDelay,
+            replacementRole: "secondCircularDelay",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "firstDefaultLogical",
+                "firstDefaultRemoved",
+                "secondCircularDelayRemoved",
+                "secondCircularDelayLogical",
+            ],
+            label: "defaultToCircularDelay"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.circularRepeat,
+            oldRole: "firstCircularRepeat",
+            replacementAnimation: Self.replacementFluidSpring,
+            replacementRole: "secondSpring",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "secondSpringLogical",
+                "firstCircularRepeatRemoved",
+                "secondSpringRemoved",
+                "firstCircularRepeatLogical",
+            ],
+            label: "circularRepeatToSpring"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.slowFluidSpring,
+            oldRole: "firstSpring",
+            replacementAnimation: Self.circularSpeed,
+            replacementRole: "secondCircularSpeed",
+            retargetTime: 0.25,
+            expectedEvents: [
+                "firstSpringRemoved",
+                "secondCircularSpeedRemoved",
+                "secondCircularSpeedLogical",
+                "firstSpringLogical",
+            ],
+            label: "springToCircularSpeed"
+        )
+    }
+
     private func assertRetargetOrder(
         oldAnimation: Animation,
         oldRole: String,
@@ -192,6 +279,18 @@ final class AnimatableAttributeUnitCurveRetargetCriteriaTests: XCTestCase {
 
     private static var shortCircular: Animation {
         .timingCurve(.circularEaseInOut, duration: 0.15)
+    }
+
+    private static var circularDelay: Animation {
+        .timingCurve(.circularEaseInOut, duration: 0.30).delay(0.25)
+    }
+
+    private static var circularSpeed: Animation {
+        .timingCurve(.circularEaseInOut, duration: 1.00).speed(2.0)
+    }
+
+    private static var circularRepeat: Animation {
+        .timingCurve(.circularEaseInOut, duration: 0.20).repeatCount(3, autoreverses: false)
     }
 
     private static var slowFluidSpring: Animation {

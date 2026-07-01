@@ -75,18 +75,28 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
 
     func testPhaseResetAfterLogicalDrainFinishesOnlyRemainingRemoved() {
         let completionRecorder = AnimationCompletionRecorder()
-        let harness = makeStartedLogicalSplitHarness(recorder: completionRecorder)
+        let reason: UInt32 = 0xCD2
+        let harness = makeStartedLogicalSplitHarness(
+            recorder: completionRecorder,
+            frameInterval: 1.0 / 30.0,
+            reason: reason
+        )
 
         harness.setTime(0.5)
         _ = harness.currentValue()
         harness.setTime(0.6)
         _ = harness.currentValue()
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [reason])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active logical"])
 
         completionRecorder.removeAll()
+        harness.resetNextUpdate()
         harness.bumpPhaseResetSeed()
         XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active removed"])
 
@@ -96,29 +106,38 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
 
     func testPhaseResetBeforeLogicalDrainFinishesRemovedBeforeLogicalOnce() {
         let completionRecorder = AnimationCompletionRecorder()
+        let reason: UInt32 = 0xCD4
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
         XCTAssertEqual(harness.currentValue().opacity, 0)
 
+        var transaction = completionTransaction(
+            animation: Animation.linear(duration: 1).logicallyComplete(after: 0.8),
+            label: "active",
+            recorder: completionRecorder
+        )
+        transaction.animationFrameInterval = 1.0 / 30.0
+        transaction.animationReason = reason
         harness.setSource(
             _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 1).logicallyComplete(after: 0.8),
-                label: "active",
-                recorder: completionRecorder
-            )
+            transaction: transaction
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
         harness.setTime(0.2)
         _ = harness.currentValue()
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [reason])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
+        harness.resetNextUpdate()
         harness.bumpPhaseResetSeed()
         XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
@@ -140,17 +159,27 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
 
     func testNodeRemovalAfterLogicalDrainFinishesOnlyRemainingRemoved() {
         let completionRecorder = AnimationCompletionRecorder()
-        let harness = makeStartedLogicalSplitHarness(recorder: completionRecorder)
+        let reason: UInt32 = 0xCD3
+        let harness = makeStartedLogicalSplitHarness(
+            recorder: completionRecorder,
+            frameInterval: 1.0 / 30.0,
+            reason: reason
+        )
 
         harness.setTime(0.5)
         _ = harness.currentValue()
         harness.setTime(0.6)
         _ = harness.currentValue()
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [reason])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active logical"])
 
         completionRecorder.removeAll()
+        harness.resetNextUpdate()
         harness.invalidateAnimatableSubgraph()
+        XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active removed"])
 
@@ -160,28 +189,37 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
 
     func testNodeRemovalBeforeLogicalDrainFinishesRemovedBeforeLogicalOnce() {
         let completionRecorder = AnimationCompletionRecorder()
+        let reason: UInt32 = 0xCD5
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
         XCTAssertEqual(harness.currentValue().opacity, 0)
 
+        var transaction = completionTransaction(
+            animation: Animation.linear(duration: 1).logicallyComplete(after: 0.8),
+            label: "active",
+            recorder: completionRecorder
+        )
+        transaction.animationFrameInterval = 1.0 / 30.0
+        transaction.animationReason = reason
         harness.setSource(
             _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 1).logicallyComplete(after: 0.8),
-                label: "active",
-                recorder: completionRecorder
-            )
+            transaction: transaction
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
         harness.setTime(0.2)
         _ = harness.currentValue()
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [reason])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
+        harness.resetNextUpdate()
         harness.invalidateAnimatableSubgraph()
+        XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
@@ -380,20 +418,29 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
     }
 
     private func makeStartedLogicalSplitHarness(
-        recorder completionRecorder: AnimationCompletionRecorder
+        recorder completionRecorder: AnimationCompletionRecorder,
+        frameInterval: Double? = nil,
+        reason: UInt32? = nil
     ) -> AnimatableAttributeHarness {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
         XCTAssertEqual(harness.currentValue().opacity, 0)
 
+        var transaction = completionTransaction(
+            animation: Animation.linear(duration: 1).logicallyComplete(after: 0.05),
+            label: "active",
+            recorder: completionRecorder
+        )
+        if let frameInterval {
+            transaction.animationFrameInterval = frameInterval
+        }
+        if let reason {
+            transaction.animationReason = reason
+        }
         harness.setSource(
             _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 1).logicallyComplete(after: 0.05),
-                label: "active",
-                recorder: completionRecorder
-            )
+            transaction: transaction
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])

@@ -9,6 +9,8 @@
 private final class _ConditionalBranchState {
     var isTrue: Bool? = nil
     var isUpdating = false
+    var lastTrueContent: Any? = nil
+    var lastFalseContent: Any? = nil
     var activeSubgraph: AGSubgraph? = nil
     var activeLCAttr: Attribute<LayoutComputer>? = nil
     /// Full preferences output of the currently active branch's _makeView result.
@@ -19,6 +21,8 @@ private final class _ConditionalBranchState {
 private final class _ConditionalListBranchState {
     var isTrue: Bool? = nil
     var isUpdating = false
+    var lastTrueContent: Any? = nil
+    var lastFalseContent: Any? = nil
     var activeSubgraph: AGSubgraph? = nil
     var activeListOutputs: _ViewListOutputs? = nil
 }
@@ -40,6 +44,42 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         let state = _ConditionalBranchState()
         state.activeSubgraph = AGSubgraph()
 
+        func trueBranchValue() -> TrueContent {
+            if case let .trueContent(content) = view._attribute.value.storage {
+                state.lastTrueContent = content
+                return content
+            }
+            guard let snapshot = state.lastTrueContent as? TrueContent else {
+                fatalError("_ConditionalContent lost true branch value during teardown.")
+            }
+            return snapshot
+        }
+
+        func falseBranchValue() -> FalseContent {
+            if case let .falseContent(content) = view._attribute.value.storage {
+                state.lastFalseContent = content
+                return content
+            }
+            guard let snapshot = state.lastFalseContent as? FalseContent else {
+                fatalError("_ConditionalContent lost false branch value during teardown.")
+            }
+            return snapshot
+        }
+
+        func makeTrueBranchView() -> _GraphValue<TrueContent> {
+            let attr: Attribute<TrueContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                graph.makeRule { trueBranchValue() }
+            }
+            return _GraphValue(_attribute: attr)
+        }
+
+        func makeFalseBranchView() -> _GraphValue<FalseContent> {
+            let attr: Attribute<FalseContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                graph.makeRule { falseBranchValue() }
+            }
+            return _GraphValue(_attribute: attr)
+        }
+
         // Evaluate the initial branch outside any rule to avoid a cycle.
         // If we call _makeView inside the lcAttr rule and then immediately read
         // state.activeLCAttr?.value, the newly created LayoutComputer attribute
@@ -52,12 +92,14 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
             let outputs: _ViewOutputs
             if initialIsTrue {
+                _ = trueBranchValue()
                 outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
+                    TrueContent._makeView(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
+                _ = falseBranchValue()
                 outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
+                    FalseContent._makeView(view: makeFalseBranchView(), inputs: inputs)
                 }
             }
             state.activeLCAttr = outputs._layoutComputer.attribute
@@ -77,12 +119,14 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
             let outputs: _ViewOutputs
             if nowTrue {
+                _ = trueBranchValue()
                 outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
+                    TrueContent._makeView(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
+                _ = falseBranchValue()
                 outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
+                    FalseContent._makeView(view: makeFalseBranchView(), inputs: inputs)
                 }
             }
             state.activeLCAttr = outputs._layoutComputer.attribute
@@ -151,14 +195,52 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         let state = _ConditionalListBranchState()
         state.activeSubgraph = AGSubgraph()
 
+        func trueBranchValue() -> TrueContent {
+            if case let .trueContent(content) = view._attribute.value.storage {
+                state.lastTrueContent = content
+                return content
+            }
+            guard let snapshot = state.lastTrueContent as? TrueContent else {
+                fatalError("_ConditionalContent lost true list branch value during teardown.")
+            }
+            return snapshot
+        }
+
+        func falseBranchValue() -> FalseContent {
+            if case let .falseContent(content) = view._attribute.value.storage {
+                state.lastFalseContent = content
+                return content
+            }
+            guard let snapshot = state.lastFalseContent as? FalseContent else {
+                fatalError("_ConditionalContent lost false list branch value during teardown.")
+            }
+            return snapshot
+        }
+
+        func makeTrueBranchView() -> _GraphValue<TrueContent> {
+            let attr: Attribute<TrueContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                graph.makeRule { trueBranchValue() }
+            }
+            return _GraphValue(_attribute: attr)
+        }
+
+        func makeFalseBranchView() -> _GraphValue<FalseContent> {
+            let attr: Attribute<FalseContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                graph.makeRule { falseBranchValue() }
+            }
+            return _GraphValue(_attribute: attr)
+        }
+
         func makeBranchOutputs(isTrue: Bool) -> _ViewListOutputs {
             if isTrue {
+                _ = trueBranchValue()
                 return AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    TrueContent._makeViewList(view: view[\.._trueContent], inputs: inputs)
+                    TrueContent._makeViewList(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
+                _ = falseBranchValue()
                 return AGSubgraph.$current.withValue(state.activeSubgraph) {
-                    FalseContent._makeViewList(view: view[\._falseContent], inputs: inputs)
+                    FalseContent._makeViewList(view: makeFalseBranchView(), inputs: inputs)
                 }
             }
         }

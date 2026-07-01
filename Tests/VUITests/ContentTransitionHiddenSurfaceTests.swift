@@ -1251,11 +1251,19 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     }
 
     func testRetainedRemovalTransactionResolverPreservesFilterOwnership() {
+        let plain = Transaction()
         let outer = Transaction(animation: .linear(duration: 0.25))
 
         XCTAssertEqual(
             retainedRemovalDurations(AnyTransition.opacity, from: outer),
             [0.25]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.opacity.animation(.linear(duration: 0.8)),
+                from: plain
+            ),
+            [0.8]
         )
         XCTAssertEqual(
             retainedRemovalDurations(AnyTransition.opacity.animation(nil), from: outer),
@@ -1286,6 +1294,51 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertEqual(
             retainedRemovalDurations(combined, from: outer),
             [nil, 0.7]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.opacity
+                    .animation(.linear(duration: 0.8))
+                    .combined(with: .offset(x: -80, y: 0).animation(.linear(duration: 0.8))),
+                from: plain
+            ),
+            [0.8]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.opacity
+                    .animation(nil)
+                    .combined(with: .offset(x: -80, y: 0).animation(.linear(duration: 0.8))),
+                from: plain
+            ),
+            [nil]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.offset(x: -80, y: 0)
+                    .animation(.linear(duration: 0.8))
+                    .combined(with: .opacity.animation(nil)),
+                from: plain
+            ),
+            [nil]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.opacity
+                    .animation(nil)
+                    .combined(with: .opacity.animation(.linear(duration: 0.8))),
+                from: plain
+            ),
+            [nil, 0.8]
+        )
+        XCTAssertEqual(
+            retainedRemovalDurations(
+                AnyTransition.opacity
+                    .animation(.linear(duration: 0.8))
+                    .combined(with: .opacity.animation(nil)),
+                from: plain
+            ),
+            [0.8, nil]
         )
     }
 

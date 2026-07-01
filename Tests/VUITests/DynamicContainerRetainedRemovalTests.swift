@@ -137,6 +137,168 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testRetainedTransitionRemovalDrainsSurvivingAnimatableCompletionsBeforeDisappear() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var animatableSource: Attribute<_OpacityEffect>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        guard let graph = _AGGraph.current else {
+                            fatalError("DynamicContainer fork-retained test element built outside AG context.")
+                        }
+                        let modifier = graph.makeInput(
+                            value: _AppearanceActionModifier(
+                                appear: { recorder.record("row appear") },
+                                disappear: { recorder.record("row disappear") }
+                            )
+                        )
+                        let effect = graph.makeStatefulRule(
+                            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+                        )
+                        graph.makeSideEffectRule {
+                            _ = effect.value
+                            return ()
+                        }
+
+                        let sourceAttr = graph.makeInput(value: _OpacityEffect(opacity: 0))
+                        var graphValue = _GraphValue<_OpacityEffect>(_attribute: sourceAttr)
+                        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+                        let animatedAttr = graphValue._attribute
+                        animatableSource = sourceAttr
+                        animatedValue = animatedAttr
+
+                        let layout = graph.makeRule {
+                            _ = animatedAttr.value
+                            return LayoutComputer.fixed(CGSize(width: 10, height: 10))
+                        }
+                        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+                    }
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(graph: graph, base: graphInputs)
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(recorder.events, ["row appear"])
+            XCTAssertNotNil(animatableSource)
+            XCTAssertNotNil(animatedValue)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+        }
+
+        func transaction(label: String) -> Transaction {
+            completionTransaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                ),
+                label: label,
+                recorder: recorder
+            )
+        }
+
+        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
+            viewGraph.data.withCurrent {
+                animatableSource.setValue(
+                    _OpacityEffect(opacity: target),
+                    transaction: transaction(label: label)
+                )
+                _ = animatedValue.value
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                graphInputs.time.setValue(Time(seconds: firstSample))
+                _ = animatedValue.value
+                graphInputs.time.setValue(Time(seconds: secondSample))
+                _ = animatedValue.value
+                Self.flushGraphActions(graph)
+            }
+        }
+
+        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
+        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
+        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
+        XCTAssertEqual(recorder.events, ["row appear"])
+
+        let retainedItem = try viewGraph.data.withCurrent {
+            var removal = completionTransaction(
+                animation: .linear(duration: 0.02),
+                label: "removal",
+                recorder: recorder
+            )
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(EmptyViewList(), transaction: removal)
+            Transaction.dispatchPendingListeners().forEach { $0() }
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertEqual(item.phase, 2)
+            XCTAssertNotNil(item.listener)
+            XCTAssertEqual(recorder.events, ["row appear"])
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+            ]
+        )
+        XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            _ = infoAttr.value
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+                "old removed",
+                "middle removed",
+                "active removed",
+                "active logical",
+                "old logical",
+                "middle logical",
+                "row disappear",
+            ]
+        )
+    }
+
     func testSameIdentityReinsertCancelsRetainedTransitionRemovalWithoutLifecycleReinsert() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -242,12 +404,44 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            ForEach(rows, id: \.self) { row in
+                DynamicContainerForkRetargetRow(
+                    row: row,
+                    effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                    recorder: recorder,
+                    capture: capture
+                )
+                .transition(.opacity)
+            }
+        }
+    }
+
     func testPublicGroupForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             Group(_content:
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
                         .transition(.opacity)
+                }
+            )
+        }
+    }
+
+    func testPublicGroupForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            Group(_content:
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
                 }
             )
         }
@@ -260,12 +454,82 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicAnyViewErasedRowRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            ForEach(rows, id: \.self) { row in
+                AnyView(
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                )
+                .transition(.opacity)
+            }
+        }
+    }
+
     func testPublicAnyLayoutVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             AnyLayout(VStackLayout(spacing: 8)) {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
                         .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    func testPublicAnyLayoutVStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            AnyLayout(VStackLayout(spacing: 8)) {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    func testPublicStandaloneSectionForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            Section {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+            } header: {
+                Text("Header")
+            }
+        }
+    }
+
+    func testPublicCustomLayoutForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            DynamicContainerProbeVStackLayout(spacing: 8) {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
                 }
             }
         }
@@ -284,12 +548,65 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicScrollViewVStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            ScrollView {
+                VStack {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
     func testPublicVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             VStack {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
                         .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    func testPublicVStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            VStack {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    func testPublicHStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            HStack {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
                 }
             }
         }
@@ -308,15 +625,133 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicMixedVStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            VStack {
+                Text("Header")
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+                Text("Footer")
+            }
+        }
+    }
+
+    func testPublicTupleViewForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+            TupleView((
+                Text("Header"),
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerLifecycleRow(row: row, recorder: recorder)
+                        .transition(.opacity)
+                },
+                Text("Footer")
+            ))
+        }
+    }
+
+    func testPublicTupleViewForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            TupleView((
+                Text("Header"),
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                },
+                Text("Footer")
+            ))
+        }
+    }
+
     func testPublicConditionalForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             DynamicContainerConditionalForEachRoot(rows: rows, recorder: recorder)
         }
     }
 
+    func testPublicConditionalForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            VStack {
+                if rows != ["never"] {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                } else {
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+    func testPublicConditionalForEachSwitchToEmptyDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            VStack {
+                if !rows.isEmpty {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                } else {
+                    EmptyView()
+                }
+            }
+        }
+    }
+
     func testPublicOptionalForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             DynamicContainerOptionalForEachRoot(rows: rows, recorder: recorder)
+        }
+    }
+
+    func testPublicOptionalForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            DynamicContainerOptionalForkRetargetRoot(
+                rows: rows,
+                target: target,
+                recorder: recorder,
+                capture: capture
+            )
+        }
+    }
+
+    func testPublicOptionalForEachSwitchToNilDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            DynamicContainerOptionalForkRetargetRoot(
+                rows: ["row"],
+                target: target,
+                recorder: recorder,
+                capture: capture,
+                showRows: !rows.isEmpty
+            )
         }
     }
 
@@ -342,6 +777,23 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicZStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            ZStack {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
     func testPublicViewThatFitsSelectedVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             ViewThatFits(in: [.horizontal, .vertical]) {
@@ -349,6 +801,25 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     ForEach(rows, id: \.self) { row in
                         DynamicContainerLifecycleRow(row: row, recorder: recorder)
                             .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
+    func testPublicViewThatFitsSelectedVStackForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            ViewThatFits(in: [.horizontal, .vertical]) {
+                VStack {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
                     }
                 }
             }
@@ -583,6 +1054,273 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             _ = layoutAttr.value
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
         }
+    }
+
+    private func assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear<Root: View>(
+        @ViewBuilder makeRoot: @escaping (
+            [String],
+            Double,
+            AnimationCompletionRecorder,
+            DynamicContainerForkRetargetCapture
+        ) -> Root
+    ) throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        let capture = DynamicContainerForkRetargetCapture()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<Root>!
+        var layoutAttr: Attribute<LayoutComputer>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        func sampleLayout() {
+            _ = layoutAttr.value.sizeThatFits(.unspecified)
+        }
+
+        try viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
+            source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
+            let outputs = Root._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: viewInputs
+            )
+            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            sampleLayout()
+            animatedValue = try XCTUnwrap(capture.animated)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+
+        func transaction(label: String) -> Transaction {
+            completionTransaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                ),
+                label: label,
+                recorder: recorder
+            )
+        }
+
+        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
+            viewGraph.data.withCurrent {
+                source.setValue(
+                    makeRoot(["row"], target, recorder, capture),
+                    transaction: transaction(label: label)
+                )
+                sampleLayout()
+                _ = animatedValue.value
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                graphInputs.time.setValue(Time(seconds: firstSample))
+                sampleLayout()
+                _ = animatedValue.value
+                graphInputs.time.setValue(Time(seconds: secondSample))
+                sampleLayout()
+                _ = animatedValue.value
+                Self.flushGraphActions(graph)
+            }
+        }
+
+        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
+        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
+        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
+        XCTAssertEqual(recorder.events, ["row appear"])
+
+        viewGraph.data.withCurrent {
+            var removal = completionTransaction(
+                animation: .linear(duration: 0.02),
+                label: "removal",
+                recorder: recorder
+            )
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(makeRoot([], 3, recorder, capture), transaction: removal)
+            sampleLayout()
+            Transaction.dispatchPendingListeners().forEach { $0() }
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+            ]
+        )
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            sampleLayout()
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+                "old removed",
+                "middle removed",
+                "active removed",
+                "active logical",
+                "old logical",
+                "middle logical",
+                "row disappear",
+            ]
+        )
+    }
+
+    private func assertPublicRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear<Root: View>(
+        @ViewBuilder makeRoot: @escaping (
+            [String],
+            Double,
+            AnimationCompletionRecorder,
+            DynamicContainerForkRetargetCapture
+        ) -> Root
+    ) throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        let capture = DynamicContainerForkRetargetCapture()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<Root>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        func sampleInfo() {
+            _ = infoAttr.value
+        }
+
+        try viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
+            source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
+            let outputs = Root._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+            guard case .dynamicList(let viewListAttr, _) = outputs.views else {
+                XCTFail("\(Root.self) with transition ForEach should produce a dynamic list")
+                return
+            }
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: viewListAttr,
+                    inputs: viewInputs
+                )
+            )
+
+            sampleInfo()
+            animatedValue = try XCTUnwrap(capture.animated)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+
+        func transaction(label: String) -> Transaction {
+            completionTransaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                ),
+                label: label,
+                recorder: recorder
+            )
+        }
+
+        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
+            viewGraph.data.withCurrent {
+                source.setValue(
+                    makeRoot(["row"], target, recorder, capture),
+                    transaction: transaction(label: label)
+                )
+                sampleInfo()
+                _ = animatedValue.value
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                graphInputs.time.setValue(Time(seconds: firstSample))
+                sampleInfo()
+                _ = animatedValue.value
+                graphInputs.time.setValue(Time(seconds: secondSample))
+                sampleInfo()
+                _ = animatedValue.value
+                Self.flushGraphActions(graph)
+            }
+        }
+
+        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
+        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
+        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
+        XCTAssertEqual(recorder.events, ["row appear"])
+
+        viewGraph.data.withCurrent {
+            var removal = completionTransaction(
+                animation: .linear(duration: 0.02),
+                label: "removal",
+                recorder: recorder
+            )
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(makeRoot([], 3, recorder, capture), transaction: removal)
+            sampleInfo()
+            Transaction.dispatchPendingListeners().forEach { $0() }
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+            ]
+        )
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            sampleInfo()
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "removal removed",
+                "removal logical",
+                "old removed",
+                "middle removed",
+                "active removed",
+                "active logical",
+                "old logical",
+                "middle logical",
+                "row disappear",
+            ]
+        )
     }
 
     func testDynamicContainerRetainsMultipleTransitionRemovalsUntilAllSeedsFinish() throws {
@@ -1466,6 +2204,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         return list
     }
 
+    private static func flushGraphActions(_ graph: _AGGraph) {
+        graph.drainActionOutbox()
+    }
+
     private func makeDisplayMapItem(
         id: String,
         zIndex: Double,
@@ -1522,6 +2264,59 @@ private final class DynamicContainerLifecycleRecorder {
         events.append(event)
     }
 }
+
+private final class DynamicContainerForkRetargetCapture {
+    var animated: Attribute<_OpacityEffect>?
+}
+
+private struct DynamicContainerForkRetargetRow: View {
+    var row: String
+    var effect: _OpacityEffect
+    var recorder: AnimationCompletionRecorder
+    var capture: DynamicContainerForkRetargetCapture
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("DynamicContainerForkRetargetRow._makeView called outside AG context.")
+        }
+        let modifier = graph.makeRule {
+            let value = view._attribute.value
+            return _AppearanceActionModifier(
+                appear: { value.recorder.record("\(value.row) appear") },
+                disappear: { value.recorder.record("\(value.row) disappear") }
+            )
+        }
+        let effect = graph.makeStatefulRule(
+            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+        )
+        graph.makeSideEffectRule {
+            _ = effect.value
+            return ()
+        }
+
+        var graphValue = view[\.effect]
+        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+        let animatedAttr = graphValue._attribute
+        let captureAttr = view[\.capture]._attribute
+        graph.makeSideEffectRule {
+            captureAttr.value.animated = animatedAttr
+            return ()
+        }
+
+        let layout = graph.makeRule {
+            _ = animatedAttr.value
+            return LayoutComputer.fixed(CGSize(width: 10, height: 10))
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+
+    typealias Body = Never
+}
+
+extension DynamicContainerForkRetargetRow: _PrimitiveView {}
 
 private struct DynamicContainerLifecycleRow: View {
     var row: String
@@ -1662,6 +2457,49 @@ private struct DynamicContainerOptionalLifecycleRow: View {
     var body: some View {
         DynamicContainerLifecycleRow(row: row, recorder: recorder)
             .transition(.opacity)
+    }
+}
+
+private struct DynamicContainerOptionalForkRetargetRoot: View {
+    var rows: [String]
+    var target: Double
+    var recorder: AnimationCompletionRecorder
+    var capture: DynamicContainerForkRetargetCapture
+    var showRows = true
+
+    var optionalRows: ForEach<[String], String, DynamicContainerOptionalForkRetargetItem>? {
+        guard showRows else { return nil }
+        return ForEach(rows, id: \.self) { row in
+            DynamicContainerOptionalForkRetargetItem(
+                row: row,
+                target: target,
+                recorder: recorder,
+                capture: capture
+            )
+        }
+    }
+
+    var body: some View {
+        VStack {
+            optionalRows
+        }
+    }
+}
+
+private struct DynamicContainerOptionalForkRetargetItem: View {
+    var row: String
+    var target: Double
+    var recorder: AnimationCompletionRecorder
+    var capture: DynamicContainerForkRetargetCapture
+
+    var body: some View {
+        DynamicContainerForkRetargetRow(
+            row: row,
+            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+            recorder: recorder,
+            capture: capture
+        )
+        .transition(.opacity)
     }
 }
 

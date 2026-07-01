@@ -170,6 +170,80 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
         XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
+    func testProviderHostGlobalTransactionDoesNotInstallQueuedTransactionAsCurrent() {
+        let host = GraphHost()
+        let provider = GlobalTransactionHostProvider(host: host)
+        var child = Transaction()
+        child.isContinuous = true
+        child[GlobalQueueMergeFlagKey.self] = false
+        var observed: [(Bool, Bool, Bool)] = []
+
+        GraphHost.globalTransaction(
+            child,
+            id: Transaction.ID(value: 112),
+            mutation: GlobalRecordingGraphMutation {
+                let current = Transaction.current
+                observed.append((
+                    current.disablesAnimations,
+                    current.isContinuous,
+                    current[GlobalQueueMergeFlagKey.self]
+                ))
+            },
+            hostProvider: provider
+        )
+
+        var parent = Transaction()
+        parent.disablesAnimations = true
+        parent[GlobalQueueMergeFlagKey.self] = true
+        withTransaction(parent) {
+            GraphHost.flushGlobalTransactions()
+            XCTAssertTrue(Transaction.current.disablesAnimations)
+        }
+
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(observed[0].0, true)
+        XCTAssertEqual(observed[0].1, false)
+        XCTAssertEqual(observed[0].2, true)
+        XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 1)
+    }
+
+    func testProviderHostGlobalTransactionDoesNotFinalizeQueuedCompletionListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        let host = GraphHost()
+        let provider = GlobalTransactionHostProvider(host: host)
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        GraphHost.globalTransaction(
+            transaction,
+            id: Transaction.ID(value: 113),
+            mutation: GlobalRecordingGraphMutation {
+                events.append("mutation")
+                Transaction.ThreadStorage.markMutation(for: Transaction.current)
+            },
+            hostProvider: provider
+        )
+
+        GraphHost.flushGlobalTransactions()
+
+        XCTAssertEqual(events, ["mutation"])
+        XCTAssertEqual(host.data.transactionSeed, 1)
+
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+        XCTAssertEqual(events, ["mutation", "completion"])
+
+        withExtendedLifetime(transaction) {}
+    }
+
     func testNilHostGlobalTransactionFallbackUsesFlushThreadTransaction() {
         let provider = GlobalTransactionHostProvider(host: nil)
         var child = Transaction()
@@ -198,6 +272,40 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
         XCTAssertEqual(observed.map(\.1), [true])
         XCTAssertEqual(observed.map(\.2), [true])
         XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
+    }
+
+    func testNilHostGlobalTransactionFallbackDoesNotFinalizeCompletionListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        let provider = GlobalTransactionHostProvider(host: nil)
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        GraphHost.globalTransaction(
+            transaction,
+            id: Transaction.ID(value: 111),
+            mutation: GlobalRecordingGraphMutation {
+                events.append("mutation")
+                Transaction.ThreadStorage.markMutation(for: Transaction.current)
+            },
+            hostProvider: provider
+        )
+
+        GraphHost.flushGlobalTransactions()
+
+        XCTAssertEqual(events, ["mutation"])
+
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+        XCTAssertEqual(events, ["mutation", "completion"])
+
+        withExtendedLifetime(transaction) {}
     }
 
     func testNilHostGlobalTransactionExplicitChildValuesOverrideFlushThreadTransaction() {

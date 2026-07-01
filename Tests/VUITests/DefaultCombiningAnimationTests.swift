@@ -62,4 +62,229 @@ final class DefaultCombiningAnimationTests: XCTestCase {
         XCTAssertNil(animation.animate(value: 15.0, time: 1.25, context: &context))
         XCTAssertTrue(context.isLogicallyComplete)
     }
+
+    func testReplacementChildLogicalFlagPropagatesBeforeNil() throws {
+        var animation = Animation(LogicalFlagAnimation(duration: 2.0, logicalAt: nil))
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(LogicalFlagAnimation(duration: 2.0, logicalAt: 0.50)),
+            newValue: 5.0
+        )
+
+        var context = AnimationContext(state: state)
+        let sample = try XCTUnwrap(
+            animation.animate(value: 15.0, time: 0.80, context: &context)
+        )
+
+        XCTAssertEqual(sample, 7.025, accuracy: 0.000_001)
+        XCTAssertTrue(context.isLogicallyComplete)
+    }
+
+    func testOldChildLogicalFlagDoesNotPropagateToReplacementGeneration() throws {
+        var animation = Animation(LogicalFlagAnimation(duration: 2.0, logicalAt: 0.20))
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(LogicalFlagAnimation(duration: 2.0, logicalAt: nil)),
+            newValue: 5.0
+        )
+
+        var context = AnimationContext(state: state)
+        let sample = try XCTUnwrap(
+            animation.animate(value: 15.0, time: 0.80, context: &context)
+        )
+
+        XCTAssertEqual(sample, 7.025, accuracy: 0.000_001)
+        XCTAssertFalse(context.isLogicallyComplete)
+    }
+
+    func testReplacementLogicalFlagPersistsIntoLaterVisibleChildren() throws {
+        let recorder = LogicalFlagContextRecorder()
+        var animation = Animation(
+            ContextRecordingLogicalFlagAnimation(
+                label: "old",
+                duration: 2.0,
+                logicalAt: nil,
+                recorder: recorder
+            )
+        )
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(
+                ContextRecordingLogicalFlagAnimation(
+                    label: "replacement",
+                    duration: 2.0,
+                    logicalAt: 0.50,
+                    recorder: recorder
+                )
+            ),
+            newValue: 5.0
+        )
+
+        var context = AnimationContext(state: state)
+        _ = try XCTUnwrap(animation.animate(value: 15.0, time: 0.80, context: &context))
+        XCTAssertTrue(context.isLogicallyComplete)
+
+        recorder.removeAll()
+        _ = try XCTUnwrap(animation.animate(value: 15.0, time: 0.90, context: &context))
+
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.label == "old" && $0.logicalAtEntry
+            }
+        )
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.label == "replacement" && $0.logicalAtEntry
+            }
+        )
+    }
+
+    func testOldLogicalFlagDoesNotReachLaterReplacementChildContext() throws {
+        let recorder = LogicalFlagContextRecorder()
+        var animation = Animation(
+            ContextRecordingLogicalFlagAnimation(
+                label: "old",
+                duration: 2.0,
+                logicalAt: 0.20,
+                recorder: recorder
+            )
+        )
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(
+                ContextRecordingLogicalFlagAnimation(
+                    label: "replacement",
+                    duration: 2.0,
+                    logicalAt: nil,
+                    recorder: recorder
+                )
+            ),
+            newValue: 5.0
+        )
+
+        var context = AnimationContext(state: state)
+        _ = try XCTUnwrap(animation.animate(value: 15.0, time: 0.80, context: &context))
+
+        XCTAssertFalse(context.isLogicallyComplete)
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.label == "old" && !$0.logicalAtEntry
+            }
+        )
+        XCTAssertTrue(
+            recorder.events.contains {
+                $0.label == "replacement" && !$0.logicalAtEntry
+            }
+        )
+    }
+}
+
+private struct LogicalFlagAnimation: CustomAnimation {
+    var duration: TimeInterval
+    var logicalAt: TimeInterval?
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        if let logicalAt, time >= logicalAt {
+            context.isLogicallyComplete = true
+        }
+        guard time < duration else {
+            return nil
+        }
+
+        var output = value
+        output.scale(by: max(time / duration, 0))
+        return output
+    }
+}
+
+private final class LogicalFlagContextRecorder: @unchecked Sendable {
+    struct Event: Equatable {
+        var label: String
+        var logicalAtEntry: Bool
+    }
+
+    private let lock = NSLock()
+    private var storage: [Event] = []
+
+    var events: [Event] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func record(label: String, logicalAtEntry: Bool) {
+        lock.lock()
+        storage.append(Event(label: label, logicalAtEntry: logicalAtEntry))
+        lock.unlock()
+    }
+
+    func removeAll() {
+        lock.lock()
+        storage.removeAll()
+        lock.unlock()
+    }
+}
+
+private struct ContextRecordingLogicalFlagAnimation: CustomAnimation {
+    var label: String
+    var duration: TimeInterval
+    var logicalAt: TimeInterval?
+    var recorder: LogicalFlagContextRecorder
+
+    static func == (
+        lhs: ContextRecordingLogicalFlagAnimation,
+        rhs: ContextRecordingLogicalFlagAnimation
+    ) -> Bool {
+        lhs.label == rhs.label &&
+            lhs.duration == rhs.duration &&
+            lhs.logicalAt == rhs.logicalAt
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(label)
+        hasher.combine(duration)
+        hasher.combine(logicalAt)
+    }
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        recorder.record(label: label, logicalAtEntry: context.isLogicallyComplete)
+        if let logicalAt, time >= logicalAt {
+            context.isLogicallyComplete = true
+        }
+        guard time < duration else {
+            return nil
+        }
+
+        var output = value
+        output.scale(by: max(time / duration, 0))
+        return output
+    }
 }

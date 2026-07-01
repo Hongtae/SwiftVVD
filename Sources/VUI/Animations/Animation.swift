@@ -1185,13 +1185,22 @@ func combineAnimation<Value>(
     )
 }
 
+private final class AnimationContextEnvironmentBox {
+    var value: EnvironmentValues
+
+    init(_ value: EnvironmentValues) {
+        self.value = value
+    }
+}
+
 public struct AnimationContext<Value> where Value: VectorArithmetic {
     public var state: AnimationState<Value>
+    private var environmentBox: AnimationContextEnvironmentBox
     public var isLogicallyComplete: Bool
-    private var resolvedEnvironment: EnvironmentValues
+    private var storageTag: UInt8
 
     public var environment: EnvironmentValues {
-        resolvedEnvironment
+        environmentBox.value
     }
 
     init(
@@ -1200,8 +1209,21 @@ public struct AnimationContext<Value> where Value: VectorArithmetic {
         environment: EnvironmentValues = EnvironmentValues()
     ) {
         self.state = state
+        self.environmentBox = AnimationContextEnvironmentBox(environment)
         self.isLogicallyComplete = isLogicallyComplete
-        self.resolvedEnvironment = environment
+        self.storageTag = 0
+    }
+
+    private init(
+        state: AnimationState<Value>,
+        isLogicallyComplete: Bool,
+        environmentBox: AnimationContextEnvironmentBox,
+        storageTag: UInt8
+    ) {
+        self.state = state
+        self.environmentBox = environmentBox
+        self.isLogicallyComplete = isLogicallyComplete
+        self.storageTag = storageTag
     }
 
     var finishingDefinition: (any AnimationFinishingDefinition<Value>.Type)? {
@@ -1240,7 +1262,8 @@ public struct AnimationContext<Value> where Value: VectorArithmetic {
         AnimationContext<T>(
             state: state,
             isLogicallyComplete: isLogicallyComplete,
-            environment: resolvedEnvironment
+            environmentBox: environmentBox,
+            storageTag: storageTag
         )
     }
 }
@@ -3264,17 +3287,7 @@ extension Transaction {
                     : $0.finalizeTransaction()
             }
         }
-        guard finalizingStandalonePending else {
-            return actions
-        }
-        return actions.map { action in
-            {
-                action()
-                Transaction.dispatchPendingListeners(
-                    finalizingStandalonePending: true
-                ).forEach { $0() }
-            }
-        }
+        return actions
     }
 }
 

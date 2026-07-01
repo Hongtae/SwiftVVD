@@ -334,7 +334,7 @@ public struct _GraphInputs {
     //   2. Environment: create MergedEnvironment AG rule if attrs differ
     //   3. Transaction: create MergedTransaction AG rule if attrs differ
     //   4. Phase (skipped when ignoringPhase==true): create MergedPhase AG rule if attrs differ
-    //   5. flags OR, animations-disabled option OR, mergedInputs union
+    //   5. flags OR, import other animations-disabled option, mergedInputs union
     //
     // mergedInputs (Set<AGAttribute>) prevents duplicate rule creation for the same attr pair.
     mutating func merge(_ other: _GraphInputs, ignoringPhase: Bool) {
@@ -383,15 +383,6 @@ public struct _GraphInputs {
         changedDebugProperties |= other.changedDebugProperties
         if other.options.contains(.animationsDisabled) {
             options.insert(.animationsDisabled)
-        }
-        if other.options.contains(.viewRequestsLayoutComputer) {
-            options.insert(.viewRequestsLayoutComputer)
-        }
-        if other.options.contains(.viewNeedsGeometry) {
-            options.insert(.viewNeedsGeometry)
-        }
-        if other.options.contains(.viewNeedsGeometryAccessibility) {
-            options.insert(.viewNeedsGeometryAccessibility)
         }
         mergedInputs.formUnion(other.mergedInputs)
     }

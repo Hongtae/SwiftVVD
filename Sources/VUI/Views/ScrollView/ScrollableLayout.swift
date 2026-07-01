@@ -1959,10 +1959,16 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 inputs: inputs
             )
         )
+        var listInputs = _ViewListInputs(from: inputs)
+        if listInputs.base.options.contains(.viewNeedsGeometry) {
+            // Item generators merge their captured base as the receiver, so keep
+            // the scroll layout-computer request on that receiver-side lane.
+            listInputs.base.options.insert(.viewRequestsLayoutComputer)
+        }
         let listState = ScrollableLayoutViewListState<Data, Layout>(
             view: view._attribute,
             layoutState: layoutState,
-            inputs: _ViewListInputs(from: inputs)
+            inputs: listInputs
         )
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
             guard let graph = _AGGraph.current else {

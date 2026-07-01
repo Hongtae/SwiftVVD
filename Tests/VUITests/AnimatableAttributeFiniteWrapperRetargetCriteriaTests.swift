@@ -22,6 +22,21 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
 
     func testPlainFiniteOldRetargetedToFiniteWrappersGroupsAtReplacementBoundary() {
         assertFiniteRetargetOrder(
+            oldAnimation: .timingCurve(0.35, 0.0, 0.65, 1.0, duration: 0.90),
+            replacementAnimation: .linear(duration: 0.20).delay(0.20),
+            label: "bezierToDelay"
+        )
+        assertFiniteRetargetOrder(
+            oldAnimation: .easeOut(duration: 0.90),
+            replacementAnimation: .linear(duration: 0.20).repeatCount(2, autoreverses: false),
+            label: "easeToRepeat"
+        )
+        assertFiniteRetargetOrder(
+            oldAnimation: .timingCurve(Self.cubicUnitCurve, duration: 0.90),
+            replacementAnimation: .linear(duration: 0.30).speed(2.0),
+            label: "cubicToSpeed"
+        )
+        assertFiniteRetargetOrder(
             oldAnimation: .linear(duration: 0.90),
             replacementAnimation: .linear(duration: 0.30).speed(2.0),
             label: "linearToSpeed"
@@ -189,6 +204,13 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
             label,
             file: file,
             line: line
+        )
+    }
+
+    private static var cubicUnitCurve: UnitCurve {
+        UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: 0.18, y: 0.07),
+            endControlPoint: UnitPoint(x: 0.82, y: 0.96)
         )
     }
 }

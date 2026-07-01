@@ -155,9 +155,11 @@ private struct ProjectedLocation<P: Projection>: _Location {
     }
 
     mutating func setValue(_ value: P.Projected, transaction: Transaction) {
-        var baseValue = base.getValue()
-        projection.set(base: &baseValue, newValue: value)
-        base.setValue(baseValue, transaction: transaction)
+        Transaction.withScopedThreadTransaction(transaction) {
+            var baseValue = base.getValue()
+            projection.set(base: &baseValue, newValue: value)
+            base.setValue(baseValue, transaction: Transaction.current)
+        }
     }
 }
 
@@ -217,14 +219,25 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
 
     override func setValue(_ value: Value, transaction: Transaction) {
         guard !_stateValuesAreKnownEqual(self.value, value) else { return }
-        self.value = value
-        Transaction.ThreadStorage.markMutation(for: transaction)
-        commit(
-            transaction: transaction,
-            id: Transaction.id,
-            mutation: BeginUpdate(location: self, value: value, transaction: transaction)
-        )
-        super.setValue(value, transaction: transaction)
+        let setValue = { (scopedTransaction: Transaction) in
+            self.value = value
+            Transaction.ThreadStorage.markMutation(for: scopedTransaction)
+            self.commit(
+                transaction: scopedTransaction,
+                id: Transaction.id,
+                mutation: BeginUpdate(location: self, value: value, transaction: scopedTransaction)
+            )
+            self.notifyChange()
+        }
+
+        if let current = Transaction.ThreadStorage.current,
+           current.isSameScopedLocationTransaction(as: transaction) {
+            setValue(current)
+        } else {
+            Transaction.withScopedThreadTransaction(transaction) {
+                setValue(Transaction.current)
+            }
+        }
     }
 
     override func update() -> (Value, Bool) {
@@ -439,4 +452,13 @@ protocol AnyLocationBox {
 }
 
 extension LocationBox: AnyLocationBox {
+}
+
+private extension Transaction {
+    func isSameScopedLocationTransaction(as transaction: Transaction) -> Bool {
+        plist.isIdentical(to: transaction.plist)
+            && animationCompletionObserver === transaction.animationCompletionObserver
+            && animationListener === transaction.animationListener
+            && animationLogicalListener === transaction.animationLogicalListener
+    }
 }

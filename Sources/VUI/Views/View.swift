@@ -170,6 +170,7 @@ extension Never: View {
 // File-scope state class. Swift cannot nest it inside a generic function.
 private final class _OptionalViewState {
     var hasValue: Bool? = nil
+    var lastWrappedValue: Any? = nil
     var subgraph: AGSubgraph? = nil
     var lcAttr: Attribute<LayoutComputer>? = nil
     var activeOutputs: PreferencesOutputs? = nil
@@ -178,6 +179,7 @@ private final class _OptionalViewState {
 private final class _OptionalListViewState {
     var hasValue: Bool? = nil
     var isUpdating = false
+    var lastWrappedValue: Any? = nil
     var subgraph: AGSubgraph? = nil
     var activeListOutputs: _ViewListOutputs? = nil
 }
@@ -207,9 +209,21 @@ extension Optional: View where Wrapped: View {
             state.hasValue = nowHas
 
             if nowHas {
-                // Force-unwrap is safe: node lives only while hasValue == true.
+                guard let wrappedValue = view._attribute.value else {
+                    fatalError("Optional<\(Wrapped.self)> missing wrapped value while rebuilding active branch.")
+                }
+                state.lastWrappedValue = wrappedValue
                 let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
-                    graph.makeRule { view._attribute.value! }
+                    graph.makeRule {
+                        if let current = view._attribute.value {
+                            state.lastWrappedValue = current
+                            return current
+                        }
+                        guard let snapshot = state.lastWrappedValue as? Wrapped else {
+                            fatalError("Optional<\(Wrapped.self)> lost wrapped value during branch teardown.")
+                        }
+                        return snapshot
+                    }
                 }
                 let outputs = AGSubgraph.$current.withValue(state.subgraph) {
                     Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
@@ -232,10 +246,8 @@ extension Optional: View where Wrapped: View {
             return state.lcAttr?.value ?? LayoutComputer.fixed(.zero)
         }
 
-        // Optional uses the same preference relay shape as _ConditionalContent so
-        // child views keep ResourceList/DisplayList and other requested preferences
-        // alive when they switch between nil and some.
-        // Optional-specific relay behavior remains a follow-up.
+        // Optional creates a stable relay for each requested preference key so
+        // nil/some switches preserve the parent's output shape.
         var outPrefs = PreferencesOutputs()
         for key in inputs.preferences.keys.keys {
             func addRelay<K: PreferenceKey>(_ k: K.Type) {
@@ -268,9 +280,19 @@ extension Optional: View where Wrapped: View {
         state.subgraph = AGSubgraph()
 
         func makeWrappedOutputs() -> _ViewListOutputs? {
-            guard view._attribute.value != nil else { return nil }
+            guard let wrappedValue = view._attribute.value else { return nil }
+            state.lastWrappedValue = wrappedValue
             let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
-                graph.makeRule { view._attribute.value! }
+                graph.makeRule {
+                    if let current = view._attribute.value {
+                        state.lastWrappedValue = current
+                        return current
+                    }
+                    guard let snapshot = state.lastWrappedValue as? Wrapped else {
+                        fatalError("Optional<\(Wrapped.self)> lost wrapped value during list teardown.")
+                    }
+                    return snapshot
+                }
             }
             return AGSubgraph.$current.withValue(state.subgraph) {
                 Wrapped._makeViewList(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)

@@ -353,6 +353,18 @@ final class DualAnimatableAttributeHarness {
         }
     }
 
+    func nextUpdateInterval() -> Double {
+        viewGraph.nextUpdateInterval
+    }
+
+    func nextUpdateReasons() -> Set<UInt32> {
+        viewGraph.nextUpdateReasons
+    }
+
+    func resetNextUpdate() {
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+    }
+
     func finalizeTransactionBody() {
         Transaction.dispatchPendingListeners().forEach { $0() }
         flushCompletionActions()
@@ -370,6 +382,7 @@ final class DualAnimatableAttributeHarness {
 final class AnimatableFrameAttributeHarness {
     private let rendererHost = TestViewRendererHost()
     private let viewGraph: ViewGraph
+    private var animatableSubgraph: AGSubgraph!
     private var rawPosition: Attribute<CGPoint>!
     private var rawSize: Attribute<ViewSize>!
     private var time: Attribute<Time>!
@@ -383,7 +396,9 @@ final class AnimatableFrameAttributeHarness {
     init(
         initialPosition: CGPoint,
         initialSize: ViewSize,
-        supportsVFD: Bool = false
+        initialTransaction: Transaction = Transaction(),
+        supportsVFD: Bool = false,
+        animationsDisabled: Bool = false
     ) {
         let viewGraph = ViewGraph(
             rootViewType: EmptyView.self,
@@ -400,7 +415,7 @@ final class AnimatableFrameAttributeHarness {
             rawSize = graph.makeInput(value: initialSize)
             time = graph.makeInput(value: Time(seconds: 0))
             phase = graph.makeInput(value: Phase())
-            transaction = graph.makeInput(value: Transaction())
+            transaction = graph.makeInput(value: initialTransaction)
             let environment = graph.makeInput(value: EnvironmentValues())
             var inputs = _GraphInputs(
                 customInputs: PropertyList(),
@@ -417,15 +432,22 @@ final class AnimatableFrameAttributeHarness {
             if supportsVFD {
                 inputs.options.insert(.supportsVariableFrameDuration)
             }
-            let attributes = makeAnimatableFrameAttributes(
-                in: &inputs,
-                position: rawPosition,
-                size: rawSize
-            )
-            animatedPosition = attributes.position
-            animatedSize = attributes.size
-            animatedFrame = attributes.frame
-            cachedFrame = inputs.cachedEnvironment.value.animatedFrame
+            if animationsDisabled {
+                inputs.options.insert(.animationsDisabled)
+            }
+            let subgraph = AGSubgraph()
+            animatableSubgraph = subgraph
+            AGSubgraph.$current.withValue(subgraph) {
+                let attributes = makeAnimatableFrameAttributes(
+                    in: &inputs,
+                    position: rawPosition,
+                    size: rawSize
+                )
+                animatedPosition = attributes.position
+                animatedSize = attributes.size
+                animatedFrame = attributes.frame
+                cachedFrame = inputs.cachedEnvironment.value.animatedFrame
+            }
         }
     }
 
@@ -482,6 +504,13 @@ final class AnimatableFrameAttributeHarness {
             var value = phase.value
             value.resetSeed &+= 1
             phase.setValue(value)
+        }
+    }
+
+    func invalidateAnimatableSubgraph() {
+        viewGraph.data.withCurrent {
+            animatableSubgraph.invalidate()
+            animatableSubgraph.removeFromParent()
         }
     }
 

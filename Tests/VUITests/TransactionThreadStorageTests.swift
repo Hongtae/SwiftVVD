@@ -240,6 +240,50 @@ final class TransactionThreadStorageTests: XCTestCase {
         XCTAssertNil(Transaction.ThreadStorage.currentBox)
     }
 
+    func testThrowingKeyPathWithTransactionRestoresBeforeCatchAndPreservesOuterScope() throws {
+        XCTAssertNil(Transaction.ThreadStorage.currentBox)
+
+        do {
+            try withTransaction(\.disablesAnimations, true) {
+                XCTAssertTrue(Transaction.current.disablesAnimations)
+                throw ThreadStorageProbeError.expected
+            }
+            XCTFail("throwing key-path withTransaction returned normally")
+        } catch ThreadStorageProbeError.expected {
+            XCTAssertNil(Transaction.ThreadStorage.currentBox)
+            XCTAssertFalse(Transaction.current.disablesAnimations)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        try withTransaction(\.tracksVelocity, true) {
+            let outerBox = try XCTUnwrap(Transaction.ThreadStorage.currentBox)
+
+            do {
+                try withTransaction(\.disablesAnimations, true) {
+                    XCTAssertFalse(Transaction.ThreadStorage.currentBox === outerBox)
+                    XCTAssertTrue(Transaction.current.disablesAnimations)
+                    XCTAssertTrue(Transaction.current.tracksVelocity)
+                    throw ThreadStorageProbeError.expected
+                }
+                XCTFail("throwing nested key-path withTransaction returned normally")
+            } catch ThreadStorageProbeError.expected {
+                XCTAssertTrue(Transaction.ThreadStorage.currentBox === outerBox)
+                XCTAssertFalse(Transaction.current.disablesAnimations)
+                XCTAssertTrue(Transaction.current.tracksVelocity)
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+
+            XCTAssertTrue(Transaction.ThreadStorage.currentBox === outerBox)
+            XCTAssertFalse(Transaction.current.disablesAnimations)
+            XCTAssertTrue(Transaction.current.tracksVelocity)
+        }
+
+        XCTAssertNil(Transaction.ThreadStorage.currentBox)
+        XCTAssertFalse(Transaction.current.tracksVelocity)
+    }
+
     func testCurrentSemanticsNestedTransactionMergesParentKeysWithChildPriority() {
         var parent = Transaction(animation: .linear(duration: 1))
         parent.disablesAnimations = true

@@ -86,6 +86,397 @@ final class AnimationCompletionObserverTests: XCTestCase {
         )
     }
 
+    func testNoRegisteredZeroDurationExplicitAnimationUsesAnimatedOrdering() {
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0))
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("removed")
+        }
+
+        finalizeAnimationCompletions(
+            in: transaction,
+            animation: transaction.animation
+        )
+
+        waitForMainQueue(until: { events.count == 2 })
+        XCTAssertEqual(events, ["removed", "logical"])
+    }
+
+    func testNoRegisteredFiniteExplicitAnimationWaitsForAnimatedBoundary() {
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0.03))
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("removed")
+        }
+
+        finalizeAnimationCompletions(
+            in: transaction,
+            animation: transaction.animation
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+        XCTAssertTrue(events.isEmpty)
+
+        waitForMainQueue(until: { events.count == 2 })
+        XCTAssertEqual(events, ["removed", "logical"])
+    }
+
+    func testNoRegisteredFiniteWrapperExplicitAnimationsUseWrapperBoundary() {
+        let cases: [(name: String, animation: Animation)] = [
+            ("delay", .linear(duration: 0.02).delay(0.02)),
+            ("speed", .linear(duration: 0.08).speed(2)),
+            ("repeat", .linear(duration: 0.02).repeatCount(2, autoreverses: false)),
+        ]
+
+        for testCase in cases {
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+            XCTAssertTrue(events.isEmpty, testCase.name)
+
+            waitForMainQueue(until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"]
+            )
+        }
+    }
+
+    func testNoRegisteredSourceDefinedCustomExplicitAnimationWaitsForNilBoundary() {
+        var events: [String] = []
+        var transaction = Transaction(animation: Animation(UnitLinearAnimation(duration: 0.05)))
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("removed")
+        }
+
+        finalizeAnimationCompletions(
+            in: transaction,
+            animation: transaction.animation
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertTrue(events.isEmpty)
+
+        waitForMainQueue(until: { events.count == 2 })
+        XCTAssertEqual(events, ["removed", "logical"])
+    }
+
+    func testNoRegisteredSourceDefinedCustomWrappersUseWrapperNilBoundary() {
+        let custom = Animation(UnitLinearAnimation(duration: 0.05))
+        let cases: [(name: String, animation: Animation, earlyWait: TimeInterval)] = [
+            ("delay", custom.delay(0.04), 0.08),
+            ("speed", custom.speed(2), 0.02),
+            ("repeat", custom.repeatCount(2, autoreverses: false), 0.12),
+        ]
+
+        for testCase in cases {
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: testCase.earlyWait))
+            XCTAssertTrue(events.isEmpty, testCase.name)
+
+            waitForMainQueue(timeout: 0.40, until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"]
+            )
+        }
+    }
+
+    func testNoRegisteredNonCustomInfiniteExplicitAnimationsStayPending() {
+        let finiteBase = Animation.linear(duration: 0.02)
+        let cases: [(name: String, animation: Animation)] = [
+            ("repeatForever", finiteBase.repeatForever(autoreverses: false)),
+            ("speed0", finiteBase.speed(0)),
+            ("speedNegative", finiteBase.speed(-1)),
+            ("delayRepeatForever", finiteBase.delay(0.02).repeatForever(autoreverses: false)),
+            ("repeatForeverDelay", finiteBase.repeatForever(autoreverses: false).delay(0.02)),
+        ]
+
+        for testCase in cases {
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            withExtendedLifetime(transaction) {
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.08))
+                XCTAssertTrue(events.isEmpty, testCase.name)
+            }
+        }
+    }
+
+    func testNoRegisteredCircularUnitCurveExplicitAnimationsUseFallbackFamilies() {
+        let circular = Animation.timingCurve(.circularEaseInOut, duration: 0.02)
+        let finiteCases: [(name: String, animation: Animation, shouldWait: Bool)] = [
+            ("direct", circular, true),
+            ("zero", .timingCurve(.circularEaseInOut, duration: 0), false),
+            ("delay", circular.delay(0.02), true),
+            ("speed", .timingCurve(.circularEaseInOut, duration: 0.08).speed(2), true),
+            ("repeat", circular.repeatCount(2, autoreverses: false), true),
+        ]
+
+        for testCase in finiteCases {
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            if testCase.shouldWait {
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+                XCTAssertTrue(events.isEmpty, testCase.name)
+            }
+
+            waitForMainQueue(until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"]
+            )
+        }
+
+        var pendingEvents: [String] = []
+        var pending = Transaction(
+            animation: circular.repeatForever(autoreverses: false)
+        )
+        pending.addAnimationCompletion(criteria: .logicallyComplete) {
+            pendingEvents.append("repeatForever logical")
+        }
+        pending.addAnimationCompletion(criteria: .removed) {
+            pendingEvents.append("repeatForever removed")
+        }
+
+        finalizeAnimationCompletions(in: pending, animation: pending.animation)
+
+        withExtendedLifetime(pending) {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.08))
+            XCTAssertTrue(pendingEvents.isEmpty)
+        }
+    }
+
+    func testNoRegisteredDirectSpringNegativeDelayUsesCriteriaSpecificScheduling() throws {
+        let spring = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        let baseDelay = try XCTUnwrap(spring.box.noRegisteredCompletionDelay())
+        let animation = spring.delay(0.04 - baseDelay)
+        let logicalDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .logicallyComplete)
+        )
+        let removedDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .removed)
+        )
+        XCTAssertLessThan(logicalDelay, removedDelay)
+        XCTAssertLessThan(removedDelay, 0.10)
+
+        var events: [String] = []
+        var logicalFirst = Transaction(animation: animation)
+        logicalFirst.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical-first logical")
+        }
+        logicalFirst.addAnimationCompletion(criteria: .removed) {
+            events.append("logical-first removed")
+        }
+        finalizeAnimationCompletions(
+            in: logicalFirst,
+            animation: logicalFirst.animation
+        )
+        waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
+        XCTAssertEqual(
+            events,
+            [
+                "logical-first logical",
+                "logical-first removed",
+            ]
+        )
+
+        events.removeAll()
+        var removedFirst = Transaction(animation: animation)
+        removedFirst.addAnimationCompletion(criteria: .removed) {
+            events.append("removed-first removed")
+        }
+        removedFirst.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("removed-first logical")
+        }
+        finalizeAnimationCompletions(
+            in: removedFirst,
+            animation: removedFirst.animation
+        )
+        waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
+        XCTAssertEqual(
+            events,
+            [
+                "removed-first removed",
+                "removed-first logical",
+            ]
+        )
+    }
+
+    func testNoRegisteredDirectSpringRepeatUsesCriteriaSpecificScheduling() throws {
+        let spring = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        let repeated = spring.repeatCount(2, autoreverses: false)
+        let repeatedRemovedDelay = try XCTUnwrap(
+            repeated.box.noRegisteredCompletionDelay(for: .removed)
+        )
+        let animation = repeated.delay(0.04 - repeatedRemovedDelay)
+        let logicalDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .logicallyComplete)
+        )
+        let removedDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .removed)
+        )
+        XCTAssertLessThan(logicalDelay, removedDelay)
+        XCTAssertLessThan(removedDelay, 0.08)
+
+        var events: [String] = []
+        var logicalFirst = Transaction(animation: animation)
+        logicalFirst.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical-first logical")
+        }
+        logicalFirst.addAnimationCompletion(criteria: .removed) {
+            events.append("logical-first removed")
+        }
+        finalizeAnimationCompletions(
+            in: logicalFirst,
+            animation: logicalFirst.animation
+        )
+        waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
+        XCTAssertEqual(
+            events,
+            [
+                "logical-first logical",
+                "logical-first removed",
+            ]
+        )
+
+        events.removeAll()
+        var removedFirst = Transaction(animation: animation)
+        removedFirst.addAnimationCompletion(criteria: .removed) {
+            events.append("removed-first removed")
+        }
+        removedFirst.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("removed-first logical")
+        }
+        finalizeAnimationCompletions(
+            in: removedFirst,
+            animation: removedFirst.animation
+        )
+        waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
+        XCTAssertEqual(
+            events,
+            [
+                "removed-first removed",
+                "removed-first logical",
+            ]
+        )
+    }
+
+    func testNoRegisteredFluidAndDefaultResidualWrappersUseAnimatedBoundary() throws {
+        let cases: [(name: String, base: Animation)] = [
+            (
+                "fluid",
+                .spring(response: 0.35, dampingFraction: 0.70, blendDuration: 0)
+            ),
+            ("default", .default),
+        ]
+
+        for testCase in cases {
+            let baseDelay = try XCTUnwrap(
+                testCase.base.box.noRegisteredCompletionDelay()
+            )
+            let animation = testCase.base.delay(0.04 - baseDelay)
+            let logicalDelay = try XCTUnwrap(
+                animation.box.noRegisteredCompletionDelay(for: .logicallyComplete)
+            )
+            let removedDelay = try XCTUnwrap(
+                animation.box.noRegisteredCompletionDelay(for: .removed)
+            )
+            XCTAssertEqual(logicalDelay, removedDelay, accuracy: 0.000_000_1)
+            XCTAssertLessThan(removedDelay, 0.08)
+
+            var events: [String] = []
+            var transaction = Transaction(animation: animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+            XCTAssertTrue(events.isEmpty, testCase.name)
+
+            waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"]
+            )
+        }
+    }
+
     func testRegisteredCriteriaFinishIndependently() throws {
         var fired: [String] = []
         let observer = AnimationCompletionObserver(criteria: .logicallyComplete) {
@@ -295,6 +686,49 @@ final class AnimationCompletionObserverTests: XCTestCase {
         pair.animationWasRemoved().forEach { $0() }
 
         XCTAssertEqual(fired, ["first", "second"])
+    }
+
+    func testTransactionCompletionCriteriaInstallSeparateListenerBuckets() throws {
+        var removedTransaction = Transaction()
+        removedTransaction.addAnimationCompletion(criteria: .removed) {}
+        let removedListener = try XCTUnwrap(removedTransaction.animationListener)
+        XCTAssertNil(removedTransaction.animationLogicalListener)
+        XCTAssertTrue(removedTransaction.combinedAnimationListener === removedListener)
+
+        var logicalTransaction = Transaction()
+        logicalTransaction.addAnimationCompletion(criteria: .logicallyComplete) {}
+        let logicalListener = try XCTUnwrap(logicalTransaction.animationLogicalListener)
+        XCTAssertNil(logicalTransaction.animationListener)
+        XCTAssertTrue(logicalTransaction.combinedAnimationListener === logicalListener)
+
+        var fired: [String] = []
+        var mixedTransaction = Transaction()
+        mixedTransaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("logical")
+        }
+        mixedTransaction.addAnimationCompletion(criteria: .removed) {
+            fired.append("removed")
+        }
+
+        let mixedRemovedListener = try XCTUnwrap(mixedTransaction.animationListener)
+        let mixedLogicalListener = try XCTUnwrap(mixedTransaction.animationLogicalListener)
+        XCTAssertFalse(mixedRemovedListener === mixedLogicalListener)
+        XCTAssertTrue(mixedTransaction.combinedAnimationListener is ListenerPair)
+
+        mixedLogicalListener.animationWasAdded()
+        mixedRemovedListener.animationWasAdded()
+        XCTAssertTrue(
+            try XCTUnwrap(mixedTransaction.animationCompletionObserver)
+                .bodyDidFinish()
+                .isEmpty
+        )
+        XCTAssertEqual(fired, [])
+
+        mixedLogicalListener.animationWasRemoved().forEach { $0() }
+        XCTAssertEqual(fired, ["logical"])
+
+        mixedRemovedListener.animationWasRemoved().forEach { $0() }
+        XCTAssertEqual(fired, ["logical", "removed"])
     }
 
     func testTransactionSameCriteriaCompletionsInstallListenerPair() throws {
@@ -618,6 +1052,157 @@ final class AnimationCompletionObserverTests: XCTestCase {
         XCTAssertEqual(fired, ["retained logical", "retained removed"])
     }
 
+    func testRetainedAndDroppedStandaloneTransactionsSplitScheduledAndScopeExitTiming() {
+        var fired: [String] = []
+        var retained: Transaction? = Transaction(animation: .linear(duration: 0.20))
+        retained?.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("retained logical")
+        }
+        retained?.addAnimationCompletion(criteria: .removed) {
+            fired.append("retained removed")
+        }
+
+        do {
+            var dropped = Transaction(animation: .linear(duration: 0.20))
+            dropped.addAnimationCompletion(criteria: .logicallyComplete) {
+                fired.append("dropped logical")
+            }
+            dropped.addAnimationCompletion(criteria: .removed) {
+                fired.append("dropped removed")
+            }
+        }
+
+        XCTAssertEqual(fired, ["dropped logical", "dropped removed"])
+
+        waitForMainQueue(until: { fired.count == 4 })
+        XCTAssertEqual(
+            fired,
+            [
+                "dropped logical",
+                "dropped removed",
+                "retained logical",
+                "retained removed",
+            ]
+        )
+
+        retained = nil
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(
+            fired,
+            [
+                "dropped logical",
+                "dropped removed",
+                "retained logical",
+                "retained removed",
+            ]
+        )
+    }
+
+    func testRetainedStandaloneTransactionCompletionSchedulesLaterCycleAfterDrain() {
+        var fired: [String] = []
+        var first: Transaction? = Transaction(animation: .linear(duration: 0.20))
+        first?.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("first logical")
+        }
+        first?.addAnimationCompletion(criteria: .removed) {
+            fired.append("first removed")
+        }
+
+        waitForMainQueue(until: { fired.count == 2 })
+        XCTAssertEqual(fired, ["first logical", "first removed"])
+
+        var second: Transaction? = Transaction(animation: .linear(duration: 0.20))
+        second?.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("second logical")
+        }
+        second?.addAnimationCompletion(criteria: .removed) {
+            fired.append("second removed")
+        }
+
+        waitForMainQueue(until: { fired.count == 4 })
+        XCTAssertEqual(
+            fired,
+            [
+                "first logical",
+                "first removed",
+                "second logical",
+                "second removed",
+            ]
+        )
+
+        first = nil
+        second = nil
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(
+            fired,
+            [
+                "first logical",
+                "first removed",
+                "second logical",
+                "second removed",
+            ]
+        )
+    }
+
+    func testPendingListenerDispatchFinalizesInsideUpdateScope() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        var events: [String] = []
+        let listener = PendingFinalizeProbeListener {
+            events.append("finalize update=\(Update.isActive)")
+            return [
+                {
+                    events.append("completion update=\(Update.isActive)")
+                },
+            ]
+        }
+
+        Transaction.addPendingListener(listener)
+
+        let actions = Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        )
+        XCTAssertEqual(events, ["finalize update=true"])
+        XCTAssertEqual(actions.count, 1)
+
+        actions.forEach { $0() }
+        XCTAssertEqual(
+            events,
+            [
+                "finalize update=true",
+                "completion update=false",
+            ]
+        )
+    }
+
+    func testPendingListenerStorageDropsReleasedWeakListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        var events: [String] = []
+        do {
+            let listener = PendingFinalizeProbeListener {
+                events.append("finalize")
+                return [
+                    {
+                        events.append("completion")
+                    },
+                ]
+            }
+            Transaction.addPendingListener(listener)
+        }
+
+        let actions = Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        )
+
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertEqual(events, [])
+    }
+
     func testStandaloneTransactionCompletionScopeExitDrainsDroppedListeners() {
         var fired: [String] = []
         do {
@@ -714,6 +1299,61 @@ final class AnimationCompletionObserverTests: XCTestCase {
                 "nested logical",
                 "nested removed",
                 "first removed",
+            ]
+        )
+    }
+
+    func testRetainedStandaloneTransactionReentrantPendingDrainWaitsForRemainingOuterListener() {
+        var fired: [String] = []
+        var retainedTransactions: [Transaction] = []
+
+        func makeRetainedTransaction(
+            label: String,
+            registersNestedInLogical: Bool = false
+        ) {
+            var transaction = Transaction(animation: .linear(duration: 0.20))
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                fired.append("\(label) logical")
+                if registersNestedInLogical {
+                    makeRetainedTransaction(label: "nested")
+                }
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                fired.append("\(label) removed")
+            }
+            retainedTransactions.append(transaction)
+            fired.append("\(label) registered")
+        }
+
+        makeRetainedTransaction(
+            label: "outer",
+            registersNestedInLogical: true
+        )
+
+        waitForMainQueue(until: { fired.contains("nested removed") })
+        XCTAssertEqual(
+            fired,
+            [
+                "outer registered",
+                "outer logical",
+                "nested registered",
+                "outer removed",
+                "nested logical",
+                "nested removed",
+            ]
+        )
+
+        retainedTransactions.removeAll()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(
+            fired,
+            [
+                "outer registered",
+                "outer logical",
+                "nested registered",
+                "outer removed",
+                "nested logical",
+                "nested removed",
             ]
         )
     }
@@ -1028,5 +1668,21 @@ final class AnimationCompletionObserverTests: XCTestCase {
         while !condition() && Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
         }
+    }
+}
+
+private final class PendingFinalizeProbeListener: AnimationListener, @unchecked Sendable {
+    private let onFinalize: () -> [() -> Void]
+
+    init(onFinalize: @escaping () -> [() -> Void]) {
+        self.onFinalize = onFinalize
+    }
+
+    override func finalizeTransaction() -> [() -> Void] {
+        onFinalize()
+    }
+
+    override func finalizeStandalonePendingTransaction() -> [() -> Void] {
+        onFinalize()
     }
 }

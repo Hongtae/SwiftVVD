@@ -75,6 +75,21 @@ final class ModalPresentationContext: @unchecked Sendable {
     private struct PendingDismissal: @unchecked Sendable {
         var transaction: Transaction
         var completion: () -> Void
+        var duration: Double? = nil
+        var completionTokens: [AnimationCompletionToken]? = nil
+        var elapsed: Double = 0
+    }
+
+    private final class DeferredDismissCompletion: @unchecked Sendable {
+        let completion: () -> Void
+
+        init(_ completion: @escaping () -> Void) {
+            self.completion = completion
+        }
+
+        func callAsFunction() {
+            completion()
+        }
     }
 
     private let padding: CGFloat = 4
@@ -145,6 +160,9 @@ final class ModalPresentationContext: @unchecked Sendable {
         guard let animation = transaction.effectiveAnimation else {
             return transitionDuration
         }
+        guard animation.box.duration.isFinite else {
+            return 0
+        }
         let animationDuration = max(0, animation.box.duration)
         guard animationDuration > 0 else {
             return 0
@@ -158,6 +176,9 @@ final class ModalPresentationContext: @unchecked Sendable {
         }
         guard let animation = transaction.effectiveAnimation else {
             return transitionDuration
+        }
+        guard animation.box.duration.isFinite else {
+            return 0
         }
         let animationDuration = max(0, animation.box.duration)
         guard animationDuration > 0 else {
@@ -200,6 +221,61 @@ final class ModalPresentationContext: @unchecked Sendable {
 
     private func startCompletionTokens(_ tokens: [AnimationCompletionToken]) {
         tokens.forEach { $0.start() }
+    }
+
+    private func isDirectNegativeSpeedAnimation(_ animation: Animation) -> Bool {
+        guard let speed = animation.box as? SpeedAnimationBox else {
+            return false
+        }
+        return speed.speed < 0
+    }
+
+    private func finishImmediatePresentCompletionIfNeeded(
+        transaction: Transaction,
+        duration: Double
+    ) {
+        guard duration <= 0,
+              transaction.hasExplicitAnimationValue,
+              let animation = transaction.animation,
+              isDirectNegativeSpeedAnimation(animation) else {
+            return
+        }
+        let tokens = completionTokens(for: transaction.animationListener, criteria: .removed) +
+            completionTokens(for: transaction.animationLogicalListener, criteria: .logicallyComplete)
+        startCompletionTokens(tokens)
+        enqueueAnimationCompletionActions(finishCompletionTokens(tokens))
+    }
+
+    private func shouldDeferImmediateDismissCompletion(
+        transaction: Transaction,
+        duration: Double
+    ) -> Bool {
+        guard duration <= 0,
+              transaction.hasExplicitAnimationValue,
+              let animation = transaction.animation,
+              animation.box.duration <= 0 else {
+            return false
+        }
+        return transaction.animationCompletionObserver != nil
+    }
+
+    private func finishImmediateDismissal(
+        transaction: Transaction,
+        duration: Double,
+        completion: @escaping () -> Void
+    ) {
+        guard shouldDeferImmediateDismissCompletion(transaction: transaction, duration: duration) else {
+            completion()
+            return
+        }
+        // Give the zero-duration no-registered completion fallback a run-loop
+        // turn before sheet cleanup becomes visible.
+        let deferredCompletion = DeferredDismissCompletion(completion)
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                deferredCompletion()
+            }
+        }
     }
 
     func onViewLoaded() {
@@ -340,6 +416,10 @@ final class ModalPresentationContext: @unchecked Sendable {
         )
         guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
+            finishImmediatePresentCompletionIfNeeded(
+                transaction: transaction,
+                duration: duration
+            )
             return
         }
         startCompletionTokens(completionTokens)
@@ -361,7 +441,11 @@ final class ModalPresentationContext: @unchecked Sendable {
         )
         guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
-            completion()
+            finishImmediateDismissal(
+                transaction: transaction,
+                duration: duration,
+                completion: completion
+            )
             return
         }
         startCompletionTokens(completionTokens)
@@ -371,6 +455,55 @@ final class ModalPresentationContext: @unchecked Sendable {
             configuration: transitionDismissAnimation,
             completionTokens: completionTokens,
             completion: completion
+        )
+    }
+
+    private func makePendingDismissal(transaction: Transaction,
+                                      completion: @escaping () -> Void) -> PendingDismissal {
+        let duration = resolvedDismissDuration(for: transaction)
+        let completionTokens = completionTokens(
+            for: transaction,
+            duration: duration,
+            registersDefaultCompletion: true
+        )
+        if duration > 0 || !completionTokens.isEmpty {
+            startCompletionTokens(completionTokens)
+            return PendingDismissal(
+                transaction: transaction,
+                completion: completion,
+                duration: duration,
+                completionTokens: completionTokens,
+                elapsed: 0
+            )
+        }
+        return PendingDismissal(transaction: transaction, completion: completion)
+    }
+
+    private func beginDismissAnimation(_ dismissal: PendingDismissal) {
+        guard let duration = dismissal.duration,
+              let completionTokens = dismissal.completionTokens else {
+            beginDismissAnimation(
+                transaction: dismissal.transaction,
+                completion: dismissal.completion
+            )
+            return
+        }
+        guard duration > 0 || !completionTokens.isEmpty else {
+            transition = nil
+            finishImmediateDismissal(
+                transaction: dismissal.transaction,
+                duration: duration,
+                completion: dismissal.completion
+            )
+            return
+        }
+        transition = TransitionAnimation(
+            phase: .dismissing,
+            duration: duration,
+            configuration: transitionDismissAnimation,
+            completionTokens: completionTokens,
+            elapsed: min(dismissal.elapsed, duration),
+            completion: dismissal.completion
         )
     }
 
@@ -386,7 +519,7 @@ final class ModalPresentationContext: @unchecked Sendable {
                 // Reversing nonlinear scale/alpha tracks would require value-to-time
                 // inversion and is not part of a confirmed modal contract.
                 if pendingDismissal == nil {
-                    pendingDismissal = PendingDismissal(
+                    pendingDismissal = makePendingDismissal(
                         transaction: transaction,
                         completion: completion
                     )
@@ -403,6 +536,9 @@ final class ModalPresentationContext: @unchecked Sendable {
     func updateAnimation(delta: Double) -> Bool {
         guard var transition else { return false }
         transition.elapsed += delta
+        if transition.phase == .presenting, pendingDismissal != nil {
+            pendingDismissal?.elapsed += delta
+        }
         if transition.isComplete {
             let completions = finishCompletionTokens(transition.completionTokens)
             switch transition.phase {
@@ -412,10 +548,7 @@ final class ModalPresentationContext: @unchecked Sendable {
                     // Present completion drains before the deferred dismissal
                     // begins, preserving one transaction boundary at a time.
                     enqueueAnimationCompletionActions(completions)
-                    beginDismissAnimation(
-                        transaction: dismissal.transaction,
-                        completion: dismissal.completion
-                    )
+                    beginDismissAnimation(dismissal)
                 } else {
                     self.transition = nil
                     enqueueAnimationCompletionActions(completions)

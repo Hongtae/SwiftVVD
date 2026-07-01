@@ -167,6 +167,61 @@ final class AnimatableAttributeDefaultFamilyRetargetCriteriaTests: XCTestCase {
         )
     }
 
+    func testFiniteCurveWrappersRetargetedWithDefaultKeepCriteriaOrder() {
+        assertRetargetOrder(
+            oldAnimation: Self.p1DelayAnimation,
+            oldRole: "firstP1Delay",
+            replacementAnimation: .default,
+            replacementRole: "secondDefault",
+            expectedEvents: [
+                "secondDefaultLogical",
+                "firstP1DelayLogical",
+                "firstP1DelayRemoved",
+                "secondDefaultRemoved",
+            ],
+            label: "p1DelayToDefault"
+        )
+        assertRetargetOrder(
+            oldAnimation: .default,
+            oldRole: "firstDefault",
+            replacementAnimation: Self.shortP1DelayAnimation,
+            replacementRole: "secondP1Delay",
+            expectedEvents: [
+                "firstDefaultRemoved",
+                "secondP1DelayRemoved",
+                "secondP1DelayLogical",
+                "firstDefaultLogical",
+            ],
+            label: "defaultToP1Delay"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.cubicSpeedAnimation,
+            oldRole: "firstCubicSpeed",
+            replacementAnimation: .default,
+            replacementRole: "secondDefault",
+            expectedEvents: [
+                "firstCubicSpeedLogical",
+                "secondDefaultLogical",
+                "firstCubicSpeedRemoved",
+                "secondDefaultRemoved",
+            ],
+            label: "cubicSpeedToDefault"
+        )
+        assertRetargetOrder(
+            oldAnimation: .default,
+            oldRole: "firstDefault",
+            replacementAnimation: Self.shortCubicSpeedAnimation,
+            replacementRole: "secondCubicSpeed",
+            expectedEvents: [
+                "firstDefaultRemoved",
+                "secondCubicSpeedRemoved",
+                "secondCubicSpeedLogical",
+                "firstDefaultLogical",
+            ],
+            label: "defaultToCubicSpeed"
+        )
+    }
+
     private func assertRetargetOrder(
         oldAnimation: Animation,
         oldRole: String,
@@ -234,9 +289,21 @@ final class AnimatableAttributeDefaultFamilyRetargetCriteriaTests: XCTestCase {
 
         var sampleTime = retargetTime + frame
         while sampleTime <= lastSampleTime && recorder.events.count < expectedEvents.count {
+            let previousEventCount = recorder.events.count
             harness.setTime(sampleTime)
-            _ = harness.currentValue()
+            let sampledValue = harness.currentValue().opacity
             harness.flushCompletionActions()
+            let newEvents = recorder.events.dropFirst(previousEventCount)
+            if newEvents.contains(where: { $0.hasSuffix("Removed") }) {
+                XCTAssertEqual(
+                    sampledValue,
+                    target,
+                    accuracy: 0.000_001,
+                    label,
+                    file: file,
+                    line: line
+                )
+            }
             sampleTime += frame
         }
 
@@ -287,5 +354,28 @@ final class AnimatableAttributeDefaultFamilyRetargetCriteriaTests: XCTestCase {
 
     private static var shortBezier: Animation {
         .timingCurve(0.42, 0.0, 0.58, 1.0, duration: 0.15)
+    }
+
+    private static var p1DelayAnimation: Animation {
+        .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.65).delay(0.25)
+    }
+
+    private static var shortP1DelayAnimation: Animation {
+        .timingCurve(0.18, 0.07, 0.82, 0.96, duration: 0.10).delay(0.10)
+    }
+
+    private static var cubicUnitCurve: UnitCurve {
+        UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: 0.18, y: 0.07),
+            endControlPoint: UnitPoint(x: 0.82, y: 0.96)
+        )
+    }
+
+    private static var cubicSpeedAnimation: Animation {
+        Animation.timingCurve(cubicUnitCurve, duration: 1.20).speed(2.0)
+    }
+
+    private static var shortCubicSpeedAnimation: Animation {
+        Animation.timingCurve(cubicUnitCurve, duration: 0.30).speed(2.0)
     }
 }

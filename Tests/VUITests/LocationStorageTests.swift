@@ -222,6 +222,49 @@ final class LocationStorageTests: XCTestCase {
         XCTAssertEqual(updates, [2, 4])
     }
 
+    func testStoredLocationWriteScopesCurrentTransactionAroundCommit() {
+        var commits: [LocationCommitSnapshot] = []
+        let location = StoredLocation<Int>(
+            initialValue: 1,
+            onCommit: { value, transaction in
+                commits.append(.init(
+                    value: value,
+                    marker: transaction[LocationProjectionTransactionKey.self],
+                    tracksVelocity: transaction.tracksVelocity,
+                    ambientMarker: transaction[LocationProjectionAmbientKey.self],
+                    currentMarker: Transaction.current[LocationProjectionTransactionKey.self],
+                    currentTracksVelocity: Transaction.current.tracksVelocity,
+                    currentAmbientMarker: Transaction.current[LocationProjectionAmbientKey.self]
+                ))
+            }
+        )
+        var ambient = Transaction()
+        ambient[LocationProjectionAmbientKey.self] = 7
+        ambient.disablesAnimations = true
+        var local = Transaction()
+        local[LocationProjectionTransactionKey.self] = 66
+        local.tracksVelocity = true
+
+        withTransaction(ambient) {
+            location.setValue(5, transaction: local)
+        }
+
+        XCTAssertEqual(location.getValue(), 5)
+        XCTAssertEqual(commits, [
+            .init(
+                value: 5,
+                marker: 66,
+                tracksVelocity: true,
+                ambientMarker: 7,
+                currentMarker: 66,
+                currentTracksVelocity: true,
+                currentAmbientMarker: 7
+            )
+        ])
+        XCTAssertEqual(Transaction.current[LocationProjectionAmbientKey.self], 0)
+        XCTAssertFalse(Transaction.current.tracksVelocity)
+    }
+
     func testProjectedLocationWriteForwardsTransactionToBaseLocation() {
         var commits: [LocationProjectionCommit] = []
         let location = StoredLocation<LocationProjectionPair>(
@@ -230,7 +273,10 @@ final class LocationStorageTests: XCTestCase {
                 commits.append(.init(
                     value: value,
                     marker: transaction[LocationProjectionTransactionKey.self],
-                    tracksVelocity: transaction.tracksVelocity
+                    tracksVelocity: transaction.tracksVelocity,
+                    currentMarker: Transaction.current[LocationProjectionTransactionKey.self],
+                    currentTracksVelocity: Transaction.current.tracksVelocity,
+                    currentAmbientMarker: Transaction.current[LocationProjectionAmbientKey.self]
                 ))
             }
         )
@@ -246,9 +292,55 @@ final class LocationStorageTests: XCTestCase {
             .init(
                 value: LocationProjectionPair(first: 9, second: 2),
                 marker: 44,
-                tracksVelocity: true
+                tracksVelocity: true,
+                currentMarker: 44,
+                currentTracksVelocity: true,
+                currentAmbientMarker: 0
             )
         ])
+        XCTAssertEqual(Transaction.current[LocationProjectionTransactionKey.self], 0)
+        XCTAssertFalse(Transaction.current.tracksVelocity)
+    }
+
+    func testProjectedLocationWriteScopesCurrentTransactionAroundBaseLocation() {
+        var commits: [LocationProjectionCommit] = []
+        let location = StoredLocation<LocationProjectionPair>(
+            initialValue: LocationProjectionPair(first: 1, second: 2),
+            onCommit: { value, transaction in
+                commits.append(.init(
+                    value: value,
+                    marker: transaction[LocationProjectionTransactionKey.self],
+                    tracksVelocity: transaction.tracksVelocity,
+                    currentMarker: Transaction.current[LocationProjectionTransactionKey.self],
+                    currentTracksVelocity: Transaction.current.tracksVelocity,
+                    currentAmbientMarker: Transaction.current[LocationProjectionAmbientKey.self]
+                ))
+            }
+        )
+        let projected = location.projecting(LocationProjectionFirst())
+        var ambient = Transaction()
+        ambient[LocationProjectionAmbientKey.self] = 7
+        ambient.disablesAnimations = true
+        var local = Transaction()
+        local[LocationProjectionTransactionKey.self] = 55
+        local.tracksVelocity = true
+
+        withTransaction(ambient) {
+            projected.setValue(10, transaction: local)
+        }
+
+        XCTAssertEqual(location.getValue(), LocationProjectionPair(first: 10, second: 2))
+        XCTAssertEqual(commits, [
+            .init(
+                value: LocationProjectionPair(first: 10, second: 2),
+                marker: 55,
+                tracksVelocity: true,
+                currentMarker: 55,
+                currentTracksVelocity: true,
+                currentAmbientMarker: 7
+            )
+        ])
+        XCTAssertEqual(Transaction.current[LocationProjectionAmbientKey.self], 0)
     }
 
     private func makeSignal(in host: GraphHost) -> AGWeakAttribute {
@@ -293,8 +385,25 @@ private struct LocationProjectionCommit: Equatable {
     var value: LocationProjectionPair
     var marker: Int
     var tracksVelocity: Bool
+    var currentMarker: Int
+    var currentTracksVelocity: Bool
+    var currentAmbientMarker: Int
+}
+
+private struct LocationCommitSnapshot: Equatable {
+    var value: Int
+    var marker: Int
+    var tracksVelocity: Bool
+    var ambientMarker: Int
+    var currentMarker: Int
+    var currentTracksVelocity: Bool
+    var currentAmbientMarker: Int
 }
 
 private struct LocationProjectionTransactionKey: TransactionKey {
+    static let defaultValue = 0
+}
+
+private struct LocationProjectionAmbientKey: TransactionKey {
     static let defaultValue = 0
 }

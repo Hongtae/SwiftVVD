@@ -47,6 +47,36 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         )
     }
 
+    func testSlowSmoothRetargetedToFastSnappyClampsOldLogicalToFinalSnap() {
+        assertResidualSameFamilyRetarget(
+            oldAnimation: Self.slowSmooth,
+            replacementAnimation: Self.fastSnappy,
+            label: "slowSmoothToFastSnappy",
+            logicalOrdering: .replacementBeforeClampedOld,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+                "old logical",
+            ]
+        )
+    }
+
+    func testFastBouncyRetargetedToSlowSmoothPreservesOldLogicalBeforeReplacementLogical() {
+        assertResidualSameFamilyRetarget(
+            oldAnimation: Self.fastBouncy,
+            replacementAnimation: Self.slowSmooth,
+            label: "fastBouncyToSlowSmooth",
+            logicalOrdering: .oldBeforeReplacement,
+            expectedFinalEvents: [
+                "old logical",
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
     func testSlowDirectSpringRetargetedToFastDirectSpringKeepsOldLogicalBeforeFinalSnap() {
         assertResidualSameFamilyRetarget(
             oldAnimation: Self.slowSpring,
@@ -67,6 +97,36 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
             oldAnimation: Self.fastSpring,
             replacementAnimation: Self.slowSpring,
             label: "fastSpringToSlowSpring",
+            logicalOrdering: .oldBeforeReplacement,
+            expectedFinalEvents: [
+                "old logical",
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
+    func testDurationSpringRetargetedToSpringValueKeepsOldLogicalBeforeFinalSnap() {
+        assertResidualSameFamilyRetarget(
+            oldAnimation: Self.slowDurationSpring,
+            replacementAnimation: Self.fastSpringValueAnimation,
+            label: "durationToSpringValue",
+            logicalOrdering: .replacementBeforeOldBeforeFinal,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
+    func testSpringValueRetargetedToDurationSpringPreservesOldLogicalBeforeReplacementLogical() {
+        assertResidualSameFamilyRetarget(
+            oldAnimation: Self.fastSpringValueAnimation,
+            replacementAnimation: Self.slowDurationSpring,
+            label: "springValueToDuration",
             logicalOrdering: .oldBeforeReplacement,
             expectedFinalEvents: [
                 "old logical",
@@ -230,6 +290,18 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         )
     }
 
+    private static var slowSmooth: Animation {
+        .smooth(duration: 1.50, extraBounce: 0.0)
+    }
+
+    private static var fastSnappy: Animation {
+        .snappy(duration: 0.25, extraBounce: 0.0)
+    }
+
+    private static var fastBouncy: Animation {
+        .bouncy(duration: 0.50, extraBounce: 0.0)
+    }
+
     private static var fastSpring: Animation {
         .interpolatingSpring(
             mass: 1.0,
@@ -244,6 +316,17 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
             mass: 1.0,
             stiffness: 25.0,
             damping: 5.0,
+            initialVelocity: 0.0
+        )
+    }
+
+    private static var slowDurationSpring: Animation {
+        .interpolatingSpring(duration: 1.20, bounce: 0.0, initialVelocity: 0.0)
+    }
+
+    private static var fastSpringValueAnimation: Animation {
+        .interpolatingSpring(
+            Spring(mass: 1.0, stiffness: 100.0, damping: 10.0),
             initialVelocity: 0.0
         )
     }
