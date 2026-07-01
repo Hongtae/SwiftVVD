@@ -125,6 +125,46 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
+    func testAppearanceEffectDoesNotAppearWhilePhaseIsBeingRemoved() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            var events: [String] = []
+            let modifier = graph.makeInput(
+                value: _AppearanceActionModifier(
+                    appear: { events.append("appear") },
+                    disappear: { events.append("disappear") }
+                )
+            )
+            var initialPhase = Phase()
+            initialPhase.isBeingRemoved = true
+            let phase = graph.makeInput(value: initialPhase)
+            let effect = graph.makeStatefulRule(
+                AppearanceEffect(modifier: modifier, phase: phase)
+            )
+
+            graph.makeSideEffectRule {
+                _ = effect.value
+                return ()
+            }
+
+            XCTAssertEqual(events, [])
+
+            var insertedPhase = phase.value
+            insertedPhase.isBeingRemoved = false
+            phase.setValue(insertedPhase)
+
+            XCTAssertEqual(events, ["appear"])
+
+            var removedPhase = phase.value
+            removedPhase.isBeingRemoved = true
+            phase.setValue(removedPhase)
+
+            XCTAssertEqual(events, ["appear", "disappear"])
+        }
+    }
+
     func testAppearanceEffectUsesLatestCallbacksAfterModifierChange() {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)

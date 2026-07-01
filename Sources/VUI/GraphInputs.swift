@@ -123,6 +123,17 @@ struct Phase {
     }
 }
 
+struct ViewPhaseOverride: GraphInput {
+    static var defaultValue: OptionalAttribute<Phase> { OptionalAttribute() }
+
+    static func valuesEqual(
+        _ lhs: OptionalAttribute<Phase>,
+        _ rhs: OptionalAttribute<Phase>
+    ) -> Bool {
+        lhs.base.identifier == rhs.base.identifier
+    }
+}
+
 /// Animated view frame snapshot passed through the animation system.
 /// { origin: CGPoint (16 bytes), size: ViewSize (32 bytes) }
 /// Total size: 48 bytes.
@@ -275,6 +286,13 @@ public struct _GraphInputs {
     subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }
+    }
+
+    mutating func applyViewPhaseOverrideIfNeeded() {
+        guard let phaseOverride = self[ViewPhaseOverride.self].attribute else {
+            return
+        }
+        phase = phaseOverride
     }
 
     // Stack operations for base-channel keys with Stack values.

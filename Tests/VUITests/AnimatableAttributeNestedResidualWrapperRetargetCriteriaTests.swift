@@ -1,0 +1,186 @@
+import XCTest
+@testable import VUI
+
+final class AnimatableAttributeNestedResidualWrapperRetargetCriteriaTests: XCTestCase {
+    func testFiniteOldRetargetedToNestedResidualWrappersKeepsCriteriaOrder() {
+        assertRetargetOrder(
+            oldAnimation: Self.oldLinear,
+            oldRole: "firstLinear",
+            replacementAnimation: Self.fluidDelayRepeat,
+            replacementRole: "secondFluidDelayRepeat",
+            expectedEvents: [
+                "firstLinearLogical",
+                "secondFluidDelayRepeatLogical",
+                "firstLinearRemoved",
+                "secondFluidDelayRepeatRemoved",
+            ],
+            label: "linearToFluidDelayRepeat"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.oldLinear,
+            oldRole: "firstLinear",
+            replacementAnimation: Self.springDelayRepeat,
+            replacementRole: "secondSpringDelayRepeat",
+            expectedEvents: [
+                "firstLinearLogical",
+                "secondSpringDelayRepeatLogical",
+                "firstLinearRemoved",
+                "secondSpringDelayRepeatRemoved",
+            ],
+            label: "linearToSpringDelayRepeat"
+        )
+    }
+
+    func testNestedResidualWrappersRetargetedToFiniteOrDirectSpringKeepsCriteriaOrder() {
+        assertRetargetOrder(
+            oldAnimation: Self.fluidDelayRepeat,
+            oldRole: "firstFluidDelayRepeat",
+            replacementAnimation: Self.shortLinear,
+            replacementRole: "secondLinear",
+            expectedEvents: [
+                "firstFluidDelayRepeatRemoved",
+                "secondLinearRemoved",
+                "secondLinearLogical",
+                "firstFluidDelayRepeatLogical",
+            ],
+            label: "fluidDelayRepeatToLinear"
+        )
+        assertRetargetOrder(
+            oldAnimation: Self.fluidRepeatDelay,
+            oldRole: "firstFluidRepeatDelay",
+            replacementAnimation: Self.directSpring,
+            replacementRole: "secondSpring",
+            expectedEvents: [
+                "firstFluidRepeatDelayLogical",
+                "secondSpringLogical",
+                "firstFluidRepeatDelayRemoved",
+                "secondSpringRemoved",
+            ],
+            label: "fluidRepeatDelayToSpring"
+        )
+    }
+
+    private func assertRetargetOrder(
+        oldAnimation: Animation,
+        oldRole: String,
+        replacementAnimation: Animation,
+        replacementRole: String,
+        expectedEvents: [String],
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let recorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let retargetTime = 0.15
+        let target = -0.5
+        let frame = min(
+            oldAnimation.box.defaultDisplayFrameInterval,
+            replacementAnimation.box.defaultDisplayFrameInterval
+        )
+
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: criteriaTransaction(
+                animation: oldAnimation,
+                role: oldRole,
+                recorder: recorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        harness.setTime(retargetTime)
+        let retargetStartValue = harness.currentValue().opacity
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        harness.setSource(
+            _OpacityEffect(opacity: target),
+            transaction: criteriaTransaction(
+                animation: replacementAnimation,
+                role: replacementRole,
+                recorder: recorder
+            )
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+
+        let oldEnd = max(
+            oldAnimation.box.duration,
+            oldAnimation.box.presentationDuration(for: 1.0)
+        )
+        let replacementEnd = retargetTime + max(
+            replacementAnimation.box.duration,
+            replacementAnimation.box.presentationDuration(for: target - retargetStartValue)
+        )
+        let lastSampleTime = max(oldEnd, replacementEnd) + 3.0
+
+        var sampleTime = retargetTime + frame
+        while sampleTime <= lastSampleTime && recorder.events.count < expectedEvents.count {
+            harness.setTime(sampleTime)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            sampleTime += frame
+        }
+
+        XCTAssertEqual(recorder.events, expectedEvents, label, file: file, line: line)
+    }
+
+    private func criteriaTransaction(
+        animation: Animation,
+        role: String,
+        recorder: AnimationCompletionRecorder
+    ) -> Transaction {
+        var transaction = Transaction(animation: animation)
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            recorder.record("\(role)Logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            recorder.record("\(role)Removed")
+        }
+        return transaction
+    }
+
+    private static var oldLinear: Animation {
+        .linear(duration: 0.65)
+    }
+
+    private static var shortLinear: Animation {
+        .linear(duration: 0.25)
+    }
+
+    private static var fluidSpring: Animation {
+        .spring(
+            response: 0.35,
+            dampingFraction: 0.70,
+            blendDuration: 0.0
+        )
+    }
+
+    private static var directSpring: Animation {
+        .interpolatingSpring(
+            mass: 1.0,
+            stiffness: 100.0,
+            damping: 10.0,
+            initialVelocity: 0.0
+        )
+    }
+
+    private static var fluidDelayRepeat: Animation {
+        fluidSpring.delay(0.20).repeatCount(2, autoreverses: false)
+    }
+
+    private static var fluidRepeatDelay: Animation {
+        fluidSpring.repeatCount(2, autoreverses: false).delay(0.20)
+    }
+
+    private static var springDelayRepeat: Animation {
+        directSpring.delay(0.20).repeatCount(2, autoreverses: false)
+    }
+}

@@ -175,6 +175,13 @@ private final class _OptionalViewState {
     var activeOutputs: PreferencesOutputs? = nil
 }
 
+private final class _OptionalListViewState {
+    var hasValue: Bool? = nil
+    var isUpdating = false
+    var subgraph: AGSubgraph? = nil
+    var activeListOutputs: _ViewListOutputs? = nil
+}
+
 extension Optional: View where Wrapped: View {
     public typealias Body = Never
 
@@ -253,7 +260,66 @@ extension Optional: View where Wrapped: View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+
+        let state = _OptionalListViewState()
+        state.subgraph = AGSubgraph()
+
+        func makeWrappedOutputs() -> _ViewListOutputs? {
+            guard view._attribute.value != nil else { return nil }
+            let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
+                graph.makeRule { view._attribute.value! }
+            }
+            return AGSubgraph.$current.withValue(state.subgraph) {
+                Wrapped._makeViewList(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
+            }
+        }
+
+        do {
+            let initialHasValue = view._attribute.value != nil
+            state.hasValue = initialHasValue
+            state.activeListOutputs = makeWrappedOutputs()
+        }
+
+        func updateActiveBranchIfNeeded() {
+            guard AttributeGraph.current != nil else {
+                fatalError("Optional<\(Wrapped.self)> list update evaluated outside an active AttributeGraph context.")
+            }
+            let nowHasValue = view._attribute.value != nil
+            guard state.hasValue != nowHasValue else { return }
+            guard !state.isUpdating else { return }
+            state.isUpdating = true
+            state.activeListOutputs = nil
+            state.subgraph?.invalidate()
+            state.hasValue = nowHasValue
+            state.activeListOutputs = makeWrappedOutputs()
+            state.isUpdating = false
+        }
+
+        func resolvedList(from outputs: _ViewListOutputs) -> any ViewList {
+            switch outputs.views {
+            case .staticList(let elements):
+                return BaseViewList(elements: elements)
+            case .dynamicList(let listAttr, _):
+                return listAttr.value
+            }
+        }
+
+        let viewListAttr: Attribute<any ViewList> = graph.makeRule {
+            updateActiveBranchIfNeeded()
+            guard let outputs = state.activeListOutputs else {
+                return EmptyViewList()
+            }
+            return resolvedList(from: outputs)
+        }
+
+        return _ViewListOutputs(
+            views: .dynamicList(viewListAttr, nil),
+            nextImplicitID: 0,
+            staticCount: nil
+        )
     }
 }
 
@@ -337,6 +403,7 @@ extension TypedUnaryViewGenerator {
         var inputs = inputs
         var mergedBase = baseInputs
         mergedBase.merge(inputs.base, ignoringPhase: false)
+        mergedBase.applyViewPhaseOverrideIfNeeded()
         inputs.base = mergedBase
         if let env = envAttr.attribute {
             // Replace cachedEnvironment with per-child reactive env attribute.

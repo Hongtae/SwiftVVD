@@ -143,6 +143,48 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         XCTAssertEqual(listener.removedCount, 0)
     }
 
+    func testActiveNoChangePayloadContinuesExistingSchedulingWithoutRetargetRegistration() {
+        let listener = CountingAnimationListener()
+        let harness = GenericAnimatableAttributeHarness(
+            initialValue: NonAnimatablePayload(id: 1, animatableData: 0)
+        )
+        XCTAssertEqual(harness.currentValue().animatableData, 0, accuracy: 0.000_001)
+
+        var initialTransaction = Transaction(animation: .linear(duration: 1))
+        initialTransaction.animationFrameInterval = 1.0 / 30.0
+        initialTransaction.animationReason = 0xC11
+        harness.setSource(
+            NonAnimatablePayload(id: 2, animatableData: 1),
+            transaction: initialTransaction
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().animatableData, 0, accuracy: 0.000_001)
+        harness.setTime(0.5)
+        _ = harness.currentValue()
+        harness.setTime(0.6)
+        let runningValue = harness.currentValue().animatableData
+        XCTAssertGreaterThan(runningValue, 0)
+        XCTAssertLessThan(runningValue, 1)
+
+        harness.resetNextUpdate()
+        var sameTargetTransaction = Transaction(animation: .linear(duration: 1))
+        sameTargetTransaction.animationFrameInterval = 1.0 / 120.0
+        sameTargetTransaction.animationReason = 0xC22
+        sameTargetTransaction.animationListener = listener
+        harness.setSource(
+            NonAnimatablePayload(id: 3, animatableData: 1),
+            transaction: sameTargetTransaction
+        )
+        harness.finalizeTransactionBody()
+        harness.setTime(0.7)
+        _ = harness.currentValue()
+
+        XCTAssertEqual(listener.addedCount, 0)
+        XCTAssertEqual(listener.removedCount, 0)
+        XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.nextUpdateReasons(), [0xC11])
+    }
+
     func testInactiveNoChangeRetainsCachedStatefulOutput() {
         let listener = CountingAnimationListener()
         let harness = GenericAnimatableAttributeHarness(
@@ -4727,6 +4769,42 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
                 "second logical",
             ]
         )
+    }
+
+    func testVelocityTrackingCompletionDoesNotWaitForHiddenSamplerWindow() {
+        let completionRecorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: velocityTrackingCompletionTransaction(
+                label: "tracked",
+                recorder: completionRecorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        let sampledValue = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(sampledValue, 0)
+        XCTAssertLessThanOrEqual(sampledValue, 1)
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "tracked removed",
+                "tracked logical",
+            ]
+        )
+
+        completionRecorder.removeAll()
+        harness.setTime(0.5)
+        let laterValue = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(laterValue, 0)
+        XCTAssertLessThanOrEqual(laterValue, 1)
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, [])
     }
 
     func testCombinedCustomVelocityTrackingSecondNilDrainsLogicalBeforeImmediateGroup() {

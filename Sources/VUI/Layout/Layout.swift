@@ -296,6 +296,7 @@ enum DynamicContainer {
         }
 
         func invalidate() {
+            subgraph.willRemove()
             subgraph.invalidate()
             subgraph.removeFromParent()
         }
@@ -545,6 +546,9 @@ struct DynamicContainerInfo: StatefulRule {
                     // stores UInt32 item indexes sorted by that depth.
                     item.zIndex = sublist.traits[ZIndexTraitKey.self]
                     item.needsTransitions = needsTransitions
+                    if item.phase == 3 {
+                        item.subgraph.didReinsert()
+                    }
                     if item.phase != 1 {
                         item.listener = nil
                         item.setTransitionPhase(.identity, transaction: listTransaction)
@@ -623,6 +627,7 @@ struct DynamicContainerInfo: StatefulRule {
                     continue
                 }
                 item.listener = nil
+                item.subgraph.willRemove()
                 item.phase = 3
                 item.removalOrder = 0
                 unusedItems.append(item)
@@ -741,14 +746,12 @@ struct DynamicContainerInfo: StatefulRule {
                     childInputs.containerSize = OptionalAttribute(capturedInputs.size)
                     childInputs.stackOrientation = capturedInputs.stackOrientation
                     if let transition {
-                        return withoutActuallyEscaping(makeView) { escapableMakeView in
-                            transition._makeView(
-                                phase: .identity,
-                                inputs: childInputs,
-                                phaseSetters: &transitionPhaseSetters
-                            ) { _, transitionInputs in
-                                escapableMakeView(transitionInputs)
-                            }
+                        return transition._makeView(
+                            phase: .identity,
+                            inputs: childInputs,
+                            phaseSetters: &transitionPhaseSetters
+                        ) { _, transitionInputs in
+                            makeView(transitionInputs)
                         }
                     }
                     return makeView(childInputs)

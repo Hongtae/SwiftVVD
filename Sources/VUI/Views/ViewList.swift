@@ -269,7 +269,7 @@ protocol _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool)
 
     func tryToReuseElement(
@@ -288,14 +288,12 @@ extension _ViewList_Elements {
         at index: Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap? = nil,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs?
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs?
     ) -> _ViewOutputs? {
         var from = index
         var resolved: _ViewOutputs?
         _ = makeElements(from: &from, inputs: inputs, indirectMap: indirectMap) { elementInputs, makeView in
-            withoutActuallyEscaping(makeView) { escapableMakeView in
-                resolved = body(elementInputs, escapableMakeView)
-            }
+            resolved = body(elementInputs, makeView)
             return (resolved, false)
         }
         return resolved
@@ -318,7 +316,7 @@ struct EmptyViewListElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         (nil, true)
     }
@@ -359,7 +357,7 @@ struct UnaryElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         if from != 0 {
             from -= 1
@@ -390,7 +388,7 @@ struct MergedElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         for output in outputs {
             switch output.views {
@@ -480,13 +478,13 @@ struct ModifiedElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         let capturedModifier  = modifier
         let capturedBaseInputs = baseInputs
         let capturedProject   = project
 
-        let wrappedBody: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool) = {
+        let wrappedBody: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool) = {
             elementInputs, makeView in
             guard let graph = AttributeGraph.current else {
                 fatalError("ModifiedElements.makeElements wrappedBody called outside AG context.")
@@ -495,6 +493,7 @@ struct ModifiedElements: _ViewList_Elements {
             // Merge modifier baseInputs at higher priority than elementInputs.base.
             var mergedBase = capturedBaseInputs
             mergedBase.merge(elementInputs.base, ignoringPhase: false)
+            mergedBase.applyViewPhaseOverrideIfNeeded()
             var mergedInputs = elementInputs
             mergedInputs.base = mergedBase
 
@@ -506,16 +505,12 @@ struct ModifiedElements: _ViewList_Elements {
             // geometry/indirect attrs, then invoke this closure with the final
             // child inputs. Applying the modifier here directly would bypass that
             // wiring and drop child preferences.
-            var result: (_ViewOutputs?, Bool) = (nil, true)
-            withoutActuallyEscaping(makeView) { escapableMakeView in
-                let strongModifier = capturedModifier.toStrong()
-                result = body(mergedInputs) { childInputs in
-                    capturedProject(strongModifier, childInputs) { innerInputs in
-                        escapableMakeView(innerInputs)
-                    }
+            let strongModifier = capturedModifier.toStrong()
+            return body(mergedInputs) { childInputs in
+                capturedProject(strongModifier, childInputs) { innerInputs in
+                    makeView(innerInputs)
                 }
             }
-            return result
         }
 
         return base.makeElements(from: &from, inputs: inputs, indirectMap: indirectMap, body: wrappedBody)
@@ -532,6 +527,14 @@ final class _ViewList_Subgraph {
 
     init(subgraph: AGSubgraph) {
         self.subgraph = subgraph
+    }
+
+    func release() {
+        guard refcount > 0 else { return }
+        refcount -= 1
+        if refcount == 0 {
+            invalidate()
+        }
     }
 
     func invalidate() {
@@ -580,10 +583,7 @@ final class _ViewList_SubgraphRelease {
 
     deinit {
         for item in subgraphs {
-            item.refcount -= 1
-            if item.refcount == 0 {
-                item.invalidate()
-            }
+            item.release()
         }
     }
 }
@@ -613,7 +613,7 @@ struct _ViewList_SubgraphElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         base.makeElements(from: &from, inputs: inputs, indirectMap: indirectMap, body: body)
     }
@@ -821,7 +821,7 @@ extension ViewListElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         switch self {
         case .unaryElements(let unary):

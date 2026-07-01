@@ -16,6 +16,13 @@ private final class _ConditionalBranchState {
     var activeOutputs: PreferencesOutputs? = nil
 }
 
+private final class _ConditionalListBranchState {
+    var isTrue: Bool? = nil
+    var isUpdating = false
+    var activeSubgraph: AGSubgraph? = nil
+    var activeListOutputs: _ViewListOutputs? = nil
+}
+
 extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
     public typealias Body = Never
 
@@ -135,9 +142,76 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         return _ViewOutputs(preferences: outPrefs, layoutComputer: OptionalAttribute(lcAttr))
     }
 
-    /// Returns a single-item static list containing a proxy for this view.
+    /// Builds a dynamic list that forwards the currently active branch's list.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+
+        let state = _ConditionalListBranchState()
+        state.activeSubgraph = AGSubgraph()
+
+        func makeBranchOutputs(isTrue: Bool) -> _ViewListOutputs {
+            if isTrue {
+                return AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    TrueContent._makeViewList(view: view[\.._trueContent], inputs: inputs)
+                }
+            } else {
+                return AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    FalseContent._makeViewList(view: view[\._falseContent], inputs: inputs)
+                }
+            }
+        }
+
+        do {
+            let initialIsTrue: Bool
+            if case .trueContent = view._attribute.value.storage { initialIsTrue = true }
+            else { initialIsTrue = false }
+            state.isTrue = initialIsTrue
+            state.activeListOutputs = makeBranchOutputs(isTrue: initialIsTrue)
+        }
+
+        func updateActiveBranchIfNeeded(nowTrue: Bool) {
+            guard AttributeGraph.current != nil else {
+                fatalError("_ConditionalContent list branch update evaluated outside an active AttributeGraph context.")
+            }
+            guard state.isTrue != nowTrue else { return }
+            guard !state.isUpdating else { return }
+            state.isUpdating = true
+            state.activeListOutputs = nil
+            state.activeSubgraph?.invalidate()
+            state.activeListOutputs = makeBranchOutputs(isTrue: nowTrue)
+            state.isTrue = nowTrue
+            state.isUpdating = false
+        }
+
+        func resolvedList(from outputs: _ViewListOutputs) -> any ViewList {
+            switch outputs.views {
+            case .staticList(let elements):
+                return BaseViewList(elements: elements)
+            case .dynamicList(let listAttr, _):
+                return listAttr.value
+            }
+        }
+
+        let viewListAttr: Attribute<any ViewList> = graph.makeRule {
+            let nowTrue: Bool
+            if case .trueContent = view._attribute.value.storage { nowTrue = true }
+            else { nowTrue = false }
+
+            updateActiveBranchIfNeeded(nowTrue: nowTrue)
+
+            guard let outputs = state.activeListOutputs else {
+                return EmptyViewList()
+            }
+            return resolvedList(from: outputs)
+        }
+
+        return _ViewListOutputs(
+            views: .dynamicList(viewListAttr, nil),
+            nextImplicitID: 0,
+            staticCount: nil
+        )
     }
 
     var _trueContent: TrueContent {

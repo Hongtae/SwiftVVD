@@ -33,6 +33,12 @@ final class AnimatableAttributeFiniteWrapperCompletionTests: XCTestCase {
             preBoundaryTime: 0.10,
             boundaryTime: 0.45
         )
+        assertFiniteWrapperCompletionBoundary(
+            animation: Animation.linear(duration: 0.30).repeatCount(-2, autoreverses: true),
+            label: "negative repeat",
+            preBoundaryTime: 0.10,
+            boundaryTime: 0.45
+        )
     }
 
     private func assertFiniteWrapperCompletionBoundary(

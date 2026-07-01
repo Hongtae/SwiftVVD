@@ -353,6 +353,32 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         XCTAssertEqual(completionRecorder.events, ["active removed"])
     }
 
+    func testNoAnimationRetargetPreservesSampledResidualFamilyUntilTerminalOutput() {
+        assertNoAnimationRetargetPreservesTerminalOutputBeforeCallbacks(
+            label: "fluid",
+            animation: .spring(response: 0.35, dampingFraction: 0.70, blendDuration: 0)
+        )
+        assertNoAnimationRetargetPreservesTerminalOutputBeforeCallbacks(
+            label: "spring",
+            animation: .interpolatingSpring(
+                mass: 1.0,
+                stiffness: 50,
+                damping: 5,
+                initialVelocity: 0
+            )
+        )
+        assertNoAnimationRetargetPreservesTerminalOutputBeforeCallbacks(
+            label: "default",
+            animation: .default
+        )
+        assertNoAnimationRetargetPreservesTerminalOutputBeforeCallbacks(
+            label: "wrapped fluid",
+            animation: Animation
+                .spring(response: 0.35, dampingFraction: 0.70, blendDuration: 0)
+                .delay(0.20)
+        )
+    }
+
     private func makeStartedLogicalSplitHarness(
         recorder completionRecorder: AnimationCompletionRecorder
     ) -> AnimatableAttributeHarness {
@@ -372,5 +398,60 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
         return harness
+    }
+
+    private func assertNoAnimationRetargetPreservesTerminalOutputBeforeCallbacks(
+        label: String,
+        animation: Animation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let completionRecorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: completionTransaction(
+                animation: animation,
+                label: label,
+                recorder: completionRecorder
+            )
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
+
+        harness.setTime(0.05)
+        _ = harness.currentValue()
+        harness.setTime(0.12)
+        let beforeRetarget = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(beforeRetarget, 0, file: file, line: line)
+        XCTAssertLessThanOrEqual(beforeRetarget, 1, file: file, line: line)
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 2),
+            transaction: Transaction(animation: nil)
+        )
+        harness.finalizeTransactionBody()
+        let afterRetarget = harness.currentValue().opacity
+        XCTAssertGreaterThanOrEqual(afterRetarget, beforeRetarget, file: file, line: line)
+        XCTAssertLessThan(afterRetarget, 2, file: file, line: line)
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
+
+        harness.setTime(5.0)
+        XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            Set(completionRecorder.events),
+            Set(["\(label) removed", "\(label) logical"]),
+            file: file,
+            line: line
+        )
     }
 }

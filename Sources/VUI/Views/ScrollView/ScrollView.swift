@@ -171,13 +171,20 @@ struct SystemScrollView<Content>: View where Content: View {
         contentInputs.preferences.keys.insert(UpdateScrollStateRequestKey.self)
 
         let contentOutputs = Content._makeView(view: view[\.content], inputs: contentInputs)
+        let layoutComputer: Attribute<LayoutComputer> = graph.makeRule(
+            ScrollViewLayoutComputerProvider(
+                contentLayout: contentOutputs._layoutComputer.attribute?.asWeak() ?? WeakAttribute()
+            )
+        )
+        let scrollLayoutComputer = OptionalAttribute(layoutComputer)
         var outputs = contentOutputs
+        outputs._layoutComputer = scrollLayoutComputer
 
         let frame: Attribute<ViewFrame> = graph.makeRule(
             ViewFrameProvider(
                 position: inputs.position,
                 containerSize: inputs.size,
-                layoutComputer: contentOutputs._layoutComputer
+                layoutComputer: scrollLayoutComputer
             )
         )
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
@@ -362,6 +369,40 @@ private struct ScrollablePreferenceProvider: Rule {
 
     func updateValue() -> [any Scrollable] {
         [scrollable.value]
+    }
+}
+
+/// Host-owned layout relay for the scroll container's child content.
+private struct ScrollViewLayoutComputerProvider: Rule {
+    typealias Value = LayoutComputer
+
+    var contentLayout: WeakAttribute<LayoutComputer>
+
+    func updateValue() -> LayoutComputer {
+        guard let graph = AttributeGraph.current else {
+            fatalError("ScrollViewLayoutComputerProvider.updateValue called outside AG context.")
+        }
+        guard contentLayout.isValid(in: graph) else {
+            return LayoutComputer.defaultValue
+        }
+
+        let inner = contentLayout.toStrong().value
+        return LayoutComputer(
+            sizeThatFits: { proposal in
+                inner.sizeThatFits(proposal)
+            },
+            spacing: inner.spacing,
+            place: { position, anchor, proposal in
+                inner.place(at: position, anchor: anchor, proposal: proposal)
+            },
+            childGeometries: { size, origin in
+                inner.childGeometries(at: size, origin: origin)
+            },
+            priority: inner.priority,
+            explicitAlignment: { key, size in
+                inner.explicitAlignment(key, at: size)
+            }
+        )
     }
 }
 

@@ -82,6 +82,36 @@ final class AnimationNoRegisteredFallbackDelayTests: XCTestCase {
         }
     }
 
+    func testFluidAndDefaultResidualWrappersUseCriteriaInsensitiveNoRegisteredFallback() throws {
+        let fluid = Animation.spring(
+            response: 0.35,
+            dampingFraction: 0.70,
+            blendDuration: 0
+        )
+        let fluidDelay = try noRegisteredDelay(fluid)
+        XCTAssertGreaterThan(fluidDelay, fluid.box.duration)
+        try assertNoRegisteredDelay(fluid.delay(0.20), equals: fluidDelay + 0.20)
+        try assertNoRegisteredDelay(fluid.repeatCount(2, autoreverses: false), equals: fluidDelay * 2)
+        try assertNoRegisteredDelay(fluid.speed(2).repeatCount(2, autoreverses: false), equals: fluidDelay)
+        try assertNoRegisteredDelay(fluid.delay(-0.20), equals: max(0, fluidDelay - 0.20))
+
+        let defaultAnimation = Animation.default
+        let defaultDelay = try noRegisteredDelay(defaultAnimation)
+        XCTAssertGreaterThan(defaultDelay, defaultAnimation.box.duration)
+        try assertNoRegisteredDelay(
+            defaultAnimation.delay(0.20).repeatCount(2, autoreverses: false),
+            equals: (defaultDelay + 0.20) * 2
+        )
+        try assertNoRegisteredDelay(
+            defaultAnimation.speed(2).repeatCount(2, autoreverses: false),
+            equals: defaultDelay
+        )
+        try assertNoRegisteredDelay(
+            defaultAnimation.delay(-0.20),
+            equals: max(0, defaultDelay - 0.20)
+        )
+    }
+
     func testSourceDefinedCustomNoRegisteredFallbackSamplesToNilBoundary() throws {
         let custom = Animation(UnitLinearAnimation(duration: 0.35))
 
@@ -166,6 +196,32 @@ final class AnimationNoRegisteredFallbackDelayTests: XCTestCase {
         }
     }
 
+    func testCircularUnitCurveUsesFiniteNoRegisteredFallbackTiming() throws {
+        let direct = Animation.timingCurve(.circularEaseInOut, duration: 0.30)
+        try assertNoRegisteredDelay(direct, equals: 0.30)
+
+        let zero = Animation.timingCurve(.circularEaseInOut, duration: 0)
+        try assertNoRegisteredDelay(zero, equals: 0)
+
+        let delayed = Animation.timingCurve(.circularEaseInOut, duration: 0.20)
+            .delay(0.25)
+        try assertNoRegisteredDelay(delayed, equals: 0.45)
+
+        let speeded = Animation.timingCurve(.circularEaseInOut, duration: 0.60)
+            .speed(2)
+        try assertNoRegisteredDelay(speeded, equals: 0.30)
+
+        let repeated = Animation.timingCurve(.circularEaseInOut, duration: 0.15)
+            .repeatCount(3, autoreverses: false)
+        try assertNoRegisteredDelay(repeated, equals: 0.45)
+
+        let infinite = Animation.timingCurve(.circularEaseInOut, duration: 0.20)
+            .repeatForever(autoreverses: false)
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay())
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .logicallyComplete))
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .removed))
+    }
+
     private static let accuracy: TimeInterval = 0.000_000_1
 
     private static func directSpring() -> Animation {
@@ -197,6 +253,35 @@ final class AnimationNoRegisteredFallbackDelayTests: XCTestCase {
     ) throws -> TimeInterval {
         try XCTUnwrap(
             animation.box.noRegisteredCompletionDelay(for: criteria),
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertNoRegisteredDelay(
+        _ animation: Animation,
+        equals expectedDelay: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        XCTAssertEqual(
+            try noRegisteredDelay(animation, file: file, line: line),
+            expectedDelay,
+            accuracy: Self.accuracy,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            try noRegisteredDelay(animation, criteria: .logicallyComplete, file: file, line: line),
+            expectedDelay,
+            accuracy: Self.accuracy,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            try noRegisteredDelay(animation, criteria: .removed, file: file, line: line),
+            expectedDelay,
+            accuracy: Self.accuracy,
             file: file,
             line: line
         )

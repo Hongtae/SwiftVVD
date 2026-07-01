@@ -86,16 +86,25 @@ extension ForEach: View where Content: View {
                             return forEach.content(element)  // stale fallback if ID removed
                         }
                     }
+                    let contentView = _GraphValue(_attribute: contentAttr)
+                    let traitListAttr = AGSubgraph.$current.withValue(subgraph) {
+                        Self.makeContentTraitListAttr(
+                            view: contentView,
+                            inputs: inputs,
+                            graph: graph
+                        )
+                    }
                     let generator = TypedUnaryViewGenerator(
-                        _GraphValue(_attribute: contentAttr),
+                        contentView,
                         inputs: inputs
                     )
                     var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
-                    elements.wrap(subgraph: _ViewList_Subgraph(subgraph: subgraph))
+                    let managedSubgraph = _ViewList_Subgraph(subgraph: subgraph)
+                    elements.wrap(subgraph: managedSubgraph)
                     state.items[id] = ForEachState<Data, ID, Content>.Item(
                         elements: elements,
-                        subgraph: subgraph,
-                        traitListAttr: generator.traitListAttr
+                        subgraph: managedSubgraph,
+                        traitListAttr: traitListAttr
                     )
                 }
             }
@@ -111,6 +120,29 @@ extension ForEach: View where Content: View {
             staticCount: nil
         )
     }
+
+    private static func makeContentTraitListAttr(
+        view: _GraphValue<Content>,
+        inputs: _ViewListInputs,
+        graph: AttributeGraph
+    ) -> OptionalAttribute<ViewTraitCollection> {
+        let outputs = Content._makeViewList(view: view, inputs: inputs)
+        guard case .dynamicList(let listAttr, _) = outputs.views else {
+            return inputs._traits
+        }
+
+        // Dynamic trait writers publish their child traits through a ViewList.
+        let traitsAttr: Attribute<ViewTraitCollection> = graph.makeRule {
+            let list = listAttr.value
+            var traits = list.traits
+            _ = _forEachSublist(in: list, listAttribute: listAttr) { sublist in
+                traits = sublist.traits
+                return false
+            }
+            return traits
+        }
+        return OptionalAttribute(traitsAttr)
+    }
 }
 
 // MARK: - ForEachState
@@ -122,7 +154,7 @@ final class ForEachState<Data, ID, Content>
 
     struct Item {
         var elements: _ViewList_SubgraphElements
-        var subgraph: AGSubgraph
+        var subgraph: _ViewList_Subgraph
         var traitListAttr: OptionalAttribute<ViewTraitCollection>
 
         var traits: ViewTraitCollection {
@@ -130,8 +162,7 @@ final class ForEachState<Data, ID, Content>
         }
 
         func invalidate() {
-            subgraph.invalidate()
-            subgraph.removeFromParent()
+            subgraph.release()
         }
     }
 

@@ -125,6 +125,33 @@ extension TupleView {
             return true
         }
 
+        if children.contains(where: { output in
+            if case .dynamicList = output.views { return true }
+            return false
+        }) {
+            let listAttributes: [Attribute<any ViewList>] = children.map { output in
+                switch output.views {
+                case .staticList(let elements):
+                    return graph.makeRule {
+                        BaseViewList(elements: elements)
+                    }
+                case .dynamicList(let attr, _):
+                    return attr
+                }
+            }
+            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
+                let lists: [(list: any ViewList, attribute: Attribute<any ViewList>)] = listAttributes.map { attr in
+                    (attr.value, attr)
+                }
+                return _ViewList_Group(lists: lists)
+            }
+            return _ViewListOutputs(
+                views: .dynamicList(viewListAttr, nil),
+                nextImplicitID: 0,
+                staticCount: nil
+            )
+        }
+
         let count = children.count
         return _ViewListOutputs(
             views: .staticList(.merged(children)),

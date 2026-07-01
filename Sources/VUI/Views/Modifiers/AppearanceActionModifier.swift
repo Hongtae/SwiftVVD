@@ -103,7 +103,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         let modifierValue = modifier.value
         appear = modifierValue.appear
         disappear = modifierValue.disappear
-        if !isRemoved {
+        if !isRemoved && currentPhase.isInserted {
             appeared()
         }
         AttributeGraph.setStatefulOutput(())

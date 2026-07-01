@@ -190,6 +190,29 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
         }
     }
 
+    func setTime(_ seconds: Double) {
+        viewGraph.data.withCurrent {
+            time.setValue(Time(seconds: seconds))
+        }
+    }
+
+    func nextUpdateInterval() -> Double {
+        viewGraph.nextUpdateInterval
+    }
+
+    func nextUpdateReasons() -> Set<UInt32> {
+        viewGraph.nextUpdateReasons
+    }
+
+    func resetNextUpdate() {
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+    }
+
+    func finalizeTransactionBody() {
+        Transaction.dispatchPendingListeners().forEach { $0() }
+        flushCompletionActions()
+    }
+
     func flushCompletionActions() {
         while !viewGraph.data.graph.actionOutbox.isEmpty {
             let actions = viewGraph.data.graph.actionOutbox

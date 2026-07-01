@@ -68,23 +68,44 @@ private final class SizeFittingState {
     }
 
     final class Child {
+        let id: _ViewList_ID.Canonical
         let subgraph: AGSubgraph
+        let selectedInput: Attribute<Bool>
         var releaseElements: _ViewList_SubgraphRelease?
         var outputs: _ViewOutputs
         var layoutComputer: Attribute<LayoutComputer>?
+        var isSelected = false
 
         init(
+            id: _ViewList_ID.Canonical,
             subgraph: AGSubgraph,
+            selectedInput: Attribute<Bool>,
             releaseElements: _ViewList_SubgraphRelease?,
             outputs: _ViewOutputs,
             layoutComputer: Attribute<LayoutComputer>?
         ) {
+            self.id = id
             self.subgraph = subgraph
+            self.selectedInput = selectedInput
             self.releaseElements = releaseElements
             self.outputs = outputs
             self.layoutComputer = layoutComputer
         }
+
+        func setSelected(_ selected: Bool) {
+            guard isSelected != selected else { return }
+            isSelected = selected
+            selectedInput.setValue(selected)
+        }
+
+        func invalidate() {
+            setSelected(false)
+            subgraph.invalidate()
+            subgraph.removeFromParent()
+        }
     }
+
+    var selectedID: _ViewList_ID.Canonical?
 
     // applyChildren currently passes child outputs by value.
     // Revisit the callback shape before wiring engine-level size-fitting callbacks.
@@ -127,8 +148,10 @@ private final class SizeFittingState {
         let staleIDs = children.keys.filter { !liveIDs.contains($0) }
         for id in staleIDs {
             guard let child = children[id] else { continue }
-            child.subgraph.invalidate()
-            child.subgraph.removeFromParent()
+            if selectedID == id {
+                selectedID = nil
+            }
+            child.invalidate()
             children.removeValue(forKey: id)
         }
         return ordered
@@ -136,10 +159,22 @@ private final class SizeFittingState {
 
     func invalidate() {
         for child in children.values {
-            child.subgraph.invalidate()
-            child.subgraph.removeFromParent()
+            child.invalidate()
         }
+        selectedID = nil
         children.removeAll()
+    }
+
+    func updateSelection(to id: _ViewList_ID.Canonical?) {
+        guard selectedID != id else { return }
+        let previousID = selectedID
+        selectedID = id
+        if let previousID, let previous = children[previousID] {
+            previous.setSelected(false)
+        }
+        if let id, let selected = children[id] {
+            selected.setSelected(true)
+        }
     }
 
     private func makeChild(
@@ -151,9 +186,14 @@ private final class SizeFittingState {
         let subgraph = AGSubgraph()
         let posAttr = graph.makeInput(value: CGPoint.zero)
         let sizeAttr = graph.makeInput(value: ViewSize(.zero))
+        let selectedInput = graph.makeInput(value: false)
+        let phaseAttr: Attribute<Phase> = graph.makeRule(
+            SizeFittingChildPhase(parentPhase: inputs.base.phase, selected: selectedInput)
+        )
         let release = (sublist.elements as? _ViewList_SubgraphElements)?.retain()
         var baseInputs = inputs
         baseInputs.copyCaches()
+        baseInputs.base[ViewPhaseOverride.self] = OptionalAttribute(phaseAttr)
 
         let outputs = AGSubgraph.$current.withValue(subgraph) {
             sublist.elements.makeOneElement(at: offset, inputs: baseInputs) { elementInputs, makeView in
@@ -196,13 +236,26 @@ private final class SizeFittingState {
         if let wrappedLC {
             wrappedOutputs._layoutComputer = OptionalAttribute(wrappedLC)
         }
-        _ = id
         return Child(
+            id: id,
             subgraph: subgraph,
+            selectedInput: selectedInput,
             releaseElements: release,
             outputs: wrappedOutputs,
             layoutComputer: wrappedLC
         )
+    }
+}
+
+private struct SizeFittingChildPhase: Rule {
+    typealias Value = Phase
+    var parentPhase: Attribute<Phase>
+    var selected: Attribute<Bool>
+
+    func updateValue() -> Phase {
+        var phase = parentPhase.value
+        phase.isBeingRemoved = !selected.value
+        return phase
     }
 }
 
@@ -213,6 +266,10 @@ private struct SizeFittingLayoutComputer: StatefulRule {
     mutating func updateValue() {
         let capturedState = state
         let axes = capturedState.root.value.axes
+        let initialChildren = capturedState.materializedChildren()
+        if capturedState.selectedID == nil {
+            capturedState.updateSelection(to: initialChildren.first?.id)
+        }
         let computer = LayoutComputer(
             sizeThatFits: { proposal in
                 guard let child = SizeFittingLayoutComputer.selectChild(state: capturedState, axes: axes, proposal: proposal),
@@ -220,7 +277,7 @@ private struct SizeFittingLayoutComputer: StatefulRule {
                 return lc.sizeThatFits(proposal)
             },
             spacing: {
-                capturedState.materializedChildren().first?.layoutComputer?.value.spacing ?? ViewSpacing()
+                initialChildren.first?.layoutComputer?.value.spacing ?? ViewSpacing()
             }(),
             place: { position, anchor, proposal in
                 guard let child = SizeFittingLayoutComputer.selectChild(state: capturedState, axes: axes, proposal: proposal),
@@ -247,6 +304,7 @@ private struct SizeFittingLayoutComputer: StatefulRule {
         if axes.contains(.horizontal) { naturalProposal.width = nil }
         if axes.contains(.vertical) { naturalProposal.height = nil }
 
+        var selectedChild: SizeFittingState.Child?
         for child in children {
             guard let lc = child.layoutComputer?.value else { continue }
             let size = lc.sizeThatFits(naturalProposal)
@@ -257,8 +315,13 @@ private struct SizeFittingLayoutComputer: StatefulRule {
             if axes.contains(.vertical), let height = proposal.height, size.height > height + 1e-6 {
                 fits = false
             }
-            if fits { return child }
+            if fits {
+                selectedChild = child
+                break
+            }
         }
-        return children.last
+        let result = selectedChild ?? children.last
+        state.updateSelection(to: result?.id)
+        return result
     }
 }
