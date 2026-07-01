@@ -22,8 +22,8 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeView called outside AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeView called outside _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
 
@@ -44,8 +44,8 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
 
         let innerOutputs = body(_Graph(), inputs)
@@ -53,7 +53,7 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
         // Path 1: PreferredColorSchemeKey staticList. Set per-child
         // ColorSchemeEnv / ColorSchemeTrait rules.
         if Key.self == PreferredColorSchemeKey.self,
-           let graph = AttributeGraph.current,
+           let graph = _AGGraph.current,
            case .staticList(let innerElements) = innerOutputs.views {
             // Safe: runtime guard above confirms Key.Value == ColorScheme?; reinterpret ID only.
             let modifierValueAttr = Attribute<ColorScheme?>(modifier[\.value]._attribute.identifier)
@@ -99,8 +99,8 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
 
@@ -127,7 +127,7 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
 // References _PreferenceWritingModifier<PreferredColorSchemeKey>.ColorSchemeEnv / ColorSchemeTrait.
 private func _applyColorSchemeEnvToElements(
     _ elements: ViewListElements,
-    graph: AttributeGraph,
+    graph: _AGGraph,
     parentEnvAttr: Attribute<EnvironmentValues>,
     modifierValueAttr: Attribute<ColorScheme?>
 ) -> ViewListElements {

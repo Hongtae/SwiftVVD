@@ -1,5 +1,5 @@
 //
-//  File: AttributeGraph.swift
+//  File: AGStorage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
@@ -8,937 +8,7 @@
 import Foundation
 import Synchronization
 
-// Single-threaded design: no internal synchronization.
-// The caller is responsible for ensuring that all operations on a given
-// AttributeGraph instance occur on a single thread (or equivalent serial context).
-//
-// All methods on AttributeGraph require that AttributeGraph.current is already bound
-// to this instance (via AttributeGraph.withCurrent(self) { ... }) before
-// they are called. Violating this precondition causes a runtime assertion failure.
-
-struct AGComparisonOptions: RawRepresentable, Equatable, Sendable {
-    var rawValue: UInt32
-
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
-}
-
-// Local implementation for AttributeGraph.compareValues / _AGCompareValues
-// duplicate suppression. This intentionally does not use public Equatable
-// equality; all AG duplicate-suppression call sites should route through this
-// entry point instead of adding type-local helpers.
-func _AGCompareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
-    _ = options
-    if let lhs = lhs as? String,
-       let rhs = rhs as? String {
-        return lhs == rhs
-    }
-    return withUnsafeBytes(of: lhs) { lhsBytes in
-        withUnsafeBytes(of: rhs) { rhsBytes in
-            lhsBytes.elementsEqual(rhsBytes)
-        }
-    }
-}
-
-// MARK: - Protocols
-
-/// Base protocol for all AG computed node bodies.
-///
-/// Marker protocol used to group computed node body types.
-protocol _AttributeBody {}
-
-/// A pure computed AG node: derives a single value from dependencies each evaluation.
-/// Unlike StatefulRule, a Rule is stateless: `updateValue()` returns the value directly
-/// and has no mutable stored state between evaluations.
-///
-/// Used for combiner nodes such as ExclusiveState, ExclusivePhase, SequenceEvents.
-protocol Rule: _AttributeBody {
-    associatedtype Value
-    func updateValue() -> Value
-}
-
-/// An AG computed node that maintains mutable state between re-evaluations.
-///
-/// Unlike a plain `makeRule` closure, the conforming struct is stored inside the AG node
-/// and reused on each evaluation, enabling lazy initialization and conditional output updates.
-///
-/// Implement `updateValue()` to recompute the output. Call `AttributeGraph.setStatefulOutput(_:)`
-/// inside `updateValue()` to publish a new value. If `setStatefulOutput` is not called, the
-/// previously cached output is retained unchanged.
-/// Override `destroy()` to release deferred work tied to the node's lifetime.
-///
-/// Used by view-system filters (e.g. GestureFilter, ContentShapeResponderFilter) that own
-/// a lazily-initialized responder object and update only its properties on re-evaluation.
-protocol StatefulRule: _AttributeBody {
-    associatedtype Value
-    mutating func updateValue()
-    mutating func destroy()
-}
-
-extension StatefulRule {
-    mutating func destroy() {}
-}
-
-/// Hidden lifecycle hook for stateful attributes owned by removable subgraphs.
-protocol RemovableAttribute: _AttributeBody {
-    static func willRemove(attribute: AGAttribute)
-    static func didReinsert(attribute: AGAttribute)
-}
-
-extension RemovableAttribute {
-    static func willRemove(attribute: AGAttribute) {}
-    static func didReinsert(attribute: AGAttribute) {}
-}
-
-private protocol _AnyStatefulBox: AnyObject {
-    func callUpdate()
-    func callDestroy()
-    func callWillRemove(attribute: AGAttribute)
-    func callDidReinsert(attribute: AGAttribute)
-}
-
-private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
-    var rule: R
-    init(_ rule: R) { self.rule = rule }
-    func callUpdate() { rule.updateValue() }
-    func callDestroy() { rule.destroy() }
-    func callWillRemove(attribute: AGAttribute) {
-        guard let type = R.self as? any RemovableAttribute.Type else { return }
-        type.willRemove(attribute: attribute)
-    }
-    func callDidReinsert(attribute: AGAttribute) {
-        guard let type = R.self as? any RemovableAttribute.Type else { return }
-        type.didReinsert(attribute: attribute)
-    }
-}
-
-// MARK: - Core Node Types
-
-#if DEBUG
-private final class AGAttributeInvalidOwner {}
-#endif
-
-/// The raw identifier for an AG node: an index into the graph's slot array.
-struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
-    private static let invalidRawValue = UInt32.max
-    static let invalid = AGAttribute(uncheckedRawValue: invalidRawValue)
-
-    let rawValue: UInt32
-    var isInvalid: Bool { rawValue == Self.invalidRawValue }
-
-#if DEBUG
-    /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
-    /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
-    private let _owningGraphID: ObjectIdentifier
-    /// The generation seed of the slot when this strong handle was created.
-    /// This catches stale strong handles when a removed slot is reused for a new node.
-    private let _seedAtCreation: UInt32
-    fileprivate var _debugSeedAtCreation: UInt32 { _seedAtCreation }
-    fileprivate func _debugValidate() {
-        guard !isInvalid else {
-            fatalError("Invalid AGAttribute sentinel cannot be used as a graph node.")
-        }
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGAttribute(\(rawValue)) accessed outside an active AttributeGraph context.")
-        }
-        if _owningGraphID != ObjectIdentifier(graph) {
-            fatalError(
-                "AGAttribute(\(rawValue)) accessed from a different AttributeGraph than the one it was created in " +
-                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
-                "Use the owning graph's cachedValue(for:) for cross-graph reads."
-            )
-        }
-        guard graph._isValid(index: rawValue, seed: _seedAtCreation) else {
-            let state = graph._debugSlotStateDescription(at: rawValue)
-            fatalError(
-                "AGAttribute(\(rawValue)) is stale or invalid in its owning AttributeGraph " +
-                "(createdSeed=\(_seedAtCreation), \(state))."
-            )
-        }
-    }
-    init(rawValue: UInt32, owningGraph: ObjectIdentifier, seed: UInt32) {
-        self.rawValue = rawValue
-        self._owningGraphID = owningGraph
-        self._seedAtCreation = seed
-    }
-
-    private init(uncheckedRawValue: UInt32) {
-        self.rawValue = uncheckedRawValue
-        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
-        self._seedAtCreation = 0
-    }
-
-    // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
-    // (e.g. AGChangeSet) partition by AttributeGraph so this operator never runs across
-    // graphs. The assert below is a tripwire if that invariant is ever broken.
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        if lhs.isInvalid || rhs.isInvalid {
-            return lhs.rawValue == rhs.rawValue
-        }
-        assert(lhs._owningGraphID == rhs._owningGraphID,
-               "Comparing AGAttributes from different graphs.")
-        return lhs.rawValue == rhs.rawValue
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(rawValue)
-    }
-#else
-    fileprivate func _debugValidate() {}
-
-    private init(uncheckedRawValue: UInt32) {
-        self.rawValue = uncheckedRawValue
-    }
-#endif
-
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGAttribute(\(rawValue)) created outside an active AttributeGraph context.")
-        }
-#if DEBUG
-        self._owningGraphID = ObjectIdentifier(graph)
-        guard let seed = graph._seedIfPresent(at: rawValue) else {
-            fatalError("AGAttribute(\(rawValue)) created for a slot outside the current AttributeGraph.")
-        }
-        self._seedAtCreation = seed
-#endif
-    }
-
-    var debugDescription: String {
-        if isInvalid {
-            return "@invalid"
-        }
-        if let graph = AttributeGraph.current {
-            return graph.debugDescription(for: self)
-        }
-        return "@\(rawValue)"
-    }
-}
-
-/// A weak reference to an AG node.
-/// Carries a seed (generation counter) to detect whether the slot at `identifier`
-/// still holds the same node that was referenced when this value was created.
-struct AGWeakAttribute: Hashable, Sendable {
-    static let invalid = AGWeakAttribute(uncheckedIdentifier: 0, seed: 0)
-
-    let identifier: UInt32
-    let seed: UInt32
-    var isInvalid: Bool { identifier == 0 && seed == 0 }
-
-#if DEBUG
-    private let _owningGraphID: ObjectIdentifier
-    init(identifier: UInt32, seed: UInt32, owningGraph: ObjectIdentifier) {
-        self.identifier = identifier
-        self.seed = seed
-        self._owningGraphID = owningGraph
-    }
-
-    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
-        self.identifier = uncheckedIdentifier
-        self.seed = seed
-        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
-    }
-#else
-    init(identifier: UInt32, seed: UInt32) {
-        self.identifier = identifier
-        self.seed = seed
-    }
-
-    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
-        self.identifier = uncheckedIdentifier
-        self.seed = seed
-    }
-#endif
-
-    func isValid(in graph: AttributeGraph) -> Bool {
-        guard !isInvalid else { return false }
-        if graph._isValid(index: identifier, seed: seed) {
-#if DEBUG
-            guard _owningGraphID == ObjectIdentifier(graph) else {
-                fatalError(
-                    "AGWeakAttribute @\(identifier) with seed \(seed) is from a different AttributeGraph than the one it was validated against. " +
-                    "This is a usage error: AGWeakAttributes must only be compared or converted to strong references within the same graph they were created from."
-                )
-            }
-#endif
-            return true
-        }
-        return false
-    }
-
-    func toStrong() -> AGAttribute {
-        guard !isInvalid else {
-            fatalError("Invalid AGWeakAttribute sentinel cannot be converted to a strong attribute.")
-        }
-#if DEBUG
-        return AGAttribute(rawValue: identifier, owningGraph: _owningGraphID, seed: seed)
-#else
-        return AGAttribute(rawValue: identifier)
-#endif
-    }
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        if lhs.isInvalid || rhs.isInvalid {
-            return lhs.identifier == rhs.identifier && lhs.seed == rhs.seed
-        }
-#if DEBUG
-        guard lhs._owningGraphID == rhs._owningGraphID else {
-            return false
-        }
-#endif
-        return lhs.identifier == rhs.identifier && lhs.seed == rhs.seed
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(identifier)
-        hasher.combine(seed)
-#if DEBUG
-        if !isInvalid {
-            hasher.combine(_owningGraphID)
-        }
-#endif
-    }
-}
-
-/// A typed wrapper around an AGAttribute.
-/// Marked @unchecked Sendable: stores only AGAttribute (a Sendable raw index).
-/// Value type parameter is used only in method signatures. No Value is retained here.
-struct Attribute<Value>: @unchecked Sendable {
-    let identifier: AGAttribute
-
-    fileprivate func _debugValidate() {
-        identifier._debugValidate()
-    }
-
-    init(_ id: AGAttribute) {
-        self.identifier = id
-    }
-
-    /// Pulls the latest value from the graph, triggering evaluation if needed,
-    /// and implicitly recording a dependency if another node is currently evaluating.
-    var value: Value {
-        _debugValidate()
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
-        }
-        return graph.value(for: identifier) as! Value
-    }
-
-    // Primarily used for State/Input nodes to push new values.
-    // Can also be used to inject an initial fallback value into a rule node
-    // to resolve potential dependency cycles before it is first evaluated.
-    func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
-        _debugValidate()
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
-        }
-        graph.setValue(for: self, to: newValue, transaction: transaction)
-    }
-
-    /// Creates a typed weak reference to this attribute, capturing the current generation seed.
-    func asWeak() -> WeakAttribute<Value> {
-        _debugValidate()
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
-        }
-#if DEBUG
-        return WeakAttribute(AGWeakAttribute(identifier: identifier.rawValue,
-                                             seed: graph._seed(at: identifier.rawValue),
-                                             owningGraph: ObjectIdentifier(graph)))
-#else
-        return WeakAttribute(AGWeakAttribute(identifier: identifier.rawValue,
-                                             seed: graph._seed(at: identifier.rawValue)))
-#endif
-    }
-}
-
-extension Attribute where Value: Equatable {
-    func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
-        _debugValidate()
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
-        }
-        graph.setValue(for: self, to: newValue, transaction: transaction)
-    }
-}
-
-/// Typed weak reference to an AG attribute.
-/// The type parameter is used only for type-safe access via toStrong().
-struct WeakAttribute<T>: Hashable, Sendable {
-    let raw: AGWeakAttribute
-
-    init() { self.raw = .invalid }
-    init(_ raw: AGWeakAttribute) { self.raw = raw }
-
-    var isInvalid: Bool { raw.isInvalid }
-    func isValid(in graph: AttributeGraph) -> Bool { raw.isValid(in: graph) }
-
-    func toStrong() -> Attribute<T> { Attribute<T>(raw.toStrong()) }
-}
-
-
-// MARK: - Optional Attribute
-
-/// Type-erased optional wrapper around an AG node identifier.
-/// Used as the backing storage for `OptionalAttribute<T>` so that
-/// `OptionalAttribute` can be stored in non-generic contexts.
-struct AnyOptionalAttribute {
-    let identifier: AGAttribute?
-
-    init() { identifier = nil }
-    init(_ id: AGAttribute) { identifier = id }
-}
-
-/// An optional typed reference to an AG node.
-/// Used for fields that may or may not have an associated AG node
-/// (e.g., `_layoutComputer`, `safeAreaInsets`, `containerSize`).
-struct OptionalAttribute<Value> {
-    let base: AnyOptionalAttribute
-
-    init() { base = AnyOptionalAttribute() }
-    init(_ attribute: Attribute<Value>) { base = AnyOptionalAttribute(attribute.identifier) }
-
-    var attribute: Attribute<Value>? {
-        guard let id = base.identifier else { return nil }
-        return Attribute(id)
-    }
-}
-
-// MARK: - Rule Contexts
-
-/// Type-erased identity for the AG rule currently being evaluated.
-struct AnyRuleContext: Equatable {
-    var attribute: AGAttribute
-
-    init(attribute: AGAttribute) {
-        self.attribute = attribute
-    }
-
-    init<Value>(_ context: RuleContext<Value>) {
-        self.attribute = context.attribute.identifier
-    }
-
-    func unsafeCast<Value>(to type: Value.Type) -> RuleContext<Value> {
-        RuleContext(attribute: Attribute<Value>(attribute))
-    }
-
-    func update(body: () -> Void) {
-        AttributeGraph.withRuleContext(attribute) {
-            body()
-        }
-    }
-
-    subscript<Value>(_ attribute: Attribute<Value>) -> Value {
-        attribute.value
-    }
-
-    subscript<Value>(_ attribute: WeakAttribute<Value>) -> Value? {
-        guard let graph = AttributeGraph.current,
-              attribute.isValid(in: graph) else { return nil }
-        return attribute.toStrong().value
-    }
-
-    subscript<Value>(_ attribute: OptionalAttribute<Value>) -> Value? {
-        attribute.attribute?.value
-    }
-}
-
-/// Typed identity and value accessor for the AG rule currently being evaluated.
-struct RuleContext<Value>: Equatable {
-    var attribute: Attribute<Value>
-
-    init(attribute: Attribute<Value>) {
-        self.attribute = attribute
-    }
-
-    static func == (lhs: RuleContext<Value>, rhs: RuleContext<Value>) -> Bool {
-        lhs.attribute.identifier == rhs.attribute.identifier
-    }
-
-    var value: Value {
-        get { attribute.value }
-        nonmutating set { attribute.setValue(newValue) }
-    }
-
-    var hasValue: Bool {
-        guard let graph = AttributeGraph.current else { return false }
-        return graph.hasCachedValue(for: attribute.identifier)
-    }
-
-    func update(body: () -> Void) {
-        AnyRuleContext(self).update(body: body)
-    }
-
-    subscript<OtherValue>(_ attribute: Attribute<OtherValue>) -> OtherValue {
-        attribute.value
-    }
-
-    subscript<OtherValue>(_ attribute: WeakAttribute<OtherValue>) -> OtherValue? {
-        AnyRuleContext(self)[attribute]
-    }
-
-    subscript<OtherValue>(_ attribute: OptionalAttribute<OtherValue>) -> OtherValue? {
-        AnyRuleContext(self)[attribute]
-    }
-}
-
-extension Rule {
-    var context: RuleContext<Value> {
-        guard let id = AttributeGraph.currentRuleContextAttribute else {
-            fatalError("Rule.context accessed outside rule evaluation.")
-        }
-        return RuleContext(attribute: Attribute<Value>(id))
-    }
-}
-
-extension StatefulRule {
-    var context: RuleContext<Value> {
-        guard let id = AttributeGraph.currentRuleContextAttribute else {
-            fatalError("StatefulRule.context accessed outside rule evaluation.")
-        }
-        return RuleContext(attribute: Attribute<Value>(id))
-    }
-}
-
-// MARK: - AGSubgraph
-
-/// A group of AG nodes that are created and destroyed together.
-///
-/// Subgraph lifecycle handle for groups of AG nodes.
-///
-/// Must be created while an AttributeGraph context is active (`AttributeGraph.current != nil`).
-/// The owning AttributeGraph is captured at creation time and validated on `invalidate()`.
-///
-/// Wrap node-creation code in `AGSubgraph.$current.withValue(subgraph) { ... }` to
-/// automatically register every node created in that scope to this subgraph.
-/// Call `invalidate()` to batch-remove all registered nodes at once.
-///
-/// Subgraphs form a parent/child tree: an AGSubgraph created while another is active
-/// automatically becomes its child. `invalidate()` cascades depth-first,
-/// so invalidating a parent also destroys all descendant subgraphs.
-///
-/// Typical use: ForEach item lifecycle:
-/// ```swift
-/// let subgraph = AGSubgraph()
-/// AGSubgraph.$current.withValue(subgraph) {
-///     Content._makeView(view: itemGraph, inputs: inputs)
-/// }
-/// itemSubgraphs[id] = subgraph
-///
-/// // item removed:
-/// itemSubgraphs[id]?.invalidate()
-/// itemSubgraphs[id]?.removeFromParent()
-/// itemSubgraphs[id] = nil
-/// ```
-final class AGSubgraph: @unchecked Sendable {
-    private(set) var nodes: [AGAttribute] = []
-    private(set) var children: [AGSubgraph] = []
-    private(set) weak var parent: AGSubgraph? = nil
-    private(set) var isValid: Bool = true
-    weak let graph: AttributeGraph?
-
-    @TaskLocal static var current: AGSubgraph? = nil
-
-    init() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGSubgraph must be created within an active AttributeGraph context.")
-        }
-        self.graph = graph
-        if let parent = AGSubgraph.current {
-            parent.children.append(self)
-            self.parent = parent
-        }
-    }
-
-    func register(_ id: AGAttribute) {
-        nodes.append(id)
-    }
-
-    func invalidate() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGSubgraph.invalidate() called outside an active AttributeGraph context.")
-        }
-        guard graph === self.graph else {
-            fatalError("AGSubgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
-        }
-        guard isValid else { return }
-
-        children.forEach {
-            $0.invalidate()
-            $0.parent = nil
-        }
-        children.removeAll()
-
-        nodes.forEach {
-            graph.removeNode($0)
-        }
-        nodes.removeAll()
-        isValid = false
-    }
-
-    func removeFromParent() {
-        parent?.children.removeAll { $0 === self }
-        parent = nil
-    }
-
-    func update(flags: UInt32 = 1) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGSubgraph.update() called outside an active AttributeGraph context.")
-        }
-        guard graph === self.graph else {
-            fatalError("AGSubgraph.update() called from a different AttributeGraph than the one that owns this subgraph.")
-        }
-        graph.updateSubgraph(self, flags: flags)
-    }
-
-    func willRemove() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGSubgraph.willRemove() called outside an active AttributeGraph context.")
-        }
-        guard graph === self.graph else {
-            fatalError("AGSubgraph.willRemove() called from a different AttributeGraph than the one that owns this subgraph.")
-        }
-        graph.willRemoveSubgraph(self)
-    }
-
-    func didReinsert() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGSubgraph.didReinsert() called outside an active AttributeGraph context.")
-        }
-        guard graph === self.graph else {
-            fatalError("AGSubgraph.didReinsert() called from a different AttributeGraph than the one that owns this subgraph.")
-        }
-        graph.didReinsertSubgraph(self)
-    }
-}
-
-func AGSubgraphIsValid(_ subgraph: AGSubgraph) -> Bool {
-    subgraph.isValid
-}
-
-func _AGGraphAnyInputsChanged() -> Bool {
-    AttributeGraph._currentStatefulInputsChanged()
-}
-
-// MARK: - AttributeGraphRef
-// Reference wrapper used to bind an AttributeGraph to a host context.
-//
-// Multiple AttributeGraphRef instances can share the same underlying AttributeGraph core.
-// Each GraphHost subclass (ViewGraph, GestureGraph) owns one AttributeGraphRef and registers
-// itself as the `context`, enabling `GestureGraph.current` / `ViewGraph.current` resolution
-// via the AG evaluation context.
-//
-// Usage:
-//   let ref = AttributeGraphRef(graph: sharedCore)
-//   ref.context = self   // register this GraphHost as the context
-struct AttributeGraphRef: @unchecked Sendable {
-    let graph: AttributeGraph       // shared graph core (one per window)
-    weak var context: AnyObject?    // the GraphHost that owns this ref (ViewGraph, GestureGraph, ...)
-
-    /// The currently active AttributeGraphRef for the running AG evaluation pass.
-    /// Set by withCurrent(_:). Reading context gives the owning GraphHost subclass.
-    @TaskLocal static var current: AttributeGraphRef? = nil
-
-    init(graph: AttributeGraph, context: AnyObject? = nil) {
-        self.graph = graph
-        self.context = context
-    }
-
-    /// Establishes both AttributeGraphRef.current (self) and AttributeGraph.current (self.graph)
-    /// for the duration of the closure. This is the canonical way to enter a GraphHost's AG context.
-    func withCurrent<R>(_ body: () throws -> R) rethrows -> R {
-        if let activeGraph = AttributeGraph.current, activeGraph !== graph {
-            // Dependency tracking is graph-local. Cross-graph re-entry must not
-            // inherit the outer graph's currently evaluating node.
-            return try AttributeGraph.withoutTracking {
-                try withCurrentBinding(body)
-            }
-        }
-        return try withCurrentBinding(body)
-    }
-
-    private func withCurrentBinding<R>(_ body: () throws -> R) rethrows -> R {
-        return try AttributeGraphRef.$current.withValue(self) {
-            try AttributeGraph.withCurrent(graph) {
-                try body()
-            }
-        }
-    }
-}
-
-// MARK: - AGChangeSet
-
-/// Records attributes that were mutated during an `AttributeGraph.$changeSet.withValue(_:)`
-/// scope, partitioned by owning AttributeGraph instance.
-///
-/// Storage is keyed by `ObjectIdentifier(graph)` so attributes from different graphs
-/// never share a `Set<AGAttribute>` bucket. Without this partitioning, a hash collision
-/// between equal `rawValue`s in different graphs would invoke cross-graph `AGAttribute.==`
-/// (which is only a same-graph comparison by contract).
-///
-final class AGChangeSet: @unchecked Sendable {
-    private var _byGraph: [ObjectIdentifier: Set<AGAttribute>] = [:]
-
-    var isEmpty: Bool { _byGraph.values.allSatisfy { $0.isEmpty } }
-
-    /// Attributes recorded for a specific graph during this AGChangeSet's lifetime.
-    func ids(for graph: AttributeGraph) -> Set<AGAttribute> {
-        _byGraph[ObjectIdentifier(graph)] ?? []
-    }
-
-    fileprivate func record(_ id: AGAttribute) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AGChangeSet.record called outside an active AttributeGraph context.")
-        }
-        _byGraph[ObjectIdentifier(graph), default: []].insert(id)
-    }
-}
-
-// MARK: - AttributeGraph
-
-class AttributeGraph: @unchecked Sendable {
-    static func compareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
-        _AGCompareValues(lhs, rhs, options: options)
-    }
-
-    // MARK: Node Storage
-
-    // Describes how a node computes its value.
-    // Exactly one case is active per node. Mutual exclusion is guaranteed at the type level.
-    private enum NodeKind {
-        // Source-of-truth node. Value is written externally via setValue(_:).
-        case input
-
-        // Computed node with a plain closure rule.
-        // isSideEffect = true -> re-evaluated eagerly inside markNeedsEvaluation
-        //   (i.e. synchronously when any input changes via setValue).
-        //   Used for gesture callbacks and other fire-and-forget side effects.
-        // isSideEffect = false -> pull-based, evaluated lazily on first .value read.
-        //
-        // Cascade example (gesture callbacks):
-        //   eventsAttr.setValue(events)
-        //     -> markNeedsEvaluation(eventRule)   [isSideEffect]
-        //       -> evaluateNode(eventRule)          immediately
-        //         -> recognizer.processEvents()
-        //         -> phaseAttr.setValue(.ended)
-        //           -> markNeedsEvaluation(callbackRule) [isSideEffect]
-        //             -> evaluateNode(callbackRule)       immediately
-        //               -> endedCallback() fires here, inside setValue call stack
-        case rule(() -> Any, isSideEffect: Bool)
-
-        // StatefulRule node. The box owns the rule struct and is reused across evaluations.
-        // Output is written by calling AttributeGraph.setStatefulOutput(_:) inside updateValue().
-        // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
-        // The box receives destroy() once before node removal so stateful rules can release
-        // pending deferred work associated with the node's lifetime.
-        case stateful(any _AnyStatefulBox)
-
-        // KeyPath-derived node. Value is projected from a parent node via a key path.
-        // The dependency on parent is fixed at creation time and never changes.
-        case keyPath(parent: AGAttribute, kp: AnyKeyPath)
-
-        // Cross-graph mirror node. It reads its cached value from a node in another AttributeGraph.
-        // Evaluated lazily via cachedValue(for:) on the source graph (no context switch needed).
-        // Invalidated reactively: when the source node changes, the source graph enqueues a
-        // markNeedsEvaluation call into this graph's inbox. This graph drains the inbox at
-        // the start of each withCurrent block (e.g. GestureGraph.sendEvents).
-        case crossGraphRef(sourceAttr: AGAttribute, sourceGraph: WeakObject<AttributeGraph>)
-
-        // Indirect (pointer) node. It forwards reads to `target` when set and returns
-        // the stored default value when target is nil.
-        // Used for placeholder view outputs (_ViewOutputs), preference placeholders, and
-        // per-child posAttr/sizeAttr in the static layout path.
-        case indirect(target: AGAttribute?)
-
-        var isSideEffect: Bool {
-            if case .rule(_, let se) = self { return se }
-            return false
-        }
-    }
-
-    private struct Node {
-        var value: Any?
-        var transaction: Transaction? = nil
-        var kind: NodeKind
-        var needsEvaluation: Bool = true
-        var inputsChanged: Bool = true
-        var changedInputs: Set<UInt32> = []
-        var isEvaluating: Bool = false  // for cycle detection
-
-        // Dependency graph edges (stored as raw slot indices)
-        var inputs: Set<UInt32> = []        // nodes this node depends on
-        var outputs: Set<UInt32> = []       // nodes that depend on this node
-        // Permanent deps registered via setIndirectDependency. They are never cleared on re-evaluation.
-        var staticInputs: Set<UInt32> = []
-    }
-
-    private struct NodeSlot {
-        var seed: UInt32    // generation counter incremented on each removal
-        var node: Node?     // nil = free slot
-    }
-
-    private struct RelativePath: Hashable {
-        let parentID: UInt32
-        let keyPath: AnyKeyPath
-
-        static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.parentID == rhs.parentID && lhs.keyPath == rhs.keyPath
-        }
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(parentID)
-            hasher.combine(keyPath)
-        }
-    }
-
-    // Contiguous slot array: index == AGAttribute.rawValue
-    private var slots: ContiguousArray<NodeSlot> = []
-    // Freed slot indices available for reuse
-    private var freeList: [UInt32] = []
-    // Cache for KeyPath-derived child nodes
-    private var pathIDs: [RelativePath: UInt32] = [:]
-#if DEBUG
-    private var removedNodeTombstones: [UInt32: RemovedNodeTombstone] = [:]
-    private var removedNodeTombstoneOrder: [UInt32] = []
-    private let removedNodeTombstoneLimit = 4096
-#endif
-
-    // MARK: Stored Properties
-
-    // Thread-safe bridge for scheduling AG invalidations from arbitrary threads.
-    let inbox: AGInbox = AGInbox()
-
-    // Cross-graph observer registry.
-    // When a crossGraphRef node in another graph mirrors a node in this graph, an entry is
-    // registered here. On every setValue / markNeedsEvaluation for that source node, the
-    // target graph is notified via its inbox so that it can invalidate the mirror node when
-    // it next enters an AG context (e.g. GestureGraph.sendEvents -> data.withCurrent).
-    private struct CrossGraphObserver {
-        weak var targetGraph: AttributeGraph?
-        var targetNodeID: UInt32
-    }
-    private var crossGraphObservers: [UInt32: [CrossGraphObserver]] = [:]
-
-    // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
-    // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
-    var actionOutbox: [() -> Void] = []
-    private var updateCounter: UInt = 0
-
-    // MARK: Task Locals
-
-    typealias ChangeSet = AGChangeSet
-
-    @TaskLocal fileprivate static var currentStorage: AttributeGraph?
-    @TaskLocal static var changeSet: ChangeSet?
-    @TaskLocal private static var currentlyEvaluatingNode: AGAttribute?
-    @TaskLocal private static var currentlyUpdatingGraphs: Set<ObjectIdentifier>?
-
-#if DEBUG
-    // Reference identity for one active graph-current binding generation.
-    private final class AGExecutionToken: @unchecked Sendable {}
-
-    // Stored on the graph so different TaskLocal lineages contend on one state.
-    private struct AGExecutionState {
-        var token: AGExecutionToken?
-        var depth: Int = 0
-    }
-
-    // Child tasks inherit this map, so same-lineage graph use can pass validation.
-    @TaskLocal private static var currentExecutionTokens: [ObjectIdentifier: AGExecutionToken]?
-    private let debugExecutionState = Mutex(AGExecutionState())
-#endif
-
-    static var current: AttributeGraph? {
-        guard let graph = currentStorage else { return nil }
-#if DEBUG
-        graph._debugValidateCurrentContext()
-#endif
-        return graph
-    }
-
-    init() {}
-
-    // Binds the raw graph. DEBUG builds also validate TaskLocal lineage ownership.
-    static func withCurrent<R>(_ graph: AttributeGraph, _ body: () throws -> R) rethrows -> R {
-#if DEBUG
-        return try graph._debugWithCurrentExecutionContext {
-            try AttributeGraph.$currentStorage.withValue(graph) {
-                try body()
-            }
-        }
-#else
-        return try AttributeGraph.$currentStorage.withValue(graph) {
-            try body()
-        }
-#endif
-    }
-
-#if DEBUG
-    // Installs this graph's active token into the current TaskLocal lineage.
-    fileprivate func _debugWithCurrentExecutionContext<R>(_ body: () throws -> R) rethrows -> R {
-        let token = _debugEnterCurrentContext()
-        defer { _debugLeaveCurrentContext(token) }
-
-        var tokens = AttributeGraph.currentExecutionTokens ?? [:]
-        tokens[ObjectIdentifier(self)] = token
-        return try AttributeGraph.$currentExecutionTokens.withValue(tokens) {
-            try body()
-        }
-    }
-
-    // Allows same-lineage re-entry, but rejects independent concurrent binding.
-    private func _debugEnterCurrentContext() -> AGExecutionToken {
-        let graphID = ObjectIdentifier(self)
-        let inheritedToken = AttributeGraph.currentExecutionTokens?[graphID]
-
-        return debugExecutionState.withLock { state in
-            if let activeToken = state.token {
-                guard inheritedToken === activeToken else {
-                    fatalError("AttributeGraph entered outside its active TaskLocal execution context.")
-                }
-                state.depth += 1
-                return activeToken
-            }
-
-            guard inheritedToken == nil else {
-                fatalError("AttributeGraph TaskLocal execution context escaped after the graph context ended.")
-            }
-
-            let token = AGExecutionToken()
-            state.token = token
-            state.depth = 1
-            return token
-        }
-    }
-
-    // Balances re-entry depth and retires the token at the outermost exit.
-    private func _debugLeaveCurrentContext(_ token: AGExecutionToken) {
-        debugExecutionState.withLock { state in
-            guard state.token === token, state.depth > 0 else {
-                fatalError("AttributeGraph execution context state is corrupted.")
-            }
-            state.depth -= 1
-            if state.depth == 0 {
-                state.token = nil
-            }
-        }
-    }
-
-    // Catches direct/stale currentStorage bindings before callers use the graph.
-    private func _debugValidateCurrentContext() {
-        let graphID = ObjectIdentifier(self)
-        guard let token = AttributeGraph.currentExecutionTokens?[graphID] else {
-            fatalError("AttributeGraph.current used outside its active TaskLocal execution context.")
-        }
-        debugExecutionState.withLock { state in
-            guard state.token === token else {
-                fatalError("AttributeGraph.current used with a stale TaskLocal execution context.")
-            }
-        }
-    }
-#endif
-
+extension _AGGraph {
     func graphCounter(lane: UInt32) -> UInt {
         switch lane {
         case 1:
@@ -948,7 +18,7 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    fileprivate func hasCachedValue(for id: AGAttribute) -> Bool {
+    func hasCachedValue(for id: AGAttribute) -> Bool {
         id._debugValidate()
         let index = Int(id.rawValue)
         guard index < slots.count else { return false }
@@ -959,7 +29,7 @@ class AttributeGraph: @unchecked Sendable {
         currentlyEvaluatingNode
     }
 
-    fileprivate static func withRuleContext<T>(_ attribute: AGAttribute, body: () -> T) -> T {
+    static func withRuleContext<T>(_ attribute: AGAttribute, body: () -> T) -> T {
         $currentlyEvaluatingNode.withValue(attribute) {
             body()
         }
@@ -967,17 +37,17 @@ class AttributeGraph: @unchecked Sendable {
 
     // MARK: Node Factory
 
-    fileprivate func _seed(at index: UInt32) -> UInt32 {
+    func _seed(at index: UInt32) -> UInt32 {
         slots[Int(index)].seed
     }
 
-    fileprivate func _seedIfPresent(at index: UInt32) -> UInt32? {
+    func _seedIfPresent(at index: UInt32) -> UInt32? {
         let i = Int(index)
         guard i < slots.count else { return nil }
         return slots[i].seed
     }
 
-    fileprivate func _isValid(index: UInt32, seed: UInt32) -> Bool {
+    func _isValid(index: UInt32, seed: UInt32) -> Bool {
         let i = Int(index)
         guard i < slots.count else { return false }
         return slots[i].seed == seed && slots[i].node != nil
@@ -998,7 +68,7 @@ class AttributeGraph: @unchecked Sendable {
     }
 
 #if DEBUG
-    fileprivate func _debugSlotStateDescription(at index: UInt32) -> String {
+    func _debugSlotStateDescription(at index: UInt32) -> String {
         let i = Int(index)
         guard i < slots.count else { return "slot=missing, slots.count=\(slots.count)" }
         return "currentSeed=\(slots[i].seed), nodeExists=\(slots[i].node != nil), inFreeList=\(freeList.contains(index))"
@@ -1031,8 +101,8 @@ class AttributeGraph: @unchecked Sendable {
     /// Must be called from within StatefulRule.updateValue(). Used by ResettableGestureRule
     /// to implement phaseValue.getter. This reads the previous phase without redundant storage.
     static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
-        guard let graph = AttributeGraph.current,
-              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return nil }
+        guard let graph = _AGGraph.current,
+              let nodeID = _AGGraph.currentlyEvaluatingNode else { return nil }
         return graph.slots[Int(nodeID.rawValue)].node?.value as? V
     }
 
@@ -1042,27 +112,27 @@ class AttributeGraph: @unchecked Sendable {
         _AGGraphAnyInputsChanged()
     }
 
-    fileprivate static func _currentStatefulInputsChanged() -> Bool {
-        guard let graph = AttributeGraph.current,
-              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
+    static func _currentStatefulInputsChanged() -> Bool {
+        guard let graph = _AGGraph.current,
+              let nodeID = _AGGraph.currentlyEvaluatingNode else { return true }
         return graph.slots[Int(nodeID.rawValue)].node?.inputsChanged ?? true
     }
 
     static func currentStatefulInputChanged(_ attribute: AGAttribute) -> Bool {
-        guard let graph = AttributeGraph.current,
-              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
+        guard let graph = _AGGraph.current,
+              let nodeID = _AGGraph.currentlyEvaluatingNode else { return true }
         return graph.slots[Int(nodeID.rawValue)].node?.changedInputs.contains(attribute.rawValue) ?? true
     }
 
     /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
     ///
-    /// Must be called on `AttributeGraph.current` while `updateValue()` is executing.
+    /// Must be called on `_AGGraph.current` while `updateValue()` is executing.
     /// If not called during a given evaluation, the previously cached value is retained.
     static func setStatefulOutput<V>(_ value: V) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("setStatefulOutput called outside of an AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("setStatefulOutput called outside of an _AGGraph context.")
         }
-        guard let nodeID = AttributeGraph.currentlyEvaluatingNode else {
+        guard let nodeID = _AGGraph.currentlyEvaluatingNode else {
             fatalError("setStatefulOutput called outside of a StatefulRule.updateValue() call.")
         }
         graph.slots[Int(nodeID.rawValue)].node!.value = value
@@ -1070,7 +140,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Creates a source-of-truth input node (e.g., @State)
     func makeInput<Value>(value: Value) -> Attribute<Value> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: value, kind: .input, needsEvaluation: false)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -1080,7 +150,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Creates a computed node with a rule (e.g., a View's body or a derived property)
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: false))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -1099,7 +169,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Use this instead of `makeRule` when the rule needs to lazily initialize a persistent
     /// object (e.g. a ViewResponder) and update only its properties on subsequent calls.
     func makeStatefulRule<R: StatefulRule>(_ rule: R) -> Attribute<R.Value> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .stateful(_StatefulBox(rule)))
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
@@ -1113,7 +183,7 @@ class AttributeGraph: @unchecked Sendable {
         invalidating: Bool = false,
         _ body: (inout R) -> Void
     ) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard index < slots.count,
               let node = slots[index].node else {
@@ -1145,7 +215,7 @@ class AttributeGraph: @unchecked Sendable {
     /// invalidated (e.g. when the owning view is removed from the tree).
     @discardableResult
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: true))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -1158,7 +228,7 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     // MARK: - Cross-Graph Reference
-    // Allows a node in one AttributeGraph to reactively mirror a node from another.
+    // Allows a node in one _AGGraph to reactively mirror a node from another.
     // Used by GestureGraph <- ViewGraph geometry nodes (GestureResponder hit-test)
     // and sheet WindowController <- parent ViewGraph content rule (makeContent reactivity).
     //
@@ -1184,7 +254,7 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     func transaction(for id: AGAttribute) -> Transaction? {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard index < slots.count,
               let node = slots[index].node else {
@@ -1197,7 +267,7 @@ class AttributeGraph: @unchecked Sendable {
     /// `targetNode` in `targetGraph` is marked dirty via the target graph's inbox.
     func addCrossGraphObserver(
         for sourceAttr: AGAttribute,
-        notifying targetGraph: AttributeGraph,
+        notifying targetGraph: _AGGraph,
         targetNode: AGAttribute
     ) {
         let entry = CrossGraphObserver(targetGraph: targetGraph, targetNodeID: targetNode.rawValue)
@@ -1208,7 +278,7 @@ class AttributeGraph: @unchecked Sendable {
     /// watching `sourceAttr` in this graph. Called when the crossGraphRef node is removed.
     func removeCrossGraphObserver(
         for sourceAttr: AGAttribute,
-        targetGraph: AttributeGraph,
+        targetGraph: _AGGraph,
         targetNode: AGAttribute
     ) {
         crossGraphObservers[sourceAttr.rawValue]?.removeAll {
@@ -1242,15 +312,15 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Creates a cross-graph mirror node in this graph that reflects a node from `sourceGraph`.
     ///
-    /// Must be called within this graph's context (self == AttributeGraph.current).
+    /// Must be called within this graph's context (self == _AGGraph.current).
     /// The source and target graphs must be different.
     ///
     /// The returned attribute is evaluated lazily: on first read, `cachedValue(for:)` is
     /// called on `sourceGraph`. The node is automatically invalidated whenever the source
     /// node changes, `sourceGraph` enqueues a `markNeedsEvaluation` into this graph's inbox,
     /// and the inbox is drained at the start of the next `withCurrent` block.
-    func makeCrossGraphRef<V>(source: Attribute<V>, in sourceGraph: AttributeGraph) -> Attribute<V> {
-        assert(AttributeGraph.current === self,
+    func makeCrossGraphRef<V>(source: Attribute<V>, in sourceGraph: _AGGraph) -> Attribute<V> {
+        assert(_AGGraph.current === self,
                "makeCrossGraphRef: must be called within the target graph's context")
         precondition(sourceGraph !== self,
                      "makeCrossGraphRef: source and target graph must be different")
@@ -1276,7 +346,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Completely removes a node and cleans up its dependencies.
     func removeNode(_ id: AGAttribute) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard let removingNode = slots[index].node else {
             fatalError("removeNode called on @\(id.rawValue) which does not exist; double-remove is a usage error.")
@@ -1330,7 +400,7 @@ class AttributeGraph: @unchecked Sendable {
     // MARK: Value Access
 
     func value(for id: AGAttribute) -> Any? {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard slots[index].node != nil else {
             fatalError("Invalid AGAttribute @\(id.rawValue): node does not exist.")
@@ -1341,14 +411,14 @@ class AttributeGraph: @unchecked Sendable {
         // Cycle detection
         if node.needsEvaluation && node.isEvaluating {
             guard node.value != nil else {
-                fatalError("AttributeGraph: cycle detected at @\(id.rawValue) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
+                fatalError("_AGGraph: cycle detected at @\(id.rawValue) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
             }
         }
 
         let shouldEvaluate = node.needsEvaluation && !node.isEvaluating
 
         // Implicit dependency tracking
-        if let evaluator = AttributeGraph.currentlyEvaluatingNode, evaluator != id {
+        if let evaluator = _AGGraph.currentlyEvaluatingNode, evaluator != id {
             addDependency(from: evaluator, dependsOn: id)
         }
 
@@ -1362,13 +432,13 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     func setValue<Value: Equatable>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
         if let oldValue = slots[index].node!.value as? Value,
-           AttributeGraph.compareValues(oldValue, newValue, options: AGComparisonOptions(rawValue: 3)) {
+           _AGGraph.compareValues(oldValue, newValue, options: AGComparisonOptions(rawValue: 3)) {
             return
         }
         slots[index].node!.value = newValue
@@ -1385,11 +455,11 @@ class AttributeGraph: @unchecked Sendable {
             )
         }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
-        AttributeGraph.changeSet?.record(attribute.identifier)
+        _AGGraph.changeSet?.record(attribute.identifier)
     }
 
     func setValue<Value>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
@@ -1408,7 +478,7 @@ class AttributeGraph: @unchecked Sendable {
             )
         }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
-        AttributeGraph.changeSet?.record(attribute.identifier)
+        _AGGraph.changeSet?.record(attribute.identifier)
     }
 
     func invalidateAttribute(
@@ -1416,7 +486,7 @@ class AttributeGraph: @unchecked Sendable {
         transaction: Transaction? = nil,
         propagateTransaction: Bool = false
     ) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard let node = slots[index].node else { return }
 
@@ -1448,8 +518,8 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    fileprivate func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
-        assert(AttributeGraph.current === self)
+    func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
+        assert(_AGGraph.current === self)
         _ = flags
         inbox.drain()
         for node in subgraph.nodes {
@@ -1463,8 +533,8 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    fileprivate func willRemoveSubgraph(_ subgraph: AGSubgraph) {
-        assert(AttributeGraph.current === self)
+    func willRemoveSubgraph(_ subgraph: AGSubgraph) {
+        assert(_AGGraph.current === self)
         for node in subgraph.nodes {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                 continue
@@ -1478,8 +548,8 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    fileprivate func didReinsertSubgraph(_ subgraph: AGSubgraph) {
-        assert(AttributeGraph.current === self)
+    func didReinsertSubgraph(_ subgraph: AGSubgraph) {
+        assert(_AGGraph.current === self)
         for node in subgraph.nodes {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                 continue
@@ -1495,13 +565,13 @@ class AttributeGraph: @unchecked Sendable {
 
     private func withGraphUpdateCounterIfNeeded<R>(_ body: () -> R) -> R {
         let graphID = ObjectIdentifier(self)
-        var activeGraphs = AttributeGraph.currentlyUpdatingGraphs ?? []
+        var activeGraphs = _AGGraph.currentlyUpdatingGraphs ?? []
         guard !activeGraphs.contains(graphID) else {
             return body()
         }
         updateCounter &+= 1
         activeGraphs.insert(graphID)
-        return AttributeGraph.$currentlyUpdatingGraphs.withValue(activeGraphs) {
+        return _AGGraph.$currentlyUpdatingGraphs.withValue(activeGraphs) {
             body()
         }
     }
@@ -1523,7 +593,7 @@ class AttributeGraph: @unchecked Sendable {
             // If it doesn't, the previous cached value is retained unchanged.
             clearInputs(for: id)
             Update.begin()
-            AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+            _AGGraph.$currentlyEvaluatingNode.withValue(id) {
                 box.callUpdate()
             }
             slots[index].node!.needsEvaluation = false
@@ -1563,7 +633,7 @@ class AttributeGraph: @unchecked Sendable {
         case .rule(let rule, _):
             // Regular computed rule: re-run the closure and store the result.
             clearInputs(for: id)
-            let newValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+            let newValue = _AGGraph.$currentlyEvaluatingNode.withValue(id) {
                 rule()
             }
             slots[index].node!.value = newValue
@@ -1577,7 +647,7 @@ class AttributeGraph: @unchecked Sendable {
             // When target is nil, the stored default value is retained unchanged.
             clearInputs(for: id)
             if let target {
-                let targetValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+                let targetValue = _AGGraph.$currentlyEvaluatingNode.withValue(id) {
                     value(for: target)
                 }
                 slots[index].node!.value = targetValue
@@ -1604,7 +674,7 @@ class AttributeGraph: @unchecked Sendable {
         inputsChanged: Bool = true,
         changedInput: UInt32? = nil
     ) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
         // Side-effect nodes are collected separately and evaluated after the BFS completes,
         // so that cascading setValue calls (from inside the side-effect rule) create their
@@ -1711,7 +781,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Creates an indirect (pointer) node whose initial value is `defaultValue`.
     /// Use `setIndirectTarget` to wire it to a concrete attribute later.
     func makeIndirectAttribute<V>(defaultValue: V) -> Attribute<V> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = allocateSlot()
         // needsEvaluation: false because default value is already stored. Evaluation is triggered
         // only after setIndirectTarget is called (which calls markNeedsEvaluation).
@@ -1725,7 +795,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Points `indirect` at `concrete` (or nil to detach).
     /// Invalidates `indirect` and its downstream dependents.
     func setIndirectTarget(_ indirect: AGAttribute, to concrete: AGAttribute?) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let index = Int(indirect.rawValue)
         guard case .indirect = slots[index].node?.kind else {
             fatalError("setIndirectTarget: @\(indirect.rawValue) is not an indirect node.")
@@ -1742,7 +812,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Registers a permanent dependency: when `dep` changes, `indirect` is invalidated.
     /// Unlike rule-computed inputs, this edge is NOT cleared on re-evaluation.
     func setIndirectDependency(_ indirect: AGAttribute, dependsOn dep: AGAttribute) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let iIdx = Int(indirect.rawValue)
         let dIdx = Int(dep.rawValue)
         guard slots[iIdx].node != nil else {
@@ -1760,7 +830,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Dynamically creates or retrieves a child node representing a property accessed via KeyPath.
     func subscriptNode<T, U>(parent: Attribute<T>, keyPath: KeyPath<T, U>) -> Attribute<U> {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let rp = RelativePath(parentID: parent.identifier.rawValue, keyPath: keyPath)
 
         if let existingIndex = pathIDs[rp] {
@@ -1791,10 +861,9 @@ class AttributeGraph: @unchecked Sendable {
     // Closures enqueued here are executed during drainActions().
     // Use enqueue() from button handlers or event callbacks to defer state mutations
     // to the appropriate point in the frame loop.
-    private var pendingActions: [() -> Void] = []
 
     func enqueue(_ action: @escaping () -> Void) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         pendingActions.append(action)
     }
 
@@ -1802,7 +871,7 @@ class AttributeGraph: @unchecked Sendable {
     // Any actions enqueued during execution are deferred to the next drainActions() call.
     // Use this variant for a single, bounded flush, e.g. at the start of a frame update.
     func drainActions() {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let actions = pendingActions
         pendingActions.removeAll()
         actions.forEach { $0() }
@@ -1812,7 +881,7 @@ class AttributeGraph: @unchecked Sendable {
     // limit is reached, then stops. Remaining unexecuted actions stay in the queue.
     // Use this variant for a background drain loop that must yield within a deadline.
     func drainActions(timeLimit: Duration) {
-        assert(AttributeGraph.current === self)
+        assert(_AGGraph.current === self)
         let deadline = ContinuousClock.now + timeLimit
         var index = 0
         while index < pendingActions.count {
@@ -1862,18 +931,6 @@ class AttributeGraph: @unchecked Sendable {
     }
 }
 
-// MARK: - AGMakeUniqueID
-
-// Global unique ID counter used by Namespace and other AG-backed identities.
-// Atomic fetch-add returns the previous value. The counter starts at 1 so callers
-// never receive 0, which is reserved as the uninitialized namespace value.
-private let _agUniqueIDCounter: Atomic<Int> = Atomic(1)
-
-func AGMakeUniqueID() -> Int {
-    let (old, _) = _agUniqueIDCounter.add(1, ordering: .relaxed)
-    return old
-}
-
 #if DEBUG
 // MARK: - Removal Tombstone Debugging
 
@@ -1902,7 +959,7 @@ private let _attributeGraphRecordRemovalStacks =
     _attributeGraphRecordRemovalTombstones &&
     ProcessInfo.processInfo.environment["VUI_AG_RECORD_REMOVAL_STACKS"] == "1"
 
-extension AttributeGraph {
+extension _AGGraph {
     struct RemovedNodeTombstone: Sendable {
         let seedBeforeRemoval: UInt32
         let seedAfterRemoval: UInt32
@@ -1942,7 +999,7 @@ extension AttributeGraph {
             inputs: node.inputs,
             outputs: node.outputs,
             staticInputs: node.staticInputs,
-            currentlyEvaluating: AttributeGraph.currentlyEvaluatingNode?.rawValue,
+            currentlyEvaluating: _AGGraph.currentlyEvaluatingNode?.rawValue,
             stack: _attributeGraphRecordRemovalStacks ? Thread.callStackSymbols : nil
         )
         removedNodeTombstones[id.rawValue] = tombstone

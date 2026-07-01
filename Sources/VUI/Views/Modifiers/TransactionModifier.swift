@@ -15,8 +15,8 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeRule {
@@ -45,8 +45,8 @@ public struct _ValueTransactionModifier<Value>: ViewModifier, _GraphInputsModifi
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
@@ -80,7 +80,7 @@ private struct ValueTransactionModifierTransactionRule<Observed: Equatable>: Sta
             modifierValue.transform(&transaction)
         }
         previousValue = modifierValue.value
-        AttributeGraph.setStatefulOutput(transaction)
+        _AGGraph.setStatefulOutput(transaction)
     }
 }
 
@@ -94,8 +94,8 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeRule {
@@ -110,8 +110,8 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeRule {

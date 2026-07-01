@@ -69,28 +69,28 @@ final class TransactionStateEqualityTests: XCTestCase {
         XCTAssertFalse(_stateValuesAreKnownEqual(reference, ReferencePayload(1)))
     }
 
-    func testAttributeGraphCompareValuesUsesStringAndStorageComparison() {
+    func testAGGraphCompareValuesUsesStringAndStorageComparison() {
         let options = AGComparisonOptions(rawValue: 3)
 
-        XCTAssertTrue(AttributeGraph.compareValues(7, 7, options: options))
-        XCTAssertFalse(AttributeGraph.compareValues(7, 8, options: options))
+        XCTAssertTrue(_AGGraph.compareValues(7, 7, options: options))
+        XCTAssertFalse(_AGGraph.compareValues(7, 8, options: options))
 
         XCTAssertTrue(
-            AttributeGraph.compareValues(
+            _AGGraph.compareValues(
                 String(repeating: "a", count: 32),
                 String(repeating: "a", count: 32),
                 options: options
             )
         )
         XCTAssertFalse(
-            AttributeGraph.compareValues(
+            _AGGraph.compareValues(
                 [1, 2, 3],
                 [1, 2, 3].map { $0 },
                 options: options
             )
         )
         XCTAssertFalse(
-            AttributeGraph.compareValues(
+            _AGGraph.compareValues(
                 SemanticEquatablePayload(value: 1, ignored: 10),
                 SemanticEquatablePayload(value: 1, ignored: 11),
                 options: options

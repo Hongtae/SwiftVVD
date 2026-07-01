@@ -52,10 +52,10 @@ class AppWindowsController: @unchecked Sendable {
     // to pull-evaluate the AG nodes.
     func syncWindowControllers(sceneListAttr: Attribute<[SceneList.Item]>?,
                                runtimeConfigAttr: Attribute<_RuntimeWindowConfig>? = nil,
-                               in graph: AttributeGraph) {
+                               in graph: _AGGraph) {
         guard let attr = sceneListAttr else { return }
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             let items = attr.value
             let activeKeys = Set(items.map { $0.windowKey })
 

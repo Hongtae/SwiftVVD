@@ -19,8 +19,8 @@ enum _GeometryEffectSupport {
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs,
         effectValue: @escaping (Modifier, CGSize) -> ProjectionTransform
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Modifier.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
         }
 
         let sizeAttr = inputs.size
@@ -54,7 +54,7 @@ enum _GeometryEffectSupport {
         to preferences: inout PreferencesOutputs,
         effect: Attribute<ProjectionTransform>,
         position: Attribute<CGPoint>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }
@@ -174,8 +174,8 @@ extension GeometryEffect {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)

@@ -79,8 +79,8 @@ final class GestureStateTransactionTests: XCTestCase {
     }
 
     func testActiveWritebackDoesNotReenterPhaseRuleForFallbackStorage() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let phase = graph.makeInput(value: GesturePhase<Int>.possible(nil))
@@ -152,8 +152,8 @@ final class GestureStateTransactionTests: XCTestCase {
     }
 
     func testActiveAndResetWritebackCarryMutatedTransactionToLocation() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let phase = graph.makeInput(value: GesturePhase<Int>.possible(nil))
@@ -214,7 +214,7 @@ final class GestureStateTransactionTests: XCTestCase {
     }
 
     private func makeGestureInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         usesGestureGraph: Bool = false
     ) -> _GestureInputs {
         var inputs = _GestureInputs(
@@ -241,7 +241,7 @@ final class GestureStateTransactionTests: XCTestCase {
         }
     }
 
-    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         _ViewInputs(
             base: makeGraphInputs(graph: graph),
             customInputs: PropertyList(),
@@ -259,7 +259,7 @@ final class GestureStateTransactionTests: XCTestCase {
         )
     }
 
-    private func makeGraphInputs(graph: AttributeGraph) -> _GraphInputs {
+    private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
             customInputs: PropertyList(),
             time: graph.makeInput(value: Time()),

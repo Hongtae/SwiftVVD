@@ -45,7 +45,7 @@ struct SourceFormula<T: View>: AnySourceFormula {
         nil  // Dynamic/unknown count.
     }
     static func snapshot(source: AnySource) -> AnyView? {
-        guard let graph = AttributeGraph.current, source.value.isValid(in: graph) else {
+        guard let graph = _AGGraph.current, source.value.isValid(in: graph) else {
             return nil
         }
         return AnyView(Attribute<T>(source.value.toStrong()).value)
@@ -103,7 +103,7 @@ struct AnySource {
     }
     func snapshotValue<T: View>(as type: T.Type) -> T? {
         guard isSource(type),
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               value.isValid(in: graph) else {
             return nil
         }

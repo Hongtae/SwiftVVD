@@ -13,7 +13,7 @@ struct _MapGesture<Content: Gesture, Value>: Gesture {
     var transform: (Content.Value) -> Value
 
     static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_MapGesture._makeGesture requires AG context")
         }
         let inner = Content._makeGesture(gesture: gesture[\.content], inputs: inputs)
@@ -49,7 +49,7 @@ public struct AnyGesture<Value>: Gesture {
         self.storage = AnyGestureBox(gesture)
     }
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        guard AttributeGraph.current != nil else {
+        guard _AGGraph.current != nil else {
             fatalError("AnyGesture._makeGesture requires AG context")
         }
         return gesture._attribute.value.storage.makeGestureImpl(
@@ -91,7 +91,7 @@ class AnyGestureBox<T: Gesture>: AnyGestureStorageBase<T.Value> {
         anyAttr: Attribute<AnyGesture<T.Value>>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<T.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("AnyGestureBox.makeGestureImpl requires AG context")
         }
         // Create an AG attribute for the concrete inner gesture T.

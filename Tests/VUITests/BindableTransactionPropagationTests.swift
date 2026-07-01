@@ -41,8 +41,8 @@ private struct BindableTransactionLeaf: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
 
         let layout = graph.makeRule {
@@ -284,7 +284,7 @@ final class BindableTransactionPropagationTests: XCTestCase {
         )
     }
 
-    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             customInputs: PropertyList(),

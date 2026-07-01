@@ -425,20 +425,20 @@ extension EventGraphHost {
 /// Manages the entire gesture processing pipeline for a single window/view-graph.
 ///
 /// Responsibilities:
-/// - Owns an independent `AttributeGraph` that is not shared with ViewGraph.
+/// - Owns an independent `_AGGraph` that is not shared with ViewGraph.
 /// - Performs hit testing via `MultiViewResponder` to determine which `ViewResponder`
 ///   receives each event stream.
 /// - Dispatches events to matched responders and manages `ActiveGestureSession` lifecycles.
 ///
-/// GestureFilter nodes live in ViewGraph's AttributeGraph. GestureGraph.current resolves
-/// through AttributeGraphRef.current while GestureGraph's graph is active.
+/// GestureFilter nodes live in ViewGraph's _AGGraph. GestureGraph.current resolves
+/// through _AGGraphContext.current while GestureGraph's graph is active.
 ///
 /// Adopts EventGraphHost for graph-side event delivery.
 class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
 
     // Resolves the active GestureGraph from the AG evaluation context.
     static var current: GestureGraph {
-        guard let ref = AttributeGraphRef.current, let g = ref.context as? GestureGraph else {
+        guard let ref = _AGGraphContext.current, let g = ref.context as? GestureGraph else {
             fatalError("GestureGraph.current accessed outside a gesture-enabled AG context")
         }
         return g
@@ -500,7 +500,7 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
 
     // Init
 
-    /// Creates a GestureGraph with its own independent AttributeGraph.
+    /// Creates a GestureGraph with its own independent _AGGraph.
     /// The gesture graph's AG is independent and not shared with ViewGraph.
     override init() {
         let mvr = MultiViewResponder()
@@ -527,8 +527,8 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     /// _GestureInputs.events uses the graph-level shared eventsAttr for all sessions.
     /// Per-session resetSeedAttr is kept for individual session teardown signalling.
     private func createSession(for responder: any AnyGestureResponder) -> ActiveGestureSession {
-        guard let graph = AttributeGraph.current else {
-            fatalError("GestureGraph.createSession: no active AttributeGraph context")
+        guard let graph = _AGGraph.current else {
+            fatalError("GestureGraph.createSession: no active _AGGraph context")
         }
         guard let sharedEventsAttr = eventsAttr else {
             fatalError("GestureGraph.createSession: eventsAttr not initialised - call sendEvents first")
@@ -616,7 +616,7 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     /// Lazily initialises GestureGraph-level shared AG attributes inside data.withCurrent.
     /// Must be called at the top of the sendEvents entry point.
     private func ensureAttrsInitialised(time: Time) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("GestureGraph.ensureAttrsInitialised: no AG context")
         }
         if eventsAttr == nil {

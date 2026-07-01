@@ -154,7 +154,7 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
         let layout = layoutAttr.value
         let engine = ViewLayoutEngine(layout: layout, children: children, layoutDirection: layoutDirection)
         let box = LayoutEngineBox(engine: engine)
-        AttributeGraph.setStatefulOutput(LayoutComputer(box: box))
+        _AGGraph.setStatefulOutput(LayoutComputer(box: box))
     }
 }
 
@@ -492,7 +492,7 @@ struct DynamicContainerInfo: StatefulRule {
     var retainedElements: [_ViewList_ID.Canonical: _ViewList_SubgraphRelease] = [:]
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainerInfo.updateValue called outside AG context.")
         }
 
@@ -572,13 +572,13 @@ struct DynamicContainerInfo: StatefulRule {
             removed: retention.removed,
             unused: retention.unused
         )
-        AttributeGraph.setStatefulOutput(info)
+        _AGGraph.setStatefulOutput(info)
     }
 
     private mutating func retainedInactiveItems(
         excluding liveIDs: Set<_ViewList_ID.Canonical>,
         transaction: Transaction,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) -> (removed: [DynamicContainer.ItemInfo], unused: [DynamicContainer.ItemInfo]) {
         var removedItems: [DynamicContainer.ItemInfo] = []
         var unusedItems: [DynamicContainer.ItemInfo] = []
@@ -663,7 +663,7 @@ struct DynamicContainerInfo: StatefulRule {
         offset: Int,
         transition: AnyTransition?,
         capturedInputs: _ViewInputs,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) -> DynamicContainer.ItemInfo? {
         let subgraph = AGSubgraph()
         let release = (sublist.elements as? _ViewList_SubgraphElements)?.retain()
@@ -860,7 +860,7 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
             _ = child.layoutComputer.attribute?.value
         }  // register AG deps on each child LC
         let engine = ViewLayoutEngine(layout: layout, children: children, layoutDirection: .leftToRight)
-        AttributeGraph.setStatefulOutput(LayoutComputer(box: LayoutEngineBox(engine: engine)))
+        _AGGraph.setStatefulOutput(LayoutComputer(box: LayoutEngineBox(engine: engine)))
     }
 }
 
@@ -873,7 +873,7 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
 func _makeDynReduceAttr<K: PreferenceKey>(
     _ keyType: K.Type,
     nodeListAttr: Attribute<[AGWeakAttribute]>,
-    in graph: AttributeGraph
+    in graph: _AGGraph
 ) -> AGAttribute {
     let attr: Attribute<K.Value> = graph.makeRule {
         let nodes = nodeListAttr.value          // registers dep on the ID list
@@ -919,8 +919,8 @@ extension Layout {
     ///    - builds `LayoutSubviews` and returns a `LayoutComputer` with sizing and
     ///      placement closures that delegate to the concrete `Layout` protocol methods.
     public static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeLayoutView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeLayoutView called outside an active _AGGraph context.")
         }
 
         // Clear static stack-orientation bits for layout body inputs and expose the

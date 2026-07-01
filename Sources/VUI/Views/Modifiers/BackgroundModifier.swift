@@ -17,8 +17,8 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         guard let mainLCAttr = mainOutputs._layoutComputer.attribute else {
@@ -133,8 +133,8 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
@@ -184,8 +184,8 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
@@ -235,8 +235,8 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size

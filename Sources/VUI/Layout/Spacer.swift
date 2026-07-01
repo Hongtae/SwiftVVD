@@ -41,8 +41,8 @@ extension Spacer: Sendable {
 
 extension Spacer: _PrimitiveView, PrimitiveSpacer {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let minLen = view._attribute.value.minLength ?? 0
@@ -193,8 +193,8 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
     }
 
     static func makeRepresentation(inputs: _ViewInputs, outputs: inout _ViewOutputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self).makeRepresentation called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self).makeRepresentation called outside an active _AGGraph context.")
         }
 
         // Use an identity attribute to produce a stable platform item identifier.
@@ -217,8 +217,8 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
 
 extension Divider: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let childAttr: Attribute<ResolvedDivider> = graph.makeRule(

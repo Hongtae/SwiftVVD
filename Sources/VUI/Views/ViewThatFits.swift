@@ -26,8 +26,8 @@ public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {
     init(axes: Axis.Set) { self.axes = axes }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let childListOutputs = body(_Graph(), inputs)
@@ -120,7 +120,7 @@ private final class SizeFittingState {
     }
 
     func materializedChildren() -> [Child] {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("SizeFittingState.materializedChildren called outside AG context.")
         }
 
@@ -181,7 +181,7 @@ private final class SizeFittingState {
         id: _ViewList_ID.Canonical,
         sublist: _ViewList_Sublist,
         offset: Int,
-        in graph: AttributeGraph
+        in graph: _AGGraph
     ) -> Child {
         let subgraph = AGSubgraph()
         let posAttr = graph.makeInput(value: CGPoint.zero)
@@ -290,7 +290,7 @@ private struct SizeFittingLayoutComputer: StatefulRule {
                 return lc.explicitAlignment(key, at: size)
             }
         )
-        AttributeGraph.setStatefulOutput(computer)
+        _AGGraph.setStatefulOutput(computer)
     }
 
     private static func selectChild(

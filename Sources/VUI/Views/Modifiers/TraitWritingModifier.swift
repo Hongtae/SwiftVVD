@@ -24,8 +24,8 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let parentTraitAttr = inputs._traits
         let newTraitAttr: Attribute<ViewTraitCollection> = graph.makeRule {

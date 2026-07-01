@@ -176,7 +176,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MakeConfirmationDialog.updateValue called outside AG context")
         }
         var actionsList: PlatformItemList?
@@ -212,7 +212,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
         let identity = identityTracker.update(for: phaseValue)
         guard m.isPresented.wrappedValue else {
             let id = identity
-            AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
+            _AGGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
                 dict.removeValue(forKey: id)
             } as Value)
             return
@@ -239,13 +239,13 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
             preventsTermination: preventsTermination
         )
         let id = identity
-        AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
+        _AGGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
             dict[id] = storage
         } as Value)
     }
 
     private mutating func trackedEnvironment(from values: EnvironmentValues) -> EnvironmentValues? {
-        if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+        if _AGGraph.currentStatefulOutput(Value.self) != nil,
            !_AGGraphAnyInputsChanged(),
            !propertyTracker.hasDifferentUsedValues(values._plist) {
             return nil
@@ -280,7 +280,7 @@ extension ConfirmationDialogModifier {
     // _makeView collects actions and message content into platform item lists.
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
                           body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ConfirmationDialogModifier._makeView called outside AG context")
         }
 
@@ -337,8 +337,8 @@ extension ConfirmationDialogModifier {
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs,
                                      body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)

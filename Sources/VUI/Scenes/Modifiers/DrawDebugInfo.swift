@@ -28,8 +28,8 @@ public struct _DrawDebug: _SceneModifier {
     let selectedValues: Info
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeScene called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeScene called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         let configAttr: Attribute<_RuntimeWindowConfig> = graph.makeRule {

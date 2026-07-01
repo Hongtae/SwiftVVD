@@ -356,12 +356,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // MARK: - View Graph State
 
-    // Owns the view-tree AttributeGraph and root output attributes.
+    // Owns the view-tree _AGGraph and root output attributes.
     // _viewGraph is an implicitly unwrapped optional because GestureGraph must be
     // created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
-    private weak var crossGraphSourceGraph: AttributeGraph?
+    private weak var crossGraphSourceGraph: _AGGraph?
 
     var date: Date  // render loop timing reference (animation)
 
@@ -429,8 +429,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         // Extract current values from the caller's AG context (AppGraph).
         // init must be called from within an active AG context (e.g. AppGraph.syncWindowControllers).
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self).init called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self).init called outside an active _AGGraph context.")
         }
         let contentValue = content._attribute.value
         if let titleText = title.map({ $0._attribute.value }) {
@@ -494,7 +494,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // when parent state changes, parent contentAttr re-evaluates and the child graph updates.
     // contentAttr must already have a non-nil cached value in sourceGraph before this is called.
     init(crossGraphContent contentAttr: Attribute<AnyView>,
-         sourceGraph: AttributeGraph,
+         sourceGraph: _AGGraph,
          scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
@@ -614,10 +614,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         guard window == nil else {
             // Platform presentation children have their own render task. Their
             // source graph is owned by the parent window's update loop, so
-            // draining it here would make one AttributeGraph run on two threads.
+            // draining it here would make one _AGGraph run on two threads.
             return
         }
-        AttributeGraph.withCurrent(sourceGraph) {
+        _AGGraph.withCurrent(sourceGraph) {
             sourceGraph.inbox.drain()
             sourceGraph.drainActions()
         }
@@ -625,7 +625,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     @discardableResult
-    private func drainActionOutbox(_ graph: AttributeGraph) -> Bool {
+    private func drainActionOutbox(_ graph: _AGGraph) -> Bool {
         let actions = graph.actionOutbox
         guard !actions.isEmpty else { return false }
         graph.actionOutbox.removeAll()
@@ -648,8 +648,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             viewGraph.valuesNeedingUpdate.insert(.size)
         }
 
-        let changeSet = AGChangeSet()
-        AttributeGraph.$changeSet.withValue(changeSet) {
+        let changeSet = _AGChangeSet()
+        _AGGraph.$changeSet.withValue(changeSet) {
 
             // Drain platform input events before AG evaluation.
             let events = self.inputEvents.withLock { events in
@@ -754,8 +754,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         context.translateBy(x: offset.x, y: offset.y)
 
         viewGraph.data.withCurrent {
-            let changeSet = AGChangeSet()
-            AttributeGraph.$changeSet.withValue(changeSet) {
+            let changeSet = _AGChangeSet()
+            _AGGraph.$changeSet.withValue(changeSet) {
                 let displayList = rootDisplayList.value
                 displayList.draw(in: context)
             }
@@ -1838,7 +1838,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
     func updateSheetPresentation(_ value: SheetPreference.Value,
                                  transaction: Transaction = Transaction()) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
         func rootContent(for pref: SheetPreference) -> AnyView {
@@ -1929,7 +1929,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when ConfirmationDialogStorage.PreferenceKey changes.
     func updateConfirmationDialogPresentation(_ dialogs: [ConfirmationDialogPreference]) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
         func sid(_ p: ConfirmationDialogPreference) -> ObjectIdentifier {
@@ -1965,7 +1965,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when AlertStorage.PreferenceKey changes.
     func updateAlertPresentation(_ alerts: [AlertPreference]) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
         func sid(_ p: AlertPreference) -> ViewIdentity {

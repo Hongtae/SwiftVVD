@@ -461,7 +461,7 @@ struct EventListener<E: EventType>: Gesture {
     typealias Body = Never
 
     static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("EventListener._makeGesture requires AG context")
         }
         // Build the stateful recognizer node and expose only its phase field.
@@ -510,7 +510,7 @@ extension ResettableGestureRule where Value == GesturePhase<PhaseValue> {
     /// Default phaseValue implementation for conformers whose Value IS GesturePhase<PhaseValue>.
     /// Reads the previous stateful output directly from the AG node cache.
     var phaseValue: GesturePhase<PhaseValue> {
-        AttributeGraph.currentStatefulOutput() ?? .possible(nil)
+        _AGGraph.currentStatefulOutput() ?? .possible(nil)
     }
 }
 
@@ -608,7 +608,7 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     // phaseValue: EventListenerPhase.Value != GesturePhase<E>, so no default impl applies.
     // Read previous stateful output and extract the .phase field.
     var phaseValue: GesturePhase<E> {
-        (AttributeGraph.currentStatefulOutput() as Value?)?.phase ?? .possible(nil)
+        (_AGGraph.currentStatefulOutput() as Value?)?.phase ?? .possible(nil)
     }
 
     mutating func updateValue() {
@@ -661,12 +661,12 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
                 output = Value(phase: .possible(nil), trackingID: nil, failureReason: nil)
             }
         }
-        AttributeGraph.setStatefulOutput(output)
+        _AGGraph.setStatefulOutput(output)
     }
 
     mutating func resetPhase() {
         trackingID = nil
-        AttributeGraph.setStatefulOutput(Value(phase: .possible(nil), trackingID: nil, failureReason: nil))
+        _AGGraph.setStatefulOutput(Value(phase: .possible(nil), trackingID: nil, failureReason: nil))
     }
 }
 
@@ -797,7 +797,7 @@ public struct _GestureInputs {
 
     /// Creates a default (no-op) gesture outputs: phase = .possible(nil), empty preferences.
     func makeDefaultOutputs<A>() -> _GestureOutputs<A> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_GestureInputs.makeDefaultOutputs requires AG context")
         }
         let phase: Attribute<GesturePhase<A>> = graph.makeInput(value: .possible(nil))
@@ -806,7 +806,7 @@ public struct _GestureInputs {
 
     /// Creates indirect (lazy) outputs backed by a forward reference that can be wired up later.
     func makeIndirectOutputs<A>() -> _GestureOutputs<A> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_GestureInputs.makeIndirectOutputs requires AG context")
         }
         let phase: Attribute<GesturePhase<A>> = graph.makeInput(value: .possible(nil))

@@ -544,7 +544,7 @@ struct TransformScrollStorageEnvironment<Transform: ScrollEnvironmentTransform>:
         let storage = ScrollEnvironmentStorage(properties, transform: _transform.value)
         values.scrollEnvironmentStorage = storage
         previousProperties = storage.properties
-        AttributeGraph.setStatefulOutput(values)
+        _AGGraph.setStatefulOutput(values)
     }
 }
 
@@ -760,8 +760,8 @@ private struct ScrollTargetModifier: ViewModifier, _GraphInputsModifier {
     typealias Body = Never
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         let role: Attribute<ScrollTargetRole.Role?> = graph.makeRule {
             modifier._attribute.value.role
@@ -780,8 +780,8 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let shouldForwardRoleLayouts = inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self)
         var inputs = inputs
@@ -819,8 +819,8 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
     }
 
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
 
         let layouts: Attribute<[ScrollTargetRole.Role: [any ScrollableCollection]]> =
@@ -833,8 +833,8 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         inputs: inout _ViewInputs,
         layouts: Attribute<[ScrollTargetRole.Role: [any ScrollableCollection]]>
     ) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
 
         let collections: Attribute<[any ScrollableCollection]> = graph.makeRule(
@@ -881,12 +881,12 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         var seed: UInt32
 
         mutating func updateValue() {
-            if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+            if _AGGraph.currentStatefulOutput(Value.self) != nil,
                _AGGraphAnyInputsChanged() {
                 seed &+= 1
             }
 
-            AttributeGraph.setStatefulOutput(ResolvedScrollBehavior(
+            _AGGraph.setStatefulOutput(ResolvedScrollBehavior(
                 base: _behavior.value,
                 baseSeed: seed,
                 collections: _collections.attribute?.asWeak() ?? WeakAttribute(),

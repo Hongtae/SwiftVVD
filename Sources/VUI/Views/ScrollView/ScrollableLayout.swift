@@ -142,15 +142,15 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
         }
 
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            guard let graph = AttributeGraph.current else {
-                fatalError("_ScrollView.Main._makeView called outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("_ScrollView.Main._makeView called outside an active _AGGraph context.")
             }
 
             let contentOffset = graph.makeInput(
                 value: _initialContentOffset(from: view._attribute.value.config)
             )
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef.current ?? AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext.current ?? _AGGraphContext(graph: graph),
                 contentOffset: contentOffset,
                 config: view._attribute.value.config,
                 pixelLength: graph.makeRule {
@@ -272,7 +272,7 @@ private struct ContainingScrollViewInput: ViewInput {
 
 private enum ScrollViewGeometry {
     static func rewrite(inputs: _ViewInputs) -> _ViewInputs {
-        guard let graph = AttributeGraph.current,
+        guard let graph = _AGGraph.current,
               let scrollView = inputs[ContainingScrollViewInput.self] else {
             return inputs
         }
@@ -1018,7 +1018,7 @@ private func _removeScrollViewNodeBindings(for node: ScrollViewNode) {
 }
 
 final class ScrollViewNode {
-    let host: AttributeGraphRef
+    let host: _AGGraphContext
     var attribute: WeakAttribute<CGPoint>
     var uniqueId: UInt32
     var modelOffset: CGPoint
@@ -1036,7 +1036,7 @@ final class ScrollViewNode {
     var propertySeed: UInt32
 
     init(
-        graphRef: AttributeGraphRef,
+        graphRef: _AGGraphContext,
         contentOffset: Attribute<CGPoint>,
         config: _ScrollViewConfig,
         pixelLength: Attribute<CGFloat>
@@ -1382,7 +1382,7 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
 
         let sourceAttribute = _node.attribute.toStrong()
         _ = sourceAttribute.value
-        let transaction = AttributeGraph.withoutTracking {
+        let transaction = _AGGraph.withoutTracking {
             _transaction.value
         }
         let pageSize = _containerSize.value.value
@@ -1410,7 +1410,7 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
             _node.propertySeed &+= 1
         }
 
-        AttributeGraph.setStatefulOutput(_ScrollViewProxy(
+        _AGGraph.setStatefulOutput(_ScrollViewProxy(
             config: current.config,
             contentOffset: _node.currentContentOffset,
             contentSize: _node.currentContentSize ?? pageSize,
@@ -1476,7 +1476,7 @@ private struct _ScrollViewDefaultLayoutResponderRule: StatefulRule {
             responder = currentResponder
         }
         currentResponder.update(responders: childResponders.value, scrollTarget: nil)
-        AttributeGraph.setStatefulOutput([currentResponder])
+        _AGGraph.setStatefulOutput([currentResponder])
     }
 }
 
@@ -1491,7 +1491,7 @@ private final class _ScrollViewMainScrollable: Scrollable {
 
     static func node(
         from parent: WeakAttribute<any Scrollable>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) -> ScrollViewNode? {
         guard parent.isValid(in: graph),
               let scrollable = parent.toStrong().value as? _ScrollViewMainScrollable else {
@@ -1557,7 +1557,7 @@ private final class _ScrollViewMainScrollable: Scrollable {
                     }
                 }
             }
-            guard let graph = AttributeGraph.current,
+            guard let graph = _AGGraph.current,
                   parent.isValid(in: graph) else {
                 return nil
             }
@@ -1947,8 +1947,8 @@ public struct _ScrollableLayoutView<Data, Layout>: View
         view: _GraphValue<_ScrollableLayoutView<Data, Layout>>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_ScrollableLayoutView._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_ScrollableLayoutView._makeView called outside an active _AGGraph context.")
         }
 
         let layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>> = graph.makeStatefulRule(
@@ -1965,8 +1965,8 @@ public struct _ScrollableLayoutView<Data, Layout>: View
             inputs: _ViewListInputs(from: inputs)
         )
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-            guard let graph = AttributeGraph.current else {
-                fatalError("ScrollableLayoutView view-list rule evaluated outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("ScrollableLayoutView view-list rule evaluated outside an active _AGGraph context.")
             }
             let state = layoutState.value
             let current = view._attribute.value
@@ -2312,7 +2312,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
     }
 
     private var resolvedParentScrollable: (any Scrollable)? {
-        guard let graph = AttributeGraph.current,
+        guard let graph = _AGGraph.current,
               parentScrollable.isValid(in: graph) else {
             return nil
         }
@@ -2348,8 +2348,8 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
     var measurementTemplate: ScrollableLayoutMeasurementTemplate<Data>?
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollableLayoutStateRule.updateValue called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableLayoutStateRule.updateValue called outside an active _AGGraph context.")
         }
         let dataValue = data.value
         let layoutValue = layout.value
@@ -2377,12 +2377,12 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
             )
         }
 
-        let previous = AttributeGraph.currentStatefulOutput(Value.self)
+        let previous = _AGGraph.currentStatefulOutput(Value.self)
         let firstEvaluation = previous == nil
         let contentChanged = firstEvaluation ||
-            AttributeGraph.currentStatefulInputChanged(data.identifier)
+            _AGGraph.currentStatefulInputChanged(data.identifier)
         let layoutChanged = firstEvaluation ||
-            AttributeGraph.currentStatefulInputChanged(layout.identifier)
+            _AGGraph.currentStatefulInputChanged(layout.identifier)
         if contentChanged {
             contentSeed &+= 1
         }
@@ -2395,7 +2395,7 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
            previous.validRect.contains(scrollLayout.visibleRect) {
             var value = previous
             value.scrollLayout = scrollLayout
-            AttributeGraph.setStatefulOutput(value)
+            _AGGraph.setStatefulOutput(value)
             return
         }
 
@@ -2426,7 +2426,7 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
         // State changes every layout update; content changes only when the source
         // view payload changes, so proxy size caches survive pure geometry updates.
         stateSeed &+= 1
-        AttributeGraph.setStatefulOutput(
+        _AGGraph.setStatefulOutput(
             ScrollableLayoutStateValue<Data, Layout>(
                 layoutState: layoutState,
                 stateSeed: stateSeed,
@@ -2456,7 +2456,7 @@ private final class ScrollableLayoutMeasurementTemplate<Data>
     init(
         initialContent: Data.Element,
         inputs: _ViewInputs,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let subgraph = AGSubgraph()
         let built = AGSubgraph.$current.withValue(subgraph) {
@@ -2487,7 +2487,7 @@ private final class ScrollableLayoutMeasurementTemplate<Data>
     }
 
     deinit {
-        guard AttributeGraph.current != nil else { return }
+        guard _AGGraph.current != nil else { return }
         subgraph.invalidate()
         subgraph.removeFromParent()
     }
@@ -2545,7 +2545,7 @@ private final class ScrollableLayoutViewListState<Data, Layout>
     func update(
         view current: _ScrollableLayoutView<Data, Layout>,
         state: ScrollableLayoutStateValue<Data, Layout>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         var nextOrder: [AnyHashable] = []
         var liveIDs = Set<AnyHashable>()

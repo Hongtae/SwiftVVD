@@ -196,8 +196,8 @@ extension AnyGestureResponder {
         }
 
         // Build path.
-        guard AttributeGraph.current != nil else {
-            fatalError("makeWrappedGesture: no AttributeGraph context")
+        guard _AGGraph.current != nil else {
+            fatalError("makeWrappedGesture: no _AGGraph context")
         }
 
         // Store the per-responder attrs from inputs.
@@ -450,7 +450,7 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
 
     private func resetSubgraph(_ subgraph: inout AGSubgraph?) {
         guard let current = subgraph else { return }
-        if let graph = AttributeGraph.current, graph === current.graph {
+        if let graph = _AGGraph.current, graph === current.graph {
             current.invalidate()
         }
         subgraph = nil
@@ -573,7 +573,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         self.inputs = inputs
         // GestureResponder is created while ViewGraph is current. Follow the renderer host
         // to the owning GestureGraph.
-        guard let ref = AttributeGraphRef.current,
+        guard let ref = _AGGraphContext.current,
               let viewGraph = ref.context as? ViewGraph,
               let gestureGraph = viewGraph.rendererHost?.gestureGraph else {
             fatalError("GestureResponder.init: must be called within a ViewGraph AG context with rendererHost.gestureGraph")
@@ -588,7 +588,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         // Runs in GestureGraph's AG context (called via createSession -> makeGesture).
         // Creates a GestureGraph-local input node from the snapshot modifier value so that
         // the gesture chain contains no cross-graph attribute references.
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("GestureResponder.makeSubviewsGesture: no AG context")
         }
         let localModifierAttr: Attribute<M> = graph.makeInput(value: currentModifier)
@@ -601,7 +601,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
 
     override func resetGesture() {
         if let subgraph = childSubgraph,
-           let graph = AttributeGraph.current,
+           let graph = _AGGraph.current,
            graph === subgraph.graph {
             subgraph.invalidate()
             childSubgraph = nil
@@ -630,7 +630,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         // Use snapshot values (plain Swift, no AG attribute access) because
         // containsGlobalPoints is called from GestureGraph's AG context, while
         // inputs.size/inputs.transform are ViewGraph AG attributes. Cross-graph
-        // attribute access causes an index-out-of-range in AttributeGraph.value(for:).
+        // attribute access causes an index-out-of-range in _AGGraph.value(for:).
         let sz = snapshotSize.value
         let t = snapshotTransform
         var localPts = Array(points.prefix(64))

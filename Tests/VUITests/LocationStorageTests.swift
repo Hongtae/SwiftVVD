@@ -122,17 +122,17 @@ final class LocationStorageTests: XCTestCase {
     }
 
     func testStoredLocationReadHookPreservesAttributeDependency() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         var derived: Attribute<Int>!
         var location: StoredLocation<Int>!
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             let sourceAttribute = graph.makeInput(value: 1)
             let inbox = graph.inbox
             location = StoredLocation<Int>(
                 initialValue: 1,
                 readValue: {
-                    if AttributeGraph.current === graph {
+                    if _AGGraph.current === graph {
                         return sourceAttribute.value
                     }
                     return 1
@@ -155,7 +155,7 @@ final class LocationStorageTests: XCTestCase {
 
         location.setValue(7, transaction: Transaction())
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             graph.inbox.drain()
             XCTAssertEqual(derived.value, 17)
         }

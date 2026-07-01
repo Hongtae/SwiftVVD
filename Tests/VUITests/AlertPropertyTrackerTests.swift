@@ -3,10 +3,10 @@ import XCTest
 
 final class AlertPropertyTrackerTests: XCTestCase {
     func testMakeAlertStorageTracksPlatformWindowEnvironment() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.modalSessionUsingPlatformWindow = false
             let environmentAttr = graph.makeInput(value: environment)
@@ -52,10 +52,10 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     func testMakeAlertStorageUsesTrackedDialogSeverityEnvironment() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
@@ -88,10 +88,10 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     func testMakeAlertStorageTracksDialogPreventsTerminationEnvironment() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
@@ -122,11 +122,11 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     func testMakeAlertStorageTracksBridgeCacheEnvironmentFields() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
         let icon = Image("tracked-dialog-icon")
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.explicitPreferredColorScheme = .dark
             let environmentAttr = graph.makeInput(value: environment)
@@ -184,10 +184,10 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     func testMakeAlertStorageTracksAccessibilityEnabledForAccessibilityTitle() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
             environment.accessibilityEnabled = false
             let environmentAttr = graph.makeInput(value: environment)
@@ -221,10 +221,10 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     func testMakeAlertStorageKeepsOutputForNonInputRefreshWhenTrackedEnvironmentIsUnchanged() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let presentation = BoolBox(true)
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             let environment = EnvironmentValues.tracking()
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
@@ -282,7 +282,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
     }
 
     private func alertStorageAttribute(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         environment: Attribute<EnvironmentValues>,
         modifier: Attribute<AlertModifier<EmptyView, EmptyView>>,
         itemList: Attribute<PlatformItemList>,

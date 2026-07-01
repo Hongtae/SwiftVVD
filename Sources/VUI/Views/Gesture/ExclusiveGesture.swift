@@ -89,7 +89,7 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ExclusiveGesture._makeGesture requires AG context")
         }
 

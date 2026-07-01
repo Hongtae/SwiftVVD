@@ -234,7 +234,7 @@ public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_KeyPressModifier._makeView called outside AG context")
         }
 

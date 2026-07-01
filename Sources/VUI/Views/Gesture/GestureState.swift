@@ -95,8 +95,8 @@ extension GestureState {
         fieldOffset: Int,
         inputs: inout _GraphInputs
     ) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeProperty called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeProperty called outside an active _AGGraph context.")
         }
 
         let inbox = graph.inbox
@@ -106,8 +106,8 @@ extension GestureState {
         assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
         buffer.properties.append(.init(type: Self.self, offset: fieldOffset))
         buffer.contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
-            guard let graph = AttributeGraph.current else {
-                fatalError("\(Self.self)._makeProperty context closure called outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self)._makeProperty context closure called outside an active _AGGraph context.")
             }
             let currentGS = ptr.assumingMemoryBound(to: GestureState<Value>.self).pointee
 
@@ -125,7 +125,7 @@ extension GestureState {
             }
             let location = LocationBox(location: FunctionalLocation<Value>(
                 get: {
-                    if AttributeGraph.current != nil {
+                    if _AGGraph.current != nil {
                         let v = attr.value
                         cache.value = v
                         return v
@@ -182,7 +182,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Self.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("GestureStateGesture._makeGesture requires AG context")
         }
 
@@ -219,7 +219,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
                     // evaluating. Do not make the storage attribute an input
                     // of the rule, or the queued writeback would immediately
                     // re-enter the same active phase.
-                    AttributeGraph.withoutTracking {
+                    _AGGraph.withoutTracking {
                         Self.projectedStateBinding(
                             location: location,
                             stateAttribute: stateAttr
@@ -288,7 +288,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         beforeCallbacks: Bool = false,
         _ action: @escaping () -> Void
     ) {
-        guard let graphRef = AttributeGraphRef.current else {
+        guard let graphRef = _AGGraphContext.current else {
             Update.enqueueAction(action)
             return
         }

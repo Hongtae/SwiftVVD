@@ -449,8 +449,8 @@ final class AnimationCompletionObserverTests: XCTestCase {
     }
 
     func testRetainedTransitionRemovalListenerUsesAnimatedNoRegisteredFallback() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var seed: Attribute<UInt32>!
         ref.withCurrent {
             seed = graph.makeInput(value: UInt32(0))
@@ -493,8 +493,8 @@ final class AnimationCompletionObserverTests: XCTestCase {
     }
 
     func testRetainedTransitionRemovalListenerInstallsCompletionOnlyOnce() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var seed: Attribute<UInt32>!
         ref.withCurrent {
             seed = graph.makeInput(value: UInt32(0))

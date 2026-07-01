@@ -6,8 +6,8 @@ private struct FixedRelaySource: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 42, height: 17))
@@ -24,8 +24,8 @@ private struct PlaceholderRelayResult<Source: View>: View {
 
 final class CustomModifierRelayTests: XCTestCase {
     func testCustomModifierRelaysPlaceholderToOriginalMakeViewBody() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             let view = FixedRelaySource().modifier(
@@ -44,7 +44,7 @@ final class CustomModifierRelayTests: XCTestCase {
         }
     }
 
-    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             customInputs: PropertyList(),

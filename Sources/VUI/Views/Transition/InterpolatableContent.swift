@@ -417,7 +417,7 @@ extension DisplayList {
             let nextTime = nextUpdate(after: time)
             guard time < nextTime,
                   nextTime.seconds.isFinite,
-                  let viewGraph = AttributeGraphRef.current?.context as? ViewGraph else {
+                  let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
                 return
             }
             viewGraph.nextUpdate.views.at(nextTime)
@@ -443,7 +443,7 @@ private extension DisplayList.InterpolatorLayer.Contents {
     }
 }
 
-// Stateful AttributeGraph rule that observes content, transaction, time, and environment inputs
+// Stateful _AGGraph rule that observes content, transaction, time, and environment inputs
 // and rewrites DisplayList.Key output when content transitions are active.
 private struct InterpolatedDisplayList<Content: InterpolatableContent>: StatefulRule {
     typealias Value = DisplayList
@@ -580,7 +580,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         previousContent = targetContent
         previousSize = currentSize
         previousDisplayList = targetList
-        AttributeGraph.setStatefulOutput(output)
+        _AGGraph.setStatefulOutput(output)
     }
 }
 
@@ -592,8 +592,8 @@ extension _ViewOutputs {
         animatesSize: Bool,
         defersRender: Bool
     ) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_ViewOutputs.applyInterpolatorGroup called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_ViewOutputs.applyInterpolatorGroup called outside an active _AGGraph context.")
         }
         guard let displayList = preferences.reducedValue(for: DisplayList.Key.self, in: graph) else {
             return

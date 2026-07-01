@@ -19,8 +19,8 @@ public struct _AppearanceActionModifier: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let effect: Attribute<Void> = graph.makeStatefulRule(
@@ -42,8 +42,8 @@ public struct _AppearanceActionModifier: ViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         var outputs = body(_Graph(), inputs)
@@ -89,7 +89,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
 
     mutating func updateValue() {
         if attribute.isInvalid,
-           let currentAttribute = AttributeGraph.currentRuleContextAttribute {
+           let currentAttribute = _AGGraph.currentRuleContextAttribute {
             attribute = currentAttribute
         }
 
@@ -106,7 +106,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         if !isRemoved && currentPhase.isInserted {
             appeared()
         }
-        AttributeGraph.setStatefulOutput(())
+        _AGGraph.setStatefulOutput(())
     }
 
     mutating func appeared() {
@@ -115,7 +115,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
             Update.enqueueAction(appear)
         }
         isAppeared = true
-        let currentAttribute = AttributeGraph.currentRuleContextAttribute ?? attribute
+        let currentAttribute = _AGGraph.currentRuleContextAttribute ?? attribute
         queueTrackedRemovalIfNeeded(attribute: currentAttribute)
     }
 
@@ -139,7 +139,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     private func queueTrackedRemovalIfNeeded(attribute: AGAttribute) {
         guard !attribute.isInvalid else { return }
         guard isRuntimeBaselineOnOrAfter(.v6) else { return }
-        guard let graphRef = AttributeGraphRef.current,
+        guard let graphRef = _AGGraphContext.current,
               let host = graphRef.context as? GraphHost,
               host.removedState.contains(.unattached) else { return }
 
@@ -147,7 +147,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         let action = {
             graphRef.withCurrent {
                 context.update {
-                    guard let currentAttribute = AttributeGraph.currentRuleContextAttribute,
+                    guard let currentAttribute = _AGGraph.currentRuleContextAttribute,
                           !currentAttribute.isInvalid else { return }
                     Self.willRemove(attribute: currentAttribute)
                 }
@@ -158,13 +158,13 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     }
 
     static func willRemove(attribute: AGAttribute) {
-        AttributeGraph.current?.mutateStatefulRule(attribute, as: Self.self) { effect in
+        _AGGraph.current?.mutateStatefulRule(attribute, as: Self.self) { effect in
             effect.remove()
         }
     }
 
     static func didReinsert(attribute: AGAttribute) {
-        guard let graph = AttributeGraph.current else { return }
+        guard let graph = _AGGraph.current else { return }
         var invalidatedAttribute: AGAttribute?
         graph.mutateStatefulRule(attribute, as: Self.self) { effect in
             effect.isRemoved = false

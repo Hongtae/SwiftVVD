@@ -227,7 +227,7 @@ struct PrimitiveButtonGesture: Gesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<()> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PrimitiveButtonGesture._makeGesture requires AG context")
         }
 
@@ -236,7 +236,7 @@ struct PrimitiveButtonGesture: Gesture {
         // GestureGraph has a separate AG from ViewGraph, so use the view graph's cached
         // environment value instead of reading inputs.environment inside a gesture rule.
         let envAttr = inputs.environment
-        let viewGraphAG: AttributeGraph? = (AttributeGraphRef.current?.context as? GestureGraph)?
+        let viewGraphAG: _AGGraph? = (_AGGraphContext.current?.context as? GestureGraph)?
             .rendererHost?.viewGraph.data.graph
         let outsetAttr: Attribute<CGFloat> = graph.makeRule {
             if let vg = viewGraphAG,
@@ -316,7 +316,7 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Void> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ButtonGesture._makeGesture requires AG context")
         }
         // Rebuild the primitive when the public gesture fields change.

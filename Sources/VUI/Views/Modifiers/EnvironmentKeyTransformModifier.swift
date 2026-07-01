@@ -17,8 +17,8 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         let parentEnvAttr = inputs.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {

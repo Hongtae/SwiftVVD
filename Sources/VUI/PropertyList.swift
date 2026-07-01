@@ -64,7 +64,7 @@ struct BloomFilter: CustomStringConvertible {
     var description: String { "BloomFilter(value: \(value))" }
 }
 
-// Property-list element identity uses AttributeGraph's unique-ID allocator.
+// Property-list element identity uses _AGGraph's unique-ID allocator.
 struct UniqueID: Equatable, CustomStringConvertible {
     let value: UInt32
     init() {

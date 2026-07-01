@@ -19,8 +19,8 @@ public struct _EnvironmentBackgroundStyleModifier<S>: ViewModifier where S: Shap
 
 extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {

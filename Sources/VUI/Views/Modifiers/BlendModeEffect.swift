@@ -14,8 +14,8 @@ private enum _BlendModeEffectSupport {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs where Modifier: ViewModifier {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Modifier.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         applyBlendMode(to: &outputs.preferences, blendMode: blendMode, graph: graph)
@@ -27,8 +27,8 @@ private enum _BlendModeEffectSupport {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs where Modifier: ViewModifier {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Modifier.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Modifier.self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
@@ -38,7 +38,7 @@ private enum _BlendModeEffectSupport {
     private static func applyBlendMode(
         to preferences: inout PreferencesOutputs,
         blendMode: _GraphValue<BlendMode>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }

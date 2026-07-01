@@ -17,8 +17,8 @@ public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier whe
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
@@ -33,8 +33,8 @@ public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier whe
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
         let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
@@ -77,7 +77,7 @@ private struct AnimationModifierTransactionRule<Observed: Equatable>: StatefulRu
             transaction.animation = modifierValue.animation
         }
         previousValue = modifierValue.value
-        AttributeGraph.setStatefulOutput(transaction)
+        _AGGraph.setStatefulOutput(transaction)
     }
 }
 

@@ -30,7 +30,7 @@ public struct PlaceholderContentView<Value>: View {
             guard let fn = elem.makeViewListFn else {
                 fatalError("PlaceholderContentView<\(Value.self)>._makeView: missing view-list body.")
             }
-            guard let graph = AttributeGraph.current else {
+            guard let graph = _AGGraph.current else {
                 fatalError("PlaceholderContentView<\(Value.self)>._makeView called outside AG context.")
             }
             let rootAttr: Attribute<_VStackLayout> = graph.makeInput(value: _VStackLayout())
@@ -183,8 +183,8 @@ struct ApplyTransitionModifier<T: Transition>: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)
@@ -203,8 +203,8 @@ struct ApplyTransitionModifier<T: Transition>: ViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)
@@ -232,8 +232,8 @@ struct TransitionBodyAccessor<T: Transition>: BodyAccessor {
         inputs: inout _GraphInputs,
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<T.Body>, Optional<_DynamicPropertyBuffer>) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("TransitionBodyAccessor.makeBody called outside AttributeGraph context")
+        guard let graph = _AGGraph.current else {
+            fatalError("TransitionBodyAccessor.makeBody called outside _AGGraph context")
         }
         let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
         let accessor = TransitionBodyAccessor(containerAttr: container._attribute)
@@ -352,8 +352,8 @@ public struct MoveTransition: Transition {
             inputs: _ViewInputs,
             body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
         ) -> _ViewOutputs {
-            guard let graph = AttributeGraph.current else {
-                fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
             }
 
             let progressSource: Attribute<MoveLayoutProgress> = graph.makeRule {
@@ -400,8 +400,8 @@ public struct MoveTransition: Transition {
             inputs: _ViewListInputs,
             body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
         ) -> _ViewListOutputs {
-            guard AttributeGraph.current != nil else {
-                fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
             }
             var outputs = body(_Graph(), inputs)
             outputs.multiModifier(modifier, inputs: inputs)
@@ -451,7 +451,7 @@ public struct MoveTransition: Transition {
             if let edge = modifier.value.edge {
                 lastEdge = edge
             }
-            AttributeGraph.setStatefulOutput(modifier.value.edge ?? lastEdge)
+            _AGGraph.setStatefulOutput(modifier.value.edge ?? lastEdge)
         }
     }
 
@@ -1094,7 +1094,7 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
         phaseSetters: inout [_TransitionPhaseSetter],
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("TransitionBox<\(Base.self)>._makeView called outside AG context.")
         }
         let attr: Attribute<ApplyTransitionModifier<Base>> = graph.makeInput(

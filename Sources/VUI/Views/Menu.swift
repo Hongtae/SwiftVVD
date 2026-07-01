@@ -137,8 +137,8 @@ struct ResolvedMenuStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let style: any MenuStyle =
             inputs.base.customInputs.value(forKey: _MenuStyleKey.self)
@@ -178,7 +178,7 @@ extension MenuDropdownModifier {
 
 extension MenuDropdownModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MenuDropdownModifier._makeView called outside AG context")
         }
 
@@ -249,7 +249,7 @@ extension MenuDropdownModifier {
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
+        guard _AGGraph.current != nil else {
             fatalError("MenuDropdownModifier._makeViewList called outside AG context")
         }
         // Keep the dropdown modifier attached when a Menu trigger is materialized
@@ -356,7 +356,7 @@ final class MenuDropdownResponder: AnyHoverResponder {
 
     func present(from parent: WindowController) {
         guard snapshotIsEnabled else { return }
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MenuDropdownResponder.present called outside AG context")
         }
 

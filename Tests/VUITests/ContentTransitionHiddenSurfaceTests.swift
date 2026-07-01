@@ -213,8 +213,8 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             XCTFail("unexpected renderer effect")
         }
 
-        let graph = AttributeGraph()
-        try AttributeGraph.withCurrent(graph) {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
             let modifier = graph.makeInput(value: effect)
             var source = makeDisplayList(debugItemCount: 1)
             source.appendEffect(
@@ -259,8 +259,8 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     func testRendererEffectReadsAnimatedPositionProjection() throws {
         CountingRendererEffect.effectValueCalls = 0
 
-        let graph = AttributeGraph()
-        try AttributeGraph.withCurrent(graph) {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
             let state = ContentTransition.State(transition: .opacity)
             let modifier = graph.makeInput(value: CountingRendererEffect(state: state))
             let sourceList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))
@@ -1377,7 +1377,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         position: Attribute<CGPoint>? = nil
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())

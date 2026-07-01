@@ -224,7 +224,7 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_HoverRegionModifier._makeView called outside AG context")
         }
 
@@ -256,7 +256,7 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
 
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let eventBindingManager =
-            (AttributeGraphRef.current?.context as? ViewGraph)?
+            (_AGGraphContext.current?.context as? ViewGraph)?
                 .rendererHost?.gestureGraph?.eventBindingManager
         let responder = HoverResponder(
             callback: modifier._attribute.value.callback,
@@ -304,7 +304,7 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ContinuousHoverModifier._makeView called outside AG context")
         }
 
@@ -336,7 +336,7 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
 
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let eventBindingManager =
-            (AttributeGraphRef.current?.context as? ViewGraph)?
+            (_AGGraphContext.current?.context as? ViewGraph)?
                 .rendererHost?.gestureGraph?.eventBindingManager
         let responder = HoverResponder(
             callback: nil,

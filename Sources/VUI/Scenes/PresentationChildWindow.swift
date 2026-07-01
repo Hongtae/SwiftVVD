@@ -182,7 +182,7 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     }
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
-         sourceGraph: AttributeGraph,
+         sourceGraph: _AGGraph,
          scene: WindowKey,
          usesPlatformWindow: Bool,
          frameInParent: CGRect = .zero) {

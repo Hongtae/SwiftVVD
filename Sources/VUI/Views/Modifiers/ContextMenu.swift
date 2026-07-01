@@ -42,7 +42,7 @@ extension View {
 
 extension ContextMenuModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ContextMenuModifier._makeView called outside AG context")
         }
 
@@ -83,7 +83,7 @@ extension ContextMenuModifier {
     // Keep the modifier attached to each materialized list element. Without this,
     // contextMenu disappears when applied to children inside HStack/VStack/etc.
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
+        guard _AGGraph.current != nil else {
             fatalError("ContextMenuModifier._makeViewList called outside AG context")
         }
         var outputs = body(_Graph(), inputs)
@@ -159,7 +159,7 @@ final class ContextMenuResponder: ViewResponder {
     }
 
     func present(from parent: WindowController, at location: CGPoint) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
         // Flush pending item-list mutations before taking the initial popup
@@ -241,12 +241,12 @@ public extension EnvironmentValues {
 final class ContextMenuPresentationSession {
     weak var root: ContextMenuWindowController?
     var onFinish: (() -> Void)?
-    private weak var sourceGraph: AttributeGraph?
+    private weak var sourceGraph: _AGGraph?
     private var liveContentSubgraph: AGSubgraph?
     private var isPresented: Binding<Bool>?
     private var didFinish = false
 
-    func installLiveContent(sourceGraph: AttributeGraph, subgraph: AGSubgraph) {
+    func installLiveContent(sourceGraph: _AGGraph, subgraph: AGSubgraph) {
         self.sourceGraph = sourceGraph
         self.liveContentSubgraph = subgraph
     }
@@ -284,7 +284,7 @@ final class ContextMenuPresentationSession {
             // The live refresh rule belongs to the source graph, not the popup
             // child graph. Bind that graph while invalidating so weak handles and
             // deferred graph actions resolve against the owner.
-            AttributeGraph.withCurrent(sourceGraph) {
+            _AGGraph.withCurrent(sourceGraph) {
                 subgraph.invalidate()
             }
         }

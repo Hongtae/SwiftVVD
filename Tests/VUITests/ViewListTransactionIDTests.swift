@@ -36,8 +36,8 @@ final class ViewListTransactionIDTests: XCTestCase {
     }
 
     func testContextInitializersReadCurrentGraphCounterLane() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let source = graph.makeInput(value: 1)

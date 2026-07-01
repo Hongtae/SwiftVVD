@@ -70,8 +70,8 @@ public struct PrimitiveButtonStyleConfiguration {
 
 extension PrimitiveButtonStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
             return _ViewOutputs()
@@ -316,8 +316,8 @@ public struct ButtonStyleConfiguration {
 
 extension ButtonStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top else {
             return _ViewOutputs()

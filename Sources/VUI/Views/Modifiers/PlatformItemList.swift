@@ -78,7 +78,7 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
     var itemList: Optional<PlatformItemList>
 
     init(content: Attribute<Content>, inputs: _ViewInputs, inputsIncludeGeometry: Bool) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PlatformItemListGenerator.init called outside AG context")
         }
         var itemInputs = inputs
@@ -122,7 +122,7 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PlatformItemListGenerator.updateValue called outside AG context")
         }
         var combined = PlatformItemList()
@@ -130,7 +130,7 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
             combined.merge(node.toStrong().value)
         }
         itemList = combined
-        AttributeGraph.setStatefulOutput(combined)
+        _AGGraph.setStatefulOutput(combined)
     }
 }
 

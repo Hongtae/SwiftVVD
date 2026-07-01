@@ -142,7 +142,7 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
             guard let fn = elem.makeViewListFn else {
                 fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView: missing view-list body.")
             }
-            guard let graph = AttributeGraph.current else {
+            guard let graph = _AGGraph.current else {
                 fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView called outside AG context.")
             }
             let rootAttr: Attribute<_VStackLayout> = graph.makeInput(value: _VStackLayout())
@@ -258,8 +258,8 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
 
         // Build the modifier body through the dynamic-property body accessor path.
@@ -286,8 +286,8 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
 
         var graphInputs = inputs.base
@@ -327,8 +327,8 @@ extension _ViewInputsModifier {
     // real layout Attributes. Conformers that only modify inputs.base can use this directly.
     // Conformers with additional layout-Attribute side effects should override _makeViewList.
     static func _applyToListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._applyToListInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._applyToListInputs called outside an active _AGGraph context.")
         }
         let stubPoint: Attribute<CGPoint> = graph.makeInput(value: .zero)
         let stubSize: Attribute<ViewSize> = graph.makeInput(value: ViewSize(width: 0, height: 0))
@@ -503,8 +503,8 @@ extension MultiViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
@@ -526,8 +526,8 @@ extension UnaryLayout {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let childOutputs = body(_Graph(), inputs)
         guard let childLCAttr = childOutputs._layoutComputer.attribute else {

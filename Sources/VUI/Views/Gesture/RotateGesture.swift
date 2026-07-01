@@ -28,7 +28,7 @@ public struct RotateGesture: Gesture {
         gesture: _GraphValue<RotateGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("RotateGesture._makeGesture requires AG context")
         }
         let self_ = gesture._attribute.value
@@ -67,7 +67,7 @@ public struct RotationGesture: Gesture {
         gesture: _GraphValue<RotationGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Angle> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("RotationGesture._makeGesture requires AG context")
         }
         let rotate = RotateGesture(minimumAngleDelta: gesture._attribute.value.minimumAngleDelta)
@@ -113,7 +113,7 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
         startLocation = .zero
         startAnchor = .center
         lastTimestamp = nil
-        AttributeGraph.setStatefulOutput(GesturePhase<RotateGesture.Value>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<RotateGesture.Value>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -123,14 +123,14 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
         case .possible:
             resetPhase()
         case .active(let event):
-            AttributeGraph.setStatefulOutput(update(event: event, terminal: false))
+            _AGGraph.setStatefulOutput(update(event: event, terminal: false))
         case .ended(let event):
             let phase = update(event: event, terminal: true)
             resetPhase()
-            AttributeGraph.setStatefulOutput(phase)
+            _AGGraph.setStatefulOutput(phase)
         case .failed:
             resetPhase()
-            AttributeGraph.setStatefulOutput(GesturePhase<RotateGesture.Value>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<RotateGesture.Value>.failed)
         }
     }
 

@@ -486,7 +486,7 @@ struct ModifiedElements: _ViewList_Elements {
 
         let wrappedBody: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool) = {
             elementInputs, makeView in
-            guard let graph = AttributeGraph.current else {
+            guard let graph = _AGGraph.current else {
                 fatalError("ModifiedElements.makeElements wrappedBody called outside AG context.")
             }
 
@@ -687,8 +687,8 @@ struct _ViewList_View {
     /// This creates placeholder outputs, then uses `PlaceholderInfo` to attach
     /// concrete child outputs through indirect output attributes.
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_ViewList_View._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_ViewList_View._makeView called outside an active _AGGraph context.")
         }
         let placeholders = inputs.makeIndirectOutputs()
         let infoAttr: Attribute<_ViewOutputs> = graph.makeStatefulRule(
@@ -721,7 +721,7 @@ private struct PlaceholderInfo: StatefulRule {
         // Reuse the item when contentSubgraph and _ViewList_ID identity match.
         if canReuse(item) {
             releaseElements = item.elements.retain()
-            AttributeGraph.setStatefulOutput(placeholders)
+            _AGGraph.setStatefulOutput(placeholders)
             return
         }
 
@@ -743,7 +743,7 @@ private struct PlaceholderInfo: StatefulRule {
         } ?? _ViewOutputs()
 
         concrete.attachIndirectOutputs(to: placeholders)
-        AttributeGraph.setStatefulOutput(placeholders)
+        _AGGraph.setStatefulOutput(placeholders)
     }
 
     private func canReuse(_ item: _ViewList_View) -> Bool {
@@ -774,15 +774,15 @@ private struct PlaceholderInfo: StatefulRule {
 struct TransactionID: Comparable, Hashable {
     var value: UInt = 0
     init() {}
-    init(graph: AttributeGraph) {
+    init(graph: _AGGraph) {
         value = graph.graphCounter(lane: 1)
     }
     init<A>(context: RuleContext<A>) {
         self.init(context: AnyRuleContext(context))
     }
     init(context: AnyRuleContext) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("TransactionID.init(context:) called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("TransactionID.init(context:) called outside an active _AGGraph context.")
         }
         context.update {}
         value = graph.graphCounter(lane: 1)
@@ -1075,7 +1075,7 @@ extension _ViewListOutputs {
             views = .staticList(.modified(modElements))
 
         case .dynamicList(let listAttr, let pred):
-            guard let graph = AttributeGraph.current else {
+            guard let graph = _AGGraph.current else {
                 fatalError("_ViewListOutputs.multiModifier called outside AG context.")
             }
             let lm = ListModifier(pred: pred, modifier: modifier._attribute, inputs: inputs.base)

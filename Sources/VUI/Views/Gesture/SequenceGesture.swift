@@ -21,7 +21,7 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("SequenceGesture._makeGesture requires AG context")
         }
 

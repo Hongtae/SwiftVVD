@@ -19,8 +19,8 @@ public struct TransformSceneListModifier: _SceneModifier {
         inputs: _SceneInputs,
         body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs
     ) -> _SceneOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeScene called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeScene called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
 

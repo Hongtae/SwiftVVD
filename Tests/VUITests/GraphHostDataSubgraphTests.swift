@@ -13,7 +13,7 @@ final class GraphHostDataSubgraphTests: XCTestCase {
     }
 
     func testSharedGraphHostsKeepDistinctSubgraphOwnership() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let first = GraphHost(graph: graph)
         let second = GraphHost(graph: graph)
 

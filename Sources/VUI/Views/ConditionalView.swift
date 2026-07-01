@@ -33,8 +33,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
     /// the view; only the rule re-evaluates and forwards a different value when
     /// the branch switches.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let state = _ConditionalBranchState()
@@ -65,8 +65,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         func updateActiveBranchIfNeeded(nowTrue: Bool) {
-            guard AttributeGraph.current != nil else {
-                fatalError("_ConditionalContent branch update evaluated outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("_ConditionalContent branch update evaluated outside an active _AGGraph context.")
             }
             guard state.isTrue != nowTrue else { return }
             guard !state.isUpdating else { return }
@@ -95,8 +95,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         // On first evaluation state.isTrue == nowTrue, so no _makeView is called here
         // and state.activeLCAttr is already set.
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            guard AttributeGraph.current != nil else {
-                fatalError("_ConditionalContent rule evaluated outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("_ConditionalContent rule evaluated outside an active _AGGraph context.")
             }
 
             let nowTrue: Bool
@@ -144,8 +144,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
     /// Builds a dynamic list that forwards the currently active branch's list.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         let state = _ConditionalListBranchState()
@@ -172,8 +172,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         func updateActiveBranchIfNeeded(nowTrue: Bool) {
-            guard AttributeGraph.current != nil else {
-                fatalError("_ConditionalContent list branch update evaluated outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("_ConditionalContent list branch update evaluated outside an active _AGGraph context.")
             }
             guard state.isTrue != nowTrue else { return }
             guard !state.isUpdating else { return }

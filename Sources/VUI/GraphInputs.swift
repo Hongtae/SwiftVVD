@@ -220,8 +220,8 @@ struct CachedEnvironment {
         if let item = mapItems.first(where: { $0.key == id }) {
             return Attribute<Value>(item.value)
         }
-        guard let graph = AttributeGraph.current else {
-            fatalError("CachedEnvironment.attribute(id:_:) called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("CachedEnvironment.attribute(id:_:) called outside an active _AGGraph context.")
         }
         let environment = environment
         let attribute = graph.makeRule {
@@ -338,8 +338,8 @@ public struct _GraphInputs {
     //
     // mergedInputs (Set<AGAttribute>) prevents duplicate rule creation for the same attr pair.
     mutating func merge(_ other: _GraphInputs, ignoringPhase: Bool) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_GraphInputs.merge(_:ignoringPhase:) called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_GraphInputs.merge(_:ignoringPhase:) called outside an active _AGGraph context.")
         }
 
         // Step 1: PropertyList
@@ -414,7 +414,7 @@ struct MergedEnvironment: Rule {
     let otherRaw: UInt32
 
     func updateValue() -> EnvironmentValues {
-        let graph = AttributeGraph.current!
+        let graph = _AGGraph.current!
         let otherAttr = Attribute<EnvironmentValues>(AGAttribute(rawValue: otherRaw))
         let otherEnv = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherEnv.trackingCopy() }
@@ -432,7 +432,7 @@ struct MergedTransaction: Rule {
     let otherRaw: UInt32
 
     func updateValue() -> Transaction {
-        let graph = AttributeGraph.current!
+        let graph = _AGGraph.current!
         let otherAttr = Attribute<Transaction>(AGAttribute(rawValue: otherRaw))
         let otherTx = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherTx }
@@ -449,7 +449,7 @@ struct MergedPhase: Rule {
     let otherRaw: UInt32
 
     func updateValue() -> Phase {
-        let graph = AttributeGraph.current!
+        let graph = _AGGraph.current!
         let otherAttr = Attribute<Phase>(AGAttribute(rawValue: otherRaw))
         let otherPhase = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherPhase }

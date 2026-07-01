@@ -8,8 +8,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectStorageLabelsMatchTrackedAttributeShape() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let modifier = graph.makeInput(value: _AppearanceActionModifier())
@@ -33,8 +33,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectStoresCurrentAttributeDuringUpdate() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let modifier = graph.makeInput(value: _AppearanceActionModifier())
@@ -54,8 +54,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectQueuesAppearOnceUntilPhaseChanges() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var events: [String] = []
@@ -89,8 +89,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectPhaseChangeQueuesDisappearAndAppearWithoutRemovalReason() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var events: [String] = []
@@ -126,8 +126,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectDoesNotAppearWhilePhaseIsBeingRemoved() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var events: [String] = []
@@ -166,8 +166,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testAppearanceEffectUsesLatestCallbacksAfterModifierChange() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var events: [String] = []
@@ -207,8 +207,8 @@ final class AppearanceActionModifierTests: XCTestCase {
     }
 
     func testOnDisappearOnlyModifierQueuesDisappearAfterPhaseChange() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var events: [String] = []

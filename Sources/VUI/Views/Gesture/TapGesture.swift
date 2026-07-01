@@ -70,7 +70,7 @@ public struct TapGesture: Gesture {
         gesture: _GraphValue<TapGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Void> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("TapGesture._makeGesture requires AG context")
         }
         let count = gesture._attribute.value.count

@@ -2,10 +2,10 @@ import Synchronization
 import XCTest
 @testable import VUI
 
-final class AttributeGraphCounterTests: XCTestCase {
+final class AGGraphCounterTests: XCTestCase {
     func testGraphCounterStartsAtZeroAndUnknownLanesReturnZero() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             XCTAssertEqual(graph.graphCounter(lane: 1), 0)
@@ -16,8 +16,8 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testLazyRuleEvaluationAdvancesCounterOncePerTopLevelUpdate() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let source = graph.makeInput(value: 1)
@@ -40,8 +40,8 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testNestedRuleEvaluationAdvancesCounterOnlyOnce() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let source = graph.makeInput(value: 1)
@@ -62,8 +62,8 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testSideEffectRuleEvaluationAdvancesCounterPerSynchronousRun() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let source = graph.makeInput(value: 1)
@@ -85,10 +85,10 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testNestedDifferentGraphEvaluationAdvancesEachGraphCounter() {
-        let outerGraph = AttributeGraph()
-        let outerRef = AttributeGraphRef(graph: outerGraph)
-        let innerGraph = AttributeGraph()
-        let innerRef = AttributeGraphRef(graph: innerGraph)
+        let outerGraph = _AGGraph()
+        let outerRef = _AGGraphContext(graph: outerGraph)
+        let innerGraph = _AGGraph()
+        let innerRef = _AGGraphContext(graph: innerGraph)
 
         var innerSource: Attribute<Int>!
         var innerDerived: Attribute<Int>!
@@ -127,8 +127,8 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testCurrentContextTokenPropagatesToChildTask() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let probe = CurrentContextTaskProbe(graph: graph)
 
         ref.withCurrent {
@@ -142,31 +142,31 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testCurrentContextTokenMapAllowsReturningToOuterGraph() {
-        let outerGraph = AttributeGraph()
-        let outerRef = AttributeGraphRef(graph: outerGraph)
-        let innerGraph = AttributeGraph()
-        let innerRef = AttributeGraphRef(graph: innerGraph)
+        let outerGraph = _AGGraph()
+        let outerRef = _AGGraphContext(graph: outerGraph)
+        let innerGraph = _AGGraph()
+        let innerRef = _AGGraphContext(graph: innerGraph)
 
         outerRef.withCurrent {
-            XCTAssertTrue(AttributeGraph.current === outerGraph)
+            XCTAssertTrue(_AGGraph.current === outerGraph)
 
             innerRef.withCurrent {
-                XCTAssertTrue(AttributeGraph.current === innerGraph)
+                XCTAssertTrue(_AGGraph.current === innerGraph)
 
                 outerRef.withCurrent {
-                    XCTAssertTrue(AttributeGraph.current === outerGraph)
+                    XCTAssertTrue(_AGGraph.current === outerGraph)
                 }
 
-                XCTAssertTrue(AttributeGraph.current === innerGraph)
+                XCTAssertTrue(_AGGraph.current === innerGraph)
             }
 
-            XCTAssertTrue(AttributeGraph.current === outerGraph)
+            XCTAssertTrue(_AGGraph.current === outerGraph)
         }
     }
 
     func testParentInvalidationMarksKeyPathChildInputsChanged() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let recorder = KeyPathChangedInputRecorder()
 
         ref.withCurrent {
@@ -197,8 +197,8 @@ final class AttributeGraphCounterTests: XCTestCase {
     }
 
     func testWithoutTrackingSkipsDependencyAndRestoresRuleContext() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let recorder = TrackingIsolationRecorder()
 
         ref.withCurrent {
@@ -250,11 +250,11 @@ private struct KeyPathChangedInputRule: StatefulRule {
     mutating func updateValue() {
         recorder.snapshots.append(
             KeyPathChangedInputSnapshot(
-                firstChanged: AttributeGraph.currentStatefulInputChanged(first.identifier),
-                secondChanged: AttributeGraph.currentStatefulInputChanged(second.identifier)
+                firstChanged: _AGGraph.currentStatefulInputChanged(first.identifier),
+                secondChanged: _AGGraph.currentStatefulInputChanged(second.identifier)
             )
         )
-        AttributeGraph.setStatefulOutput(first.value + second.value)
+        _AGGraph.setStatefulOutput(first.value + second.value)
     }
 }
 
@@ -263,17 +263,17 @@ private final class TrackingIsolationRecorder {
 }
 
 private final class CurrentContextTaskProbe: @unchecked Sendable {
-    let graph: AttributeGraph
+    let graph: _AGGraph
     private let semaphore = DispatchSemaphore(value: 0)
     private let observedCurrent = Mutex(false)
 
-    init(graph: AttributeGraph) {
+    init(graph: _AGGraph) {
         self.graph = graph
     }
 
     func run() {
         observedCurrent.withLock { value in
-            value = AttributeGraph.current === graph
+            value = _AGGraph.current === graph
         }
         semaphore.signal()
     }
@@ -295,10 +295,10 @@ private struct TrackingIsolationRule: StatefulRule {
     var recorder: TrackingIsolationRecorder
 
     mutating func updateValue() {
-        let value = tracked.value + AttributeGraph.withoutTracking {
+        let value = tracked.value + _AGGraph.withoutTracking {
             isolated.value
         }
         recorder.values.append(value)
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
     }
 }

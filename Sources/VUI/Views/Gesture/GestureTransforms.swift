@@ -22,7 +22,7 @@ struct MapGesture<A, B>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<A>
     ) -> _GestureOutputs<B> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MapGesture.makeGesture requires AG context")
         }
         let bodyOutputs = body(inputs)
@@ -46,7 +46,7 @@ struct MapPhase<A, B>: StatefulRule {
 
     mutating func updateValue() {
         let phase = source.value
-        AttributeGraph.setStatefulOutput(phase.map(transform))
+        _AGGraph.setStatefulOutput(phase.map(transform))
     }
 }
 
@@ -67,7 +67,7 @@ struct DurationGesture<E>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<Double> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DurationGesture.makeGesture requires AG context")
         }
         let bodyOutputs = body(inputs)
@@ -103,7 +103,7 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
     mutating func resetPhase() {
         startTime = 0
         isTracking = false
-        AttributeGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -114,7 +114,7 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
         case .possible:
             isTracking = false
             startTime = 0
-            AttributeGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
+            _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
         case .active:
             if !isTracking {
                 isTracking = true
@@ -122,21 +122,21 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
             }
             let elapsed = now - startTime
             if elapsed >= minimumDuration {
-                AttributeGraph.setStatefulOutput(GesturePhase<Double>.active(elapsed))
+                _AGGraph.setStatefulOutput(GesturePhase<Double>.active(elapsed))
             } else {
-                AttributeGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
+                _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
             }
         case .ended:
             let elapsed = now - startTime
             if elapsed >= minimumDuration {
-                AttributeGraph.setStatefulOutput(GesturePhase<Double>.ended(elapsed))
+                _AGGraph.setStatefulOutput(GesturePhase<Double>.ended(elapsed))
             } else {
-                AttributeGraph.setStatefulOutput(GesturePhase<Double>.failed)
+                _AGGraph.setStatefulOutput(GesturePhase<Double>.failed)
             }
             isTracking = false
         case .failed:
             isTracking = false
-            AttributeGraph.setStatefulOutput(GesturePhase<Double>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<Double>.failed)
         }
     }
 }
@@ -164,7 +164,7 @@ struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
         // .global locations are already in global coordinates.
         if cs == .global { return bodyOutputs }
 
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("CoordinateSpaceGesture.makeGesture requires AG context")
         }
         let phase = CoordinateSpacePhase<E>(
@@ -191,7 +191,7 @@ struct CoordinateSpacePhase<E: EventType>: StatefulRule {
         case .global:
             // Pass through. CoordinateSpaceGesture.makeGesture filters .global early,
             // but guard here for the initial StatefulRule evaluation)
-            AttributeGraph.setStatefulOutput(phase)
+            _AGGraph.setStatefulOutput(phase)
         case .local:
             // Convert global coordinates to local: ViewTransform.convertGlobal(to: .local, points:)
             let transform = transformAttr.value
@@ -204,10 +204,10 @@ struct CoordinateSpacePhase<E: EventType>: StatefulRule {
                 }
                 return e
             }
-            AttributeGraph.setStatefulOutput(transformed)
+            _AGGraph.setStatefulOutput(transformed)
         case .named:
             // Named coordinate space preserves the incoming location.
-            AttributeGraph.setStatefulOutput(phase)
+            _AGGraph.setStatefulOutput(phase)
         }
     }
 }
@@ -229,7 +229,7 @@ struct Map2Gesture<A, B, C>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<A>
     ) -> _GestureOutputs<C> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("Map2Gesture.makeGesture requires AG context")
         }
         let body1Outputs = body(inputs)
@@ -256,7 +256,7 @@ struct Map2Phase<A, B, C>: StatefulRule {
     mutating func updateValue() {
         let p1 = source1.value
         let p2 = source2.value
-        AttributeGraph.setStatefulOutput(p1.and(p2, value: combine))
+        _AGGraph.setStatefulOutput(p1.and(p2, value: combine))
     }
 }
 
@@ -286,7 +286,7 @@ struct StateContainerGesture<S, E: EventType, V>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<V> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("StateContainerGesture.makeGesture requires AG context")
         }
         let bodyOutputs = body(inputs)
@@ -339,7 +339,7 @@ struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureR
     mutating func resetPhase() {
         // Re-invoke the initialState closure from the modifier.
         state = modifierAttr.value.initialState()
-        AttributeGraph.setStatefulOutput(GesturePhase<V>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<V>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -348,7 +348,7 @@ struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureR
         let childPhase = childPhaseAttr.value
         // Invoke transform closure: (inout S, GesturePhase<E>) -> GesturePhase<V>.
         let newPhase = transform(&state, childPhase)
-        AttributeGraph.setStatefulOutput(newPhase)
+        _AGGraph.setStatefulOutput(newPhase)
     }
 }
 
@@ -371,7 +371,7 @@ struct EndedByWrapper<Base: Gesture>: Gesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Base.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("EndedByWrapper._makeGesture requires AG context")
         }
         let baseOutputs = Base._makeGesture(gesture: gesture[\.base], inputs: inputs)
@@ -400,10 +400,10 @@ struct EndedByWrapperPhase<V>: StatefulRule {
         switch base {
         case .possible:
             startLocation = nil
-            AttributeGraph.setStatefulOutput(base)
+            _AGGraph.setStatefulOutput(base)
         case .failed, .ended:
             startLocation = nil
-            AttributeGraph.setStatefulOutput(base)
+            _AGGraph.setStatefulOutput(base)
         case .active:
             let events = eventsAttr.value
             for (_, event) in events {
@@ -411,11 +411,11 @@ struct EndedByWrapperPhase<V>: StatefulRule {
                 if startLocation == nil { startLocation = e.location }
                 if condition(e, startLocation) {
                     startLocation = nil
-                    AttributeGraph.setStatefulOutput(GesturePhase<V>.failed)
+                    _AGGraph.setStatefulOutput(GesturePhase<V>.failed)
                     return
                 }
             }
-            AttributeGraph.setStatefulOutput(base)
+            _AGGraph.setStatefulOutput(base)
         }
     }
 }
@@ -449,7 +449,7 @@ struct CombineGesture<A, B, C>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<A>
     ) -> _GestureOutputs<C> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("CombineGesture.makeGesture requires AG context")
         }
         let primaryOutputs = body(inputs)
@@ -474,7 +474,7 @@ struct CombinePhase<A, B, C>: StatefulRule {
     var combine: (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
 
     mutating func updateValue() {
-        AttributeGraph.setStatefulOutput(combine(source1.value, source2.value))
+        _AGGraph.setStatefulOutput(combine(source1.value, source2.value))
     }
 }
 
@@ -508,7 +508,7 @@ extension Gesture {
     ) -> ModifierGesture<CombineGesture<Value, G.Value, V>, Self> {
         let capturedOther = other
         let secondary: (_GestureInputs) -> _GestureOutputs<G.Value> = { inputs in
-            guard let graph = AttributeGraph.current else {
+            guard let graph = _AGGraph.current else {
                 fatalError("Gesture.combined secondary requires AG context")
             }
             let attr = graph.makeInput(value: capturedOther)

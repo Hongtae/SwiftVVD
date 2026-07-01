@@ -16,8 +16,8 @@ extension ForEach: View where Content: View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let rootAttr: Attribute<VStackLayout> = graph.makeRule { VStackLayout() }
         return VStackLayout._makeLayoutView(
@@ -31,15 +31,15 @@ extension ForEach: View where Content: View {
     // ForEach returns .dynamicList(Attribute<any ViewList>, nil) wrapping a ForEachList.
     // ForEachList.applyNodes calls `to` once per data item (per-item sublist).
     public static func _makeViewList(view: _GraphValue<ForEach<Data, ID, Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         let state = ForEachState<Data, ID, Content>(inputs: inputs)
 
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-            guard let graph = AttributeGraph.current else {
-                fatalError("ForEach viewList rule evaluated outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("ForEach viewList rule evaluated outside an active _AGGraph context.")
             }
             let forEach = view._attribute.value   // dep: data / content changes
 
@@ -124,7 +124,7 @@ extension ForEach: View where Content: View {
     private static func makeContentTraitListAttr(
         view: _GraphValue<Content>,
         inputs: _ViewListInputs,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) -> OptionalAttribute<ViewTraitCollection> {
         let outputs = Content._makeViewList(view: view, inputs: inputs)
         guard case .dynamicList(let listAttr, _) = outputs.views else {

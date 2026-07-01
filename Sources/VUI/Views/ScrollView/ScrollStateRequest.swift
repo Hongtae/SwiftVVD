@@ -354,12 +354,12 @@ struct ScrollStateEnqueueRequests: StatefulRule {
         let pendingRequests = updateRequests(for: phaseState)
 
         guard phaseState.shouldUpdateValue else {
-            AttributeGraph.setStatefulOutput(())
+            _AGGraph.setStatefulOutput(())
             return
         }
 
         enqueueRequests(pendingRequests)
-        AttributeGraph.setStatefulOutput(())
+        _AGGraph.setStatefulOutput(())
     }
 
     mutating func updateRequests(for phaseState: ScrollPhaseState) -> [any ScrollStateRequest] {
@@ -420,8 +420,8 @@ struct ScrollStateRequestTransform: StatefulRule {
     var phaseRawValue: UInt32?
 
     init(collection: Attribute<any ScrollableCollection>, inputs: _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollStateRequestTransform.init(collection:inputs:) called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollStateRequestTransform.init(collection:inputs:) called outside an active _AGGraph context.")
         }
         self.collection = collection
         self.layoutDirection = graph.makeRule {
@@ -440,7 +440,7 @@ struct ScrollStateRequestTransform: StatefulRule {
         }
 
         guard let binding = inputs.base.scrollPositionBinding(kind: .scrollContent).attribute?.value else {
-            AttributeGraph.setStatefulOutput([])
+            _AGGraph.setStatefulOutput([])
             return
         }
 
@@ -455,9 +455,9 @@ struct ScrollStateRequestTransform: StatefulRule {
         )
 
         if let request {
-            AttributeGraph.setStatefulOutput([request])
+            _AGGraph.setStatefulOutput([request])
         } else {
-            AttributeGraph.setStatefulOutput([])
+            _AGGraph.setStatefulOutput([])
         }
     }
 
@@ -666,8 +666,8 @@ public struct ScrollValueModifier: ViewModifier, _GraphInputsModifier {
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         inputs.resetScrollPosition(kind: .scrollView)
         let value = graph.makeRule {
@@ -690,8 +690,8 @@ public struct ScrollPositionBindingModifier: ViewModifier, _GraphInputsModifier 
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
 
         let binding = graph.makeRule {
@@ -744,16 +744,16 @@ public struct ScrollPositionBindingModifier: ViewModifier, _GraphInputsModifier 
             defer { previousValue = binding.wrappedValue }
 
             guard hadOutput else {
-                AttributeGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
+                _AGGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
                 return
             }
             guard !baseTransaction.isScrollStateValueUpdate else {
-                AttributeGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
+                _AGGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
                 return
             }
             if let previousValue,
                previousValue == value {
-                AttributeGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
+                _AGGraph.setStatefulOutput(Optional<any ScrollStateRequest>.none)
                 return
             }
 
@@ -764,7 +764,7 @@ public struct ScrollPositionBindingModifier: ViewModifier, _GraphInputsModifier 
                 value: value,
                 baseTransaction: baseTransaction
             )
-            AttributeGraph.setStatefulOutput(Optional<any ScrollStateRequest>.some(request))
+            _AGGraph.setStatefulOutput(Optional<any ScrollStateRequest>.some(request))
         }
     }
 }

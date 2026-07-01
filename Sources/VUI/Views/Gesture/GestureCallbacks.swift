@@ -217,7 +217,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
 
     mutating func resetPhase() {
         state = C.initialState
-        AttributeGraph.setStatefulOutput(GesturePhase<C.Value>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<C.Value>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -229,7 +229,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
         // Dispatch may mutate generic callback state and may return work that must run
         // after the stateful rule evaluation has left dependency tracking.
         var stateRef = state
-        let animCompletion: (() -> Void)? = AttributeGraph.withoutTracking {
+        let animCompletion: (() -> Void)? = _AGGraph.withoutTracking {
             callbacks.dispatch(phase: currentPhase, state: &stateRef)
         }
         state = stateRef
@@ -244,7 +244,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
             }
         }
 
-        AttributeGraph.setStatefulOutput(currentPhase)
+        _AGGraph.setStatefulOutput(currentPhase)
     }
 }
 
@@ -264,7 +264,7 @@ struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<BodyValue>
     ) -> _GestureOutputs<Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("CallbacksGesture.makeGesture requires AG context")
         }
         let outputs = body(inputs)
@@ -272,8 +272,8 @@ struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
         // Create CallbacksPhase StatefulRule: phase pass-through + callback firing.
         let useGestureGraph = inputs.options.contains(.gestureGraph)
         // When makeGesture runs inside GestureGraph's AG context (gestureGraph option set),
-        // AttributeGraphRef.current?.context is the GestureGraph instance.
-        let gg = useGestureGraph ? (AttributeGraphRef.current?.context as? GestureGraph) : nil
+        // _AGGraphContext.current?.context is the GestureGraph instance.
+        let gg = useGestureGraph ? (_AGGraphContext.current?.context as? GestureGraph) : nil
 
         let callbacksPhase = CallbacksPhase<Callbacks>(
             modifierAttr:    modifier._attribute,

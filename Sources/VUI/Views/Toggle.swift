@@ -139,8 +139,8 @@ public struct ToggleStyleConfiguration {
 
 extension ToggleStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
             return _ViewOutputs()
@@ -263,8 +263,8 @@ private struct CheckmarkToggleBody: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         // Build an action-capable collected item and write ToggleState onto the
@@ -327,8 +327,8 @@ private struct PlatformItemToggleStateModifier: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         let stateAttr = modifier[\.state]._attribute

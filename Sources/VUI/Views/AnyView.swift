@@ -24,8 +24,8 @@ private struct AnyViewContainer: StatefulRule {
     var subgraph: AGSubgraph?
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AnyViewContainer.updateValue evaluated outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("AnyViewContainer.updateValue evaluated outside an active _AGGraph context.")
         }
 
         let currentView = view.value._view
@@ -55,7 +55,7 @@ private struct AnyViewContainer: StatefulRule {
             }
         }
 
-        AttributeGraph.setStatefulOutput(placeholders)
+        _AGGraph.setStatefulOutput(placeholders)
     }
 
     private mutating func eraseCurrentSubgraph() {
@@ -100,8 +100,8 @@ public struct AnyView: View {
     /// erasure. The concrete child outputs are attached when the stateful rule
     /// opens the wrapped existential.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let placeholders = inputs.makeIndirectOutputs()

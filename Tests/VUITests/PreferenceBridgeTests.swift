@@ -828,7 +828,7 @@ final class PreferenceBridgeTests: XCTestCase {
         hostKeys: Attribute<PreferenceKeys>,
         hostCombiner: Attribute<PreferenceValues>,
         bridgedCombiner: Attribute<AppendingPreferenceKey.Value>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) -> PreferenceBridge {
         let weakCombiner = graph.weakAttributeIfValid(for: bridgedCombiner.identifier)!
         return PreferenceBridge(
@@ -862,7 +862,7 @@ final class PreferenceBridgeTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         preferenceKeys: PreferenceKeys,
         hostKeys: Attribute<PreferenceKeys>,
         transaction: Transaction = Transaction()

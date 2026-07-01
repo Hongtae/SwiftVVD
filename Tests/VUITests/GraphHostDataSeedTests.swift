@@ -7,7 +7,7 @@ final class GraphHostDataSeedTests: XCTestCase {
 
         host.data.withCurrent {
             XCTAssertTrue(GraphHost.currentHost === host)
-            XCTAssertTrue(AttributeGraph.current === host.data.graph)
+            XCTAssertTrue(_AGGraph.current === host.data.graph)
             XCTAssertEqual(host.data.updateSeed, 0)
             XCTAssertEqual(host.data.transactionSeed, 0)
             XCTAssertEqual(host.data.updateSeedAttribute.value, 0)
@@ -22,7 +22,7 @@ final class GraphHostDataSeedTests: XCTestCase {
     }
 
     func testGraphHostDataSeedsAreIndependentForSharedGraphHosts() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let first = GraphHost(graph: graph)
         let second = GraphHost(graph: graph)
 

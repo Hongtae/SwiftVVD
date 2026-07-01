@@ -20,8 +20,8 @@ private struct TransactionModifierReportingContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
 
         let transaction = inputs.base.transaction
@@ -63,8 +63,8 @@ private struct TransactionModifierForwardingModifier: ViewModifier {
 
 final class TransactionModifierTests: XCTestCase {
     func testTransactionModifierAppliesTransformOverLiveParentTransaction() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -101,8 +101,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testTransactionModifierViewListAppliesTransformOverLiveParentTransaction() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -134,8 +134,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testValueTransactionModifierAppliesTransformOnlyAfterObservedValueChanges() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -187,8 +187,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testValueTransactionModifierViewListAppliesTransformOnlyAfterObservedValueChanges() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -227,8 +227,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testValueTransactionModifierNilAnimationClearsInheritedAnimationOnlyAfterObservedValueChanges() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -268,8 +268,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testValueTransactionModifierViewListNilAnimationClearsInheritedAnimationOnlyAfterObservedValueChanges() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -303,8 +303,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testNestedValueTransactionModifiersKeepContentAdjacentTransformAsFinalWriter() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -348,8 +348,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testPushPopTransactionModifierAppliesBaseTransformBeforeWrappedModifier() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -384,8 +384,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testPushPopTransactionModifierAppliesBaseTransformBeforeWrappedModifierViewList() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -420,8 +420,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testViewTransactionBodyWrapsPlaceholderContentWithPushPopTransaction() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -446,8 +446,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testViewAnimationBodySetsAnimationThroughPushPopTransaction() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -469,8 +469,8 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     func testViewAnimationBodyRespectsDisabledAnimations() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -493,7 +493,7 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     private func makeGraphInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> (inputs: _GraphInputs, parent: Attribute<Transaction>) {
         let parent = graph.makeInput(value: transaction)
@@ -515,7 +515,7 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> _ViewInputs {
         _ViewInputs(
@@ -549,14 +549,14 @@ final class TransactionModifierTests: XCTestCase {
     }
 
     private func makeViewListInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> _ViewListInputs {
         makeViewListInputs(base: makeGraphInputs(graph: graph, transaction: transaction).inputs)
     }
 
     private func makeTransactionReportingViewList(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         inputs: _ViewListInputs
     ) -> _ViewListOutputs {
         let transaction = inputs.base.transaction

@@ -192,7 +192,7 @@ extension AddGestureModifier {
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<()> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("AddGestureModifier._makeSessionGesture requires AG context")
         }
         let gestureGV = modifier[\.gesture]
@@ -234,7 +234,7 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
                     inputs: viewInputs
                 )
             }
-            AttributeGraph.setStatefulOutput([_responder!])
+            _AGGraph.setStatefulOutput([_responder!])
         } else {
             // Subsequent evaluation: modifier may have changed.
             // Update the snapshot and flag the gesture chain for rebuild.
@@ -267,7 +267,7 @@ extension AddGestureModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("AddGestureModifier.makeView requires AG context")
         }
 

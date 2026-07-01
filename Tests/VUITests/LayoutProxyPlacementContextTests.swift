@@ -3,15 +3,15 @@ import XCTest
 
 final class LayoutProxyPlacementContextTests: XCTestCase {
     func testLayoutProxyCanBeCreatedForPlacementOutsideRuleEvaluation() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             _ = graph.makeInput(value: 0)
             let layoutComputer = LayoutComputer.fixed(CGSize(width: 12, height: 34))
             let layoutComputerAttr = graph.makeInput(value: layoutComputer)
             let attributes = LayoutProxyAttributes(layoutComputer: layoutComputerAttr)
 
-            XCTAssertNil(AttributeGraph.currentRuleContextAttribute)
+            XCTAssertNil(_AGGraph.currentRuleContextAttribute)
             let proxy = LayoutProxy(attributes: attributes)
 
             XCTAssertNil(proxy.context)

@@ -88,8 +88,8 @@ extension PhaseAnimator {
         typealias Body = Never
 
         static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            guard let graph = AttributeGraph.current else {
-                fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
             }
             let attrs = makeChildAttributes(view: view, baseInputs: inputs.base)
             var inputs = inputs
@@ -119,8 +119,8 @@ extension PhaseAnimator {
             view: _GraphValue<Self>,
             baseInputs: _GraphInputs
         ) -> (content: Attribute<Content>, transaction: Attribute<Transaction>, isVisible: Attribute<Bool>) {
-            guard let graph = AttributeGraph.current else {
-                fatalError("\(Self.self) child attributes requested outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self) child attributes requested outside an active _AGGraph context.")
             }
 
             let animationCompletionAttr = graph.makeInput(
@@ -158,8 +158,8 @@ extension PhaseAnimator {
             return (contentAttr, transactionAttr, isVisibleAttr)
         }
 
-        private static func transactionSeedAttribute(in graph: AttributeGraph) -> Attribute<UInt32> {
-            if let ref = AttributeGraphRef.current,
+        private static func transactionSeedAttribute(in graph: _AGGraph) -> Attribute<UInt32> {
+            if let ref = _AGGraphContext.current,
                let host = ref.context as? GraphHost {
                 return host.data.transactionSeedAttribute
             }
@@ -278,11 +278,11 @@ extension PhaseAnimator.StateTransitioningContainer {
                 resetAnimationState()
             }
 
-            let viewChanged = AttributeGraph.currentStatefulInputChanged(_view.identifier)
+            let viewChanged = _AGGraph.currentStatefulInputChanged(_view.identifier)
             let container = _view.value
 
             let isVisible: Bool?
-            let graph = AttributeGraph.current
+            let graph = _AGGraph.current
             if let graph,
                _isVisible.isValid(in: graph) {
                 isVisible = _isVisible.toStrong().value
@@ -338,7 +338,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             }
 
             let currentPhase = container.phases[clampedIndex]
-            AttributeGraph.setStatefulOutput(
+            _AGGraph.setStatefulOutput(
                 Value(
                     content: container.content(currentPhase),
                     phaseChangeTransaction: phaseChangeTransaction,
@@ -473,7 +473,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                             Transaction(),
                             id: Transaction.id,
                             mutation: CustomGraphMutation {
-                                guard let graph = AttributeGraph.current,
+                                guard let graph = _AGGraph.current,
                                       completion.isValid(in: graph) else {
                                     return
                                 }
@@ -533,7 +533,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             } else {
                 selected = transaction
             }
-            AttributeGraph.setStatefulOutput(selected)
+            _AGGraph.setStatefulOutput(selected)
         }
     }
 }

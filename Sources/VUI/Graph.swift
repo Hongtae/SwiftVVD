@@ -13,7 +13,7 @@ import Foundation
 /// that the call originates from a _makeView context.
 public struct _Graph {}
 
-/// A typed cursor into the AttributeGraph, pointing at the AG node for `Value`.
+/// A typed cursor into the _AGGraph, pointing at the AG node for `Value`.
 ///
 /// `_makeView` receives a `_GraphValue<Self>` for the view being constructed.
 /// Use the `subscript(keyPath:)` operator to navigate to child properties —
@@ -31,8 +31,8 @@ public struct _GraphValue<Value> {
 
     /// Returns a child `_GraphValue` for the given KeyPath, creating an AG node if needed.
     public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_GraphValue subscript called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_GraphValue subscript called outside an active _AGGraph context.")
         }
         let child = graph.subscriptNode(parent: _attribute, keyPath: keyPath)
         return _GraphValue<U>(_attribute: child)
@@ -40,8 +40,8 @@ public struct _GraphValue<Value> {
 
     /// True if this node has no KeyPath parent (i.e., it is a root input node).
     var isRoot: Bool {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_GraphValue.isRoot accessed outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("_GraphValue.isRoot accessed outside an active _AGGraph context.")
         }
         return graph.parent(of: _attribute.identifier) == nil
     }

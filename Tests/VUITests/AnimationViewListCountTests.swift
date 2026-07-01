@@ -32,8 +32,8 @@ private struct TransactionReportingAnimationContent: View, Equatable, _Primitive
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         let transaction = inputs.base.transaction
         let layout = graph.makeRule {
@@ -52,8 +52,8 @@ private struct TransactionReportingAnimationContent: View, Equatable, _Primitive
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         let transaction = inputs.base.transaction
         let list: Attribute<any ViewList> = graph.makeRule {
@@ -87,8 +87,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewForwardsStaticViewListCountToContent() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let inputs = _GraphInputs(
@@ -116,8 +116,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewGatesContentAndTransactionByContentEquality() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -166,8 +166,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewNilAnimationClearsInheritedAnimationOnContentChange() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -204,8 +204,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewHonorsInheritedDisablesAnimations() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -243,8 +243,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewListGatesContentAndTransactionByContentEquality() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -291,8 +291,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewListNilAnimationClearsInheritedAnimationOnContentChange() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -328,8 +328,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationViewListHonorsInheritedDisablesAnimations() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -366,8 +366,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierInjectsAnimationOnlyAfterObservedValueChanges() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -404,8 +404,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierListInjectsAnimationOnlyAfterObservedValueChanges() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -449,8 +449,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierListNilAnimationClearsInheritedAnimationOnValueChange() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -489,8 +489,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierListHonorsInheritedDisablesAnimations() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -530,8 +530,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierNilAnimationClearsInheritedAnimationOnValueChange() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -563,8 +563,8 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     func testAnimationModifierHonorsInheritedDisablesAnimations() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
             var parent = Transaction(animation: .linear(duration: 1.0))
@@ -597,7 +597,7 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> _ViewInputs {
         _ViewInputs(
@@ -631,7 +631,7 @@ final class AnimationViewListCountTests: XCTestCase {
     }
 
     private func makeViewListInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> _ViewListInputs {
         _ViewListInputs(

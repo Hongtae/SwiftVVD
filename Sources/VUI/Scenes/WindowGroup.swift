@@ -71,8 +71,8 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
     var title: Text
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeScene called outside an active _AGGraph context.")
         }
         // One window slot per Content type. AppGraph subscribes to this preference
         // and creates/destroys a WindowController when the value changes.

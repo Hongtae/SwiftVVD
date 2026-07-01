@@ -7,13 +7,13 @@
 
 import Foundation
 
-// AppGraph — owns the top-level AttributeGraph for the app's scene tree.
+// AppGraph — owns the top-level _AGGraph for the app's scene tree.
 // Calls App.body._makeScene() with _SceneInputs (SceneList.Key registered),
 // then exposes the resulting SceneList.Key AG node for AppWindowsController to consume.
 // AppWindowsController owns the window lifecycle.
 class AppGraph<A: App>: @unchecked Sendable {
 
-    let graph: AttributeGraph
+    let graph: _AGGraph
 
     // The SceneList.Key AG node produced by App.body._makeScene().
     // Read by AppWindowsController.syncWindowControllers (inside graph context)
@@ -26,12 +26,12 @@ class AppGraph<A: App>: @unchecked Sendable {
     let runtimeWindowConfigAttr: Attribute<_RuntimeWindowConfig>?
 
     init(app: A) {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let time = Time(seconds: 0)
         var sceneList: Attribute<[SceneList.Item]>? = nil
         var runtimeConfig: Attribute<_RuntimeWindowConfig>? = nil
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             // Stub AG input nodes for _GraphInputs fields.
             let timeAttr        = graph.makeInput(value: time)
             let phaseAttr       = graph.makeInput(value: Phase())

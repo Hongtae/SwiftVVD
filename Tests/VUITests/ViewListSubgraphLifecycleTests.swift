@@ -103,11 +103,11 @@ private struct ViewListSubgraphRecorderRule: StatefulRule, RemovableAttribute {
 
     mutating func updateValue() {
         recorder.events.append("update")
-        AttributeGraph.setStatefulOutput(())
+        _AGGraph.setStatefulOutput(())
     }
 
     static func willRemove(attribute: AGAttribute) {
-        AttributeGraph.current?.mutateStatefulRule(attribute, as: Self.self) { rule in
+        _AGGraph.current?.mutateStatefulRule(attribute, as: Self.self) { rule in
             rule.recorder.events.append("willRemove")
         }
     }

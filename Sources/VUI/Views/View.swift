@@ -47,8 +47,8 @@ extension View {
 }
 
 func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutputs {
-    guard let graph = AttributeGraph.current else {
-        fatalError("\(V.self)._makeView called outside an active AttributeGraph context.")
+    guard let graph = _AGGraph.current else {
+        fatalError("\(V.self)._makeView called outside an active _AGGraph context.")
     }
 
     if V.self is any _PrimitiveView.Type {
@@ -83,7 +83,7 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
             let transactionBox = UnsafeBox(Transaction.current)
             inbox?.enqueue {
                 if let id = handle.value {
-                    AttributeGraph.current?.markNeedsEvaluation(
+                    _AGGraph.current?.markNeedsEvaluation(
                         id,
                         transaction: transactionBox.value,
                         propagateTransaction: !transactionBox.value.isEmpty
@@ -108,8 +108,8 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
         fatalError("\(V.self) may not have Body == Never")
     }
 
-    guard let graph = AttributeGraph.current else {
-        fatalError("\(V.self)._makeViewList called outside an active AttributeGraph context.")
+    guard let graph = _AGGraph.current else {
+        fatalError("\(V.self)._makeViewList called outside an active _AGGraph context.")
     }
 
     var graphInputs = inputs.base
@@ -130,7 +130,7 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
             let transactionBox = UnsafeBox(Transaction.current)
             inbox?.enqueue {
                 if let id = handle.value {
-                    AttributeGraph.current?.markNeedsEvaluation(
+                    _AGGraph.current?.markNeedsEvaluation(
                         id,
                         transaction: transactionBox.value,
                         propagateTransaction: !transactionBox.value.isEmpty
@@ -190,16 +190,16 @@ extension Optional: View where Wrapped: View {
     /// When `.none` changes to `.some`, creates an AGSubgraph and wires `Wrapped._makeView` into it.
     /// When `.some` changes to `.none`, invalidates the subgraph. The master rule returns `.fixed(.zero)`.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         let state = _OptionalViewState()
         state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
 
         func updateActiveBranchIfNeeded() {
-            guard let graph = AttributeGraph.current else {
-                fatalError("Optional<\(Wrapped.self)> branch update evaluated outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("Optional<\(Wrapped.self)> branch update evaluated outside an active _AGGraph context.")
             }
             let nowHas = view._attribute.value != nil
             guard state.hasValue != nowHas else { return }
@@ -223,8 +223,8 @@ extension Optional: View where Wrapped: View {
         }
 
         let masterLC: Attribute<LayoutComputer> = graph.makeRule {
-            guard AttributeGraph.current != nil else {
-                fatalError("Optional<\(Wrapped.self)> rule evaluated outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("Optional<\(Wrapped.self)> rule evaluated outside an active _AGGraph context.")
             }
 
             updateActiveBranchIfNeeded()
@@ -260,8 +260,8 @@ extension Optional: View where Wrapped: View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         let state = _OptionalListViewState()
@@ -284,8 +284,8 @@ extension Optional: View where Wrapped: View {
         }
 
         func updateActiveBranchIfNeeded() {
-            guard AttributeGraph.current != nil else {
-                fatalError("Optional<\(Wrapped.self)> list update evaluated outside an active AttributeGraph context.")
+            guard _AGGraph.current != nil else {
+                fatalError("Optional<\(Wrapped.self)> list update evaluated outside an active _AGGraph context.")
             }
             let nowHasValue = view._attribute.value != nil
             guard state.hasValue != nowHasValue else { return }
@@ -376,8 +376,8 @@ struct TypedUnaryViewGenerator {
 
 extension TypedUnaryViewGenerator {
     init<V: View>(_ graphValue: _GraphValue<V>, baseInputs: _GraphInputs) {
-        guard AttributeGraph.current != nil else {
-            fatalError("TypedUnaryViewGenerator init called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("TypedUnaryViewGenerator init called outside an active _AGGraph context.")
         }
         self.view = graphValue._attribute.asWeak().raw
         self.viewType = V.self
@@ -385,8 +385,8 @@ extension TypedUnaryViewGenerator {
     }
 
     init<V: View>(_ graphValue: _GraphValue<V>, inputs: _ViewListInputs) {
-        guard AttributeGraph.current != nil else {
-            fatalError("TypedUnaryViewGenerator init called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("TypedUnaryViewGenerator init called outside an active _AGGraph context.")
         }
         self.view = graphValue._attribute.asWeak().raw
         self.viewType = V.self
@@ -395,8 +395,8 @@ extension TypedUnaryViewGenerator {
     }
 
     func makeView(inputs: _ViewInputs) -> _ViewOutputs? {
-        guard let graph = AttributeGraph.current else {
-            fatalError("TypedUnaryViewGenerator.makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("TypedUnaryViewGenerator.makeView called outside an active _AGGraph context.")
         }
         guard view.isValid(in: graph) else { return nil }
         let attrID = view.toStrong()
@@ -420,8 +420,8 @@ extension TypedUnaryViewGenerator {
     }
 
     func makeViewList(inputs: _ViewListInputs) -> _ViewListOutputs? {
-        guard let graph = AttributeGraph.current else {
-            fatalError("TypedUnaryViewGenerator.makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("TypedUnaryViewGenerator.makeViewList called outside an active _AGGraph context.")
         }
         guard view.isValid(in: graph) else { return nil }
         let attrID = view.toStrong()
@@ -529,7 +529,7 @@ public struct _ViewInputs {
     /// Creates placeholder outputs that can later be attached to concrete child outputs.
     /// Creates an indirect AG attribute for the layout output and each requested preference slot.
     func makeIndirectOutputs() -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ViewInputs.makeIndirectOutputs called outside AG context.")
         }
         let layoutComputer = graph.makeIndirectAttribute(defaultValue: LayoutComputer.defaultValue)
@@ -670,7 +670,7 @@ public struct _ViewOutputs {
     /// Points each placeholder output slot at the corresponding concrete child output.
     /// Used after a delayed or erased child has produced real outputs.
     func attachIndirectOutputs(to placeholders: _ViewOutputs) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ViewOutputs.attachIndirectOutputs called outside AG context.")
         }
         preferences.attachIndirectOutputs(to: placeholders.preferences)
@@ -683,7 +683,7 @@ public struct _ViewOutputs {
     /// Keeps delayed placeholder outputs invalidated by the child source attribute.
     func setIndirectDependency(_ attr: AGAttribute?) {
         guard let dep = attr else { return }
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ViewOutputs.setIndirectDependency called outside AG context.")
         }
         if let placeholder = _layoutComputer.attribute {
@@ -694,7 +694,7 @@ public struct _ViewOutputs {
 
     /// Detaches all placeholder output slots and restores their default values.
     func detachIndirectOutputs() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ViewOutputs.detachIndirectOutputs called outside AG context.")
         }
         if let placeholder = _layoutComputer.attribute {

@@ -40,8 +40,8 @@ public struct _VariadicView_Children: View {
     /// Called when _VariadicView_Children itself appears in a view list
     /// (e.g. inside a _VariadicView_MultiViewRoot body).
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let childAttr: Attribute<ForEach<Self, AnyHashable, Element>> = graph.makeRule(
             Child(attribute: view._attribute)
@@ -239,8 +239,8 @@ struct BodyUnaryViewGenerator {
 
 extension _VariadicView_ViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
         if Body.self is Never.Type {
@@ -286,8 +286,8 @@ extension _VariadicView_ViewRoot {
             return childListOutputs
         }
 
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         // Body != Never: build children + body rule, then wrap in dynamicList.
@@ -348,8 +348,8 @@ extension _VariadicView_MultiViewRoot {
         // Delegate to the generic ViewRoot _makeView which handles both Body = Never and Body != Never.
         // For Body = Never, fall back to VStackLayout.
         // For Body != Never, build children AG input, body(children:) rule, and Body._makeView.
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         _ = graph
 

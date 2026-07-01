@@ -159,7 +159,7 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarItem._makeView called outside AG context")
         }
         let contentView = view[\.content]
@@ -230,7 +230,7 @@ public struct TupleToolbarContent<C>: View, ToolbarContent {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("TupleToolbarContent._makeView called outside AG context")
         }
         var allOutputs: [_ViewOutputs] = []
@@ -260,7 +260,7 @@ public struct TupleToolbarContent<C>: View, ToolbarContent {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("TupleToolbarContent._makeViewList called outside AG context")
         }
         var children: [_ViewListOutputs] = []
@@ -372,7 +372,7 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarItemGroup._makeView called outside AG context")
         }
         let contentView = view[\.content]
@@ -442,7 +442,7 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewMod
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarModifier._makeView called outside AG context")
         }
         var outputs = body(_Graph(), inputs)
@@ -541,7 +541,7 @@ struct ToolbarReader<Edges, Content: View>: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarReader._makeView called outside AG context")
         }
 
@@ -636,7 +636,7 @@ struct ToolbarFilterModifier: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarFilterModifier._makeView called outside AG context")
         }
 

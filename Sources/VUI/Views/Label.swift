@@ -50,8 +50,8 @@ struct ResolvedLabelStyle: View {
     var configuration: LabelStyleConfiguration = LabelStyleConfiguration()
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         var stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
         let configuration = LabelStyleConfiguration()

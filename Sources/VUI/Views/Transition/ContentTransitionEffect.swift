@@ -12,15 +12,15 @@ protocol _RendererEffect: ViewModifier where Body == Never {
     func effectValue(size: CGSize) -> DisplayList.Effect
 }
 
-// Shared AttributeGraph plumbing for renderer-effect modifiers.
+// Shared _AGGraph plumbing for renderer-effect modifiers.
 enum _RendererEffectSupport {
     static func makeView<Effect: _RendererEffect>(
         effect: _GraphValue<Effect>,
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Effect.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Effect.self)._makeView called outside an active _AGGraph context.")
         }
 
         var outputs = body(_Graph(), inputs)
@@ -40,8 +40,8 @@ enum _RendererEffectSupport {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Effect.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Effect.self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
@@ -53,7 +53,7 @@ enum _RendererEffectSupport {
         effect: Attribute<Effect>,
         position: Attribute<CGPoint>,
         size: Attribute<ViewSize>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }

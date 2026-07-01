@@ -1,6 +1,6 @@
 import XCTest
 @testable import VUI
-final class AnimatableAttributeGraphSmokeTests: XCTestCase {
+final class AnimatableAGGraphSmokeTests: XCTestCase {
     func testMakeAnimatableInstallsStatefulRule() {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)

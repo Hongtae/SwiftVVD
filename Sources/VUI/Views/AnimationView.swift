@@ -17,8 +17,8 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let contentAttr: Attribute<Content> = graph.makeStatefulRule(
             AnimationViewContentRule(view: view._attribute)
@@ -36,8 +36,8 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let contentAttr: Attribute<Content> = graph.makeStatefulRule(
             AnimationViewContentRule(view: view._attribute)
@@ -81,7 +81,7 @@ private struct AnimationViewContentRule<Content: View & Equatable>: StatefulRule
             return
         }
         previousContent = content
-        AttributeGraph.setStatefulOutput(content)
+        _AGGraph.setStatefulOutput(content)
     }
 }
 
@@ -104,6 +104,6 @@ private struct AnimationViewTransactionRule<Content: View & Equatable>: Stateful
             transaction.animation = viewValue.animation
         }
         previousContent = viewValue.content
-        AttributeGraph.setStatefulOutput(transaction)
+        _AGGraph.setStatefulOutput(transaction)
     }
 }

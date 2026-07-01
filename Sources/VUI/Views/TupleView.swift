@@ -81,8 +81,8 @@ extension TupleView {
         // Delegates to VStackLayout as the default layout for a bare TupleView.
         // This mirrors the behaviour when a view's body returns a TupleView directly,
         // which the framework wraps in a VStack-equivalent root.
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let body: (_Graph, _ViewInputs) -> _ViewListOutputs = { _, viewInputs in
             Self._makeViewList(view: view, inputs: _ViewListInputs(from: viewInputs))
@@ -93,8 +93,8 @@ extension TupleView {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
         var children: [_ViewListOutputs] = []

@@ -464,7 +464,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     private let usesPlatformWindow: Bool
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
-         sourceGraph: AttributeGraph,
+         sourceGraph: _AGGraph,
          scene: WindowKey,
          parentController: WindowController,
          usesPlatformWindow: Bool) {

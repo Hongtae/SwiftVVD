@@ -316,7 +316,7 @@ final class StoredLocation<Value>: StoredLocationBase<Value>, @unchecked Sendabl
         if let signal {
             if let host {
                 isValid = signal.isValid(in: host.data.graph)
-            } else if let graph = AttributeGraph.current {
+            } else if let graph = _AGGraph.current {
                 isValid = signal.isValid(in: graph)
             } else {
                 isValid = false
@@ -337,7 +337,7 @@ final class StoredLocation<Value>: StoredLocationBase<Value>, @unchecked Sendabl
         if let host {
             guard signal.isValid(in: host.data.graph) else { return }
             host.continueTransaction(invalidating: signal)
-        } else if let graph = AttributeGraph.current, signal.isValid(in: graph) {
+        } else if let graph = _AGGraph.current, signal.isValid(in: graph) {
             graph.invalidateAttribute(signal.toStrong())
         }
     }

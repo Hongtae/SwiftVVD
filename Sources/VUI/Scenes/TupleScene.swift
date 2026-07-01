@@ -19,8 +19,8 @@ struct _TupleScene<T>: Scene {
     }
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeScene called outside an active _AGGraph context.")
         }
 
         var childOutputsList: [_SceneOutputs] = []

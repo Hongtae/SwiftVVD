@@ -230,8 +230,8 @@ public macro _SwiftUIAnimatableProperty<T>(_ t: T.Type) -> EmptyAnimatableData.T
 
 extension Animatable {
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeAnimatable called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeAnimatable called outside an active _AGGraph context.")
         }
         let attr: Attribute<Self> = graph.makeStatefulRule(
             AnimatableAttribute(
@@ -1653,8 +1653,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AnimatableAttribute.updateValue called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("AnimatableAttribute.updateValue called outside an active _AGGraph context.")
         }
 
         var updateValue = (value: _source.value, changed: false)
@@ -1674,7 +1674,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             finishPhaseReset(with: target, at: updateInputs.time)
             return
         }
-        let previousOutput: AnimatedValue? = AttributeGraph.currentStatefulOutput()
+        let previousOutput: AnimatedValue? = _AGGraph.currentStatefulOutput()
 
         guard let previousOutput else {
             finishValue(with: target, at: updateInputs.time)
@@ -2310,7 +2310,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         // presentation-bound groups. State has already updated the listener
         // snapshot; the outer rule decides which copied records are due.
         if isCombinedFiniteCompletionGroupPresentationDue(at: now) {
-            AttributeGraph.setStatefulOutput(targetValue)
+            _AGGraph.setStatefulOutput(targetValue)
             let completions = finishCombinedFiniteCompletionGroup()
             enqueueAnimationCompletionActions(completions)
             return
@@ -2325,7 +2325,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if sampleSideEffectLayers(at: now) {
             return
         }
-        AttributeGraph.setStatefulOutput(output)
+        _AGGraph.setStatefulOutput(output)
         if let velocityTrackingImmediateCompletionGroup {
             self.velocityTrackingImmediateCompletionGroup = nil
             samplingLayers.removeAll()
@@ -2353,7 +2353,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         // copied records, so finishing them directly from helper/state would
         // reorder the boundary.
         if isCombinedFiniteCompletionGroupReplacement(currentGeneration) {
-            AttributeGraph.setStatefulOutput(targetValue)
+            _AGGraph.setStatefulOutput(targetValue)
             let completions = finishCombinedFiniteCompletionGroup()
             enqueueAnimationCompletionActions(completions)
             return
@@ -2367,7 +2367,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         if isCustomReplacementCompletionGroupReplacement(currentGeneration) {
-            AttributeGraph.setStatefulOutput(targetValue)
+            _AGGraph.setStatefulOutput(targetValue)
             // The replacement nil boundary owns this handoff; discarded
             // side-effect layers should not be sampled again after it.
             let completions = finishCustomReplacementCompletionGroup(at: now)
@@ -2462,7 +2462,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         helper.commitTarget(value)
         clearCompletionRecordSideState()
         nextGeneration = 1
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
         let completions = finishAllCompletionRecords()
         enqueueAnimationCompletionActions(completions)
     }
@@ -2536,7 +2536,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         targetValue = value
         helper.commitTarget(value)
         clearAnimationRuntimeState()
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
         guard !completionRecords.isEmpty else { return }
         let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
@@ -2559,7 +2559,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         // storage must not erase the copied completion records that are about
         // to be ordered and drained below.
         clearAnimationRuntimeState(clearingGeneration: false)
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
         var completions: [() -> Void]
         if finishAllRecords {
             completions = finishAllCompletionRecords()
@@ -2959,7 +2959,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         guard let animation = state.animation,
               let startValue,
               let targetValue else {
-            return AttributeGraph.currentStatefulOutput()
+            return _AGGraph.currentStatefulOutput()
         }
         let elapsed = max(time.seconds - state.beginTime.seconds, 0)
         var context = makeAnimationContext(
@@ -3288,7 +3288,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         helper.commitTarget(value)
         helper.clearAnimatorStateStorageForCompletionRecords()
         currentGeneration = nil
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
 
         guard var group = sourceCustomResidualReplacementCompletionGroup else {
             return []
@@ -3378,7 +3378,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if let finalValue {
             targetValue = finalValue
             helper.commitTarget(finalValue)
-            AttributeGraph.setStatefulOutput(finalValue)
+            _AGGraph.setStatefulOutput(finalValue)
         }
         clearAnimationRuntimeState()
 
@@ -4401,8 +4401,8 @@ private struct AnimatableFrameAttribute: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AnimatableFrameAttribute.updateValue called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("AnimatableFrameAttribute.updateValue called outside an active _AGGraph context.")
         }
 
         let target = roundedFrame(
@@ -4419,7 +4419,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
                 graph.transaction(for: _size.identifier)
         }
 
-        let previousOutput: ViewFrame? = AttributeGraph.currentStatefulOutput()
+        let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
 
         if update.didReset || animationsDisabled || previousOutput == nil {
             finishValue(update.target)
@@ -4451,7 +4451,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
             value: &value,
             environment: _environment
         )
-        AttributeGraph.setStatefulOutput(value.value)
+        _AGGraph.setStatefulOutput(value.value)
     }
 
     mutating func destroy() {
@@ -4473,7 +4473,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
     private mutating func finishValue(_ value: ViewFrame) {
         helper.finishAndClearAnimatorState()
         helper.commitTarget(value)
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
     }
 }
 
@@ -4511,8 +4511,8 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("AnimatableFrameAttributeVFD.updateValue called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("AnimatableFrameAttributeVFD.updateValue called outside an active _AGGraph context.")
         }
 
         let target = roundedFrame(
@@ -4529,7 +4529,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
                 graph.transaction(for: _size.identifier)
         }
 
-        let previousOutput: ViewFrame? = AttributeGraph.currentStatefulOutput()
+        let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
 
         if update.didReset || animationsDisabled || previousOutput == nil {
             finishValue(update.target)
@@ -4564,7 +4564,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
                 velocityFilter.addSample(data, time: time)
             }
         )
-        AttributeGraph.setStatefulOutput(value.value)
+        _AGGraph.setStatefulOutput(value.value)
 
         if helper.isAnimating {
             scheduleMaxVelocity()
@@ -4593,7 +4593,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
         helper.finishAndClearAnimatorState()
         helper.commitTarget(value)
         velocityFilter.reset()
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
     }
 
     private mutating func scheduleMaxVelocity() {
@@ -4612,8 +4612,8 @@ func makeAnimatableFrameAttributes(
     supportsVFD: Bool? = nil,
     animationsDisabled: Bool? = nil
 ) -> AnimatedFrameAttributes {
-    guard let graph = AttributeGraph.current else {
-        fatalError("makeAnimatableFrameAttributes called outside an active AttributeGraph context.")
+    guard let graph = _AGGraph.current else {
+        fatalError("makeAnimatableFrameAttributes called outside an active _AGGraph context.")
     }
 
     let environment = inputs.cachedEnvironment.value.environment

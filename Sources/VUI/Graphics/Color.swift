@@ -266,8 +266,8 @@ extension Color: View {
 
 extension Color: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer(

@@ -103,7 +103,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("RepeatGesture.makeGesture requires AG context")
         }
         let bodyOutputs = body(inputs)
@@ -167,7 +167,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         lastTapTime = 0
         isFirstTap = true
         completedTaps = 0
-        AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -181,14 +181,14 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             // Tap interval exceeded, so the sequence fails.
             isFirstTap = true
             completedTaps = 0
-            AttributeGraph.setStatefulOutput(GesturePhase<E>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
             return
         }
 
         switch childPhase {
         case .possible:
             if completedTaps == 0 {
-                AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
             // Keep possible while a tap sequence is in progress.
         case .active(let v):
@@ -198,9 +198,9 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             }
             // A single-tap repeat becomes active immediately.
             if requiredCount == 1 {
-                AttributeGraph.setStatefulOutput(GesturePhase<E>.active(v))
+                _AGGraph.setStatefulOutput(GesturePhase<E>.active(v))
             } else {
-                AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
         case .ended(let v):
             completedTaps += 1
@@ -213,15 +213,15 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
                 // Increment tapCountAttr to signal RepeatResetSeed.
                 let newCount = tapCountAttr.value &+ 1
                 tapCountAttr.setValue(newCount)
-                AttributeGraph.setStatefulOutput(GesturePhase<E>.ended(v))
+                _AGGraph.setStatefulOutput(GesturePhase<E>.ended(v))
             } else {
                 // More taps are needed, so remain possible.
-                AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
         case .failed:
             completedTaps = 0
             isFirstTap = true
-            AttributeGraph.setStatefulOutput(GesturePhase<E>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
         }
     }
 }
@@ -250,7 +250,7 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("RequiredTapCountWriter.makeGesture requires AG context")
         }
         var bodyOutputs = body(inputs)
@@ -278,7 +278,7 @@ struct SizeGesture<T: Gesture>: Gesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<T.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("SizeGesture._makeGesture requires AG context")
         }
         let sizeAttr = inputs.size
@@ -329,7 +329,7 @@ struct DelayedGesture<T: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<T>
     ) -> _GestureOutputs<T> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DelayedGesture.makeGesture requires AG context")
         }
         let innerOutputs = body(inputs)
@@ -364,13 +364,13 @@ struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
     // ResettableGestureRule
     var resetSeed: UInt32 { resetSeedAttr.value }
     var phaseValue: GesturePhase<T> {
-        AttributeGraph.currentStatefulOutput() ?? .possible(nil)
+        _AGGraph.currentStatefulOutput() ?? .possible(nil)
     }
 
     mutating func resetPhase() {
         pendingFlag = 0
         startTimestamp = 0
-        AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -382,37 +382,37 @@ struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
         switch inner {
         case .possible(let v):
             pendingFlag = 0
-            AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(v))
+            _AGGraph.setStatefulOutput(GesturePhase<T>.possible(v))
         case .failed:
             pendingFlag = 0
-            AttributeGraph.setStatefulOutput(GesturePhase<T>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<T>.failed)
         case .active(let ev):
             // duration=0 or pendingFlag==2 means immediate pass-through.
             if modifier.duration <= 0 {
                 pendingFlag = 2  // mark fired so .ended passes through correctly
-                AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+                _AGGraph.setStatefulOutput(GesturePhase<T>.active(ev))
             } else if pendingFlag == 0 {
                 startTimestamp = timeAttr.value.seconds
                 pendingFlag = 1
-                AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+                _AGGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
                 // The next event delivery re-evaluates the pending delay.
             } else if pendingFlag == 1 {
                 let elapsed = timeAttr.value.seconds - startTimestamp
                 if elapsed >= modifier.duration {
-                    AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+                    _AGGraph.setStatefulOutput(GesturePhase<T>.active(ev))
                     pendingFlag = 2
                 } else {
-                    AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+                    _AGGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
                 }
             } else {  // pendingFlag == 2, already fired
-                AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+                _AGGraph.setStatefulOutput(GesturePhase<T>.active(ev))
             }
         case .ended(let ev):
             // Ending before duration fails. Ending after firing succeeds.
             if pendingFlag == 2 {
-                AttributeGraph.setStatefulOutput(GesturePhase<T>.ended(ev))
+                _AGGraph.setStatefulOutput(GesturePhase<T>.ended(ev))
             } else {
-                AttributeGraph.setStatefulOutput(GesturePhase<T>.failed)
+                _AGGraph.setStatefulOutput(GesturePhase<T>.failed)
             }
             pendingFlag = 0
         }

@@ -41,8 +41,8 @@ extension StyleModifier {
         modifier: _GraphValue<Self>, inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let modAttr = modifier._attribute
         let styleAttr: Attribute<Self> = graph.makeRule { modAttr.value }
@@ -62,8 +62,8 @@ extension StyleModifier {
         modifier: _GraphValue<Self>, inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let modAttr = modifier._attribute
         let styleAttr: Attribute<Self> = graph.makeRule { modAttr.value }
@@ -90,7 +90,7 @@ struct StyleModifierType<M: StyleModifier>: AnyStyleModifierType {
     static func makeView<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("StyleModifierType.makeView called outside AG context.")
         }
         let styleAttr = Attribute<M>(modifier.value)
@@ -108,7 +108,7 @@ struct StyleModifierType<M: StyleModifier>: AnyStyleModifierType {
     static func makeViewList<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewListInputs
     ) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("StyleModifierType.makeViewList called outside AG context.")
         }
         let styleAttr = Attribute<M>(modifier.value)

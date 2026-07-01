@@ -19,8 +19,8 @@ public struct _AlignmentWritingModifier: ViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let childOutputs = body(_Graph(), inputs)
         guard let childLCAttr = childOutputs._layoutComputer.attribute else {

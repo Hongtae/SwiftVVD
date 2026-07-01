@@ -19,8 +19,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let sizeAttr = inputs.size
         let positionAttr = inputs.position

@@ -21,7 +21,7 @@ public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, 
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("SimultaneousGesture._makeGesture requires AG context")
         }
 

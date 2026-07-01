@@ -130,7 +130,7 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ContentShapeModifier._makeView requires AG context")
         }
 
@@ -197,7 +197,7 @@ public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewMo
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("_ContentShapeKindModifier._makeView requires AG context")
         }
 

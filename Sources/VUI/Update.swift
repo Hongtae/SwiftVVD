@@ -205,7 +205,7 @@ struct UpdateCycleDetector {
     }
 
     private static func currentSeed() -> UInt32 {
-        guard let host = AttributeGraphRef.current?.context as? GraphHost else {
+        guard let host = _AGGraphContext.current?.context as? GraphHost else {
             return 0
         }
         return host.data.updateSeed

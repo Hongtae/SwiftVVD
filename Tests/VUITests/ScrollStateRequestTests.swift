@@ -71,8 +71,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollGeometryStatePreferenceAndProviderSurface() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let geometry = ScrollGeometry(
@@ -255,8 +255,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollToRequestScopesScrollTransactionAndUpdatesBindingOnSuccess() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -309,8 +309,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollToRequestRestoresAmbientTransactionBeforeBindingSetter() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -360,8 +360,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollToRequestDoesNotUpdateBindingWhenScrollFails() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: false)
@@ -442,8 +442,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsQueuesReason11AndStoresRequest() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -490,8 +490,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsQueuesPositionedByUserWhenContentBindingPhaseChanges() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -542,8 +542,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsQueuesOutputPreferenceRequests() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -591,8 +591,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsMergesOutputPreferenceRequestsInOrder() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -649,8 +649,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsPreferenceRequestSuppressesPositionedByUserAdjustment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -699,8 +699,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsEmptyPreferenceRequestsAllowPositionedByUserAdjustment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -742,8 +742,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsExplicitRequestSuppressesPositionedByUserAdjustment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -790,8 +790,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateEnqueueRequestsExplicitRequestSuppressesPreferenceAndPositionedByUserAdjustment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -849,8 +849,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testGraphInputsScrollRequestAndScrollableOptionalAttributesRoundTrip() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -870,8 +870,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testGraphInputsScrollPositionStorageAndAnchorKindRouting() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let valueAttr = graph.makeInput(value: ScrollPosition(id: "value"))
@@ -914,8 +914,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollValueModifierWritesValueScrollPositionInput() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let modifier = ScrollValueModifier(value: ScrollPosition(id: "value"))
@@ -937,8 +937,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollPositionBindingModifierWritesInputsAndDefersInitialScrollToRequest() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var stored = ScrollPosition(id: "target")
@@ -987,8 +987,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollPositionBindingModifierAdjustedAnchorKeepsNilUnderCurrentSemantics() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var stored = ScrollPosition(id: "target")
@@ -1029,8 +1029,8 @@ final class ScrollStateRequestTests: XCTestCase {
         Semantics.overrides = Semantics.Overrides(build: .v5, runtime: previous.runtime)
         defer { Semantics.overrides = previous }
 
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var stored = ScrollPosition(id: "target")
@@ -1067,8 +1067,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollPositionBindingModifierSkipsUnchangedRequestAfterInitialEvaluation() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var stored = ScrollPosition(idType: String.self, edge: .bottom)
@@ -1101,8 +1101,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollPositionBindingModifierSkipsRequestDuringValueUpdateTransaction() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let binding = Binding<ScrollPosition>(
@@ -1200,8 +1200,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testZeroWeakAttributeIsInvalidAndFirstSlotWeakAttributeUsesNonzeroSeed() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let first = graph.makeInput(value: 42)
@@ -1221,8 +1221,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testViewInputsWeakScrollableReturnsInvalidWhenAbsentAndWeakWhenPresent() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let scrollable = RecordingScrollable(shouldScroll: true)
@@ -1243,8 +1243,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollablePreferenceKeyAndUnaryProviderSurface() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let first = RecordingScrollable(shouldScroll: true)
@@ -1335,8 +1335,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateRequestTransformPublishesNearestVisibleUpdateRequest() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let collection = RecordingCollectionScrollable(shouldScroll: true)
@@ -1383,8 +1383,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateRequestTransformConvertsSubviewFrameThroughTransform() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var selectedTransform = ViewTransform.identity
@@ -1430,8 +1430,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateRequestTransformCapturesLayoutDirectionEnvironment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let collection = RecordingCollectionScrollable(shouldScroll: true)
@@ -1463,8 +1463,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateRequestTransformKeepsRepeatedRequestAndClearsMismatchedBinding() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let collection = RecordingCollectionScrollable(shouldScroll: true)
@@ -1496,8 +1496,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testScrollStateRequestTransformUsesTargetDistanceTolerance() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let collection = RecordingCollectionScrollable(shouldScroll: true)
@@ -1534,8 +1534,8 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     func testGraphInputsScrollPhaseStateStackRoundTrip() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let first = graph.makeInput(value: ScrollPhaseState(phase: .tracking))
@@ -1561,7 +1561,7 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         environment: Attribute<EnvironmentValues>? = nil
     ) -> _ViewInputs {
         _ViewInputs(
@@ -1582,7 +1582,7 @@ final class ScrollStateRequestTests: XCTestCase {
     }
 
     private func makeGraphInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         environment: Attribute<EnvironmentValues>? = nil
     ) -> _GraphInputs {
         _GraphInputs(

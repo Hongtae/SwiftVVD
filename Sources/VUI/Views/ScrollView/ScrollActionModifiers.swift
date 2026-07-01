@@ -72,8 +72,8 @@ struct OnScrollPhaseChangeModifier: ViewModifier, MultiViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("OnScrollPhaseChangeModifier._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("OnScrollPhaseChangeModifier._makeView called outside an active _AGGraph context.")
         }
 
         var contentInputs = inputs
@@ -131,8 +131,8 @@ struct OnScrollPhaseContextChangeModifier: ViewModifier, MultiViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("OnScrollPhaseContextChangeModifier._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("OnScrollPhaseContextChangeModifier._makeView called outside an active _AGGraph context.")
         }
 
         var contentInputs = inputs
@@ -201,8 +201,8 @@ struct OnScrollGeometryChangeModifier<T: Equatable>: ViewModifier, MultiViewModi
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("OnScrollGeometryChangeModifier._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("OnScrollGeometryChangeModifier._makeView called outside an active _AGGraph context.")
         }
 
         var contentInputs = inputs
@@ -277,7 +277,7 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
         viewPhase: Attribute<Phase>,
         prefersLast: OptionalAttribute<Bool>,
         cycleDetector: UpdateCycleDetector = UpdateCycleDetector(),
-        viewGraph: ViewGraph? = AttributeGraphRef.current?.context as? ViewGraph
+        viewGraph: ViewGraph? = _AGGraphContext.current?.context as? ViewGraph
     ) {
         self.provider = provider
         self.inputs = inputs
@@ -303,7 +303,7 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
         guard let source,
               let newOutput = provider.makeOutput(input: source) else {
             oldOutput = nil
-            AttributeGraph.setStatefulOutput(())
+            _AGGraph.setStatefulOutput(())
             return
         }
 
@@ -319,6 +319,6 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
             }
         }
         oldOutput = newOutput
-        AttributeGraph.setStatefulOutput(())
+        _AGGraph.setStatefulOutput(())
     }
 }

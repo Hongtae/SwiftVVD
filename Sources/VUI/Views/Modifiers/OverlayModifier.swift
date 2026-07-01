@@ -17,8 +17,8 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         guard let mainLCAttr = mainOutputs._layoutComputer.attribute else {
@@ -133,8 +133,8 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
@@ -184,8 +184,8 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size

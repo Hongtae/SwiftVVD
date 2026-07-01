@@ -21,8 +21,8 @@ extension EnvironmentalModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)
@@ -36,8 +36,8 @@ extension EnvironmentalModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)

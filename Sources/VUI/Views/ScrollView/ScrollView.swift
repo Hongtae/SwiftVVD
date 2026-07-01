@@ -140,8 +140,8 @@ struct SystemScrollView<Content>: View where Content: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("SystemScrollView._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("SystemScrollView._makeView called outside an active _AGGraph context.")
         }
 
         var contentInputs = inputs
@@ -160,7 +160,7 @@ struct SystemScrollView<Content>: View where Content: View {
             )
         )
         let scrollable = ScrollViewScrollable(
-            graphRef: AttributeGraphRef.current ?? AttributeGraphRef(graph: graph),
+            graphRef: _AGGraphContext.current ?? _AGGraphContext(graph: graph),
             contentOffset: contentOffset
         )
         let scrollableAttr: Attribute<any Scrollable> = graph.makeRule(
@@ -253,13 +253,13 @@ struct SystemScrollView<Content>: View where Content: View {
 
 /// Local scrollable host used until platform-backed scrolling is mounted.
 private final class ScrollViewScrollable: Scrollable {
-    private let graphRef: AttributeGraphRef
+    private let graphRef: _AGGraphContext
     private let contentOffset: Attribute<CGPoint>
     private var geometry: Attribute<ScrollGeometry>?
     private var layoutDirection: Attribute<LayoutDirection>?
     private var childScrollables: Attribute<[any Scrollable]>?
 
-    init(graphRef: AttributeGraphRef, contentOffset: Attribute<CGPoint>) {
+    init(graphRef: _AGGraphContext, contentOffset: Attribute<CGPoint>) {
         self.graphRef = graphRef
         self.contentOffset = contentOffset
     }
@@ -379,7 +379,7 @@ private struct ScrollViewLayoutComputerProvider: Rule {
     var contentLayout: WeakAttribute<LayoutComputer>
 
     func updateValue() -> LayoutComputer {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("ScrollViewLayoutComputerProvider.updateValue called outside AG context.")
         }
         guard contentLayout.isValid(in: graph) else {
@@ -715,8 +715,8 @@ struct ContentMarginModifier: ViewModifier, _GraphInputsModifier {
     var placement: ContentMarginPlacement
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
 
         let parentEnvironment = inputs.cachedEnvironment.value.environment
@@ -840,8 +840,8 @@ struct ResetContentMarginModifier: ViewModifier, _GraphInputsModifier {
     var placements: [ContentMarginPlacement]
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
 
         let parentEnvironment = inputs.cachedEnvironment.value.environment
@@ -865,8 +865,8 @@ struct EnvironmentAxesModifier: ViewModifier, _GraphInputsModifier {
     var scrollableAxes: Axis.Set
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
         let parentEnvironment = inputs.cachedEnvironment.value.environment
         let modifierAttribute = modifier._attribute
@@ -888,8 +888,8 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
     var axes: Axis.Set
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
 
         let parentEnvironment = inputs.cachedEnvironment.value.environment
@@ -930,14 +930,14 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
 
         mutating func updateValue() {
             let values = _environment.value
-            if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+            if _AGGraph.currentStatefulOutput(Value.self) != nil,
                !_AGGraphAnyInputsChanged(),
                !tracker.hasDifferentUsedValues(values._plist) {
                 return
             }
 
             tracker.reset()
-            AttributeGraph.setStatefulOutput(EnvironmentValues(values._plist, tracker: tracker))
+            _AGGraph.setStatefulOutput(EnvironmentValues(values._plist, tracker: tracker))
         }
     }
 
@@ -950,7 +950,7 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
 
         mutating func updateValue() {
             let behavior = defaultBehavior
-            AttributeGraph.setStatefulOutput(behavior)
+            _AGGraph.setStatefulOutput(behavior)
             oldDefaultBehavior = behavior
         }
 
@@ -1022,8 +1022,8 @@ struct ScrollPhaseStateConfigurationModifier: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollPhaseStateConfigurationModifier._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollPhaseStateConfigurationModifier._makeView called outside an active _AGGraph context.")
         }
 
         var contentInputs = inputs

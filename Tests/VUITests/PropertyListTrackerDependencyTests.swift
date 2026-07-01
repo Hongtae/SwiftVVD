@@ -51,10 +51,10 @@ final class PropertyListTrackerDependencyTests: XCTestCase {
     }
 
     func testMergedEnvironmentReturnsFreshTrackedMergedValues() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         var mergedValues: EnvironmentValues!
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var primaryList = PropertyList()
             primaryList[EnvironmentPropertyKey<TrackerDependencyNameKey>.self] = "primary"
             let primaryValues = EnvironmentValues.tracking(primaryList)

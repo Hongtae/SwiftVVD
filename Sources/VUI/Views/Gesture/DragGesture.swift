@@ -82,7 +82,7 @@ public struct DragGesture: Gesture {
         gesture: _GraphValue<DragGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<DragGesture.Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DragGesture._makeGesture requires AG context")
         }
         // Copies minimumDistance/coordinateSpace/allowedDirections into SpatialDragGesture,

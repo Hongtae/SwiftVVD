@@ -16,8 +16,8 @@ private enum _ShadowEffectSupport {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs where Modifier: ViewModifier {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Modifier.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         applyShadow(
@@ -35,8 +35,8 @@ private enum _ShadowEffectSupport {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs where Modifier: ViewModifier {
-        guard AttributeGraph.current != nil else {
-            fatalError("\(Modifier.self)._makeViewList called outside an active AttributeGraph context.")
+        guard _AGGraph.current != nil else {
+            fatalError("\(Modifier.self)._makeViewList called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
@@ -48,7 +48,7 @@ private enum _ShadowEffectSupport {
         color: _GraphValue<Color.Resolved>,
         radius: _GraphValue<CGFloat>,
         offset: _GraphValue<CGSize>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }

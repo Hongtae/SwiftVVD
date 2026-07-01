@@ -42,7 +42,7 @@ struct InvalidatingGraphMutation: GraphMutation {
     var attribute: AGWeakAttribute
 
     func apply() {
-        guard let graph = AttributeGraph.current,
+        guard let graph = _AGGraph.current,
               attribute.isValid(in: graph) else {
             return
         }
@@ -67,7 +67,7 @@ struct AssignmentGraphMutation<Value>: GraphMutation {
     var value: Value
 
     func apply() {
-        guard let graph = AttributeGraph.current,
+        guard let graph = _AGGraph.current,
               attribute.isValid(in: graph) else {
             return
         }
@@ -89,10 +89,10 @@ enum _GraphMutation_Style: UInt8, Hashable {
     case deferred = 1
 }
 
-// GraphHost is the root AttributeGraph-owning base class.
+// GraphHost is the root _AGGraph-owning base class.
 // `data` wraps the shared graph core with a per-host context pointer and the
 // per-host seed attributes used by graph/update transaction bookkeeping.
-// Multiple hosts can share one underlying AttributeGraph while each holds its
+// Multiple hosts can share one underlying _AGGraph while each holds its
 // own data wrapper.
 class GraphHost {
     private static let maxTransactionUpdatePassCount = 8
@@ -105,15 +105,15 @@ class GraphHost {
     }
 
     struct Data: @unchecked Sendable {
-        private var ref: AttributeGraphRef
+        private var ref: _AGGraphContext
 
         private(set) var globalSubgraph: AGSubgraph
         private(set) var rootSubgraph: AGSubgraph
         private(set) var updateSeedAttribute: Attribute<UInt32>
         private(set) var transactionSeedAttribute: Attribute<UInt32>
 
-        init(graph: AttributeGraph) {
-            let ref = AttributeGraphRef(graph: graph)
+        init(graph: _AGGraph) {
+            let ref = _AGGraphContext(graph: graph)
             var globalSubgraph: AGSubgraph!
             var rootSubgraph: AGSubgraph!
             var updateSeedAttribute: Attribute<UInt32>!
@@ -133,7 +133,7 @@ class GraphHost {
             self.transactionSeedAttribute = transactionSeedAttribute
         }
 
-        var graph: AttributeGraph {
+        var graph: _AGGraph {
             ref.graph
         }
 
@@ -181,23 +181,23 @@ class GraphHost {
     private var pendingGraphMutations: [any GraphMutation] = []
 
     static var currentHost: GraphHost {
-        guard let ref = AttributeGraphRef.current,
+        guard let ref = _AGGraphContext.current,
               let host = ref.context as? GraphHost else {
             fatalError("GraphHost.currentHost accessed outside an active graph host context.")
         }
         return host
     }
 
-    /// Creates a new AttributeGraph core and wraps it in an AttributeGraphRef owned by self.
+    /// Creates a new _AGGraph core and wraps it in an _AGGraphContext owned by self.
     init() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         self.data = Data(graph: graph)
         self.data.context = self
     }
 
-    /// Wraps an existing AttributeGraph core in a new AttributeGraphRef owned by self.
+    /// Wraps an existing _AGGraph core in a new _AGGraphContext owned by self.
     /// Used when a second GraphHost (e.g. GestureGraph) shares the same core as another.
-    init(graph: AttributeGraph) {
+    init(graph: _AGGraph) {
         self.data = Data(graph: graph)
         self.data.context = self
     }

@@ -28,7 +28,7 @@ public struct MagnifyGesture: Gesture {
         gesture: _GraphValue<MagnifyGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Value> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MagnifyGesture._makeGesture requires AG context")
         }
         let self_ = gesture._attribute.value
@@ -67,7 +67,7 @@ public struct MagnificationGesture: Gesture {
         gesture: _GraphValue<MagnificationGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<CGFloat> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MagnificationGesture._makeGesture requires AG context")
         }
         let magnify = MagnifyGesture(minimumScaleDelta: gesture._attribute.value.minimumScaleDelta)
@@ -113,7 +113,7 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
         startLocation = .zero
         startAnchor = .center
         lastTimestamp = nil
-        AttributeGraph.setStatefulOutput(GesturePhase<MagnifyGesture.Value>.possible(nil))
+        _AGGraph.setStatefulOutput(GesturePhase<MagnifyGesture.Value>.possible(nil))
     }
 
     mutating func updateValue() {
@@ -123,14 +123,14 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
         case .possible:
             resetPhase()
         case .active(let event):
-            AttributeGraph.setStatefulOutput(update(event: event, terminal: false))
+            _AGGraph.setStatefulOutput(update(event: event, terminal: false))
         case .ended(let event):
             let phase = update(event: event, terminal: true)
             resetPhase()
-            AttributeGraph.setStatefulOutput(phase)
+            _AGGraph.setStatefulOutput(phase)
         case .failed:
             resetPhase()
-            AttributeGraph.setStatefulOutput(GesturePhase<MagnifyGesture.Value>.failed)
+            _AGGraph.setStatefulOutput(GesturePhase<MagnifyGesture.Value>.failed)
         }
     }
 

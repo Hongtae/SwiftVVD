@@ -181,7 +181,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MakeAlertStorage.updateValue called outside AG context")
         }
         var actionsList: PlatformItemList?
@@ -217,7 +217,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         let identity = identityTracker.update(for: phaseValue)
         guard m.isPresented.wrappedValue else {
             let id = identity
-            AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
+            _AGGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
                 dict.removeValue(forKey: id)
             } as Value)
             return
@@ -245,13 +245,13 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             preventsTermination: preventsTermination
         )
         let id = identity
-        AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
+        _AGGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
             dict[id] = storage
         } as Value)
     }
 
     private mutating func trackedEnvironment(from values: EnvironmentValues) -> EnvironmentValues? {
-        if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+        if _AGGraph.currentStatefulOutput(Value.self) != nil,
            !_AGGraphAnyInputsChanged(),
            !propertyTracker.hasDifferentUsedValues(values._plist) {
             return nil
@@ -464,7 +464,7 @@ private struct PlatformItemListButtonBody: View {
     @Environment(\.isEnabled) private var isEnabled: Bool
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PlatformItemListButtonBody._makeView called outside AG context")
         }
 
@@ -555,7 +555,7 @@ extension AlertModifier {
     //   6. AlertStorage.PreferenceKey output
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
                           body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("AlertModifier._makeView called outside AG context")
         }
 

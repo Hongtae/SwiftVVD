@@ -3333,7 +3333,7 @@ final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable
 func runAnimationCompletionActionsImmediately(_ actions: [() -> Void]) {
     guard !actions.isEmpty else { return }
     actions.forEach { action in
-        AttributeGraph.withoutTracking(action)
+        _AGGraph.withoutTracking(action)
     }
 }
 
@@ -3341,12 +3341,12 @@ func enqueueAnimationCompletionActions(_ actions: [() -> Void]) {
     guard !actions.isEmpty else { return }
     let wrapped = actions.map { action in
         {
-            AttributeGraph.withoutTracking(action)
+            _AGGraph.withoutTracking(action)
         }
     }
     // Completion actions may trigger arbitrary view mutations. Queue them until
     // the graph leaves the current evaluation/draw pass when possible.
-    if let graph = AttributeGraph.current {
+    if let graph = _AGGraph.current {
         graph.actionOutbox.append(contentsOf: wrapped)
     } else {
         wrapped.forEach { Update.enqueueAction($0) }

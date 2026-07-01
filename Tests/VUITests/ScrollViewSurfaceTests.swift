@@ -18,8 +18,8 @@ private struct ScrollViewRecordingContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollViewRecordingContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewRecordingContent._makeView called outside an active _AGGraph context.")
         }
 
         let recorder = view._attribute.value.recorder
@@ -44,8 +44,8 @@ private struct ScrollViewChildScrollableContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollViewChildScrollableContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewChildScrollableContent._makeView called outside an active _AGGraph context.")
         }
 
         let current = view._attribute.value
@@ -139,8 +139,8 @@ private struct ScrollViewTargetRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollViewTargetRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewTargetRow._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 40, height: 20))
@@ -195,8 +195,8 @@ private struct ScrollBehaviorEnvironmentContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollBehaviorEnvironmentContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollBehaviorEnvironmentContent._makeView called outside an active _AGGraph context.")
         }
 
         let current = view._attribute.value
@@ -218,8 +218,8 @@ private struct ScrollBehaviorRoleContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollBehaviorRoleContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollBehaviorRoleContent._makeView called outside an active _AGGraph context.")
         }
 
         let current = view._attribute.value
@@ -436,8 +436,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollTargetBehaviorModifierPublishesResolvedBehaviorEnvironment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let recorder = ScrollBehaviorEnvironmentRecorder()
@@ -517,8 +517,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollViewResolvedBehaviorModifierClearsBehaviorForEmptyAxes() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let recorder = ScrollBehaviorEnvironmentRecorder()
@@ -866,8 +866,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testContentMarginModifierAndResetPublishTrackedEnvironment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var inputs = makeViewInputs(graph: graph)
@@ -919,8 +919,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testEnvironmentAxesModifierPublishesScrollableAxesEnvironment() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var inputs = makeViewInputs(graph: graph)
@@ -955,8 +955,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewMakeViewInstallsScrollableInputsAndPreferenceProvider() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -989,8 +989,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewMakeViewKeepsScrollablePreferenceInternalWhenUnrequested() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let recorder = ScrollViewInputRecorder()
@@ -1012,8 +1012,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewMakeViewPublishesGeometryPreferenceWhenRequested() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -1090,8 +1090,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewScrollableAppliesScrollToPointRequestToGeometryState() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -1145,8 +1145,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewScrollableAppliesAxisTargetsAndOffsetAdjustmentsToGeometryState() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -1216,8 +1216,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewScrollableRoutesViewIDRequestToChildScrollablePreference() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -1338,8 +1338,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testContainerBodyConfiguresPhaseStateAndResetsChildPreferenceRequests() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
@@ -1370,8 +1370,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionModifiersRequestExpectedPreferences() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let phaseRecorder = ScrollViewInputRecorder()
@@ -1410,8 +1410,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionDispatcherQueuesPhaseActionsAfterInitialOutput() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var calls: [(ScrollPhase, ScrollPhase)] = []
@@ -1456,8 +1456,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionDispatcherStoresExpectedFieldShape() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let modifier = graph.makeInput(
@@ -1484,8 +1484,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionDispatcherCycleDetectorSuppressesThirdSameSeedAction() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var calls: [(ScrollPhase, ScrollPhase)] = []
@@ -1530,8 +1530,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionDispatcherClearsOutputWhenSourceDisappears() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var calls: [(CGFloat, CGFloat)] = []
@@ -1583,8 +1583,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollActionDispatcherUsesLastGeometryWhenRequested() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var calls: [(CGFloat, CGFloat)] = []
@@ -1627,8 +1627,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollPhaseContextDispatcherBuildsContextFromGeometryState() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var calls: [(old: ScrollPhase, new: ScrollPhase, context: ScrollPhaseChangeContext)] = []
@@ -1668,7 +1668,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         preferenceKeys: PreferenceKeys = PreferenceKeys()
     ) -> _ViewInputs {
         _ViewInputs(

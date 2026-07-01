@@ -73,7 +73,7 @@ public struct LongPressGesture: Gesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Bool> {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("LongPressGesture._makeGesture requires AG context")
         }
         // storedBody is EventListener<TappableEvent>().longPressPhase().

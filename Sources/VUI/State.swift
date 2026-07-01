@@ -84,8 +84,8 @@ extension State {
         fieldOffset: Int,
         inputs: inout _GraphInputs
     ) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeProperty called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeProperty called outside an active _AGGraph context.")
         }
 
         let inbox = graph.inbox
@@ -98,8 +98,8 @@ extension State {
         assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
         buffer.properties.append(.init(type: Self.self, offset: fieldOffset))
         buffer.contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
-            guard let graph = AttributeGraph.current else {
-                fatalError("\(Self.self)._makeProperty context closure called outside an active AttributeGraph context.")
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self)._makeProperty context closure called outside an active _AGGraph context.")
             }
             let currentState = ptr.assumingMemoryBound(to: State<Value>.self).pointee
 
@@ -121,7 +121,7 @@ extension State {
                 graph.makeInput(value: initialValue)
             }
             // Capture the owning graph so the getter can detect cross-graph calls.
-            // AttributeGraph.current can differ from the graph that owns this attr.
+            // _AGGraph.current can differ from the graph that owns this attr.
             // Accessing attr.value from the wrong graph would read against that graph's
             // independent slot table.
             let owningGraph = graph
@@ -131,7 +131,7 @@ extension State {
                     // Read the AG node only when executing inside the same graph that
                     // owns this attribute. Any other context (no AG or a different
                     // graph) must fall back to the cache.
-                    if AttributeGraph.current === owningGraph {
+                    if _AGGraph.current === owningGraph {
                         let value = attr.value
                         cache.value = value
                         return value

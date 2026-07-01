@@ -52,10 +52,10 @@ final class ContentTransitionSurfaceTests: XCTestCase {
     }
 
     func testContentTransitionModifierPublishesEnvironmentValue() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ContentTransitionEnvironmentRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let view = ContentTransitionEnvironmentContent(recorder: recorder)
                 .contentTransition(.opacity)
             let viewAttr = graph.makeInput(value: view)
@@ -72,10 +72,10 @@ final class ContentTransitionSurfaceTests: XCTestCase {
     }
 
     func testContentTransitionDrawingGroupEnvironmentWrites() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ContentTransitionEnvironmentRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let view = ContentTransitionEnvironmentContent(recorder: recorder)
                 .environment(\.contentTransitionAddsDrawingGroup, true)
                 .contentTransition(.interpolate)
@@ -92,7 +92,7 @@ final class ContentTransitionSurfaceTests: XCTestCase {
         }
     }
 
-    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             customInputs: PropertyList(),

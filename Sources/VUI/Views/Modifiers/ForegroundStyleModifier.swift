@@ -32,8 +32,8 @@ public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     }
 
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
@@ -61,8 +61,8 @@ public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeSty
     }
 
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
@@ -94,8 +94,8 @@ public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: Shap
     }
 
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
         }
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {

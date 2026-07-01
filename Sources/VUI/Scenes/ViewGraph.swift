@@ -326,7 +326,7 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
 
     override init() { super.init() }
 
-    override init(graph: AttributeGraph) { super.init(graph: graph) }
+    override init(graph: _AGGraph) { super.init(graph: graph) }
 }
 
 private final class ViewGraphDisplayLink {
@@ -561,7 +561,7 @@ class ViewGraph: ViewGraphHost {
         }
 
         guard let hostValues = outputs.preferences.value(for: HostPreferencesKey.self),
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               let weakHostValues = graph.weakAttributeIfValid(for: hostValues) else {
             return
         }
@@ -638,7 +638,7 @@ class ViewGraph: ViewGraphHost {
 
     private func resolvedHostPreferenceKeys(
         for bridge: PreferenceBridge,
-        in graph: AttributeGraph
+        in graph: _AGGraph
     ) -> Attribute<PreferenceKeys>? {
         if let hostPreferenceKeys,
            containsRequestedPreference(in: hostPreferenceKeys.value, bridge: bridge) {
@@ -687,7 +687,7 @@ class ViewGraph: ViewGraphHost {
     // When parent state changes, parent contentAttr re-evaluates, the child inbox
     // is notified, and the child updates on its next updateOutputs. Caller must evaluate contentAttr in sourceGraph
     // first (call `_ = contentAttr.value`) so the crossGraphRef finds a non-nil cached value.
-    convenience init(crossGraphContentAttr: Attribute<AnyView>, sourceGraph: AttributeGraph,
+    convenience init(crossGraphContentAttr: Attribute<AnyView>, sourceGraph: _AGGraph,
                      rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
             _GraphValue<AnyView>(_attribute: g.makeCrossGraphRef(source: crossGraphContentAttr, in: sourceGraph))
@@ -695,10 +695,10 @@ class ViewGraph: ViewGraphHost {
     }
 
     // Common designated init: `makeContent` is called inside data.withCurrent to produce the
-    // root _GraphValue. The AttributeGraph passed is self.data.graph (child graph, current).
+    // root _GraphValue. The _AGGraph passed is self.data.graph (child graph, current).
     private init<V: View>(rootViewType: V.Type, rendererHost: any ViewRendererHost,
                           requestedOutputs: Outputs,
-                          makeContent: (AttributeGraph) -> _GraphValue<V>) {
+                          makeContent: (_AGGraph) -> _GraphValue<V>) {
         self.requestedOutputs = requestedOutputs
         super.init()
         // Wire rendererHost before _makeView so GestureResponder.init can read rendererHost?.gestureGraph.
@@ -816,7 +816,7 @@ class ViewGraph: ViewGraphHost {
                 g.makeSideEffectRule { [weak self] in
                     guard let host = self?.rendererHost as? WindowController else { return }
                     let value = sheetAttr.value
-                    let transaction = AttributeGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
+                    let transaction = _AGGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
                     host.updateSheetPresentation(value, transaction: transaction)
                 }
             }

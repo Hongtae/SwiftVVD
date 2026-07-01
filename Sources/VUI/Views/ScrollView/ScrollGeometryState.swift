@@ -32,7 +32,7 @@ struct ScrollGeometryState: Equatable {
     }
 
     var transform: ViewTransform? {
-        guard let graph = AttributeGraph.current,
+        guard let graph = _AGGraph.current,
               transformAttribute.isValid(in: graph) else {
             return nil
         }

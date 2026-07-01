@@ -48,7 +48,7 @@ struct LayoutProxy {
     var attributes: LayoutProxyAttributes
 
     init(attributes: LayoutProxyAttributes) {
-        self.context = AttributeGraph.currentRuleContextAttribute.map(AnyRuleContext.init(attribute:))
+        self.context = _AGGraph.currentRuleContextAttribute.map(AnyRuleContext.init(attribute:))
         self.attributes = attributes
     }
 

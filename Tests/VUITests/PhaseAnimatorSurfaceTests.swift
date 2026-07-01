@@ -8,8 +8,8 @@ private struct PhaseSizedView: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
             let value = view._attribute.value
@@ -23,8 +23,8 @@ private struct PhaseAnimatorRelaySource: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 31, height: 23))
@@ -53,8 +53,8 @@ private struct TransactionSizedPhaseView: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         let transaction = inputs.base.transaction
         let layout = graph.makeRule {
@@ -6630,8 +6630,8 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     func testTransactionRuleSelectsPhaseChangeTransactionWhenSeedMatches() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var baseTransaction = Transaction()
@@ -6661,8 +6661,8 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     func testTransactionRuleFallsBackWhenPhaseChangeSeedIsNil() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var baseTransaction = Transaction()
@@ -6684,8 +6684,8 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     func testTransactionRuleRechecksCurrentTransactionSeed() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var baseTransaction = Transaction()
@@ -6713,8 +6713,8 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     func testTransactionRuleStorageLabelsMatchObservedShape() {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             let rule = PhaseAnimator<Int, PhaseSizedView>
@@ -6752,7 +6752,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    private func makeViewInputs(graph: AttributeGraph, transaction: Transaction = Transaction()) -> _ViewInputs {
+    private func makeViewInputs(graph: _AGGraph, transaction: Transaction = Transaction()) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             customInputs: PropertyList(),
@@ -6782,7 +6782,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     private func withPhaseAnimatorHost(
-        _ body: (ViewGraph, AttributeGraph) throws -> Void
+        _ body: (ViewGraph, _AGGraph) throws -> Void
     ) rethrows {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -6798,7 +6798,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     }
 
     private func makeChild(
-        in graph: AttributeGraph,
+        in graph: _AGGraph,
         viewGraph: ViewGraph,
         container: PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
     ) -> PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer.Child {

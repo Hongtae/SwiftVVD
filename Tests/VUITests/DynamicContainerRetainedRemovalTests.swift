@@ -3,8 +3,8 @@ import XCTest
 
 final class DynamicContainerRetainedRemovalTests: XCTestCase {
     func testDynamicContainerRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var removalEvents: [String] = []
@@ -66,8 +66,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedTransitionRemovalQueuesDisappearAfterCompletionSeedFinishes() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var removalEvents: [String] = []
@@ -138,8 +138,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testSameIdentityReinsertCancelsRetainedTransitionRemovalWithoutLifecycleReinsert() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var graphInputs: _GraphInputs!
@@ -356,8 +356,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicViewThatFitsFallbackSwitchQueuesSelectedDisappearAndFallbackAppear() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<DynamicContainerViewThatFitsFallbackRoot>!
         var layoutAttr: Attribute<LayoutComputer>!
@@ -457,8 +457,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     private func assertPublicRootRetainsTransitionRemovalUntilCompletionSeedFinishes<Root: View>(
         @ViewBuilder makeRoot: @escaping ([String], DynamicContainerLifecycleRecorder) -> Root
     ) throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<Root>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -534,8 +534,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     private func assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes<Root: View>(
         @ViewBuilder makeRoot: @escaping ([String], DynamicContainerLifecycleRecorder) -> Root
     ) throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<Root>!
         var layoutAttr: Attribute<LayoutComputer>!
@@ -586,8 +586,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testDynamicContainerRetainsMultipleTransitionRemovalsUntilAllSeedsFinish() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var removalEvents: [String] = []
@@ -659,8 +659,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testTransitionRemovalWithoutPositiveAnimationBecomesUnusedWithoutListener() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
 
@@ -882,8 +882,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testUnusedRetentionPrunesOlderPhaseThreeItemsBeyondLimit() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var graphInputs: _GraphInputs!
@@ -948,8 +948,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testCompletedPhaseTwoRemovalDoesNotPruneRetainedUnusedItem() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var graphInputs: _GraphInputs!
@@ -1034,8 +1034,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testTransitionRemovalWithoutPositiveAnimationInvalidatesWhenUnusedRetentionIsDisabled() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var initialItem: DynamicContainer.ItemInfo!
@@ -1130,8 +1130,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapUsesActivePrefixAndRetainedInclusiveSegments() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
             let activeLow = makeDisplayMapItem(id: "active-low", zIndex: 0, phase: 1)
@@ -1151,8 +1151,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedUnusedDisplayMapIgnoresUnusedDepthOnlyItems() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
             let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
@@ -1171,8 +1171,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapOrdersRemovedItemsBeforeSameDepthActiveItems() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
             let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
@@ -1190,8 +1190,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapKeepsDepthOrderingAcrossRemovedAndActiveItems() throws {
-        let graph = AttributeGraph()
-        let ref = AttributeGraphRef(graph: graph)
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
             let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
@@ -1255,7 +1255,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     private static func makeFixedLayoutOutputs(_ inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainer test element built outside AG context.")
         }
         let layout = graph.makeInput(
@@ -1268,7 +1268,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         row: String,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainer preference test element built outside AG context.")
         }
         let layout = graph.makeInput(
@@ -1292,7 +1292,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         appear: @escaping () -> Void,
         disappear: @escaping () -> Void
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainer lifecycle test element built outside AG context.")
         }
         let modifier = graph.makeInput(
@@ -1412,7 +1412,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         base: _GraphInputs,
         maxUnusedItems: Int? = nil,
         preferenceKeys: PreferenceKeys = PreferenceKeys()
@@ -1439,7 +1439,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     private func makeGraphInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         transaction: Transaction
     ) -> _GraphInputs {
         _GraphInputs(
@@ -1531,7 +1531,7 @@ private struct DynamicContainerLifecycleRow: View {
         view: _GraphValue<Self>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainerLifecycleRow._makeView called outside AG context.")
         }
         let modifier = graph.makeRule {
@@ -1568,7 +1568,7 @@ private struct DynamicContainerLifecycleSizedRow: View {
         view: _GraphValue<Self>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("DynamicContainerLifecycleSizedRow._makeView called outside AG context.")
         }
         let modifier = graph.makeRule {

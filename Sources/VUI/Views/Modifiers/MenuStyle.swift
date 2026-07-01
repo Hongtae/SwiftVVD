@@ -46,8 +46,8 @@ struct _MenuStyleKey: GraphInput {
 
 extension MenuStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
             return _ViewOutputs()
@@ -87,8 +87,8 @@ extension MenuStyleConfiguration.Label {
 
 extension MenuStyleConfiguration.Content {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
             return _ViewOutputs()
@@ -319,7 +319,7 @@ private struct PlatformItemListMenuBody: View {
     @Environment(\.isEnabled) private var isEnabled: Bool
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PlatformItemListMenuBody._makeView called outside AG context")
         }
 

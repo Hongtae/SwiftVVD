@@ -74,7 +74,7 @@ extension Namespace {
 // MARK: - ID allocation
 
 extension Namespace {
-    // Namespace IDs use AttributeGraph's process-wide unique-ID allocator.
+    // Namespace IDs use _AGGraph's process-wide unique-ID allocator.
     static func _allocateID() -> Int {
         AGMakeUniqueID()
     }

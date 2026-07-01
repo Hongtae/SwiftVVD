@@ -122,8 +122,8 @@ private struct ScrollableRecordingRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollableRecordingRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableRecordingRow._makeView called outside an active _AGGraph context.")
         }
         let row = view._attribute.value
         row.recorder.makeViewIDs.append(row.id)
@@ -159,8 +159,8 @@ private struct ScrollableLifecycleRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollableLifecycleRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableLifecycleRow._makeView called outside an active _AGGraph context.")
         }
         let row = view._attribute.value
         row.recorder.makeViewIDs.append(row.id)
@@ -218,8 +218,8 @@ private struct ScrollableOrdinaryPreferenceRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollableOrdinaryPreferenceRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableOrdinaryPreferenceRow._makeView called outside an active _AGGraph context.")
         }
         let row = view._attribute.value
         row.recorder.makeViewIDs.append(row.id)
@@ -249,8 +249,8 @@ private struct ScrollViewInputRecordingContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollViewInputRecordingContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewInputRecordingContent._makeView called outside an active _AGGraph context.")
         }
         let content = view._attribute.value
         content.recorder.geometryInputs.append(
@@ -311,8 +311,8 @@ private struct ScrollViewResponderContent: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollViewResponderContent._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewResponderContent._makeView called outside an active _AGGraph context.")
         }
         let content = view._attribute.value
         let layout = graph.makeRule {
@@ -343,8 +343,8 @@ private struct FixedSizeRecordingRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("FixedSizeRecordingRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("FixedSizeRecordingRow._makeView called outside an active _AGGraph context.")
         }
         let row = view._attribute.value
         let layout = graph.makeRule {
@@ -373,8 +373,8 @@ private struct ScrollableMeasuringRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollableMeasuringRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableMeasuringRow._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
             LayoutComputer(
@@ -453,8 +453,8 @@ private struct ScrollablePreferenceRow: View, _PrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ScrollablePreferenceRow._makeView called outside an active AttributeGraph context.")
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollablePreferenceRow._makeView called outside an active _AGGraph context.")
         }
 
         let layout = graph.makeRule {
@@ -630,16 +630,16 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorStorageShapeAndIdleCompletionDispatch() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         var completions: [Bool] = []
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offset = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offset,
                 config: config,
                 pixelLength: pixelLength
@@ -783,15 +783,15 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewNodeConsumesDirectCommitInfoTransaction() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offset = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offset,
                 config: config,
                 pixelLength: pixelLength
@@ -830,16 +830,16 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewNodeConsumesTargetCommitInfoTransaction() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         var completions: [Bool] = []
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offset = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offset,
                 config: config,
                 pixelLength: pixelLength
@@ -881,15 +881,15 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewNodeBindingChangesUseScrollViewAnimationModeGate() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offset = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offset,
                 config: config,
                 pixelLength: pixelLength
@@ -935,16 +935,16 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorBuildsAndReplacesDecelerationState() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         var completions: [Bool] = []
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offset = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offset,
                 config: config,
                 pixelLength: pixelLength
@@ -1063,13 +1063,13 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorOverflowContentOffsetRubberBandsDraggingAxes() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.alwaysBounceHorizontal = true
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1094,13 +1094,13 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorOverflowContentOffsetPropagatesResidueToContainers() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let rootNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: CGPoint(x: 100, y: 0)),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1109,7 +1109,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             rootNode.containerSize = CGSize(width: 100, height: 100)
 
             let childNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: CGPoint(x: 20, y: 0)),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1137,13 +1137,13 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorReloadsParentNodeContainersForIdleDeceleration() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let parentNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: CGPoint(x: 30, y: 40)),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1151,7 +1151,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             parentNode.presentationOffset = CGPoint(x: 30, y: 40)
 
             let childNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1173,13 +1173,13 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             var stoppingConfig = config
             stoppingConfig.stopDraggingImmediately = true
             let stoppingParent = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: stoppingConfig,
                 pixelLength: graph.makeInput(value: CGFloat(1))
             )
             let stoppedChild = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1198,12 +1198,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorReloadRevalidatesParentContainersBeforeReset() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             let config = _ScrollViewConfig()
             let grandparentNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(0.5))
@@ -1215,7 +1215,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             grandparentNode.presentationOffset = .zero
 
             let parentNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: CGPoint(x: 30, y: 40)),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1232,7 +1232,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
 
             let childNode = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: graph.makeInput(value: .zero),
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
@@ -1257,15 +1257,15 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewBehaviorEstimatedDecelerationAndIterationTick() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             var config = _ScrollViewConfig()
             config.decelerationRate = 0.9
             let offsetAttribute = graph.makeInput(value: CGPoint(x: 10, y: 20))
             let pixelLength = graph.makeInput(value: CGFloat(1))
             let node = ScrollViewNode(
-                graphRef: AttributeGraphRef(graph: graph),
+                graphRef: _AGGraphContext(graph: graph),
                 contentOffset: offsetAttribute,
                 config: config,
                 pixelLength: pixelLength
@@ -1325,10 +1325,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewMainGeometryRewriteAppliesContentInsets() {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        AttributeGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             var config = _ScrollViewConfig()
@@ -1363,10 +1363,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewMainWrapsChildRespondersInDefaultLayoutResponder() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let childResponder = ScrollViewTestResponder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewResponderProvider>
 
             let provider = ScrollViewResponderProvider(responder: childResponder)
@@ -1477,10 +1477,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewMainContentSizeChangeClampsContentOffset() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             var config = _ScrollViewConfig()
@@ -1520,12 +1520,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewMainBindingOffsetCommitRoundsToPixelLength() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
         var storedOffset = CGPoint.zero
         var bindingWrites: [CGPoint] = []
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             let binding = Binding<CGPoint>(
@@ -1589,11 +1589,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewUpdateConsumesChangedBindingOffsetThroughStatefulRule() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
         var storedOffset = CGPoint.zero
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             let binding = Binding<CGPoint>(
@@ -1652,12 +1652,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewUpdateWarnsWithSwiftUIContentOffsetBindingReadMessage() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
         let location = StoredLocationBase<CGPoint>(initialValue: .zero)
 
         let output = try captureStandardOutput {
-            try AttributeGraph.withCurrent(graph) {
+            try _AGGraph.withCurrent(graph) {
                 typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
                 let binding = Binding<CGPoint>(location: location)
@@ -1699,11 +1699,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewUpdateUsesInheritedTransactionAfterSourceCommitTransaction() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
         var storedOffset = CGPoint.zero
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             let binding = Binding<CGPoint>(
@@ -1766,10 +1766,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewUpdateDoesNotDependOnTransactionAttribute() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
 
             var config = _ScrollViewConfig()
@@ -2210,10 +2210,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableLayoutProxyMeasuresTemplateContent() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let rows = [
                 ScrollableMeasuringRow(id: 7),
                 ScrollableMeasuringRow(id: 11),
@@ -2238,10 +2238,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableLayoutProxyContentSeedIgnoresGeometryOnlyUpdates() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let rows = [
                 ScrollableMeasuringRow(id: 7, recorder: recorder),
                 ScrollableMeasuringRow(id: 11, recorder: recorder),
@@ -2394,10 +2394,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableLayoutViewPlacesVisibleItemsAndReusesOneUnusedItem() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let rows = (0..<4).map { ScrollableRecordingRow(id: $0, recorder: recorder) }
             let viewAttr = graph.makeInput(
                 value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
@@ -2561,10 +2561,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableLayoutViewFiltersRetainedUnusedOrdinaryPreferences() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let rows = (0..<4).map { ScrollableOrdinaryPreferenceRow(id: $0, recorder: recorder) }
             let viewAttr = graph.makeInput(
                 value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
@@ -2598,10 +2598,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableItemGeometryUsesPlacementAnchorAndResolvedChildSize() throws {
-        let graph = AttributeGraph()
+        let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
 
-        try AttributeGraph.withCurrent(graph) {
+        try _AGGraph.withCurrent(graph) {
             let rows = [
                 FixedSizeRecordingRow(
                     id: 0,
@@ -2634,8 +2634,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testViewInputsGeometryOptionBits() {
-        let graph = AttributeGraph()
-        AttributeGraph.withCurrent(graph) {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
 
@@ -2656,8 +2656,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollableIdentifierContextUsesDynamicContainerInfo() {
-        let graph = AttributeGraph()
-        AttributeGraph.withCurrent(graph) {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
             let layoutDirection = graph.makeInput(value: LayoutDirection.leftToRight)
             let context = ScrollableLayoutItemGeometryContext(
                 layoutDirection: layoutDirection,
@@ -2687,7 +2687,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     private func makeViewInputs(
-        graph: AttributeGraph,
+        graph: _AGGraph,
         size: Attribute<ViewSize>,
         environment: Attribute<EnvironmentValues>? = nil
     ) -> _ViewInputs {

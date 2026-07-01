@@ -30,7 +30,7 @@ protocol BodyAccessor {
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<Body>, Optional<_DynamicPropertyBuffer>)
 
-    // Return value is published via AttributeGraph.setStatefulOutput in StatefulRule.
+    // Return value is published via _AGGraph.setStatefulOutput in StatefulRule.
     mutating func updateBody(of container: Container, changed: Bool) -> Body
 }
 
@@ -50,7 +50,7 @@ struct DynamicBody<Accessor: BodyAccessor, Flags>: StatefulRule {
         var container = accessor.containerAttr.value  // registers AG dependency
         buffer.applyContexts(to: &container)
         let body = accessor.updateBody(of: container, changed: !buffer.isEmpty)
-        AttributeGraph.setStatefulOutput(body)
+        _AGGraph.setStatefulOutput(body)
     }
 }
 
@@ -63,7 +63,7 @@ struct StaticBody<Accessor: BodyAccessor, Flags>: StatefulRule {
     mutating func updateValue() {
         let container = accessor.containerAttr.value  // registers AG dependency
         let body = accessor.updateBody(of: container, changed: false)
-        AttributeGraph.setStatefulOutput(body)
+        _AGGraph.setStatefulOutput(body)
     }
 }
 
@@ -84,8 +84,8 @@ struct ModifierBodyAccessor<M: ViewModifier>: BodyAccessor {
         inputs: inout _GraphInputs,
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<M.Body>, Optional<_DynamicPropertyBuffer>) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ModifierBodyAccessor.makeBody called outside AttributeGraph context")
+        guard let graph = _AGGraph.current else {
+            fatalError("ModifierBodyAccessor.makeBody called outside _AGGraph context")
         }
         let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
         let accessor = ModifierBodyAccessor(containerAttr: container._attribute)
@@ -119,8 +119,8 @@ struct EnvironmentalBodyAccessor<E: EnvironmentalModifier>: BodyAccessor {
         inputs: inout _GraphInputs,
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<E.ResolvedModifier>, Optional<_DynamicPropertyBuffer>) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("EnvironmentalBodyAccessor.makeBody called outside AttributeGraph context")
+        guard let graph = _AGGraph.current else {
+            fatalError("EnvironmentalBodyAccessor.makeBody called outside _AGGraph context")
         }
         let environmentAttr = inputs.cachedEnvironment.value.environment
         let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
@@ -155,8 +155,8 @@ struct ViewBodyAccessor<V: View>: DSLBodyAccessor {
         inputs: inout _GraphInputs,
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<V.Body>, Optional<_DynamicPropertyBuffer>) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ViewBodyAccessor.makeBody called outside AttributeGraph context")
+        guard let graph = _AGGraph.current else {
+            fatalError("ViewBodyAccessor.makeBody called outside _AGGraph context")
         }
         let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
         let accessor = ViewBodyAccessor(containerAttr: container._attribute)

@@ -202,11 +202,11 @@ struct PreferenceCombiner<A: PreferenceKey>: StatefulRule {
     }
 
     mutating func updateValue() {
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
     }
 
     var value: A.Value {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferenceCombiner.value accessed outside AG context.")
         }
         var combined = A.defaultValue
@@ -256,11 +256,11 @@ struct HostPreferencesCombiner: StatefulRule {
     }
 
     mutating func updateValue() {
-        AttributeGraph.setStatefulOutput(value)
+        _AGGraph.setStatefulOutput(value)
     }
 
     var value: PreferenceValues {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("HostPreferencesCombiner.value accessed outside AG context.")
         }
 
@@ -321,7 +321,7 @@ final class PreferenceBridge {
     }
 
     convenience init() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferenceBridge.init() called outside AG context.")
         }
         let requestedKeys = PreferenceKeys()
@@ -341,7 +341,7 @@ final class PreferenceBridge {
     }
 
     func wrapInputs(_ inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferenceBridge.wrapInputs called outside AG context.")
         }
         guard isValid,
@@ -363,7 +363,7 @@ final class PreferenceBridge {
     }
 
     func wrapOutputs(_ outputs: inout PreferencesOutputs, inputs: _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferenceBridge.wrapOutputs called outside AG context.")
         }
         guard isValid else {
@@ -436,7 +436,7 @@ final class PreferenceBridge {
 
     func addValue<K: PreferenceKey>(_ value: Attribute<K.Value>, for key: K.Type) {
         guard isValid,
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               let bridgedPreference = bridgedPreference(for: key),
               bridgedPreference.combiner.isValid(in: graph),
               let weakValue = graph.weakAttributeIfValid(for: value.identifier) else {
@@ -476,7 +476,7 @@ final class PreferenceBridge {
         isInvalidating: Bool = false
     ) -> Bool {
         guard isValid,
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               let bridgedPreference = bridgedPreference(for: key),
               bridgedPreference.combiner.isValid(in: graph) else {
             return false
@@ -499,7 +499,7 @@ final class PreferenceBridge {
         for keys: Attribute<PreferenceKeys>
     ) {
         guard isValid,
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               _hostPreferencesCombiner.isValid(in: graph) else {
             return
         }
@@ -524,7 +524,7 @@ final class PreferenceBridge {
 
     func addHostValues(keys: Attribute<PreferenceKeys>, values: Attribute<PreferenceValues>) {
         guard isValid,
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               _hostPreferencesCombiner.isValid(in: graph),
               let weakValues = graph.weakAttributeIfValid(for: values.identifier) else {
             return
@@ -539,7 +539,7 @@ final class PreferenceBridge {
         isInvalidating: Bool = false
     ) -> Bool {
         guard isValid,
-              let graph = AttributeGraph.current,
+              let graph = _AGGraph.current,
               _hostPreferencesCombiner.isValid(in: graph) else {
             return false
         }
@@ -592,7 +592,7 @@ final class PreferenceBridge {
     private func wrapPreferenceOutput(
         _ key: any PreferenceKey.Type,
         outputs: inout PreferencesOutputs,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         func wrap<K: PreferenceKey>(_ key: K.Type) {
             guard let value = outputs.value(for: key) else {
@@ -624,7 +624,7 @@ private struct MergePreferenceKeys: Rule {
     var bridged: WeakAttribute<PreferenceKeys>
 
     func updateValue() -> PreferenceKeys {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("MergePreferenceKeys.updateValue() called outside AG context.")
         }
 
@@ -731,16 +731,16 @@ struct PreferencesOutputs {
         let value: AGAttribute      // type-erased raw node ID
         /// Builds a new AG rule that reduces `nodes` into a single value using
         /// the concrete `PreferenceKey.reduce` implementation captured at append time.
-        let _makeReduceRule: (_ nodes: [AGAttribute], _ graph: AttributeGraph) -> AGAttribute
+        let _makeReduceRule: (_ nodes: [AGAttribute], _ graph: _AGGraph) -> AGAttribute
         /// Points the indirect placeholder at the matching concrete attr in `concrete`.
         /// Non-placeholder outputs leave this nil.
-        let _attachIndirect: ((_ concrete: PreferencesOutputs, _ graph: AttributeGraph) -> Void)?
+        let _attachIndirect: ((_ concrete: PreferencesOutputs, _ graph: _AGGraph) -> Void)?
         /// Detaches the indirect placeholder (points it to nil for the default value).
         /// Non-placeholder outputs leave this nil.
-        let _detachIndirect: ((_ graph: AttributeGraph) -> Void)?
+        let _detachIndirect: ((_ graph: _AGGraph) -> Void)?
         /// Registers a permanent AG dependency on `dep` so this placeholder is
         /// invalidated whenever `dep` changes. Non-placeholder outputs leave this nil.
-        let _setIndirectDependency: ((_ dep: AGAttribute, _ graph: AttributeGraph) -> Void)?
+        let _setIndirectDependency: ((_ dep: AGAttribute, _ graph: _AGGraph) -> Void)?
     }
 
     var preferences: [KeyValue] = []
@@ -770,7 +770,7 @@ struct PreferencesOutputs {
 
     /// Merges multiple `PreferencesOutputs` by reducing per-key AG nodes.
     /// For each unique key across all outputs, creates a single AG reduce rule.
-    static func merge(_ outputs: [PreferencesOutputs], in graph: AttributeGraph) -> PreferencesOutputs {
+    static func merge(_ outputs: [PreferencesOutputs], in graph: _AGGraph) -> PreferencesOutputs {
         var grouped: [ObjectIdentifier: (representative: KeyValue, nodes: [AGAttribute])] = [:]
         for output in outputs {
             for kv in output.preferences {
@@ -801,7 +801,7 @@ extension PreferencesInputs {
     /// Creates placeholder preference outputs for the requested keys.
     /// Each placeholder is backed by an indirect AG attribute for the key.
     func makeIndirectOutputs() -> PreferencesOutputs {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferencesInputs.makeIndirectOutputs called outside AG context.")
         }
         var outputs = PreferencesOutputs()
@@ -814,7 +814,7 @@ extension PreferencesInputs {
     private func _appendIndirectPreference<K: PreferenceKey>(
         _ key: K.Type,
         to outputs: inout PreferencesOutputs,
-        in graph: AttributeGraph
+        in graph: _AGGraph
     ) {
         let indirectAttr: Attribute<K.Value> = graph.makeIndirectAttribute(defaultValue: K.defaultValue)
         outputs.preferences.append(PreferencesOutputs.KeyValue(
@@ -866,7 +866,7 @@ extension PreferencesInputs {
 extension PreferencesOutputs {
     /// Points each placeholder preference attr at the matching concrete attr.
     func attachIndirectOutputs(to placeholders: PreferencesOutputs) {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferencesOutputs.attachIndirectOutputs called outside AG context.")
         }
         for placeholder in placeholders.preferences {
@@ -877,7 +877,7 @@ extension PreferencesOutputs {
     /// Registers a permanent AG dependency on `attr` for all placeholder slots.
     func setIndirectDependency(_ attr: AGAttribute?) {
         guard let dep = attr else { return }
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferencesOutputs.setIndirectDependency called outside AG context.")
         }
         for kv in preferences {
@@ -887,7 +887,7 @@ extension PreferencesOutputs {
 
     /// Detaches all placeholder slots (points them to nil for the default value).
     func detachIndirectOutputs() {
-        guard let graph = AttributeGraph.current else {
+        guard let graph = _AGGraph.current else {
             fatalError("PreferencesOutputs.detachIndirectOutputs called outside AG context.")
         }
         for kv in preferences {
@@ -934,7 +934,7 @@ extension PreferencesOutputs {
     mutating func makePreferenceTransformer<K: PreferenceKey>(
         key: K.Type,
         transformAttr: Attribute<(inout K.Value) -> Void>,
-        graph: AttributeGraph
+        graph: _AGGraph
     ) {
         let existingNodes = values(for: K.self)
         let weakNodes = existingNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
@@ -998,7 +998,7 @@ extension PreferencesOutputs {
     /// For "last wins" reduce semantics this is equivalent to replace.
     /// for union semantics (e.g. OptionSet) all entries are merged correctly.
     func reducedValue<K: PreferenceKey>(for key: K.Type,
-                                        in graph: AttributeGraph) -> Attribute<K.Value>? {
+                                        in graph: _AGGraph) -> Attribute<K.Value>? {
         let nodes = values(for: key)
         guard !nodes.isEmpty,
               let representative = preferences.first(where: {
