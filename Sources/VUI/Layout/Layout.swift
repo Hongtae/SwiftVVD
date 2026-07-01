@@ -377,14 +377,14 @@ enum DynamicContainer {
         private mutating func rebuildDisplayMap() {
             // zIndex/depth can produce displayMap. LayoutProxyAttributes does not
             // currently provide a zIndex source, so this only covers stored values.
-            guard items.contains(where: { $0.zIndex != 0 }) else {
-                displayMap = nil
-                return
-            }
             let activeEnd = max(0, items.count - unusedCount - removedCount)
             let activeRange = 0..<activeEnd
             let retainedEnd = activeEnd + removedCount
             let retainedRange = 0..<retainedEnd
+            guard items[retainedRange].contains(where: { $0.zIndex != 0 }) else {
+                displayMap = nil
+                return
+            }
             let activeMap = sortedDisplayIndexes(in: activeRange)
             guard removedCount != 0 else {
                 displayMap = activeMap

@@ -1150,6 +1150,26 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testRetainedUnusedDisplayMapIgnoresUnusedDepthOnlyItems() throws {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+        ref.withCurrent {
+            var info = DynamicContainer.Info()
+            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
+            let unusedHigh = makeDisplayMapItem(id: "unused-high", zIndex: 8, phase: 3)
+
+            info.replaceItems(
+                active: [activeZero],
+                unused: [unusedHigh]
+            )
+
+            XCTAssertEqual(info.activeItems.count, 1)
+            XCTAssertEqual(info.removedCount, 0)
+            XCTAssertEqual(info.unusedCount, 1)
+            XCTAssertNil(info.displayMap)
+        }
+    }
+
     func testRetainedRemovalDisplayMapOrdersRemovedItemsBeforeSameDepthActiveItems() throws {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)

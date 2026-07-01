@@ -47,18 +47,21 @@ final class BindingPropagationTransactionTests: XCTestCase {
         local.disablesAnimations = true
         binding.value.transaction(local).wrappedValue = 2
 
+        binding.value.animation(.linear(duration: 0.25)).wrappedValue = 3
+
         var ambient = Transaction(animation: .linear(duration: 0.40))
         ambient.disablesAnimations = false
         withTransaction(ambient) {
-            binding.value.transaction(local).wrappedValue = 3
+            binding.value.transaction(local).wrappedValue = 4
         }
 
-        XCTAssertEqual(recorder.value, BindingPropagationModel(value: 3))
+        XCTAssertEqual(recorder.value, BindingPropagationModel(value: 4))
         XCTAssertEqual(
             recorder.transactions,
             [
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: true),
+                .init(hasAnimation: true, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: false),
             ]
         )
@@ -74,19 +77,22 @@ final class BindingPropagationTransactionTests: XCTestCase {
         local.disablesAnimations = true
         binding[0].transaction(local).wrappedValue = 2
 
+        binding[0].animation(.linear(duration: 0.25)).wrappedValue = 3
+
         let baseLocal = binding.transaction(Transaction(animation: .linear(duration: 0.30)))
-        baseLocal[0].wrappedValue = 3
+        baseLocal[0].wrappedValue = 4
 
         var ambient = Transaction(animation: .linear(duration: 0.40))
         ambient.disablesAnimations = false
         withTransaction(ambient) {
-            binding[0].transaction(local).wrappedValue = 4
+            binding[0].transaction(local).wrappedValue = 5
         }
 
-        XCTAssertEqual(recorder.value, [4])
+        XCTAssertEqual(recorder.value, [5])
         XCTAssertEqual(
             recorder.transactions,
             [
+                .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: false),
@@ -129,19 +135,22 @@ final class BindingPropagationTransactionTests: XCTestCase {
         local.disablesAnimations = true
         binding[0].value.transaction(local).wrappedValue = 2
 
+        binding[0].value.animation(.linear(duration: 0.25)).wrappedValue = 3
+
         let baseLocal = binding.transaction(Transaction(animation: .linear(duration: 0.30)))
-        baseLocal[0].value.wrappedValue = 3
+        baseLocal[0].value.wrappedValue = 4
 
         var ambient = Transaction(animation: .linear(duration: 0.40))
         ambient.disablesAnimations = false
         withTransaction(ambient) {
-            binding[0].value.transaction(local).wrappedValue = 4
+            binding[0].value.transaction(local).wrappedValue = 5
         }
 
-        XCTAssertEqual(recorder.value, [BindingPropagationModel(value: 4)])
+        XCTAssertEqual(recorder.value, [BindingPropagationModel(value: 5)])
         XCTAssertEqual(
             recorder.transactions,
             [
+                .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: false),

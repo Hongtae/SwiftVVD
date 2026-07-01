@@ -882,7 +882,7 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
 
         mutating func updateValue() {
             if AttributeGraph.currentStatefulOutput(Value.self) != nil,
-               AttributeGraph.currentStatefulInputsChanged() {
+               _AGGraphAnyInputsChanged() {
                 seed &+= 1
             }
 

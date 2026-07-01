@@ -83,6 +83,42 @@ final class AnimatableAttributeHarness {
         }
     }
 
+    func setSourceThroughDynamicMemberBinding(_ opacity: Double, transaction: Transaction) {
+        viewGraph.data.withCurrent {
+            let binding = Binding<_OpacityEffect>(
+                get: { self.source.value },
+                set: { newValue, transaction in
+                    self.source.setValue(newValue, transaction: transaction)
+                }
+            )
+            binding.opacity.transaction(transaction).wrappedValue = opacity
+        }
+    }
+
+    func setSourceThroughCollectionElementBinding(_ value: _OpacityEffect, transaction: Transaction) {
+        viewGraph.data.withCurrent {
+            let binding = Binding<[_OpacityEffect]>(
+                get: { [self.source.value] },
+                set: { newValue, transaction in
+                    self.source.setValue(newValue[0], transaction: transaction)
+                }
+            )
+            binding[0].transaction(transaction).wrappedValue = value
+        }
+    }
+
+    func setSourceThroughCollectionMemberBinding(_ opacity: Double, transaction: Transaction) {
+        viewGraph.data.withCurrent {
+            let binding = Binding<[_OpacityEffect]>(
+                get: { [self.source.value] },
+                set: { newValue, transaction in
+                    self.source.setValue(newValue[0], transaction: transaction)
+                }
+            )
+            binding[0].opacity.transaction(transaction).wrappedValue = opacity
+        }
+    }
+
     func setTime(_ seconds: Double) {
         viewGraph.data.withCurrent {
             time.setValue(Time(seconds: seconds))

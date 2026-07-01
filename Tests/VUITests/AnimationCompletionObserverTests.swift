@@ -599,6 +599,25 @@ final class AnimationCompletionObserverTests: XCTestCase {
         )
     }
 
+    func testRetainedStandaloneTransactionCompletionWaitsForScheduledPendingDrain() {
+        var fired: [String] = []
+        var retained: Transaction? = Transaction(animation: .linear(duration: 0.20))
+        retained?.addAnimationCompletion(criteria: .logicallyComplete) {
+            fired.append("retained logical")
+        }
+        retained?.addAnimationCompletion(criteria: .removed) {
+            fired.append("retained removed")
+        }
+
+        XCTAssertEqual(fired, [])
+        waitForMainQueue(until: { fired.count == 2 })
+        XCTAssertEqual(fired, ["retained logical", "retained removed"])
+
+        retained = nil
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(fired, ["retained logical", "retained removed"])
+    }
+
     func testStandaloneTransactionCompletionScopeExitDrainsDroppedListeners() {
         var fired: [String] = []
         do {

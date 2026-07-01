@@ -246,7 +246,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
 
     private mutating func trackedEnvironment(from values: EnvironmentValues) -> EnvironmentValues? {
         if AttributeGraph.currentStatefulOutput(Value.self) != nil,
-           !AttributeGraph.currentStatefulInputsChanged(),
+           !_AGGraphAnyInputsChanged(),
            !propertyTracker.hasDifferentUsedValues(values._plist) {
             return nil
         }

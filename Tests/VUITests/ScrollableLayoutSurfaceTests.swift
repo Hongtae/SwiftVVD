@@ -73,6 +73,7 @@ private final class ScrollableLayoutRecorder {
     var placements: [[Int]] = []
     var currentPlacement: [Int] = []
     var itemSubgraphs: [Int: AGSubgraph] = [:]
+    var lifecycleEvents: [String] = []
 
     func beginPlacement() {
         currentPlacement = []
@@ -80,6 +81,37 @@ private final class ScrollableLayoutRecorder {
 
     func finishPlacement() {
         placements.append(currentPlacement)
+    }
+}
+
+private final class ScrollableLayoutDelegateGraphHost: GraphHost {
+    private let delegateRecorder: ScrollableLayoutGraphDelegateRecorder
+
+    init(delegate: ScrollableLayoutGraphDelegateRecorder) {
+        self.delegateRecorder = delegate
+        super.init()
+        delegate.host = self
+    }
+
+    override var graphDelegate: (any GraphDelegate)? {
+        delegateRecorder
+    }
+}
+
+private final class ScrollableLayoutGraphDelegateRecorder: GraphDelegate {
+    weak var host: GraphHost?
+    private(set) var events: [String] = []
+
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        guard let host else {
+            fatalError("ScrollableLayoutGraphDelegateRecorder used before attaching a host.")
+        }
+        events.append("update")
+        return body(host)
+    }
+
+    func graphDidChange() {
+        events.append("change")
     }
 }
 
@@ -117,6 +149,96 @@ private struct ScrollableRecordingRow: View, _PrimitiveView {
             )
         }
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+}
+
+private struct ScrollableLifecycleRow: View, _PrimitiveView {
+    var id: Int
+    var recorder: ScrollableLayoutRecorder
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("ScrollableLifecycleRow._makeView called outside an active AttributeGraph context.")
+        }
+        let row = view._attribute.value
+        row.recorder.makeViewIDs.append(row.id)
+        if let subgraph = AGSubgraph.current {
+            row.recorder.itemSubgraphs[row.id] = subgraph
+        }
+        let modifier = graph.makeRule {
+            let value = view._attribute.value
+            return _AppearanceActionModifier(
+                appear: { value.recorder.lifecycleEvents.append("\(value.id) appear") },
+                disappear: { value.recorder.lifecycleEvents.append("\(value.id) disappear") }
+            )
+        }
+        let effect = graph.makeStatefulRule(
+            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+        )
+        graph.makeSideEffectRule {
+            _ = effect.value
+            return ()
+        }
+        let layout = graph.makeRule {
+            LayoutComputer(
+                sizeThatFits: { proposal in
+                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                },
+                place: { _, _, _ in
+                    row.recorder.currentPlacement.append(row.id)
+                    row.recorder.geometryInputs.append(
+                        ScrollableGeometryInputRecord(
+                            id: row.id,
+                            position: inputs.position.value,
+                            size: inputs.size.value.value,
+                            requestsLayoutComputer: inputs.requestsLayoutComputer
+                        )
+                    )
+                }
+            )
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+}
+
+private struct ScrollableOrdinaryPreferenceKey: PreferenceKey {
+    static let defaultValue = ""
+
+    static func reduce(value: inout String, nextValue: () -> String) {
+        value += nextValue()
+    }
+}
+
+private struct ScrollableOrdinaryPreferenceRow: View, _PrimitiveView {
+    var id: Int
+    var recorder: ScrollableLayoutRecorder
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("ScrollableOrdinaryPreferenceRow._makeView called outside an active AttributeGraph context.")
+        }
+        let row = view._attribute.value
+        row.recorder.makeViewIDs.append(row.id)
+        let layout = graph.makeRule {
+            LayoutComputer(
+                sizeThatFits: { proposal in
+                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                }
+            )
+        }
+        let ordinary = graph.makeRule {
+            "\(view._attribute.value.id),"
+        }
+        var preferences = PreferencesOutputs()
+        preferences.append(ScrollableOrdinaryPreferenceKey.self, node: ordinary.identifier)
+        return _ViewOutputs(
+            preferences: preferences,
+            layoutComputer: OptionalAttribute(layout)
+        )
     }
 }
 
@@ -2239,7 +2361,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         host.flushTransactions()
 
-        try host.data.withCurrent {
+        host.data.withCurrent {
             let graph = host.data.graph
             let scrollableAttr: Attribute<any Scrollable> = graph.makeRule {
                 Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value[0]
@@ -2352,6 +2474,125 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 requestsLayoutComputer: true
             ),
         ])
+        XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 1 }.count, 1)
+        XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 2 }.count, 2)
+    }
+
+    func testScrollableLayoutViewReusedUnusedItemRunsDisappearAndAppear() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = ScrollableLayoutRecorder()
+
+        try host.data.withCurrent {
+            let rows = (0..<4).map { ScrollableLifecycleRow(id: $0, recorder: recorder) }
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.needsGeometry = true
+
+            let outputs = _ScrollableLayoutView<[ScrollableLifecycleRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(
+                recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
+                ["1 appear", "2 appear"]
+            )
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 40))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
+            XCTAssertEqual(
+                recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
+                ["1 appear", "2 appear", "1 disappear", "2 disappear"]
+            )
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 80))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(
+                recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
+                [
+                    "1 appear",
+                    "2 appear",
+                    "1 disappear",
+                    "2 disappear",
+                    "1 appear",
+                    "2 appear",
+                ]
+            )
+        }
+
+        XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 1 }.count, 1)
+        XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 2 }.count, 2)
+    }
+
+    func testScrollableLayoutViewRetainedUnusedReinsertNotifiesGraphDelegate() throws {
+        let delegate = ScrollableLayoutGraphDelegateRecorder()
+        let host = ScrollableLayoutDelegateGraphHost(delegate: delegate)
+        let graph = host.data.graph
+        let recorder = ScrollableLayoutRecorder()
+
+        try host.data.withCurrent {
+            let rows = (0..<4).map { ScrollableLifecycleRow(id: $0, recorder: recorder) }
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.needsGeometry = true
+
+            let outputs = _ScrollableLayoutView<[ScrollableLifecycleRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(delegate.events, [])
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 40))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
+            XCTAssertEqual(delegate.events, [])
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 80))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(delegate.events, ["change"])
+        }
+    }
+
+    func testScrollableLayoutViewFiltersRetainedUnusedOrdinaryPreferences() throws {
+        let graph = AttributeGraph()
+        let recorder = ScrollableLayoutRecorder()
+
+        try AttributeGraph.$current.withValue(graph) {
+            let rows = (0..<4).map { ScrollableOrdinaryPreferenceRow(id: $0, recorder: recorder) }
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.preferences.keys.insert(ScrollableOrdinaryPreferenceKey.self)
+            inputs.needsGeometry = true
+
+            let outputs = _ScrollableLayoutView<[ScrollableOrdinaryPreferenceRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            let ordinaryAttr = Attribute<String>(
+                try XCTUnwrap(outputs.preferences.value(for: ScrollableOrdinaryPreferenceKey.self))
+            )
+
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(ordinaryAttr.value, "0,1,2,")
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 40))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
+            XCTAssertEqual(ordinaryAttr.value, "0,")
+
+            sizeAttr.setValue(ViewSize(width: 100, height: 80))
+            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            XCTAssertEqual(ordinaryAttr.value, "0,1,2,")
+        }
+
         XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 1 }.count, 1)
         XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 2 }.count, 2)
     }

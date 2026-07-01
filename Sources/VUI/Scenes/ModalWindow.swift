@@ -47,7 +47,7 @@ struct TransitionAnimationConfiguration<Key: Hashable> {
 }
 
 // Minimal presentation state for the preference-driven modal path.
-private final class ModalPresentationContext: @unchecked Sendable {
+final class ModalPresentationContext: @unchecked Sendable {
     typealias AnimationKey = TransitionAnimationKey
     typealias AnimationTrack = TransitionAnimationConfiguration<AnimationKey>.Track
     typealias AnimationConfiguration = TransitionAnimationConfiguration<AnimationKey>
@@ -198,6 +198,10 @@ private final class ModalPresentationContext: @unchecked Sendable {
         return [AnimationCompletionToken(listener: listener, criteria: criteria)]
     }
 
+    private func startCompletionTokens(_ tokens: [AnimationCompletionToken]) {
+        tokens.forEach { $0.start() }
+    }
+
     func onViewLoaded() {
     }
 
@@ -338,6 +342,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
             transition = nil
             return
         }
+        startCompletionTokens(completionTokens)
         transition = TransitionAnimation(
             phase: .presenting,
             duration: duration,
@@ -352,13 +357,14 @@ private final class ModalPresentationContext: @unchecked Sendable {
         let completionTokens = completionTokens(
             for: transaction,
             duration: duration,
-            registersDefaultCompletion: false
+            registersDefaultCompletion: true
         )
         guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
             completion()
             return
         }
+        startCompletionTokens(completionTokens)
         transition = TransitionAnimation(
             phase: .dismissing,
             duration: duration,

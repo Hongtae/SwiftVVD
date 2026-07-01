@@ -538,7 +538,8 @@ final class _ViewList_Subgraph {
     }
 
     func invalidate() {
-        // Pre-invalidation observer hooks are not wired.
+        guard AGSubgraphIsValid(subgraph) else { return }
+        subgraph.willRemove()
         subgraph.invalidate()
         subgraph.removeFromParent()
     }
@@ -553,12 +554,11 @@ final class _ViewList_SublistSubgraphStorage {
 
     func retain() -> _ViewList_SubgraphRelease? {
         // Walk backwards: skip dead (refcount==0) and invalid subgraphs, retain live ones.
-        // AGSubgraph validity filtering is not modeled.
         var liveItems: [_ViewList_Subgraph] = []
         var i = subgraphs.count - 1
         while i >= 0 {
             let item = subgraphs[i]
-            if item.refcount > 0 {
+            if item.refcount > 0, AGSubgraphIsValid(item.subgraph) {
                 item.refcount += 1
                 liveItems.append(item)
             }

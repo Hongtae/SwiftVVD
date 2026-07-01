@@ -170,6 +170,34 @@ final class AnimationNoRegisteredFallbackDelayTests: XCTestCase {
         }
     }
 
+    func testCircularUnitCurveUsesFiniteNoRegisteredFallbackFamilies() throws {
+        let circular = Animation.timingCurve(.circularEaseInOut, duration: 0.30)
+        try assertNoRegisteredDelay(circular, equals: 0.30)
+        try assertNoRegisteredDelay(
+            Animation.timingCurve(.circularEaseInOut, duration: 0.0),
+            equals: 0
+        )
+        try assertNoRegisteredDelay(
+            Animation.timingCurve(.circularEaseInOut, duration: 0.20).delay(0.25),
+            equals: 0.45
+        )
+        try assertNoRegisteredDelay(
+            Animation.timingCurve(.circularEaseInOut, duration: 0.60).speed(2.0),
+            equals: 0.30
+        )
+        try assertNoRegisteredDelay(
+            Animation.timingCurve(.circularEaseInOut, duration: 0.15)
+                .repeatCount(3, autoreverses: false),
+            equals: 0.45
+        )
+
+        let infinite = Animation.timingCurve(.circularEaseInOut, duration: 0.20)
+            .repeatForever(autoreverses: false)
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay())
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .logicallyComplete))
+        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .removed))
+    }
+
     func testZeroEffectiveFiniteWrappersUseImmediateNoRegisteredFallbackDelay() throws {
         let zeroLinear = Animation.linear(duration: 0)
         let negativeDelay = Animation.linear(duration: 0.20).delay(-0.30)
@@ -194,32 +222,6 @@ final class AnimationNoRegisteredFallbackDelayTests: XCTestCase {
                 accuracy: Self.accuracy
             )
         }
-    }
-
-    func testCircularUnitCurveUsesFiniteNoRegisteredFallbackTiming() throws {
-        let direct = Animation.timingCurve(.circularEaseInOut, duration: 0.30)
-        try assertNoRegisteredDelay(direct, equals: 0.30)
-
-        let zero = Animation.timingCurve(.circularEaseInOut, duration: 0)
-        try assertNoRegisteredDelay(zero, equals: 0)
-
-        let delayed = Animation.timingCurve(.circularEaseInOut, duration: 0.20)
-            .delay(0.25)
-        try assertNoRegisteredDelay(delayed, equals: 0.45)
-
-        let speeded = Animation.timingCurve(.circularEaseInOut, duration: 0.60)
-            .speed(2)
-        try assertNoRegisteredDelay(speeded, equals: 0.30)
-
-        let repeated = Animation.timingCurve(.circularEaseInOut, duration: 0.15)
-            .repeatCount(3, autoreverses: false)
-        try assertNoRegisteredDelay(repeated, equals: 0.45)
-
-        let infinite = Animation.timingCurve(.circularEaseInOut, duration: 0.20)
-            .repeatForever(autoreverses: false)
-        XCTAssertNil(infinite.box.noRegisteredCompletionDelay())
-        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .logicallyComplete))
-        XCTAssertNil(infinite.box.noRegisteredCompletionDelay(for: .removed))
     }
 
     private static let accuracy: TimeInterval = 0.000_000_1

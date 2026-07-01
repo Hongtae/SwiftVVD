@@ -931,7 +931,7 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
         mutating func updateValue() {
             let values = _environment.value
             if AttributeGraph.currentStatefulOutput(Value.self) != nil,
-               !AttributeGraph.currentStatefulInputsChanged(),
+               !_AGGraphAnyInputsChanged(),
                !tracker.hasDifferentUsedValues(values._plist) {
                 return
             }

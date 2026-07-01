@@ -16,6 +16,31 @@ import Synchronization
 // to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
 // they are called. Violating this precondition causes a runtime assertion failure.
 
+struct AGComparisonOptions: RawRepresentable, Equatable, Sendable {
+    var rawValue: UInt32
+
+    init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+}
+
+// Local implementation for AttributeGraph.compareValues / _AGCompareValues
+// duplicate suppression. This intentionally does not use public Equatable
+// equality; all AG duplicate-suppression call sites should route through this
+// entry point instead of adding type-local helpers.
+func _AGCompareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
+    _ = options
+    if let lhs = lhs as? String,
+       let rhs = rhs as? String {
+        return lhs == rhs
+    }
+    return withUnsafeBytes(of: lhs) { lhsBytes in
+        withUnsafeBytes(of: rhs) { rhsBytes in
+            lhsBytes.elementsEqual(rhsBytes)
+        }
+    }
+}
+
 // MARK: - Protocols
 
 /// Base protocol for all AG computed node bodies.
@@ -511,6 +536,7 @@ final class AGSubgraph: @unchecked Sendable {
     private(set) var nodes: [AGAttribute] = []
     private(set) var children: [AGSubgraph] = []
     private(set) weak var parent: AGSubgraph? = nil
+    private(set) var isValid: Bool = true
     weak let graph: AttributeGraph?
 
     @TaskLocal static var current: AGSubgraph? = nil
@@ -537,6 +563,7 @@ final class AGSubgraph: @unchecked Sendable {
         guard graph === self.graph else {
             fatalError("AGSubgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
         }
+        guard isValid else { return }
 
         children.forEach {
             $0.invalidate()
@@ -548,6 +575,7 @@ final class AGSubgraph: @unchecked Sendable {
             graph.removeNode($0)
         }
         nodes.removeAll()
+        isValid = false
     }
 
     func removeFromParent() {
@@ -584,6 +612,14 @@ final class AGSubgraph: @unchecked Sendable {
         }
         graph.didReinsertSubgraph(self)
     }
+}
+
+func AGSubgraphIsValid(_ subgraph: AGSubgraph) -> Bool {
+    subgraph.isValid
+}
+
+func _AGGraphAnyInputsChanged() -> Bool {
+    AttributeGraph._currentStatefulInputsChanged()
 }
 
 // MARK: - AttributeGraphRef
@@ -663,6 +699,9 @@ final class AGChangeSet: @unchecked Sendable {
 // MARK: - AttributeGraph
 
 class AttributeGraph: @unchecked Sendable {
+    static func compareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
+        _AGCompareValues(lhs, rhs, options: options)
+    }
 
     // MARK: Node Storage
 
@@ -897,6 +936,10 @@ class AttributeGraph: @unchecked Sendable {
     /// Reports whether the current StatefulRule evaluation was caused by an
     /// upstream input/dependency change.
     static func currentStatefulInputsChanged() -> Bool {
+        _AGGraphAnyInputsChanged()
+    }
+
+    fileprivate static func _currentStatefulInputsChanged() -> Bool {
         guard let graph = AttributeGraph.current,
               let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
         return graph.slots[Int(nodeID.rawValue)].node?.inputsChanged ?? true
@@ -1221,7 +1264,10 @@ class AttributeGraph: @unchecked Sendable {
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
-        if let oldValue = slots[index].node!.value as? Value, oldValue == newValue { return }
+        if let oldValue = slots[index].node!.value as? Value,
+           AttributeGraph.compareValues(oldValue, newValue, options: AGComparisonOptions(rawValue: 3)) {
+            return
+        }
         slots[index].node!.value = newValue
         Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction

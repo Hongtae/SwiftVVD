@@ -15,6 +15,44 @@ private struct BindableTransactionSnapshot: Equatable {
     var disablesAnimations: Bool
 }
 
+private struct BindableTransactionGraphKey: TransactionKey {
+    static let defaultValue = 0
+}
+
+private struct BindableLocalTransactionRoot: View {
+    let model: BindableTransactionModel
+
+    var body: BindableTransactionLeaf {
+        BindableTransactionLeaf(width: CGFloat(model.localValue))
+    }
+}
+
+private struct BindableAmbientTransactionRoot: View {
+    let model: BindableTransactionModel
+
+    var body: BindableTransactionLeaf {
+        BindableTransactionLeaf(width: CGFloat(model.ambientValue))
+    }
+}
+
+private struct BindableTransactionLeaf: View, _PrimitiveView {
+    var width: CGFloat
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        }
+
+        let layout = graph.makeRule {
+            let leaf = view._attribute.value
+            return LayoutComputer.fixed(CGSize(width: leaf.width, height: 12))
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+}
+
 private final class BindableTransactionSnapshotRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [BindableTransactionSnapshot] = []
@@ -156,11 +194,122 @@ final class BindableTransactionPropagationTests: XCTestCase {
         )
     }
 
+    func testLocalBindableTransactionPropagatesToGraphInvalidation() throws {
+        let model = BindableTransactionModel()
+        let bindable = Bindable(model)
+
+        var local = Transaction(animation: .linear(duration: 0.20))
+        local[BindableTransactionGraphKey.self] = 17
+
+        let host = GraphHost()
+        try host.data.withCurrent {
+            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let source = graph.makeInput(value: BindableLocalTransactionRoot(model: model))
+                let outputs = BindableLocalTransactionRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph)
+                )
+                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                XCTAssertEqual(
+                    layoutAttr.value.sizeThatFits(.unspecified),
+                    CGSize(width: 0, height: 12)
+                )
+                XCTAssertNil(graph.transaction(for: layoutAttr.identifier))
+
+                bindable.localValue.transaction(local).wrappedValue = 24
+                host.data.rootSubgraph.update()
+
+                let propagated = try XCTUnwrap(graph.transaction(for: layoutAttr.identifier))
+                XCTAssertEqual(propagated[BindableTransactionGraphKey.self], 17)
+                XCTAssertNotNil(propagated.animation)
+                XCTAssertEqual(propagated.disablesAnimations, false)
+                XCTAssertEqual(
+                    layoutAttr.value.sizeThatFits(.unspecified),
+                    CGSize(width: 24, height: 12)
+                )
+            }
+        }
+    }
+
+    func testAmbientTransactionPropagatesToGraphInvalidationWhenBindableLocalIsPresent() throws {
+        let model = BindableTransactionModel()
+        let bindable = Bindable(model)
+
+        var local = Transaction(animation: nil)
+        local.disablesAnimations = true
+        local[BindableTransactionGraphKey.self] = 17
+
+        var ambient = Transaction(animation: .linear(duration: 0.20))
+        ambient[BindableTransactionGraphKey.self] = 29
+
+        let host = GraphHost()
+        try host.data.withCurrent {
+            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let source = graph.makeInput(value: BindableAmbientTransactionRoot(model: model))
+                let outputs = BindableAmbientTransactionRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph)
+                )
+                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                XCTAssertEqual(
+                    layoutAttr.value.sizeThatFits(.unspecified),
+                    CGSize(width: 0, height: 12)
+                )
+                XCTAssertNil(graph.transaction(for: layoutAttr.identifier))
+
+                withTransaction(ambient) {
+                    bindable.ambientValue.transaction(local).wrappedValue = 24
+                }
+                host.data.rootSubgraph.update()
+
+                let propagated = try XCTUnwrap(graph.transaction(for: layoutAttr.identifier))
+                XCTAssertEqual(propagated[BindableTransactionGraphKey.self], 29)
+                XCTAssertNotNil(propagated.animation)
+                XCTAssertEqual(propagated.disablesAnimations, false)
+                XCTAssertEqual(
+                    layoutAttr.value.sizeThatFits(.unspecified),
+                    CGSize(width: 24, height: 12)
+                )
+            }
+        }
+    }
+
     private static func snapshot(_ transaction: Transaction) -> BindableTransactionSnapshot {
         BindableTransactionSnapshot(
             isEmpty: transaction.isEmpty,
             hasAnimation: transaction.animation != nil,
             disablesAnimations: transaction.disablesAnimations
+        )
+    }
+
+    private func makeViewInputs(graph: AttributeGraph) -> _ViewInputs {
+        let environment = graph.makeInput(value: EnvironmentValues())
+        let base = _GraphInputs(
+            customInputs: PropertyList(),
+            time: graph.makeInput(value: Time(seconds: 0)),
+            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
+            phase: graph.makeInput(value: Phase()),
+            transaction: graph.makeInput(value: Transaction()),
+            changedDebugProperties: 0,
+            options: [],
+            mergedInputs: []
+        )
+        return _ViewInputs(
+            base: base,
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
         )
     }
 }
