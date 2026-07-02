@@ -8,15 +8,15 @@
 import Foundation
 
 /// Bitset describing scrollable child groups that should stay pinned.
-struct PinnedScrollableViews: OptionSet, Hashable, Sendable {
-    var rawValue: UInt32
+public struct PinnedScrollableViews: OptionSet, Hashable, Sendable {
+    public var rawValue: UInt32
 
-    init(rawValue: UInt32) {
+    public init(rawValue: UInt32) {
         self.rawValue = rawValue
     }
 
-    static let sectionHeaders = PinnedScrollableViews(rawValue: 1)
-    static let sectionFooters = PinnedScrollableViews(rawValue: 2)
+    public static let sectionHeaders = PinnedScrollableViews(rawValue: 1)
+    public static let sectionFooters = PinnedScrollableViews(rawValue: 2)
 }
 
 /// Accessibility grouping role exposed by scrollable collection hosts.
