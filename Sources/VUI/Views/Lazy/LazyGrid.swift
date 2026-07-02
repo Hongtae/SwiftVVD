@@ -309,3 +309,6 @@ struct _LazyGridLayout: Layout {
 
 extension _LazyGridLayout: _VariadicView_UnaryViewRoot {
 }
+
+protocol HVGrid: LazyStack {
+}

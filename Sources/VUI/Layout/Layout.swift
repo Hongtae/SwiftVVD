@@ -247,6 +247,7 @@ enum DynamicContainer {
         var transitionPhaseSetters: [_TransitionPhaseSetter]
         var transitionCompletionSeed: Attribute<UInt32>?
         var transitionTransactions: _TransitionTransactionResolver?
+        var removalLifecycleStarted: Bool
 
         init(
             subgraph: AGSubgraph,
@@ -265,7 +266,8 @@ enum DynamicContainer {
             phase: UInt8 = 1,
             item: AnyHashable? = nil,
             transitionCompletionSeed: Attribute<UInt32>? = nil,
-            transitionTransactions: _TransitionTransactionResolver? = nil
+            transitionTransactions: _TransitionTransactionResolver? = nil,
+            removalLifecycleStarted: Bool = false
         ) {
             self.subgraph = subgraph
             self.uniqueId = uniqueId
@@ -284,6 +286,7 @@ enum DynamicContainer {
             self.transitionPhaseSetters = transitionPhaseSetters
             self.transitionCompletionSeed = transitionCompletionSeed
             self.transitionTransactions = transitionTransactions
+            self.removalLifecycleStarted = removalLifecycleStarted
         }
 
         func setTransitionPhase(
@@ -418,14 +421,23 @@ enum DynamicContainer {
             var uniqueId: _ViewList_ID.Canonical
             var viewCount: Int
             var phase: UInt8
+            var removalLifecycleStarted: Bool
 
             init(item: ItemInfo) {
                 self.uniqueId = item.uniqueId
                 self.viewCount = item.viewCount
                 self.phase = item.phase
+                self.removalLifecycleStarted = item.removalLifecycleStarted
             }
         }
     }
+}
+
+/// Controls retained-removal lifecycle ordering for layout-owned dynamic items.
+/// Lazy layout hosts send removal lifecycle callbacks before final invalidation
+/// so retained animation listeners can drain after disappearance.
+struct DynamicContainerWillRemoveBeforeInvalidation: GraphInput {
+    static var defaultValue: Bool { false }
 }
 
 /// Stores layout attributes keyed by DynamicContainer item id and rebuilds its sorted
@@ -557,6 +569,7 @@ struct DynamicContainerInfo: StatefulRule {
                     }
                     if item.phase != 1 {
                         item.listener = nil
+                        item.removalLifecycleStarted = false
                         item.setTransitionPhase(.identity, transaction: listTransaction)
                     }
                     item.phase = 1
@@ -598,6 +611,19 @@ struct DynamicContainerInfo: StatefulRule {
                 }
                 listener.readSeed()
                 if listener.isComplete {
+                    if inputs.base[DynamicContainerWillRemoveBeforeInvalidation.self],
+                       !item.removalLifecycleStarted {
+                        item.removalLifecycleStarted = true
+                        item.subgraph.willRemove()
+                        if let currentAttribute = _AGGraph.currentRuleContextAttribute {
+                            graph.inbox.enqueue {
+                                graph.invalidateAttribute(currentAttribute)
+                            }
+                        }
+                        item.removalOrder = removedItems.count
+                        removedItems.append(item)
+                        continue
+                    }
                     item.invalidate()
                     retainedElements.removeValue(forKey: item.uniqueId)
                     continue

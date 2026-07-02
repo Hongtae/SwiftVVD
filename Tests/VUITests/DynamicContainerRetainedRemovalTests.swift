@@ -567,6 +567,86 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicLazyVStackForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
+            disappearBeforeRetainedCompletions: true
+        ) { rows, target, recorder, capture in
+            ScrollView {
+                LazyVStack {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
+    func testPublicLazyHStackForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
+            disappearBeforeRetainedCompletions: true
+        ) { rows, target, recorder, capture in
+            ScrollView(.horizontal) {
+                LazyHStack {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
+    func testPublicLazyVGridForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
+            disappearBeforeRetainedCompletions: true
+        ) { rows, target, recorder, capture in
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.fixed(44))]) {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
+    func testPublicLazyHGridForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
+            disappearBeforeRetainedCompletions: true
+        ) { rows, target, recorder, capture in
+            ScrollView(.horizontal) {
+                LazyHGrid(rows: [GridItem(.fixed(44))]) {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(opacity: row == "row" ? target : 0),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
     func testPublicVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
             VStack {
@@ -1057,6 +1137,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     private func assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear<Root: View>(
+        disappearBeforeRetainedCompletions: Bool = false,
         @ViewBuilder makeRoot: @escaping (
             [String],
             Double,
@@ -1168,21 +1249,53 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             sampleLayout()
             Self.flushGraphActions(graph)
         }
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "row appear",
-                "removal removed",
-                "removal logical",
-                "old removed",
-                "middle removed",
-                "active removed",
-                "active logical",
-                "old logical",
-                "middle logical",
-                "row disappear",
-            ]
-        )
+        if disappearBeforeRetainedCompletions {
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "row appear",
+                    "removal removed",
+                    "removal logical",
+                    "row disappear",
+                ]
+            )
+            viewGraph.data.withCurrent {
+                graph.inbox.drain()
+                sampleLayout()
+                Self.flushGraphActions(graph)
+            }
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "row appear",
+                    "removal removed",
+                    "removal logical",
+                    "row disappear",
+                    "old removed",
+                    "middle removed",
+                    "active removed",
+                    "active logical",
+                    "old logical",
+                    "middle logical",
+                ]
+            )
+        } else {
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "row appear",
+                    "removal removed",
+                    "removal logical",
+                    "old removed",
+                    "middle removed",
+                    "active removed",
+                    "active logical",
+                    "old logical",
+                    "middle logical",
+                    "row disappear",
+                ]
+            )
+        }
     }
 
     private func assertPublicRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear<Root: View>(

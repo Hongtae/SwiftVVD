@@ -25,11 +25,17 @@ final class LazyContainerSurfaceTests: XCTestCase {
             EmptyView()
         }
         XCTAssertEqual(vStack.pinnedViews, [.sectionHeaders])
+        XCTAssertEqual(vStack.tree.content.root.pinnedViews, [.sectionHeaders])
+        XCTAssertEqual(vStack.tree.content.root.base.alignment, .leading)
+        XCTAssertEqual(vStack.tree.content.root.base.spacing, 4)
 
         let hStack = LazyHStack(alignment: .top, spacing: 5, pinnedViews: [.sectionFooters]) {
             EmptyView()
         }
         XCTAssertEqual(hStack.pinnedViews, [.sectionFooters])
+        XCTAssertEqual(hStack.tree.content.root.pinnedViews, [.sectionFooters])
+        XCTAssertEqual(hStack.tree.content.root.base.alignment, .top)
+        XCTAssertEqual(hStack.tree.content.root.base.spacing, 5)
     }
 
     func testLazyGridInitializersStorePinnedViews() {
@@ -38,11 +44,31 @@ final class LazyContainerSurfaceTests: XCTestCase {
             EmptyView()
         }
         XCTAssertEqual(vGrid.pinnedViews, [.sectionHeaders])
+        XCTAssertEqual(vGrid.tree.content.root.columns, columns)
+        XCTAssertEqual(vGrid.tree.content.root.alignment, .leading)
+        XCTAssertEqual(vGrid.tree.content.root.spacing, 4)
+        XCTAssertEqual(vGrid.tree.content.root.pinnedViews, [.sectionHeaders])
 
         let rows = [GridItem(.fixed(12), spacing: 2, alignment: .bottomTrailing)]
         let hGrid = LazyHGrid(rows: rows, alignment: .bottom, spacing: 5, pinnedViews: [.sectionFooters]) {
             EmptyView()
         }
         XCTAssertEqual(hGrid.pinnedViews, [.sectionFooters])
+        XCTAssertEqual(hGrid.tree.content.root.rows, rows)
+        XCTAssertEqual(hGrid.tree.content.root.alignment, .bottom)
+        XCTAssertEqual(hGrid.tree.content.root.spacing, 5)
+        XCTAssertEqual(hGrid.tree.content.root.pinnedViews, [.sectionFooters])
+    }
+
+    func testLazyContainersUseResettableLazyLayoutRootStorage() {
+        let vStack = LazyVStack { EmptyView() }
+        let hStack = LazyHStack { EmptyView() }
+        let vGrid = LazyVGrid(columns: [GridItem(.fixed(8))]) { EmptyView() }
+        let hGrid = LazyHGrid(rows: [GridItem(.fixed(8))]) { EmptyView() }
+
+        XCTAssertTrue(type(of: vStack.tree.content.root) == LazyVStackLayout.self)
+        XCTAssertTrue(type(of: hStack.tree.content.root) == LazyHStackLayout.self)
+        XCTAssertTrue(type(of: vGrid.tree.content.root) == LazyVGridLayout.self)
+        XCTAssertTrue(type(of: hGrid.tree.content.root) == LazyHGridLayout.self)
     }
 }

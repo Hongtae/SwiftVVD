@@ -8,8 +8,11 @@
 import Foundation
 
 public struct LazyVGrid<Content>: View where Content: View {
-    var _tree: _VariadicView.Tree<_LazyGridLayout, Content>
-    var pinnedViews: PinnedScrollableViews
+    var tree: ResettableLazyLayoutRoot<_VariadicView.Tree<LazyVGridLayout, Content>>
+
+    var pinnedViews: PinnedScrollableViews {
+        tree.content.root.pinnedViews
+    }
 
     public init(
         columns: [GridItem],
@@ -18,25 +21,120 @@ public struct LazyVGrid<Content>: View where Content: View {
         pinnedViews: PinnedScrollableViews = .init(),
         @ViewBuilder content: () -> Content
     ) {
-        self._tree = .init(
-            root: _LazyGridLayout(
-                axis: .vertical,
-                items: columns,
-                horizontalAlignment: alignment,
-                verticalAlignment: .center,
-                spacing: spacing
-            ),
-            content: content()
-        )
-        self.pinnedViews = pinnedViews
+        self.tree = ResettableLazyLayoutRoot {
+            _VariadicView.Tree(
+                root: LazyVGridLayout(
+                    columns: columns,
+                    alignment: alignment,
+                    spacing: spacing,
+                    pinnedViews: pinnedViews
+                ),
+                content: content()
+            )
+        }
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _VariadicView.Tree<_LazyGridLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
+        ResettableLazyLayoutRoot<_VariadicView.Tree<LazyVGridLayout, Content>>
+            ._makeView(view: view[\.tree], inputs: inputs)
     }
 
     public typealias Body = Never
 }
 
 extension LazyVGrid: _PrimitiveView {
+}
+
+struct LazyVGridLayout: HVGrid {
+    var columns: [GridItem]
+    var alignment: HorizontalAlignment
+    var spacing: CGFloat?
+    var pinnedViews: PinnedScrollableViews
+
+    typealias Body = Never
+    typealias AnimatableData = EmptyAnimatableData
+    typealias Cache = _LazyGridLayout.Cache
+
+    init(
+        columns: [GridItem],
+        alignment: HorizontalAlignment,
+        spacing: CGFloat?,
+        pinnedViews: PinnedScrollableViews
+    ) {
+        self.columns = columns
+        self.alignment = alignment
+        self.spacing = spacing
+        self.pinnedViews = pinnedViews
+    }
+
+    private var layout: _LazyGridLayout {
+        _LazyGridLayout(
+            axis: .vertical,
+            items: self.columns,
+            horizontalAlignment: alignment,
+            verticalAlignment: .center,
+            spacing: spacing
+        )
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        layout.makeCache(subviews: subviews)
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        layout.updateCache(&cache, subviews: subviews)
+    }
+
+    func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
+        layout.spacing(subviews: subviews, cache: &cache)
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGSize {
+        layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) {
+        layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
+    }
+
+    func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGFloat? {
+        layout.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
+
+    func explicitAlignment(
+        of guide: VerticalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGFloat? {
+        layout.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
 }

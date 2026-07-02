@@ -8,8 +8,11 @@
 import Foundation
 
 public struct LazyHStack<Content>: View where Content: View {
-    var _tree: _VariadicView.Tree<_HStackLayout, Content>
-    var pinnedViews: PinnedScrollableViews
+    var tree: ResettableLazyLayoutRoot<_VariadicView.Tree<LazyHStackLayout, Content>>
+
+    var pinnedViews: PinnedScrollableViews {
+        tree.content.root.pinnedViews
+    }
 
     public init(
         alignment: VerticalAlignment = .center,
@@ -17,15 +20,20 @@ public struct LazyHStack<Content>: View where Content: View {
         pinnedViews: PinnedScrollableViews = .init(),
         @ViewBuilder content: () -> Content
     ) {
-        self._tree = .init(
-            root: _HStackLayout(alignment: alignment, spacing: spacing),
-            content: content()
-        )
-        self.pinnedViews = pinnedViews
+        self.tree = ResettableLazyLayoutRoot {
+            _VariadicView.Tree(
+                root: LazyHStackLayout(
+                    base: _HStackLayout(alignment: alignment, spacing: spacing),
+                    pinnedViews: pinnedViews
+                ),
+                content: content()
+            )
+        }
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _VariadicView.Tree<_HStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
+        ResettableLazyLayoutRoot<_VariadicView.Tree<LazyHStackLayout, Content>>
+            ._makeView(view: view[\.tree], inputs: inputs)
     }
 
     public typealias Body = Never
