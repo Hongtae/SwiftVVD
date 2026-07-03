@@ -7,7 +7,7 @@
 
 import Foundation
 import Synchronization
-import miniaudio
+private import miniaudio
 
 public enum AudioAttenuationModel: Sendable {
     case none
@@ -732,7 +732,8 @@ public final class AudioSource: @unchecked Sendable {
         }
 
         let sound = UnsafeMutablePointer<ma_sound>.allocate(capacity: 1)
-        let result = ma_sound_init_from_data_source(device.engine,
+        let engine = device.engineRawPointer.assumingMemoryBound(to: ma_engine.self)
+        let result = ma_sound_init_from_data_source(engine,
                                                     base,
                                                     0,
                                                     nil,

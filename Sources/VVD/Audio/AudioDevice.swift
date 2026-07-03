@@ -6,15 +6,15 @@
 //
 
 import Foundation
-import miniaudio
+private import miniaudio
 
 public struct AudioDeviceInfo: Sendable {
     public let name: String
     public let isDefault: Bool
 
-    let id: ma_device_id
+    fileprivate let id: ma_device_id
 
-    init(name: String, isDefault: Bool, id: ma_device_id) {
+    fileprivate init(name: String, isDefault: Bool, id: ma_device_id) {
         self.name = name
         self.isDefault = isDefault
         self.id = id
@@ -69,11 +69,15 @@ public func availableAudioDevices() -> [AudioDeviceInfo] {
     return devices
 }
 
-public final class AudioDevice: @unchecked Sendable {
-    let engine: UnsafeMutablePointer<ma_engine>
+public final class AudioDevice {
+    fileprivate let engine: UnsafeMutablePointer<ma_engine>
     public let deviceName: String
     public let sampleRate: Int
     public let channels: Int
+
+    var engineRawPointer: UnsafeMutableRawPointer {
+        UnsafeMutableRawPointer(engine)
+    }
 
     public convenience init?(device: AudioDeviceInfo? = nil) {
         self.init(device: device, noDevice: false)
