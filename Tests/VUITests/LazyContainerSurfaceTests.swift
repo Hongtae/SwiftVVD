@@ -234,6 +234,47 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutViewCacheReuseSkipsDisplayedCandidates() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let targetID = _ViewList_ID(implicitID: 99)
+            let (cache, displayed, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                reuseIdentifier: targetID.reuseIdentifier
+            )
+            let (_, reusable, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2,
+                reuseIdentifier: targetID.reuseIdentifier
+            )
+            displayed.usedSeed = 1
+            displayed.displayIndex = 0
+            displayed.prefetchPhase = .pendingDisplay
+            reusable.usedSeed = 10
+
+            XCTAssertTrue(
+                cache.reusedItem(
+                    for: targetID.canonicalID,
+                    reuseIdentifier: targetID.reuseIdentifier,
+                    transitionType: nil
+                ) === reusable
+            )
+
+            cache.items.removeValue(forKey: reusable.id.canonicalID)
+            cache.lru.invalidate()
+            XCTAssertNil(
+                cache.reusedItem(
+                    for: targetID.canonicalID,
+                    reuseIdentifier: targetID.reuseIdentifier,
+                    transitionType: nil
+                )
+            )
+        }
+    }
+
     func testLazyLayoutViewCacheUpdateItemPhaseSkipsInvalidSubgraph() {
         let host = GraphHost()
         let (cache, item, state) = host.data.withCurrent {

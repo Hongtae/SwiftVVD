@@ -467,6 +467,7 @@ final class LazyLayoutViewCache {
         return candidates.first { item in
             item.id.canonicalID != id &&
                 item.reuseIdentifier == reuseIdentifier &&
+                item.displayIndex == nil &&
                 item.prefetchPhase != .pendingRemoval &&
                 item.transitionType == transitionType
         }
