@@ -30,6 +30,10 @@ struct LayoutComputer {
         box.sizeThatFits_(proposal)
     }
 
+    func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat {
+        box.lengthThatFits_(proposal, in: axis)
+    }
+
     var spacing: ViewSpacing { box.spacing_() }
     var priority: Double { box.layoutPriority_() }
 

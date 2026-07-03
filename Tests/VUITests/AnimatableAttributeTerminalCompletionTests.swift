@@ -38,6 +38,17 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
             ]
         )
 
+        harness.setTime(2.0)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "terminal removed",
+                "terminal logical",
+            ]
+        )
+
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,

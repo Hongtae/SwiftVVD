@@ -60,6 +60,11 @@ extension GraphInput where Value: GraphReusable {
 /// No additional requirements.
 protocol ViewInput: GraphInput {}
 
+struct UsingGraphicsRenderer: ViewInput {
+    typealias Value = Bool
+    static var defaultValue: Bool { false }
+}
+
 /// A generic single-owner reference box.
 /// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
 /// (a struct) still shares the same `CachedEnvironment` instance across

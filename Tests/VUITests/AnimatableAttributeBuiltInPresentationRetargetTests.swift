@@ -80,6 +80,57 @@ final class AnimatableAttributeBuiltInPresentationRetargetTests: XCTestCase {
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
+    func testDurationSpringRetargetedToSpringValueUsesDirectSpringPresentation() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let retargetTime = 0.25
+
+        start(harness, animation: slowDurationSpring, target: 1)
+        sampleFrames(harness, through: retargetTime)
+        let retargetStart = harness.currentValue().opacity
+        XCTAssertGreaterThan(retargetStart, 0.05)
+        XCTAssertLessThan(retargetStart, 0.40)
+
+        retarget(harness, animation: springValueAnimation, target: -0.5)
+
+        harness.setTime(retargetTime + 0.12)
+        XCTAssertLessThan(harness.currentValue().opacity, 0.08)
+
+        harness.setTime(retargetTime + 0.24)
+        XCTAssertLessThan(harness.currentValue().opacity, -0.45)
+
+        harness.setTime(retargetTime + 0.36)
+        XCTAssertLessThan(harness.currentValue().opacity, -0.60)
+
+        harness.setTime(retargetTime + 1.55)
+        XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
+    }
+
+    func testSpringValueRetargetedToDurationSpringUsesSlowSpringPresentation() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let retargetTime = 0.25
+
+        start(harness, animation: springValueAnimation, target: 1)
+        sampleFrames(harness, through: retargetTime)
+        let retargetStart = harness.currentValue().opacity
+        XCTAssertGreaterThan(retargetStart, 0.70)
+        XCTAssertLessThan(retargetStart, 1.05)
+
+        retarget(harness, animation: slowDurationSpring, target: -0.5)
+
+        harness.setTime(retargetTime + 0.12)
+        XCTAssertGreaterThan(harness.currentValue().opacity, retargetStart - 0.25)
+
+        harness.setTime(retargetTime + 0.40)
+        XCTAssertLessThan(harness.currentValue().opacity, 0.20)
+
+        harness.setTime(retargetTime + 1.90)
+        XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
+    }
+
     func testFluidSpringOldRetargetedToDirectSpringKeepsOldContribution() {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
@@ -312,6 +363,21 @@ final class AnimatableAttributeBuiltInPresentationRetargetTests: XCTestCase {
             mass: 1.0,
             stiffness: 100.0,
             damping: 10.0,
+            initialVelocity: 0.0
+        )
+    }
+
+    private var slowDurationSpring: Animation {
+        .interpolatingSpring(
+            duration: 1.20,
+            bounce: 0.0,
+            initialVelocity: 0.0
+        )
+    }
+
+    private var springValueAnimation: Animation {
+        .interpolatingSpring(
+            Spring(mass: 1.0, stiffness: 100.0, damping: 10.0),
             initialVelocity: 0.0
         )
     }

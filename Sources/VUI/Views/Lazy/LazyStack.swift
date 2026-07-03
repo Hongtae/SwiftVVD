@@ -36,6 +36,46 @@ extension View {
     }
 }
 
+protocol LazyLayoutNamespace {
+}
+
+typealias _ProposedSize = ProposedViewSize
+
+@dynamicMemberLookup
+struct SizeAndSpacingContext {
+    var context: AnyRuleContext
+    var owner: AGAttribute?
+    var environment: Attribute<EnvironmentValues>
+
+    init(
+        context: AnyRuleContext,
+        owner: AGAttribute? = nil,
+        environment: Attribute<EnvironmentValues>
+    ) {
+        self.context = context
+        self.owner = owner
+        self.environment = environment
+    }
+
+    subscript<Value>(dynamicMember keyPath: KeyPath<EnvironmentValues, Value>) -> Value {
+        environment.value[keyPath: keyPath]
+    }
+
+    mutating func update(_ context: AnyRuleContext) {
+        self.context = context
+    }
+}
+
+struct _LazyLayout_Properties: LazyLayoutNamespace {
+    var axes: Axis.Set
+    var multipleViewAxes: Axis.Set
+
+    init(axes: Axis.Set = [], multipleViewAxes: Axis.Set = []) {
+        self.axes = axes
+        self.multipleViewAxes = multipleViewAxes
+    }
+}
+
 struct LazyLayoutCacheSection: Hashable {
     var id: UInt32?
     var isHeader: Bool
@@ -48,7 +88,195 @@ struct LazyLayoutCacheSection: Hashable {
     }
 }
 
-struct _LazyLayout_Subview {
+struct AccessibilitySectionContext: Equatable {
+    var id: UInt32
+    var isHeader: Bool
+    var isFooter: Bool
+
+    init(id: UInt32 = 0, isHeader: Bool = false, isFooter: Bool = false) {
+        self.id = id
+        self.isHeader = isHeader
+        self.isFooter = isFooter
+    }
+}
+
+@dynamicMemberLookup
+struct _LazyLayout_SizeAndSpacingContext: LazyLayoutNamespace {
+    var baseContext: SizeAndSpacingContext
+    var _containerSize: OptionalAttribute<ViewSize>
+
+    init(
+        ruleContext: AnyRuleContext,
+        owner: AGAttribute? = nil,
+        environment: Attribute<EnvironmentValues>,
+        containerSize: OptionalAttribute<ViewSize> = OptionalAttribute()
+    ) {
+        self.baseContext = SizeAndSpacingContext(
+            context: ruleContext,
+            owner: owner,
+            environment: environment
+        )
+        self._containerSize = containerSize
+    }
+
+    var ruleContext: AnyRuleContext {
+        baseContext.context
+    }
+
+    var containerSize: CGSize {
+        _containerSize.attribute?.value.value ?? .zero
+    }
+
+    subscript<Value>(dynamicMember keyPath: KeyPath<EnvironmentValues, Value>) -> Value {
+        baseContext[dynamicMember: keyPath]
+    }
+
+    mutating func update(_ context: AnyRuleContext) {
+        baseContext.update(context)
+    }
+}
+
+struct _LazyLayout_PlacementContext: LazyLayoutNamespace {
+    struct Geometry: Equatable {
+        var transform: ViewTransform
+        var layoutDirection: LayoutDirection
+        var isAccessibilityEnabled: Bool
+
+        init(
+            transform: ViewTransform = ViewTransform(),
+            layoutDirection: LayoutDirection = .leftToRight,
+            isAccessibilityEnabled: Bool = false
+        ) {
+            self.transform = transform
+            self.layoutDirection = layoutDirection
+            self.isAccessibilityEnabled = isAccessibilityEnabled
+        }
+    }
+
+    var base: _LazyLayout_SizeAndSpacingContext
+    var position: CGPoint
+    var size: CGSize
+    var pinnedViews: PinnedScrollableViews
+    var geometry: Geometry
+
+    init(
+        base: _LazyLayout_SizeAndSpacingContext,
+        position: CGPoint = .zero,
+        size: ViewSize = .zero,
+        transform: ViewTransform = ViewTransform(),
+        layoutDirection: LayoutDirection = .leftToRight,
+        pinnedViews: PinnedScrollableViews = [],
+        isAccessibilityEnabled: Bool = false
+    ) {
+        self.base = base
+        self.position = position
+        self.size = size.value
+        self.pinnedViews = pinnedViews
+        self.geometry = Geometry(
+            transform: transform,
+            layoutDirection: layoutDirection,
+            isAccessibilityEnabled: isAccessibilityEnabled
+        )
+    }
+
+    var transform: ViewTransform {
+        geometry.transform
+    }
+
+    var layoutDirection: LayoutDirection {
+        geometry.layoutDirection
+    }
+
+    var isAccessibilityEnabled: Bool {
+        geometry.isAccessibilityEnabled
+    }
+
+    var unadjustedVisibleRect: CGRect {
+        CGRect(origin: position, size: size)
+    }
+
+    var nearestVisibleRect: CGRect {
+        unadjustedVisibleRect
+    }
+
+    var containingVisibleRect: CGRect {
+        unadjustedVisibleRect
+    }
+
+    var clampedVisibleRect: CGRect {
+        unadjustedVisibleRect
+    }
+
+    var allowsTranslations: Bool {
+        true
+    }
+}
+
+struct _LazyLayout_EstimatedPlacementContext: LazyLayoutNamespace {
+    var base: _LazyLayout_PlacementContext
+
+    init(base: _LazyLayout_PlacementContext) {
+        self.base = base
+    }
+}
+
+struct _LazyLayout_Subviews: LazyLayoutNamespace {
+    enum Node {
+        case subviews(_LazyLayout_Subviews)
+        case section(_LazyLayout_Section)
+    }
+
+    var cache: LazyLayoutViewCache
+    var context: AnyRuleContext
+    var node: _ViewList_Node
+    var transform: _ViewList_SublistTransform
+    var section: LazyLayoutCacheSection
+    var baseIndex: Int
+
+    init(
+        cache: LazyLayoutViewCache,
+        context: AnyRuleContext,
+        node: _ViewList_Node,
+        transform: _ViewList_SublistTransform,
+        section: LazyLayoutCacheSection = LazyLayoutCacheSection(),
+        baseIndex: Int = 0
+    ) {
+        self.cache = cache
+        self.context = context
+        self.node = node
+        self.transform = transform
+        self.section = section
+        self.baseIndex = baseIndex
+    }
+}
+
+struct _LazyLayout_Section: LazyLayoutNamespace {
+    struct ID: Hashable {
+        var id: UInt32
+    }
+
+    var base: _ViewList_Section
+    var transform: _ViewList_SublistTransform
+    var cache: LazyLayoutViewCache
+    var context: AnyRuleContext
+    var baseIndex: Int
+
+    init(
+        base: _ViewList_Section,
+        transform: _ViewList_SublistTransform,
+        cache: LazyLayoutViewCache,
+        context: AnyRuleContext,
+        baseIndex: Int = 0
+    ) {
+        self.base = base
+        self.transform = transform
+        self.cache = cache
+        self.context = context
+        self.baseIndex = baseIndex
+    }
+}
+
+struct _LazyLayout_Subview: LazyLayoutNamespace {
     var cache: LazyLayoutViewCache
     var context: AnyRuleContext
     var data: Data
@@ -94,8 +322,54 @@ struct _LazyLayout_Subview {
         case footer
     }
 
+    func proposeSize(_ proposal: ProposedViewSize) -> _LazyLayout_ProposedSubview {
+        let item = cache.item(data: data)
+        item.placement = _Placement(
+            proposedSize: proposal.replacingUnspecifiedDimensions()
+        )
+        return _LazyLayout_ProposedSubview(
+            item: item,
+            proposal: proposal,
+            index: index
+        )
+    }
+
     func beginPrefetching(at proposal: ProposedViewSize) {
         cache.item(data: data).beginPrefetching(at: proposal)
+    }
+
+    func lengthAndSpacing(
+        size: ProposedViewSize,
+        axis: Axis,
+        predecessor: _LazyLayout_Subview?,
+        uniformSpacing: CGFloat?
+    ) -> (length: CGFloat, spacing: CGFloat) {
+        let item = cache.item(data: data)
+        let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
+        let length = layoutComputer.lengthThatFits(size, in: axis)
+        guard let predecessor else {
+            return (length, 0)
+        }
+        if let uniformSpacing {
+            return (length, uniformSpacing)
+        }
+        let predecessorItem = predecessor.cache.item(data: predecessor.data)
+        let predecessorLayoutComputer =
+            predecessorItem.outputs._layoutComputer.attribute?.value ?? .defaultValue
+        return (
+            length,
+            predecessorLayoutComputer.spacing.distance(to: layoutComputer.spacing, along: axis)
+        )
+    }
+
+    func place(at placement: _Placement) -> _LazyLayout_PlacedSubview {
+        let item = cache.item(data: data)
+        item.placement = placement
+        return _LazyLayout_PlacedSubview(
+            item: item,
+            placement: placement,
+            index: index
+        )
     }
 }
 
@@ -272,7 +546,7 @@ struct LazyLayoutCacheChildren {
     }
 }
 
-final class LazyLayoutViewCache {
+final class LazyLayoutViewCache: LazyLayoutNamespace {
     struct LeastRecentlyUsedItems {
         private(set) var generationSeed: UInt32 = 0
         private var sortedItems: [LazyLayoutCacheItem]?
@@ -404,7 +678,13 @@ final class LazyLayoutViewCache {
 
     func addItem(_ item: LazyLayoutCacheItem, reset: Bool = false) {
         item.cache = self
+        item.insertionTransactionSeed = commitSeed
         if reset {
+            var state = item._state.value
+            state.resetDelta &+= 1
+            state.phase = .identity
+            state.isRemoved = false
+            item._state.setValue(state, transaction: Transaction.current)
             item.usedSeed = 0
             item.placementSeed = 0
             item.commitSeed = 0
@@ -465,11 +745,13 @@ final class LazyLayoutViewCache {
     ) -> LazyLayoutCacheItem? {
         let candidates = lru.updatedItems(Array(items.values))
         return candidates.first { item in
-            item.id.canonicalID != id &&
-                item.reuseIdentifier == reuseIdentifier &&
-                item.displayIndex == nil &&
-                item.prefetchPhase != .pendingRemoval &&
-                item.transitionType == transitionType
+            isReusableCandidate(
+                item,
+                for: id,
+                reuseIdentifier: reuseIdentifier,
+                transitionType: transitionType
+            ) &&
+            item.prefetchPhase != .pendingRemoval
         }
     }
 
@@ -480,11 +762,15 @@ final class LazyLayoutViewCache {
         let id = data.id.canonicalID
         let transitionType = transition?._transitionType
         let reuseIdentifier = data.id.reuseIdentifier
-        guard let item = reusedItem(
-            for: id,
-            reuseIdentifier: reuseIdentifier,
-            transitionType: transitionType
-        ) else {
+        let candidates = lru.updatedItems(Array(items.values))
+        guard let item = candidates.first(where: {
+            isReusableCandidate(
+                $0,
+                for: id,
+                reuseIdentifier: reuseIdentifier,
+                transitionType: transitionType
+            )
+        }) else {
             return nil
         }
         let oldID = item.id.canonicalID
@@ -496,10 +782,29 @@ final class LazyLayoutViewCache {
         return item
     }
 
+    private func isReusableCandidate(
+        _ item: LazyLayoutCacheItem,
+        for id: _ViewList_ID.Canonical,
+        reuseIdentifier: Int,
+        transitionType: Any.Type?
+    ) -> Bool {
+        guard item.id.canonicalID != id,
+              item.reuseIdentifier == reuseIdentifier else {
+            return false
+        }
+        let insertionAge = Int32(bitPattern: commitSeed &- item.insertionTransactionSeed)
+        guard insertionAge >= 1,
+              item.placementSeed != commitSeed,
+              item.displayIndex == nil else {
+            return false
+        }
+        return item.transitionType == transitionType
+    }
+
     func prefetchOutputs() -> [_ViewOutputs] {
         items.values
             .filter { $0.prefetchSeed == commitSeed }
-            .map(\.outputs)
+            .compactMap { prefetchOutput(for: $0.outputs) }
     }
 
     func resetPrefetchPhases() {
@@ -519,12 +824,87 @@ final class LazyLayoutViewCache {
         signalPrefetch()
     }
 
+    func resetMaxDisplayListSubviews(item: LazyLayoutCacheItem) {
+        for childCache in liveChildCaches(for: item) {
+            guard childCache.maxDisplayListSubviews != nil else { continue }
+            childCache.maxDisplayListSubviews = nil
+            childCache.signalPrefetch()
+        }
+    }
+
+    func hasChildPrefetchPhaseWork(item: LazyLayoutCacheItem) -> Bool {
+        guard item.prefetchSeed == commitSeed else { return false }
+        for childCache in liveChildCaches(for: item) {
+            guard let maxDisplayListSubviews = childCache.maxDisplayListSubviews else { continue }
+            let lower = childCache.placedIndices.min
+            guard lower >= 0 else { continue }
+            let upper = childCache.placedIndices.max
+            guard upper >= 1 else { continue }
+            let placedDelta = upper &- lower
+            if placedDelta > 0 {
+                if placedDelta >= maxDisplayListSubviews {
+                    return true
+                }
+            } else if maxDisplayListSubviews < 1 {
+                return true
+            }
+        }
+        return false
+    }
+
+    func setupChildPrefetchPhase(item: LazyLayoutCacheItem) -> Bool {
+        guard item.prefetchSeed == commitSeed else { return false }
+        var scheduled = false
+        for childCache in liveChildCaches(for: item) {
+            guard childCache.maxDisplayListSubviews == nil else { continue }
+            childCache.maxDisplayListSubviews = 0
+            childCache.signalPrefetch()
+            scheduled = true
+        }
+        return scheduled
+    }
+
+    func advanceChildPrefetchPhase(item: LazyLayoutCacheItem) -> Bool {
+        guard item.prefetchSeed == commitSeed else { return false }
+        var scheduled = false
+        for childCache in liveChildCaches(for: item) {
+            guard let maxDisplayListSubviews = childCache.maxDisplayListSubviews else { continue }
+            childCache.maxDisplayListSubviews = maxDisplayListSubviews &+ 1
+            childCache.signalPrefetch()
+            scheduled = true
+        }
+        return scheduled
+    }
+
     func signalPrefetch() {
-        Update.enqueueAction {}
+        let signal = _weakPrefetchSignal.raw
+        Update.enqueueAction { [weak viewGraph] in
+            guard let viewGraph else { return }
+            viewGraph.data.withCurrent {
+                let graph = viewGraph.data.graph
+                guard signal.isValid(in: graph) else { return }
+                graph.invalidateAttribute(signal.toStrong())
+            }
+        }
     }
 
     var supportsViewHierarchyPrefetching: Bool {
         false
+    }
+
+    private func prefetchOutput(for outputs: _ViewOutputs) -> _ViewOutputs? {
+        let displayNodes = outputs.preferences.values(for: DisplayList.Key.self)
+        guard !displayNodes.isEmpty else { return nil }
+        var preferences = PreferencesOutputs()
+        for node in displayNodes {
+            preferences.append(DisplayList.Key.self, node: node)
+        }
+        return _ViewOutputs(preferences: preferences)
+    }
+
+    private func liveChildCaches(for item: LazyLayoutCacheItem) -> [LazyLayoutViewCache] {
+        guard let children = childCaches[item.id.canonicalID] else { return [] }
+        return children.children.compactMap(\.value)
     }
 
     private func anyTransition(data: _LazyLayout_Subview.Data) -> AnyTransition? {
@@ -539,12 +919,26 @@ final class LazyLayoutViewCache {
         guard let graph = _AGGraph.current else {
             fatalError("LazyLayoutViewCache.item(data:) requires an active AttributeGraph")
         }
-        let state = graph.makeInput(value: LazyLayoutCacheItem.State())
+
+        let subgraph = AGSubgraph()
+        let release = data.elements.retain()
+        var childInputs = inputs
+        childInputs.copyCaches()
+        let materialized = AGSubgraph.$current.withValue(subgraph) {
+            let state = graph.makeInput(value: LazyLayoutCacheItem.State())
+            let outputs = data.elements.makeOneElement(at: 0, inputs: childInputs) {
+                elementInputs,
+                makeView in
+                makeView(elementInputs)
+            } ?? _ViewOutputs()
+            return (state: state, outputs: outputs)
+        }
+
         let item = LazyLayoutCacheItem(
             cache: self,
-            subgraph: AGSubgraph(),
-            outputs: _ViewOutputs(),
-            state: state,
+            subgraph: subgraph,
+            outputs: materialized.outputs,
+            state: materialized.state,
             list: data.list.map(OptionalAttribute.init) ?? OptionalAttribute<any ViewList>(),
             elements: data.elements,
             elementIndex: 0,
@@ -555,6 +949,7 @@ final class LazyLayoutViewCache {
             transitionType: transition?._transitionType,
             zIndex: data.traits[ZIndexTraitKey.self]
         )
+        item.releaseElements = release
         addItem(item, reset: false)
         return item
     }
@@ -579,6 +974,107 @@ struct _LazyLayout_PlacedSubview {
     var item: LazyLayoutCacheItem
     var placement: _Placement
     var index: Int
+
+    var id: _ViewList_ID {
+        item.id
+    }
+
+    var size: CGSize {
+        let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
+        return layoutComputer.sizeThatFits(ProposedViewSize(placement.proposedSize))
+    }
+
+    var origin: CGPoint {
+        let size = size
+        return CGPoint(
+            x: placement.anchorPosition.x - size.width * placement.anchor.x,
+            y: placement.anchorPosition.y - size.height * placement.anchor.y
+        )
+    }
+
+    var frame: CGRect {
+        CGRect(origin: origin, size: size)
+    }
+
+    var isHeader: Bool {
+        item.section.isHeader
+    }
+
+    var isFooter: Bool {
+        item.section.isFooter
+    }
+
+    func matches(_ pinnedViews: PinnedScrollableViews) -> Bool {
+        (isHeader && pinnedViews.contains(.sectionHeaders)) ||
+            (isFooter && pinnedViews.contains(.sectionFooters))
+    }
+
+    var accessibilityContext: AccessibilitySectionContext {
+        AccessibilitySectionContext(
+            id: item.section.id ?? 0,
+            isHeader: item.section.isHeader,
+            isFooter: item.section.isFooter
+        )
+    }
+}
+
+extension _LazyLayout_PlacedSubview: LazyLayoutNamespace {
+}
+
+struct _LazyLayout_ProposedSubview: LazyLayoutNamespace {
+    var item: LazyLayoutCacheItem
+    var proposal: _ProposedSize
+    var index: Int
+
+    init(
+        item: LazyLayoutCacheItem,
+        proposal: _ProposedSize,
+        index: Int
+    ) {
+        self.item = item
+        self.proposal = proposal
+        self.index = index
+    }
+}
+
+struct _LazyLayout_ProposedSizes: LazyLayoutNamespace {
+    var subviews: [_LazyLayout_ProposedSubview]
+
+    init(subviews: [_LazyLayout_ProposedSubview] = []) {
+        self.subviews = subviews
+    }
+}
+
+struct _LazyLayout_Placements: LazyLayoutNamespace {
+    var subviews: [_LazyLayout_PlacedSubview]
+    var validRect: CGRect
+    var invalidSize: Bool
+    var translation: CGSize
+    var wasCancelled: Bool
+
+    init(
+        subviews: [_LazyLayout_PlacedSubview] = [],
+        validRect: CGRect = .null,
+        invalidSize: Bool = false,
+        translation: CGSize = .zero,
+        wasCancelled: Bool = false
+    ) {
+        self.subviews = subviews
+        self.validRect = validRect
+        self.invalidSize = invalidSize
+        self.translation = translation
+        self.wasCancelled = wasCancelled
+    }
+}
+
+struct _LazyLayout_EstimatedPlacements: LazyLayoutNamespace {
+    var index: Int?
+    var subviews: [_LazyLayout_PlacedSubview]
+
+    init(index: Int? = nil, subviews: [_LazyLayout_PlacedSubview] = []) {
+        self.index = index
+        self.subviews = subviews
+    }
 }
 
 struct LazyTransaction: StatefulRule, RemovableAttribute {

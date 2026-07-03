@@ -1651,6 +1651,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private var deferredTerminalPresentationDeadline: Time?
     private var contextLogicalCompletionSuppressedGenerations: Set<UInt64> = []
     private var deadlineOwnedLogicalCompletionGenerations: Set<UInt64> = []
+    private var deadlineOwnedLogicalCompletionOrderGenerations: Set<UInt64> = []
     // A generation identifies one target activation. `generation` can be
     // rewritten when a later animation owns an old callback deadline, while
     // `orderGeneration` preserves the original activation for final ordering.
@@ -1672,6 +1673,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         var deadline: Time
         var generation: UInt64
         let orderGeneration: UInt64
+        let prefersOldToNewLogicalOrder: Bool
 
         var criteria: AnimationCompletionCriteria {
             listener.criteria
@@ -1697,12 +1699,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             listener: StateCompletionListener,
             deadline: Time,
             generation: UInt64,
-            orderGeneration: UInt64
+            orderGeneration: UInt64,
+            prefersOldToNewLogicalOrder: Bool = false
         ) {
             self.listener = listener
             self.deadline = deadline
             self.generation = generation
             self.orderGeneration = orderGeneration
+            self.prefersOldToNewLogicalOrder = prefersOldToNewLogicalOrder
         }
     }
 
@@ -1737,6 +1741,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         deferredTerminalPresentationDeadline = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         deadlineOwnedLogicalCompletionGenerations.removeAll()
+        deadlineOwnedLogicalCompletionOrderGenerations.removeAll()
         if clearingGeneration {
             currentGeneration = nil
         }
@@ -2056,6 +2061,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         velocityTrackingImmediateCompletionGroup = nil
         var holdsCombinedResidualReplacementLogicalUntilPresentation = false
+        let existingRemovedOrderGenerations = Set(
+            completionRecords
+                .filter { $0.criteria == .removed }
+                .map(\.orderGeneration)
+        )
         // The active AnimatorState owns sampling and listener movement. The
         // outer completion records own deadlines across retargets, so each
         // branch below only rewrites copied record ownership; it does not move
@@ -2283,6 +2293,49 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     completionRecords[index].generation = replacementGeneration
                 }
             }
+        } else if shouldHoldFiniteRepeatForkCompletionRecordsForNewestRepeatBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            let removedOrderGenerations = Set(
+                completionRecords
+                    .filter { $0.criteria == .removed }
+                    .map(\.orderGeneration)
+            )
+            for index in completionRecords.indices {
+                let orderGeneration = completionRecords[index].orderGeneration
+                completionRecords[index].generation = replacementGeneration
+                if removedOrderGenerations.contains(orderGeneration) {
+                    completionRecords[index].deadline = deadline
+                    deadlineOwnedLogicalCompletionOrderGenerations.remove(orderGeneration)
+                } else if completionRecords[index].deadline == .infinity {
+                    completionRecords[index].deadline = deadline
+                } else {
+                    completionRecords[index].deadline = .infinity
+                    deadlineOwnedLogicalCompletionOrderGenerations.insert(orderGeneration)
+                }
+            }
+        } else if shouldReleaseHeldFiniteRepeatForkCompletionRecordsAtNewestRepeatBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            for index in completionRecords.indices
+                where completionRecords[index].criteria != .removed &&
+                completionRecords[index].deadline == .infinity {
+                completionRecords[index].deadline = deadline
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldMoveHeldOlderFiniteRepeatForkCompletionRecordsToFiniteReplacementBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            let completionDeadline = completionStart + max(animation.box.duration, presentationDuration)
+            for index in completionRecords.indices
+                where completionRecords[index].criteria != .removed &&
+                completionRecords[index].orderGeneration != previousGeneration {
+                completionRecords[index].deadline = completionDeadline
+                completionRecords[index].generation = replacementGeneration
+            }
         } else if shouldMoveSourceCustomCompletionRecordsToFiniteReplacement(
             previousAnimation: previousAnimation,
             replacementAnimation: animation
@@ -2316,6 +2369,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 previousAnimation: previousAnimation
             )
             for index in completionRecords.indices {
+                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                    record: completionRecords[index],
+                    previousAnimation: previousAnimation,
+                    replacementAnimation: animation,
+                    removedOrderGenerations: existingRemovedOrderGenerations
+                ) {
+                    continue
+                }
                 let isPreviousGenerationRecord = previousGeneration.map {
                     completionRecords[index].orderGeneration == $0
                 } ?? false
@@ -2345,6 +2406,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 previousAnimation: previousAnimation
             )
             for index in completionRecords.indices {
+                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                    record: completionRecords[index],
+                    previousAnimation: previousAnimation,
+                    replacementAnimation: animation,
+                    removedOrderGenerations: existingRemovedOrderGenerations
+                ) {
+                    continue
+                }
                 let isPreviousGenerationRecord = previousGeneration.map {
                     completionRecords[index].orderGeneration == $0
                 } ?? false
@@ -2381,6 +2450,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             // Interrupted infinite or FluidSpring boxes also finalize at a
             // non-residual replacement boundary in the sampled handoff paths.
             for index in completionRecords.indices {
+                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                    record: completionRecords[index],
+                    previousAnimation: previousAnimation,
+                    replacementAnimation: animation,
+                    removedOrderGenerations: existingRemovedOrderGenerations
+                ) {
+                    continue
+                }
                 completionRecords[index].deadline = deadline
                 completionRecords[index].generation = replacementGeneration
             }
@@ -2389,6 +2466,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             replacementAnimation: animation
         ) {
             for index in completionRecords.indices where completionRecords[index].deadline.seconds > deadline.seconds {
+                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                    record: completionRecords[index],
+                    previousAnimation: previousAnimation,
+                    replacementAnimation: animation,
+                    removedOrderGenerations: existingRemovedOrderGenerations
+                ) {
+                    continue
+                }
                 completionRecords[index].deadline = deadline
                 completionRecords[index].generation = replacementGeneration
             }
@@ -2429,7 +2514,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         let newCompletionRecords = completionRecords(
             from: listenerRegistration,
             generation: replacementGeneration,
-            orderGeneration: replacementGeneration
+            orderGeneration: replacementGeneration,
+            prefersOldToNewLogicalOrder: shouldOrderFixedAliasLogicalRecordsOldToNew(
+                animation: animation,
+                registration: listenerRegistration
+            )
         ) { criteria in
             let waitsForPresentation = criteria == .removed || holdsNewLogicalUntilPresentation
             let registeredDeadline = animation.box.registeredCompletionDelay(for: criteria).map {
@@ -2450,6 +2539,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         from registration: AnimatorState<AnimatedValue>.ListenerRegistration,
         generation: UInt64,
         orderGeneration: UInt64,
+        prefersOldToNewLogicalOrder: Bool = false,
         deadline: (AnimationCompletionCriteria) -> Time
     ) -> [CompletionRecord] {
         registration.mapRecords { listener in
@@ -2457,7 +2547,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 listener: listener,
                 deadline: deadline(listener.criteria),
                 generation: generation,
-                orderGeneration: orderGeneration
+                orderGeneration: orderGeneration,
+                prefersOldToNewLogicalOrder: prefersOldToNewLogicalOrder && listener.criteria != .removed
             )
         }
     }
@@ -3072,8 +3163,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         matching continuingCompletion: AnimatorState<AnimatedValue>.UpdateResult.ContinuingCompletion,
         preferLogicalBeforeRemoved: Bool
     ) -> [() -> Void] {
+        let deadlineOwnedOrderGenerations = deadlineOwnedLogicalCompletionOrderGenerations
         let readyRecords = takeCompletionRecords { record in
-            record.isMatched(by: continuingCompletion)
+            record.isMatched(by: continuingCompletion) &&
+                !deadlineOwnedOrderGenerations.contains(record.orderGeneration)
         }
         return finishRecords(
             readyRecords,
@@ -3192,11 +3285,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 return $0.offset < $1.offset
             }
             .map { $0.element }
-        let otherRecords = indexedRecords
+        let indexedOtherRecords = indexedRecords
             .filter { $0.element.criteria != .removed }
+        let ordersOtherRecordsOldToNew =
+            !indexedOtherRecords.isEmpty &&
+            indexedOtherRecords.allSatisfy(\.element.prefersOldToNewLogicalOrder)
+        let otherRecords = indexedOtherRecords
             .sorted {
                 if $0.element.orderGeneration != $1.element.orderGeneration {
-                    return $0.element.orderGeneration > $1.element.orderGeneration
+                    return ordersOtherRecordsOldToNew
+                        ? $0.element.orderGeneration < $1.element.orderGeneration
+                        : $0.element.orderGeneration > $1.element.orderGeneration
                 }
                 return $0.offset < $1.offset
             }
@@ -3330,8 +3429,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 time: elapsed,
                 context: &context
             )
+            let ownsLogicalDeadline =
+                deadlineOwnedLogicalCompletionOrderGenerations.contains(layer.generation)
             if context.isLogicallyComplete {
                 if !contextLogicalCompletionSuppressedGenerations.contains(layer.generation),
+                   !ownsLogicalDeadline,
                    !shouldHoldCombinedResidualSourceLogicalUntilFinalization(layer.generation) {
                     var completions = finishCombinedResidualReplacementLogicalBeforeSourceLogicalIfNeeded(
                         for: layer.generation
@@ -3365,7 +3467,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 }
                 if isSourceCustomResidualReplacementCompletionGroupOldGeneration(layer.generation) {
                     var completions = finishCompletionRecords(for: layer.generation) {
-                        $0.criteria != .removed
+                        if ownsLogicalDeadline, $0.criteria != .removed {
+                            return $0.deadline < now || $0.deadline == now
+                        }
+                        return $0.criteria != .removed
                     }
                     completions.append(
                         contentsOf: markSourceCustomResidualReplacementOldGenerationComplete(
@@ -3376,7 +3481,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     continue
                 }
                 if isDeferredCompletionGroupOldGeneration(layer.generation) {
-                    if !shouldHoldCombinedResidualSourceLogicalUntilFinalization(layer.generation) {
+                    if !ownsLogicalDeadline,
+                       !shouldHoldCombinedResidualSourceLogicalUntilFinalization(layer.generation) {
                         var completions = finishCombinedResidualReplacementLogicalBeforeSourceLogicalIfNeeded(
                             for: layer.generation
                         )
@@ -3390,7 +3496,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     continue
                 }
                 let completions = finishCompletionRecords(for: layer.generation) {
-                    $0.criteria != .removed ||
+                    if ownsLogicalDeadline, $0.criteria != .removed {
+                        return $0.deadline < now || $0.deadline == now
+                    }
+                    return $0.criteria != .removed ||
                         $0.deadline < now ||
                         $0.deadline == now
                 }
@@ -4382,6 +4491,38 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             fluidSpring.blendDuration == 0
     }
 
+    private func shouldOrderFixedAliasLogicalRecordsOldToNew(
+        animation: Animation,
+        registration: AnimatorState<AnimatedValue>.ListenerRegistration
+    ) -> Bool {
+        guard isFixedDurationLogicalOrderAlias(animation.box) else {
+            return false
+        }
+        let criteria = registration.mapRecords(\.criteria)
+        return criteria.contains(.logicallyComplete) &&
+            !criteria.contains(.removed)
+    }
+
+    private func isFixedDurationLogicalOrderAlias(_ box: AnimationBoxBase) -> Bool {
+        isFixedDurationBezierAlias(box) ||
+            isFixedDurationFluidSpringAlias(box)
+    }
+
+    private func isFixedDurationBezierAlias(_ box: AnimationBoxBase) -> Bool {
+        guard let bezier = box as? BezierAnimationBox else {
+            return false
+        }
+        return approximatelyEqual(bezier.storedDuration, 0.35)
+    }
+
+    private func isFixedDurationFluidSpringAlias(_ box: AnimationBoxBase) -> Bool {
+        guard let fluidSpring = box as? FluidSpringAnimationBox else {
+            return false
+        }
+        return isSpringPropertyFluidSpringAlias(box) ||
+            isDefaultDurationInteractiveFluidSpringAlias(fluidSpring)
+    }
+
     private func isResidualFirstDirectFluidSpringAlias(
         _ box: FluidSpringAnimationBox
     ) -> Bool {
@@ -4540,6 +4681,22 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return false
     }
 
+    private func shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+        record: CompletionRecord,
+        previousAnimation: Animation?,
+        replacementAnimation: Animation,
+        removedOrderGenerations: Set<UInt64>
+    ) -> Bool {
+        guard record.criteria != .removed,
+              !removedOrderGenerations.contains(record.orderGeneration),
+              let previousAnimation,
+              previousAnimation.box is FluidSpringAnimationBox,
+              replacementAnimation.box is FluidSpringAnimationBox else {
+            return false
+        }
+        return true
+    }
+
     private func shouldGroupResidualWrapperReplacementCompletionRecords(
         previousAnimation: Animation?,
         replacementAnimation: Animation
@@ -4558,8 +4715,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         replacementAnimation: Animation
     ) -> Bool {
         guard let previousAnimation else { return false }
-        return isPlainFiniteNonResidualAnimation(previousAnimation.box) &&
-            isPlainFiniteNonResidualAnimation(replacementAnimation.box)
+        guard !shouldHoldFiniteRepeatForkCompletionRecordsForNewestRepeatBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: replacementAnimation
+        ) else {
+            return false
+        }
+        return isFiniteNonResidualAnimation(previousAnimation.box) &&
+            isFiniteNonResidualAnimation(replacementAnimation.box)
     }
 
     private func shouldMoveCompletionRecordsToReplacementBoundary(
@@ -4574,23 +4737,58 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         guard !previousAnimation.box.preservesRetargetedCompletionDeadlines else {
             return false
         }
+        if isFiniteNonResidualAnimation(previousAnimation.box),
+           isFiniteNonResidualAnimation(replacementAnimation.box) {
+            return false
+        }
         if !previousAnimation.box.duration.isFinite {
             return true
-        }
-        if isFiniteNonResidualAnimation(replacementAnimation.box) {
-            if isFiniteNonResidualWrapper(previousAnimation.box) {
-                return true
-            }
-            if isFiniteNonResidualWrapper(replacementAnimation.box),
-               isFiniteNonResidualAnimation(previousAnimation.box) {
-                return true
-            }
         }
         if previousAnimation.box is FluidSpringAnimationBox,
            replacementAnimation.box.presentationDuration == replacementAnimation.box.duration {
             return true
         }
         return false
+    }
+
+    private func shouldHoldFiniteRepeatForkCompletionRecordsForNewestRepeatBoundary(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        if isDefaultCombiningAnimation(previousAnimation.box) {
+            return isFiniteRepeatDelayedWrapper(replacementAnimation.box)
+        }
+        return containsFiniteNonResidualRepeat(previousAnimation.box) &&
+            containsFiniteNonResidualRepeat(replacementAnimation.box)
+    }
+
+    private func shouldReleaseHeldFiniteRepeatForkCompletionRecordsAtNewestRepeatBoundary(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation,
+              containsFiniteNonResidualRepeat(replacementAnimation.box) else {
+            return false
+        }
+        return containsFiniteNonResidualRepeat(previousAnimation.box)
+    }
+
+    private func shouldMoveHeldOlderFiniteRepeatForkCompletionRecordsToFiniteReplacementBoundary(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation,
+              !deadlineOwnedLogicalCompletionOrderGenerations.isEmpty,
+              containsFiniteNonResidualRepeat(previousAnimation.box),
+              isDirectFiniteCurveAnimation(replacementAnimation.box) else {
+            return false
+        }
+        return true
+    }
+
+    private func isDirectFiniteCurveAnimation(_ box: AnimationBoxBase) -> Bool {
+        box is BezierAnimationBox || box is UnitCurveAnimationBox
     }
 
     private func shouldClampCompletionRecordsToEarlierReplacementBoundary(
@@ -4663,6 +4861,33 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         return box.duration.isFinite &&
             box.presentationDuration == box.duration
+    }
+
+    private func isFiniteRepeatDelayedWrapper(_ box: AnimationBoxBase) -> Bool {
+        guard let delayBox = box as? DelayAnimationBox,
+              delayBox.duration.isFinite,
+              delayBox.presentationDuration == delayBox.duration else {
+            return false
+        }
+        return containsFiniteNonResidualRepeat(delayBox.base)
+    }
+
+    private func containsFiniteNonResidualRepeat(_ box: AnimationBoxBase) -> Bool {
+        if isFiniteNonResidualRepeat(box) {
+            return true
+        }
+        if let delayBox = box as? DelayAnimationBox {
+            return containsFiniteNonResidualRepeat(delayBox.base)
+        }
+        if let speedBox = box as? SpeedAnimationBox {
+            return containsFiniteNonResidualRepeat(speedBox.base)
+        }
+        if let combinedBox = box as? CustomAnimationBox<DefaultCombiningAnimation> {
+            return combinedBox.base.entries.contains {
+                containsFiniteNonResidualRepeat($0.animation.box)
+            }
+        }
+        return false
     }
 
     private func isFiniteNonResidualAnimation(_ box: AnimationBoxBase) -> Bool {

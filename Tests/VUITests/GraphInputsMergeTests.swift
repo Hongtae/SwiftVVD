@@ -2,6 +2,29 @@ import XCTest
 @testable import VUI
 
 final class GraphInputsMergeTests: XCTestCase {
+    func testUsingGraphicsRendererIsBoolViewInputWithSeparateViewChannel() {
+        assertBoolViewInput(UsingGraphicsRenderer.self)
+
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+
+            XCTAssertFalse(inputs[UsingGraphicsRenderer.self])
+            XCTAssertFalse(inputs.base[UsingGraphicsRenderer.self])
+
+            inputs[UsingGraphicsRenderer.self] = true
+
+            XCTAssertTrue(inputs[UsingGraphicsRenderer.self])
+            XCTAssertFalse(inputs.base[UsingGraphicsRenderer.self])
+
+            inputs.base[UsingGraphicsRenderer.self] = true
+
+            XCTAssertTrue(inputs[UsingGraphicsRenderer.self])
+            XCTAssertTrue(inputs.base[UsingGraphicsRenderer.self])
+        }
+    }
+
     func testMergePreservesReceiverOptionsAndImportsOnlyOtherAnimationsDisabled() {
         let graph = _AGGraph()
 
@@ -62,5 +85,27 @@ final class GraphInputsMergeTests: XCTestCase {
             options: [],
             mergedInputs: []
         )
+    }
+
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
+        _ViewInputs(
+            base: makeGraphInputs(graph: graph),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(CGSize(width: 10, height: 10))),
+            safeAreaInsets: OptionalAttribute<SafeAreaInsets>(),
+            containerSize: OptionalAttribute<ViewSize>(),
+            stackOrientation: nil
+        )
+    }
+
+    private func assertBoolViewInput<T: ViewInput>(_ type: T.Type) where T.Value == Bool {
+        XCTAssertFalse(T.defaultValue)
     }
 }

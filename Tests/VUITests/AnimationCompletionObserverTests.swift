@@ -429,6 +429,211 @@ final class AnimationCompletionObserverTests: XCTestCase {
         )
     }
 
+    func testNoRegisteredDirectSpringSingleCriteriaWrappersCompleteAfterAction() throws {
+        let spring = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        let cases: [(name: String, animation: Animation, criteria: AnimationCompletionCriteria)] = [
+            ("delay logical", spring.delay(0.20), .logicallyComplete),
+            ("delay removed", spring.delay(0.20), .removed),
+            ("repeat logical", spring.repeatCount(2, autoreverses: false), .logicallyComplete),
+            ("repeat removed", spring.repeatCount(2, autoreverses: false), .removed),
+            ("negative delay logical", spring.delay(-0.70), .logicallyComplete),
+            ("negative delay removed", spring.delay(-0.70), .removed),
+        ]
+        let expectedEvents = cases.map(\.name).sorted()
+        var events: [String] = []
+        var transactions: [Transaction] = []
+        var longestFallbackDelay: TimeInterval = 0
+
+        for testCase in cases {
+            let fallbackDelay = try XCTUnwrap(
+                testCase.animation.box.noRegisteredCompletionDelay(for: testCase.criteria),
+                testCase.name
+            )
+            XCTAssertGreaterThan(fallbackDelay, 0.10, testCase.name)
+            longestFallbackDelay = max(longestFallbackDelay, fallbackDelay)
+
+            let name = testCase.name
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: testCase.criteria) {
+                events.append(name)
+            }
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+            transactions.append(transaction)
+        }
+
+        withExtendedLifetime(transactions) {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.10))
+            XCTAssertTrue(events.isEmpty)
+
+            waitForMainQueue(
+                timeout: longestFallbackDelay + 0.50,
+                until: { events.count == cases.count }
+            )
+        }
+        XCTAssertEqual(events.count, cases.count)
+        XCTAssertEqual(events.sorted(), expectedEvents)
+    }
+
+    func testNoRegisteredDirectSpringUsesAnimatedSameBoundaryWhenLogicalRegisteredFirst() throws {
+        let animation = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        let logicalDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .logicallyComplete)
+        )
+        let removedDelay = try XCTUnwrap(
+            animation.box.noRegisteredCompletionDelay(for: .removed)
+        )
+        XCTAssertEqual(logicalDelay, removedDelay, accuracy: 0.000_000_1)
+
+        var events: [String] = []
+        var transaction = Transaction(animation: animation)
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            events.append("logical")
+        }
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("removed")
+        }
+
+        finalizeAnimationCompletions(
+            in: transaction,
+            animation: transaction.animation
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertTrue(events.isEmpty)
+
+        waitForMainQueue(timeout: 2.0, until: { events.count == 2 })
+        XCTAssertEqual(events, ["removed", "logical"])
+    }
+
+    func testNoRegisteredSpeedWrappedDirectSpringUsesAnimatedSameBoundaryWhenLogicalRegisteredFirst() throws {
+        let spring = Animation.interpolatingSpring(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        let cases: [(name: String, animation: Animation)] = [
+            ("speed", spring.speed(2)),
+            ("speedRepeat", spring.speed(2).repeatCount(2, autoreverses: false)),
+            ("repeatSpeed", spring.repeatCount(2, autoreverses: false).speed(2)),
+        ]
+
+        for testCase in cases {
+            let logicalDelay = try XCTUnwrap(
+                testCase.animation.box.noRegisteredCompletionDelay(for: .logicallyComplete),
+                testCase.name
+            )
+            let removedDelay = try XCTUnwrap(
+                testCase.animation.box.noRegisteredCompletionDelay(for: .removed),
+                testCase.name
+            )
+            XCTAssertEqual(
+                logicalDelay,
+                removedDelay,
+                accuracy: 0.000_000_1,
+                testCase.name
+            )
+
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+            XCTAssertTrue(events.isEmpty, testCase.name)
+
+            waitForMainQueue(timeout: 2.0, until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"],
+                testCase.name
+            )
+        }
+    }
+
+    func testNoRegisteredFluidAndDefaultResidualWrapperChainsUseAnimatedSameBoundary() throws {
+        let fluid = Animation.spring(
+            response: 0.35,
+            dampingFraction: 0.70,
+            blendDuration: 0
+        )
+        let cases: [(name: String, animation: Animation)] = [
+            (
+                "fluidSpeedRepeat",
+                fluid.speed(2).repeatCount(2, autoreverses: false)
+            ),
+            (
+                "defaultSpeedRepeat",
+                Animation.default.speed(2).repeatCount(2, autoreverses: false)
+            ),
+            ("fluidNegativeDelay", fluid.delay(-0.20)),
+            ("defaultNegativeDelay", Animation.default.delay(-0.20)),
+        ]
+
+        for testCase in cases {
+            let logicalDelay = try XCTUnwrap(
+                testCase.animation.box.noRegisteredCompletionDelay(for: .logicallyComplete),
+                testCase.name
+            )
+            let removedDelay = try XCTUnwrap(
+                testCase.animation.box.noRegisteredCompletionDelay(for: .removed),
+                testCase.name
+            )
+            XCTAssertEqual(
+                logicalDelay,
+                removedDelay,
+                accuracy: 0.000_000_1,
+                testCase.name
+            )
+
+            var events: [String] = []
+            var transaction = Transaction(animation: testCase.animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                events.append("\(testCase.name) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                events.append("\(testCase.name) removed")
+            }
+
+            finalizeAnimationCompletions(
+                in: transaction,
+                animation: transaction.animation
+            )
+
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+            XCTAssertTrue(events.isEmpty, testCase.name)
+
+            waitForMainQueue(timeout: 2.0, until: { events.count == 2 })
+            XCTAssertEqual(
+                events,
+                ["\(testCase.name) removed", "\(testCase.name) logical"],
+                testCase.name
+            )
+        }
+    }
+
     func testNoRegisteredFluidAndDefaultResidualWrappersUseAnimatedBoundary() throws {
         let cases: [(name: String, base: Animation)] = [
             (

@@ -282,11 +282,15 @@ extension PhaseAnimator.StateTransitioningContainer {
             let container = _view.value
 
             let isVisible: Bool?
+            let visibilityChanged: Bool
             let graph = _AGGraph.current
             if let graph,
                _isVisible.isValid(in: graph) {
-                isVisible = _isVisible.toStrong().value
+                let visibleAttribute = _isVisible.toStrong()
+                visibilityChanged = _AGGraph.currentStatefulInputChanged(visibleAttribute.identifier)
+                isVisible = visibleAttribute.value
             } else {
+                visibilityChanged = false
                 isVisible = nil
             }
 
@@ -299,6 +303,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                     scheduleVisibleRepeatingStartIfNeeded(
                         behavior: container.behavior,
                         viewChanged: viewChanged,
+                        visibilityChanged: visibilityChanged,
                         previousBehavior: lastBehavior
                     )
                 }
@@ -393,11 +398,12 @@ extension PhaseAnimator.StateTransitioningContainer {
         mutating func scheduleVisibleRepeatingStartIfNeeded(
             behavior: PhaseAnimator<Phase, Content>.Behavior,
             viewChanged: Bool,
+            visibilityChanged: Bool,
             previousBehavior: PhaseAnimator<Phase, Content>.Behavior?
         ) {
             if case .repeating = behavior {
-                if viewChanged,
-                   previousBehavior == behavior {
+                if previousBehavior == behavior,
+                   viewChanged || (!visibilityChanged && completionSeed != 0) {
                     return
                 }
                 advance(from: currentIndex)
