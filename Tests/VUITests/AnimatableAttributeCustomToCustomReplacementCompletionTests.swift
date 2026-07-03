@@ -212,6 +212,75 @@ final class AnimatableAttributeCustomToCustomReplacementCompletionTests: XCTestC
         )
     }
 
+    func testMergeTrueReplacementReusesPreviousStateFrame() {
+        let recorder = CustomRetargetFrameRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0.0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0.0, accuracy: 0.000_001)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1.0),
+            transaction: Transaction(animation: Animation(
+                CustomToCustomFrameAnimation(
+                    role: "old",
+                    nilAt: 1.40,
+                    shouldMergeResult: true,
+                    recorder: recorder
+                )
+            ))
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        sampleRunningAnimationBeforeRetarget(harness)
+        recorder.removeAnimationSamples()
+
+        harness.setSource(
+            _OpacityEffect(opacity: -0.5),
+            transaction: Transaction(animation: Animation(
+                CustomToCustomFrameAnimation(
+                    role: "replacement",
+                    nilAt: 1.00,
+                    shouldMergeResult: true,
+                    recorder: recorder
+                )
+            ))
+        )
+        harness.finalizeTransactionBody()
+        activateReplacementAnimation(harness)
+
+        let events = recorder.events
+        guard let shouldMergeFrame = events
+            .last(where: { $0.kind == "shouldMerge" && $0.role == "replacement" })?
+            .frame
+        else {
+            XCTFail("replacement shouldMerge should record the previous frame state")
+            return
+        }
+
+        let replacementFrames = events
+            .filter { $0.kind == "animate" && $0.role == "replacement" }
+            .map(\.frame)
+        let oldFrames = events
+            .filter { $0.kind == "animate" && $0.role == "old" }
+            .map(\.frame)
+        XCTAssertGreaterThanOrEqual(
+            shouldMergeFrame,
+            2,
+            "replacement shouldMerge should observe already-advanced state"
+        )
+        XCTAssertEqual(
+            Array(replacementFrames.prefix(3)),
+            [shouldMergeFrame, shouldMergeFrame + 1, shouldMergeFrame + 2],
+            "replacement animation should continue the previous state after shouldMerge(true)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            oldFrames.filter { $0 == shouldMergeFrame }.count,
+            2,
+            "old side-effect samples should reuse the retarget-time state snapshot"
+        )
+    }
+
     func testMergeFalsePresentationBaseNilDoesNotFinishOldCompletionBeforeReplacementNil() {
         let completionRecorder = AnimationCompletionRecorder()
         let frameRecorder = CustomRetargetFrameGateRecorder()

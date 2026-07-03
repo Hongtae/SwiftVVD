@@ -203,6 +203,91 @@ private struct ScrollableLifecycleRow: View, _PrimitiveView {
     }
 }
 
+private final class ScrollableForkRetargetCapture {
+    var animated: Attribute<_OpacityEffect>?
+}
+
+private struct ScrollableForkRetargetRow: View, _PrimitiveView {
+    var id: Int
+    var effect: _OpacityEffect
+    var recorder: AnimationCompletionRecorder
+    var capture: ScrollableForkRetargetCapture
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollableForkRetargetRow._makeView called outside an active _AGGraph context.")
+        }
+        let modifier = graph.makeRule {
+            let value = view._attribute.value
+            return _AppearanceActionModifier(
+                appear: {
+                    if value.id == 1 {
+                        value.recorder.record("row appear")
+                    }
+                },
+                disappear: {
+                    if value.id == 1 {
+                        value.recorder.record("row disappear")
+                    }
+                }
+            )
+        }
+        let appearance = graph.makeStatefulRule(
+            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+        )
+        graph.makeSideEffectRule {
+            _ = appearance.value
+            return ()
+        }
+
+        var graphValue = view[\.effect]
+        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+        let animatedAttr = graphValue._attribute
+        let captureAttr = view[\.capture]._attribute
+        graph.makeSideEffectRule {
+            let value = view._attribute.value
+            if value.id == 1 {
+                captureAttr.value.animated = animatedAttr
+            }
+            return ()
+        }
+
+        let layout = graph.makeRule {
+            _ = animatedAttr.value
+            return LayoutComputer.fixed(CGSize(width: 30, height: 20))
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+}
+
+private typealias ScrollableTransitionForkRetargetRow = ModifiedContent<
+    ModifiedContent<ScrollableForkRetargetRow, _TraitWritingModifier<TransitionTraitKey>>,
+    _TraitWritingModifier<CanTransitionTraitKey>
+>
+
+private func scrollableTransitionForkRetargetRow(
+    id: Int,
+    target: Double,
+    recorder: AnimationCompletionRecorder,
+    capture: ScrollableForkRetargetCapture
+) -> ScrollableTransitionForkRetargetRow {
+    let row = ScrollableForkRetargetRow(
+        id: id,
+        effect: _OpacityEffect(opacity: id == 1 ? target : 0),
+        recorder: recorder,
+        capture: capture
+    )
+    return ModifiedContent(
+        content: ModifiedContent(
+            content: row,
+            modifier: _TraitWritingModifier<TransitionTraitKey>(value: .opacity)
+        ),
+        modifier: _TraitWritingModifier<CanTransitionTraitKey>(value: true)
+    )
+}
+
 private struct ScrollableOrdinaryPreferenceKey: PreferenceKey {
     static let defaultValue = ""
 
@@ -589,6 +674,10 @@ private struct TargetRecordingScrollableLayout: _ScrollableLayout {
 }
 
 final class ScrollableLayoutSurfaceTests: XCTestCase {
+    private static func flushGraphActions(_ graph: _AGGraph) {
+        graph.drainActionOutbox()
+    }
+
     private func labels(of value: Any) -> [String] {
         Mirror(reflecting: value).children.compactMap(\.label)
     }
@@ -2558,6 +2647,157 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(delegate.events, ["change"])
         }
+    }
+
+    func testScrollableLayoutViewOffscreenRetainedUnusedRemovalDrainsRemovalCompletionBeforeForkedListeners() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        let capture = ScrollableForkRetargetCapture()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<_ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>>!
+        var sizeAttr: Attribute<ViewSize>!
+        var layoutAttr: Attribute<LayoutComputer>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        func rows(count: Int, target: Double) -> [ScrollableTransitionForkRetargetRow] {
+            (0..<count).map { id in
+                scrollableTransitionForkRetargetRow(
+                    id: id,
+                    target: target,
+                    recorder: recorder,
+                    capture: capture
+                )
+            }
+        }
+
+        func view(count: Int, target: Double) -> _ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout> {
+            _ScrollableLayoutView(data: rows(count: count, target: target), layout: VisibleCountScrollableLayout())
+        }
+
+        func place(height: CGFloat) {
+            sizeAttr.setValue(ViewSize(width: 100, height: height))
+            layoutAttr.value.place(
+                at: .zero,
+                proposal: ProposedViewSize(CGSize(width: 100, height: height))
+            )
+        }
+
+        try viewGraph.data.withCurrent {
+            sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            graphInputs = inputs.base
+            inputs.needsGeometry = true
+            source = graph.makeInput(value: view(count: 2, target: 0))
+
+            let outputs = _ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: source), inputs: inputs)
+            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            place(height: 80)
+
+            animatedValue = try XCTUnwrap(capture.animated)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+
+        func transaction(label: String) -> Transaction {
+            completionTransaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                ),
+                label: label,
+                recorder: recorder
+            )
+        }
+
+        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
+            viewGraph.data.withCurrent {
+                let nextTransaction = transaction(label: label)
+                source.setValue(
+                    view(count: 2, target: target),
+                    transaction: nextTransaction
+                )
+                place(height: 80)
+                _ = animatedValue.value
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                graphInputs.time.setValue(Time(seconds: firstSample))
+                place(height: 80)
+                _ = animatedValue.value
+                graphInputs.time.setValue(Time(seconds: secondSample))
+                place(height: 80)
+                _ = animatedValue.value
+                Self.flushGraphActions(graph)
+            }
+        }
+
+        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
+        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
+        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
+        XCTAssertEqual(recorder.events, ["row appear"])
+
+        viewGraph.data.withCurrent {
+            place(height: 40)
+            Self.flushGraphActions(graph)
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
+        }
+
+        viewGraph.data.withCurrent {
+            var removal = completionTransaction(
+                animation: .linear(duration: 0.02),
+                label: "removal",
+                recorder: recorder
+            )
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(view(count: 1, target: 3), transaction: removal)
+            place(height: 40)
+            Transaction.dispatchPendingListeners().forEach { $0() }
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "row disappear",
+                "removal removed",
+                "removal logical",
+            ]
+        )
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            place(height: 40)
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "row disappear",
+                "removal removed",
+                "removal logical",
+                "old removed",
+                "middle removed",
+                "active removed",
+                "active logical",
+                "old logical",
+                "middle logical",
+            ]
+        )
     }
 
     func testScrollableLayoutViewFiltersRetainedUnusedOrdinaryPreferences() throws {

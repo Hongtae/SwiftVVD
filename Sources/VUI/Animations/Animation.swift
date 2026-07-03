@@ -987,6 +987,10 @@ struct VelocityTrackingAnimation: CustomAnimation {
         if velocityState.sampler.isEmpty {
             velocityState.sampler.addSample(value, time: time)
             context.velocityState = velocityState
+            return .zero
+        }
+        guard time > 0 else {
+            return .zero
         }
 
         let activeUntil = (velocityState.sampler.lastTime ?? 0) + Self.activityWindow
@@ -2104,7 +2108,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override var presentationDuration: TimeInterval {
-        max(duration, presentationDurationEstimate)
+        presentationDurationWithAliasFloor(max(duration, presentationDurationEstimate))
     }
 
     override var description: String {
@@ -2137,14 +2141,29 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override func presentationDuration<Value>(
         for value: Value
     ) -> TimeInterval where Value: VectorArithmetic {
-        max(
+        presentationDurationWithAliasFloor(max(
             duration,
             fluidSpringSettlingDuration(
                 response: response,
                 dampingFraction: dampingFraction,
                 target: value
             )
-        )
+        ))
+    }
+
+    private func presentationDurationWithAliasFloor(_ duration: TimeInterval) -> TimeInterval {
+        guard isDefaultDurationInteractiveSpringAlias else { return duration }
+        return max(duration, 0.365)
+    }
+
+    private var isDefaultDurationInteractiveSpringAlias: Bool {
+        approximatelyEqual(response, 0.15) &&
+            approximatelyEqual(dampingFraction, 0.85) &&
+            approximatelyEqual(blendDuration, 0.25)
+    }
+
+    private func approximatelyEqual(_ lhs: Double, _ rhs: Double) -> Bool {
+        abs(lhs - rhs) <= 0.000_000_001
     }
 
     func reachesTargetAtLogicalDuration<Value>(

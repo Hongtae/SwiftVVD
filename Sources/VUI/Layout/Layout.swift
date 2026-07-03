@@ -248,6 +248,8 @@ enum DynamicContainer {
         var transitionCompletionSeed: Attribute<UInt32>?
         var transitionTransactions: _TransitionTransactionResolver?
         var removalLifecycleStarted: Bool
+        var ignoredRetainedUnusedRemovalObserver: ObjectIdentifier?
+        var retainAfterRemovalCompletion: Bool
 
         init(
             subgraph: AGSubgraph,
@@ -267,7 +269,9 @@ enum DynamicContainer {
             item: AnyHashable? = nil,
             transitionCompletionSeed: Attribute<UInt32>? = nil,
             transitionTransactions: _TransitionTransactionResolver? = nil,
-            removalLifecycleStarted: Bool = false
+            removalLifecycleStarted: Bool = false,
+            ignoredRetainedUnusedRemovalObserver: ObjectIdentifier? = nil,
+            retainAfterRemovalCompletion: Bool = false
         ) {
             self.subgraph = subgraph
             self.uniqueId = uniqueId
@@ -287,6 +291,8 @@ enum DynamicContainer {
             self.transitionCompletionSeed = transitionCompletionSeed
             self.transitionTransactions = transitionTransactions
             self.removalLifecycleStarted = removalLifecycleStarted
+            self.ignoredRetainedUnusedRemovalObserver = ignoredRetainedUnusedRemovalObserver
+            self.retainAfterRemovalCompletion = retainAfterRemovalCompletion
         }
 
         func setTransitionPhase(
@@ -440,6 +446,13 @@ struct DynamicContainerWillRemoveBeforeInvalidation: GraphInput {
     static var defaultValue: Bool { false }
 }
 
+/// Keeps a phase-3 retained-unused item cached after its later animated removal
+/// listener completes. Cache-owned lazy hosts use this to preserve source state
+/// across same-identity removal/reinsertion windows.
+struct DynamicContainerRetainCompletedUnusedRemovals: ViewInput {
+    static var defaultValue: Bool { false }
+}
+
 /// Stores layout attributes keyed by DynamicContainer item id and rebuilds its sorted
 /// attribute cache when DynamicContainer.Info.seed changes.
 private struct DynamicLayoutMap {
@@ -570,6 +583,7 @@ struct DynamicContainerInfo: StatefulRule {
                     if item.phase != 1 {
                         item.listener = nil
                         item.removalLifecycleStarted = false
+                        item.retainAfterRemovalCompletion = false
                         item.setTransitionPhase(.identity, transaction: listTransaction)
                     }
                     item.phase = 1
@@ -602,6 +616,25 @@ struct DynamicContainerInfo: StatefulRule {
         var removedItems: [DynamicContainer.ItemInfo] = []
         var unusedItems: [DynamicContainer.ItemInfo] = []
         let maxUnusedItems = max(inputs[DynamicContainerMaxUnusedItems.self], 0)
+        let retainCompletedUnusedRemovals = inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
+        func positiveRemovalTransition(
+            for item: DynamicContainer.ItemInfo
+        ) -> (transaction: Transaction, completionSeed: Attribute<UInt32>)? {
+            let transitionTransaction = item.transitionTransactions?(.didDisappear, transaction)
+                .first { candidate in
+                    guard let animation = candidate.effectiveAnimation else { return false }
+                    return animation.box.duration > 0
+                }
+            guard item.needsTransitions,
+                  let transitionTransaction,
+                  let animation = transitionTransaction.effectiveAnimation,
+                  animation.box.duration > 0,
+                  let completionSeed = item.transitionCompletionSeed else {
+                return nil
+            }
+            return (transitionTransaction, completionSeed)
+        }
+
         for item in info.items where !liveIDs.contains(item.uniqueId) {
             if item.phase == 2 {
                 guard let listener = item.listener else {
@@ -611,6 +644,19 @@ struct DynamicContainerInfo: StatefulRule {
                 }
                 listener.readSeed()
                 if listener.isComplete {
+                    if item.retainAfterRemovalCompletion {
+                        item.listener = nil
+                        item.retainAfterRemovalCompletion = false
+                        item.phase = 3
+                        item.removalOrder = 0
+                        guard unusedItems.count < maxUnusedItems else {
+                            item.invalidate()
+                            retainedElements.removeValue(forKey: item.uniqueId)
+                            continue
+                        }
+                        unusedItems.append(item)
+                        continue
+                    }
                     if inputs.base[DynamicContainerWillRemoveBeforeInvalidation.self],
                        !item.removalLifecycleStarted {
                         item.removalLifecycleStarted = true
@@ -633,6 +679,39 @@ struct DynamicContainerInfo: StatefulRule {
                 continue
             }
             if item.phase == 3 {
+                let transition = positiveRemovalTransition(for: item)
+                let observerID = transition?.transaction.animationCompletionObserver.map(ObjectIdentifier.init)
+                let didIgnoreObserver = observerID != nil &&
+                    item.ignoredRetainedUnusedRemovalObserver == observerID
+                if removedItems.isEmpty,
+                   !didIgnoreObserver,
+                   let transition {
+                    let listener = DynamicContainer.TransitionRemovalListener(
+                        seed: transition.completionSeed,
+                        inbox: graph.inbox
+                    )
+                    item.listener = listener
+                    item.ignoredRetainedUnusedRemovalObserver = nil
+                    item.retainAfterRemovalCompletion = retainCompletedUnusedRemovals
+
+                    var removalTransaction = transition.transaction
+                    _ = listener.installCompletion(into: &removalTransaction)
+                    item.phase = 2
+                    item.removalLifecycleStarted = true
+                    item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
+                    listener.readSeed()
+                    finalizeAnimationCompletions(
+                        in: removalTransaction,
+                        animation: removalTransaction.effectiveAnimation
+                    )
+
+                    item.removalOrder = removedItems.count
+                    removedItems.append(item)
+                    continue
+                }
+                if !removedItems.isEmpty, let observerID {
+                    item.ignoredRetainedUnusedRemovalObserver = observerID
+                }
                 guard unusedItems.count < maxUnusedItems else {
                     item.invalidate()
                     retainedElements.removeValue(forKey: item.uniqueId)
@@ -642,17 +721,7 @@ struct DynamicContainerInfo: StatefulRule {
                 continue
             }
 
-            let transitionTransaction = item.transitionTransactions?(.didDisappear, transaction)
-                .first { candidate in
-                    guard let animation = candidate.effectiveAnimation else { return false }
-                    return animation.box.duration > 0
-                }
-
-            guard item.needsTransitions,
-                  let transitionTransaction,
-                  let animation = transitionTransaction.effectiveAnimation,
-                  animation.box.duration > 0,
-                  let completionSeed = item.transitionCompletionSeed else {
+            guard let transition = positiveRemovalTransition(for: item) else {
                 guard unusedItems.count < maxUnusedItems else {
                     item.invalidate()
                     retainedElements.removeValue(forKey: item.uniqueId)
@@ -667,12 +736,12 @@ struct DynamicContainerInfo: StatefulRule {
             }
 
             let listener = DynamicContainer.TransitionRemovalListener(
-                seed: completionSeed,
+                seed: transition.completionSeed,
                 inbox: graph.inbox
             )
             item.listener = listener
 
-            var removalTransaction = transitionTransaction
+            var removalTransaction = transition.transaction
             _ = listener.installCompletion(into: &removalTransaction)
             item.phase = 2
             item.setTransitionPhase(.didDisappear, transaction: removalTransaction)

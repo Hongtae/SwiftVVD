@@ -137,7 +137,59 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         )
     }
 
+    func testPropertyAndNoArgFluidSpringAliasesKeepSampledSameFamilyCriteriaOrder() {
+        assertResidualSameFamilyRetarget(
+            oldAnimation: .spring,
+            replacementAnimation: .interactiveSpring,
+            label: "springPropertyToInteractiveProperty",
+            logicalOrdering: .replacementBeforeOldBeforeFinal,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+        assertResidualSameFamilyRetarget(
+            oldAnimation: .interactiveSpring,
+            replacementAnimation: .spring,
+            label: "interactivePropertyToSpringProperty",
+            logicalOrdering: .oldBeforeRetarget,
+            expectedFinalEvents: [
+                "old logical",
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+        assertResidualSameFamilyRetarget(
+            oldAnimation: .spring(),
+            replacementAnimation: .interactiveSpring(),
+            label: "springNoArgToInteractiveNoArg",
+            logicalOrdering: .replacementBeforeOldBeforeFinal,
+            expectedFinalEvents: [
+                "replacement logical",
+                "old logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+        assertResidualSameFamilyRetarget(
+            oldAnimation: .interactiveSpring(),
+            replacementAnimation: .spring(),
+            label: "interactiveNoArgToSpringNoArg",
+            logicalOrdering: .oldBeforeRetarget,
+            expectedFinalEvents: [
+                "old logical",
+                "replacement logical",
+                "old removed",
+                "replacement removed",
+            ]
+        )
+    }
+
     private enum LogicalOrdering {
+        case oldBeforeRetarget
         case oldBeforeReplacement
         case replacementBeforeOldBeforeFinal
         case replacementBeforeClampedOld
@@ -176,7 +228,11 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         harness.setTime(retargetTime)
         let retargetStartValue = harness.currentValue().opacity
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+        if logicalOrdering == .oldBeforeRetarget {
+            XCTAssertEqual(recorder.events, ["old logical"], label, file: file, line: line)
+        } else {
+            XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+        }
 
         harness.setSource(
             _OpacityEffect(opacity: target),
@@ -189,7 +245,11 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         harness.finalizeTransactionBody()
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+        if logicalOrdering == .oldBeforeRetarget {
+            XCTAssertEqual(recorder.events, ["old logical"], label, file: file, line: line)
+        } else {
+            XCTAssertEqual(recorder.events, [], label, file: file, line: line)
+        }
 
         let oldLogical = oldAnimation.box.duration
         let replacementLogical = retargetTime + replacementAnimation.box.duration
@@ -199,6 +259,21 @@ final class AnimatableAttributeResidualSameFamilyRetargetCompletionTests: XCTest
         XCTAssertLessThan(replacementLogical, replacementFinal, label, file: file, line: line)
 
         switch logicalOrdering {
+        case .oldBeforeRetarget:
+            XCTAssertLessThan(oldLogical, retargetTime, label, file: file, line: line)
+            harness.setTime(replacementLogical + frame)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "old logical",
+                    "replacement logical",
+                ],
+                label,
+                file: file,
+                line: line
+            )
         case .oldBeforeReplacement:
             XCTAssertLessThan(oldLogical, replacementLogical, label, file: file, line: line)
             harness.setTime(oldLogical + frame)

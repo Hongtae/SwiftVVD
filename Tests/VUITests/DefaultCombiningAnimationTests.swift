@@ -23,6 +23,40 @@ final class DefaultCombiningAnimationTests: XCTestCase {
         XCTAssertEqual(sample, 11.25, accuracy: 0.000_001)
     }
 
+    func testRepeatedCombineAnimationAppendsAccumulatedReplacementEntry() throws {
+        var animation = Animation(UnitLinearAnimation(duration: 1.0))
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(UnitLinearAnimation(duration: 1.0)),
+            newValue: 5.0
+        )
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 15.0,
+            elapsed: 0.50,
+            newAnimation: Animation(UnitLinearAnimation(duration: 1.0)),
+            newValue: -3.0
+        )
+
+        let box = try XCTUnwrap(animation.box as? CustomAnimationBox<DefaultCombiningAnimation>)
+        XCTAssertEqual(box.base.entries.count, 3)
+        XCTAssertEqual(box.base.entries.map(\.elapsed), [0.0, 0.25, 0.50])
+        XCTAssertEqual(state.combinedState.entries.map(\.value), [10.0, 15.0, 12.0])
+
+        var context = AnimationContext(state: state)
+        let sample = try XCTUnwrap(
+            animation.animate(value: 12.0, time: 0.75, context: &context)
+        )
+
+        XCTAssertEqual(sample, 11.4375, accuracy: 0.000_001)
+    }
+
     func testCompletedChildKeepsAccumulatedContribution() throws {
         var animation = Animation(UnitLinearAnimation(duration: 0.2))
         var state = AnimationState<Double>()

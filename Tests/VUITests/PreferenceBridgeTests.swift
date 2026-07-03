@@ -417,6 +417,69 @@ final class PreferenceBridgeTests: XCTestCase {
         }
     }
 
+    func testPreferenceTransformQueuedTargetUpdateDoesNotFinalizeCompletionListeners() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        let host = GraphHost()
+        var transformed: AGAttribute!
+        var events: [String] = []
+        var transaction = Transaction(animation: .linear(duration: 0.20))
+        transaction[PreferenceTransformBaseTransactionKey.self] = "queuedCompletion"
+        transaction.addAnimationCompletion(criteria: .removed) {
+            events.append("completion")
+        }
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let source = graph.makeInput(value: "root")
+            let transform = graph.makeInput(value: { (value: inout String) in
+                value += "|queued"
+            })
+            var outputs = PreferencesOutputs()
+            outputs.append(AppendingPreferenceKey.self, node: source.identifier)
+
+            Update.begin()
+            defer {
+                if Update.isActive {
+                    Update.end()
+                }
+            }
+
+            withTransaction(transaction) {
+                outputs.makePreferenceTransformer(
+                    key: AppendingPreferenceKey.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
+                transformed = outputs.value(for: AppendingPreferenceKey.self)
+                XCTAssertEqual(Attribute<String>(transformed).value, "")
+                XCTAssertEqual(Update.queuedActionReasons, [0x11])
+                Update.end()
+            }
+
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
+            XCTAssertEqual(Attribute<String>(transformed).value, "root|queued")
+            let propagated = host.data.graph.transaction(for: transformed)
+            XCTAssertEqual(
+                propagated?[PreferenceTransformBaseTransactionKey.self],
+                "queuedCompletion"
+            )
+        }
+        XCTAssertEqual(events, [])
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(events, ["completion"])
+
+        withExtendedLifetime(transaction) {}
+    }
+
     func testPreferenceTransformSuppressesDuplicateTargetUpdateAfterEquivalentBaseValue() {
         let host = GraphHost()
         var transformed: AGAttribute!

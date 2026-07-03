@@ -367,6 +367,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     }
 
     private var animation: Animation?
+    // `state` drives active sampling.
+    private var state = AnimationState<AnimatedValue.AnimatableData>()
     // Model-space delta from the active start value to the current target. The
     // animation box samples this delta; resolvedData applies the sampled delta
     // back to the latest model target.
@@ -376,20 +378,18 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     private var nextTime: Time = .zero
     private var previousAnimationValue: AnimatedValue.AnimatableData = .zero
     private var reason: UInt32?
-    // `state` drives sampling. `mergeState` is the separate context handed to a
-    // replacement's merge query so a failed merge does not corrupt the active
-    // sampling state.
-    private var state = AnimationState<AnimatedValue.AnimatableData>()
-    private var mergeState = AnimationState<AnimatedValue.AnimatableData>()
     private var phase: Phase = .pending
     private var listeners: [AnimationListener] = []
     private var logicalListeners: [AnimationListener] = []
     private var isLogicallyComplete = false
     private var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
-    private var updatesMergeStateWithAnimation = true
     // Forks are old logical-completion routes. They no longer affect output,
     // but still sample until their own logical completion boundary is reached.
     private var forks: [Fork] = []
+    // VUI-only merge and presentation-base state extends the SwiftUI-shaped
+    // storage above without changing the helper's ownership boundary.
+    private var mergeState = AnimationState<AnimatedValue.AnimatableData>()
+    private var updatesMergeStateWithAnimation = true
     // Base layers preserve visual continuity across false retargets. The active
     // route samples against their stacked presentation output instead of the raw
     // model start value.
@@ -809,6 +809,18 @@ private final class AnimatorState<AnimatedValue: Animatable> {
 
     func appendBaseLayer(_ layer: PresentationLayer) {
         baseLayers.append(layer)
+    }
+
+    func forkLogicalListenersForRetargetIfNeeded() {
+        guard let previousAnimation = animation,
+              phase != .pending else {
+            return
+        }
+        forkListeners(
+            animation: previousAnimation,
+            state: state,
+            interval: interval
+        )
     }
 
     func combine(
@@ -1985,6 +1997,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 hasLayerStackConversion: combineResult.layerStackConversion != nil,
                 usesWrapperLocalFiniteReplacementPresentation: usesWrapperLocalFiniteReplacementPresentation
             )
+        let restartsVelocityTrackingPresentationAtCurrentOutput =
+            shouldRestartVelocityTrackingPresentationAtCurrentOutput(
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation
+            )
         if usesCombinedAnimation,
            let previousAnimation,
            let previousStart {
@@ -2003,6 +2020,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         if !previousSamplingLayers.isEmpty {
             samplingLayers.append(SideEffectSamplingLayer(layers: previousSamplingLayers))
+        }
+        if restartsVelocityTrackingPresentationAtCurrentOutput {
+            activeStart = start
+            activeStartTime = now
         }
         if usesCombinedAnimation {
             helper.removeBaseLayers()
@@ -3766,6 +3787,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             isVelocityTrackingAnimation(replacementAnimation.box)
     }
 
+    private func shouldRestartVelocityTrackingPresentationAtCurrentOutput(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isVelocityTrackingAnimation(previousAnimation.box) &&
+            isVelocityTrackingAnimation(replacementAnimation.box)
+    }
+
     private func shouldFinishCombinedCompletionRecordsWithImmediateReplacement(
         previousAnimation: Animation?,
         replacementAnimation: Animation
@@ -4216,7 +4246,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return true
         }
         if let fluidSpring = repeatBox.base as? FluidSpringAnimationBox {
-            return repeatCount >= 0 && !isInteractiveFluidSpringAlias(fluidSpring)
+            return repeatCount >= 0 &&
+                (
+                    !isInteractiveFluidSpringAlias(fluidSpring) ||
+                    isDefaultDurationInteractiveFluidSpringAlias(fluidSpring)
+                )
         }
         if repeatCount > 0,
            hasSpringAnimationBaseThroughDelayRepeat(repeatBox.base) {
@@ -4361,6 +4395,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         approximatelyEqual(box.response, 0.5) &&
             approximatelyEqual(box.blendDuration, 0) &&
             box.dampingFraction < 0.8
+    }
+
+    private func isDefaultDurationInteractiveFluidSpringAlias(
+        _ box: FluidSpringAnimationBox
+    ) -> Bool {
+        approximatelyEqual(box.response, 0.15) &&
+            approximatelyEqual(box.dampingFraction, 0.85) &&
+            approximatelyEqual(box.blendDuration, 0.25)
     }
 
     private func isInteractiveFluidSpringAlias(_ box: FluidSpringAnimationBox) -> Bool {
@@ -5171,6 +5213,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         // update after activation, so listener registration must finish inside
         // AnimatorState before control returns to the rule.
         updatePreviousModelData(target.animatableData)
+        animatorState?.forkLogicalListenersForRetargetIfNeeded()
         activate(
             animation: animation,
             interval: animatableDelta(from: start, to: target),

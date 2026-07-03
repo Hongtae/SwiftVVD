@@ -116,4 +116,103 @@ final class AnimationFinishingDefinitionTests: XCTestCase {
             spring.animate(value: target, time: 0, context: &finishingContext)
         )
     }
+
+    func testDelayAndSpeedWrappersForwardExistingFinishingContext() throws {
+        let target = Self.viewFrameTarget
+
+        let delayRecorder = WrapperFinishingContextRecorder()
+        var delayContext = Self.makeViewFrameFinishingContext()
+        let delayed = Animation(
+            WrapperFinishingContextProbeAnimation(recorder: delayRecorder, returnsNil: false)
+        )
+        .delay(0.25)
+
+        _ = delayed.animate(value: target, time: 0.10, context: &delayContext)
+        XCTAssertEqual(delayRecorder.observations, [true])
+
+        let speedRecorder = WrapperFinishingContextRecorder()
+        var speedContext = Self.makeViewFrameFinishingContext()
+        let sped = Animation(
+            WrapperFinishingContextProbeAnimation(recorder: speedRecorder, returnsNil: false)
+        )
+        .speed(2.0)
+
+        _ = sped.animate(value: target, time: 0.10, context: &speedContext)
+        XCTAssertEqual(speedRecorder.observations, [true])
+    }
+
+    func testRepeatNonFiniteCycleResetDoesNotCopyFinishingDefinition() {
+        let recorder = WrapperFinishingContextRecorder()
+        let repeated = Animation(
+            WrapperFinishingContextProbeAnimation(recorder: recorder, returnsNil: true)
+        )
+        .repeatCount(2, autoreverses: false)
+
+        var context = Self.makeViewFrameFinishingContext()
+        _ = repeated.animate(value: Self.viewFrameTarget, time: 0, context: &context)
+        XCTAssertEqual(recorder.observations, [true])
+
+        XCTAssertNil(repeated.animate(value: Self.viewFrameTarget, time: 0.1, context: &context))
+        XCTAssertEqual(recorder.observations, [true, false])
+        XCTAssertNil(context.finishingDefinition)
+        XCTAssertEqual(context.state[RepeatState<ViewFrame.AnimatableData>.self].iteration, 2)
+    }
+
+    private static var viewFrameTarget: ViewFrame.AnimatableData {
+        ViewFrame.AnimatableData(
+            CGPoint(x: 1.0, y: 1.0).animatableData,
+            ViewSize(width: 3.0, height: 3.0).animatableData
+        )
+    }
+
+    private static func makeViewFrameFinishingContext() -> AnimationContext<ViewFrame.AnimatableData> {
+        makeAnimationContext(
+            for: ViewFrame.self,
+            state: AnimationState<ViewFrame.AnimatableData>(),
+            environment: EnvironmentValues()
+        )
+    }
+}
+
+private final class WrapperFinishingContextRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedObservations: [Bool] = []
+
+    var observations: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedObservations
+    }
+
+    func append(_ value: Bool) {
+        lock.lock()
+        storedObservations.append(value)
+        lock.unlock()
+    }
+}
+
+private struct WrapperFinishingContextProbeAnimation: CustomAnimation, @unchecked Sendable {
+    let recorder: WrapperFinishingContextRecorder
+    let returnsNil: Bool
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        recorder.append(context.finishingDefinition != nil)
+        return returnsNil ? nil : value
+    }
+
+    static func == (
+        lhs: WrapperFinishingContextProbeAnimation,
+        rhs: WrapperFinishingContextProbeAnimation
+    ) -> Bool {
+        lhs.recorder === rhs.recorder && lhs.returnsNil == rhs.returnsNil
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(recorder))
+        hasher.combine(returnsNil)
+    }
 }

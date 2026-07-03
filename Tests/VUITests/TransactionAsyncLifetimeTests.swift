@@ -19,6 +19,119 @@ private final class MainActorWaiter {
 
 final class TransactionAsyncLifetimeTests: XCTestCase {
     @MainActor
+    func testAsyncAnimatableWritesScheduledInsideScopedTransactionsSnapWithoutInheritedAnimation() async {
+        var events: [String] = []
+
+        let dispatchAnimationHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let dispatchAnimationWaiter = MainActorWaiter()
+        withAnimation(
+            .linear(duration: 0.20),
+            completionCriteria: .removed
+        ) {
+            events.append("animation body")
+            DispatchQueue.main.async {
+                events.append(Self.currentTransactionState(prefix: "animation dispatch"))
+                dispatchAnimationHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                dispatchAnimationWaiter.resume()
+            }
+        } completion: {
+            events.append("animation completion")
+        }
+        events.append("animation returned")
+        await dispatchAnimationWaiter.wait()
+        assertSnappedWithoutAnimation(dispatchAnimationHarness)
+
+        let dispatchTransactionHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let dispatchTransactionWaiter = MainActorWaiter()
+        do {
+            var dispatchTransaction = Transaction(animation: .linear(duration: 0.20))
+            dispatchTransaction.addAnimationCompletion(criteria: .removed) {
+                events.append("transaction completion")
+            }
+            withTransaction(dispatchTransaction) {
+                events.append("transaction body")
+                DispatchQueue.main.async {
+                    events.append(Self.currentTransactionState(prefix: "transaction dispatch"))
+                    dispatchTransactionHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                    dispatchTransactionWaiter.resume()
+                }
+            }
+            events.append("transaction returned")
+        }
+        await dispatchTransactionWaiter.wait()
+        assertSnappedWithoutAnimation(dispatchTransactionHarness)
+
+        let taskAnimationHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let taskAnimationWaiter = MainActorWaiter()
+        withAnimation(
+            .linear(duration: 0.20),
+            completionCriteria: .removed
+        ) {
+            events.append("animation task body")
+            Task { @MainActor in
+                events.append(Self.currentTransactionState(prefix: "animation task"))
+                taskAnimationHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                taskAnimationWaiter.resume()
+            }
+        } completion: {
+            events.append("animation task completion")
+        }
+        events.append("animation task returned")
+        await taskAnimationWaiter.wait()
+        assertSnappedWithoutAnimation(taskAnimationHarness)
+
+        let taskTransactionHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let taskTransactionWaiter = MainActorWaiter()
+        do {
+            var taskTransaction = Transaction(animation: .linear(duration: 0.20))
+            taskTransaction.addAnimationCompletion(criteria: .removed) {
+                events.append("transaction task completion")
+            }
+            withTransaction(taskTransaction) {
+                events.append("transaction task body")
+                Task { @MainActor in
+                    events.append(Self.currentTransactionState(prefix: "transaction task"))
+                    taskTransactionHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                    taskTransactionWaiter.resume()
+                }
+            }
+            events.append("transaction task returned")
+        }
+        await taskTransactionWaiter.wait()
+        assertSnappedWithoutAnimation(taskTransactionHarness)
+
+        XCTAssertEqual(
+            events,
+            [
+                "animation body",
+                "animation completion",
+                "animation returned",
+                "animation dispatch empty",
+                "transaction body",
+                "transaction returned",
+                "transaction completion",
+                "transaction dispatch empty",
+                "animation task body",
+                "animation task completion",
+                "animation task returned",
+                "animation task empty",
+                "transaction task body",
+                "transaction task returned",
+                "transaction task completion",
+                "transaction task empty",
+            ]
+        )
+    }
+
+    @MainActor
     func testDispatchQueueWorkScheduledInsideScopedTransactionsDoesNotInheritCurrentTransaction() async {
         var events: [String] = []
 
@@ -200,5 +313,19 @@ final class TransactionAsyncLifetimeTests: XCTestCase {
                 "nested task empty",
             ]
         )
+    }
+
+    private func assertSnappedWithoutAnimation(
+        _ harness: AnimatableAttributeHarness,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001, file: file, line: line)
+        harness.setTime(0.05)
+        XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001, file: file, line: line)
+    }
+
+    private static func currentTransactionState(prefix: String) -> String {
+        "\(prefix) \(Transaction.current.isEmpty ? "empty" : "inherited")"
     }
 }

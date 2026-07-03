@@ -350,6 +350,43 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
         XCTAssertTrue(events.contains("animate:replacement"), "\(events)")
     }
 
+    func testContinuousTrackedSourceCustomToDirectSpringDoesNotCallVelocity() {
+        let recorder = AnimationVelocityRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+
+        var oldTransaction = Transaction(animation: recordingAnimation(id: "old", recorder: recorder))
+        oldTransaction.isContinuous = true
+        oldTransaction.tracksVelocity = true
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: oldTransaction
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.setTime(0.25)
+        _ = harness.currentValue()
+
+        var springTransaction = Transaction(
+            animation: .interpolatingSpring(mass: 1.0, stiffness: 80.0, damping: 12.0)
+        )
+        springTransaction.isContinuous = true
+        springTransaction.tracksVelocity = true
+        harness.setSource(
+            _OpacityEffect(opacity: 0.5),
+            transaction: springTransaction
+        )
+        harness.finalizeTransactionBody()
+        harness.setTime(0.35)
+        _ = harness.currentValue()
+
+        let events = recorder.events
+        XCTAssertFalse(events.contains { $0.hasPrefix("velocity:") }, "\(events)")
+        XCTAssertTrue(events.contains("animate:old"), "\(events)")
+    }
+
     func testNoExplicitVelocityTrackingRetargetsDoNotCallSourceDefinedVelocity() {
         let customToTrackedRecorder = AnimationVelocityRecorder()
         let customToTrackedHarness = AnimatableAttributeHarness(
@@ -472,6 +509,25 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
         }
     }
 
+    func testSourceDefinedCustomWrappersDoNotCallVelocityThroughAnimatableAttribute() {
+        let wrappers: [(String, (Animation) -> Animation)] = [
+            ("delay", { $0.delay(0.10) }),
+            ("speed", { $0.speed(2.0) }),
+            ("repeat", { $0.repeatCount(2, autoreverses: false) }),
+        ]
+
+        for (label, wrapper) in wrappers {
+            assertScalarSourceDefinedCustomWrapperDoesNotCallVelocity(
+                label: label,
+                wrapper: wrapper
+            )
+            assertVectorSourceDefinedCustomWrapperDoesNotCallVelocity(
+                label: label,
+                wrapper: wrapper
+            )
+        }
+    }
+
     func testReverseDirectFluidSpringAliasesDoNotCallReplacementVelocity() {
         let previousAnimations: [Animation] = [
             .default,
@@ -569,6 +625,199 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
         return (animation, state)
     }
 
+    private func assertScalarSourceDefinedCustomWrapperDoesNotCallVelocity(
+        label: String,
+        wrapper: (Animation) -> Animation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let customToWrapperOldRecorder = AnimationVelocityRecorder()
+        let customToWrapperReplacementRecorder = AnimationVelocityRecorder()
+        let customToWrapperHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        driveSourceDefinedWrapperRetarget(
+            harness: customToWrapperHarness,
+            oldAnimation: recordingAnimation(id: "old", recorder: customToWrapperOldRecorder),
+            replacementAnimation: wrapper(
+                recordingAnimation(id: "replacement", recorder: customToWrapperReplacementRecorder)
+            ),
+            oldValue: _OpacityEffect(opacity: 1),
+            replacementValue: _OpacityEffect(opacity: 0.25)
+        )
+        assertNoVelocityAndAnimationSampling(
+            oldEvents: customToWrapperOldRecorder.events,
+            replacementEvents: customToWrapperReplacementRecorder.events,
+            label: "\(label) scalar custom-to-wrapper",
+            file: file,
+            line: line
+        )
+
+        let wrapperToCustomOldRecorder = AnimationVelocityRecorder()
+        let wrapperToCustomReplacementRecorder = AnimationVelocityRecorder()
+        let wrapperToCustomHarness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        driveSourceDefinedWrapperRetarget(
+            harness: wrapperToCustomHarness,
+            oldAnimation: wrapper(recordingAnimation(id: "old", recorder: wrapperToCustomOldRecorder)),
+            replacementAnimation: recordingAnimation(
+                id: "replacement",
+                recorder: wrapperToCustomReplacementRecorder
+            ),
+            oldValue: _OpacityEffect(opacity: 1),
+            replacementValue: _OpacityEffect(opacity: 0.25)
+        )
+        assertNoVelocityAndAnimationSampling(
+            oldEvents: wrapperToCustomOldRecorder.events,
+            replacementEvents: wrapperToCustomReplacementRecorder.events,
+            label: "\(label) scalar wrapper-to-custom",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertVectorSourceDefinedCustomWrapperDoesNotCallVelocity(
+        label: String,
+        wrapper: (Animation) -> Animation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let customToWrapperOldRecorder = AnimationVelocityRecorder()
+        let customToWrapperReplacementRecorder = AnimationVelocityRecorder()
+        let customToWrapperHarness = GenericAnimatableAttributeHarness(
+            initialValue: VelocityPairPayload(x: 0, y: 0)
+        )
+        driveSourceDefinedWrapperRetarget(
+            harness: customToWrapperHarness,
+            oldAnimation: recordingAnimation(id: "old", recorder: customToWrapperOldRecorder),
+            replacementAnimation: wrapper(
+                recordingAnimation(id: "replacement", recorder: customToWrapperReplacementRecorder)
+            ),
+            oldValue: VelocityPairPayload(x: 1, y: -0.5),
+            replacementValue: VelocityPairPayload(x: 0.25, y: 0.75)
+        )
+        assertNoVelocityAndAnimationSampling(
+            oldEvents: customToWrapperOldRecorder.events,
+            replacementEvents: customToWrapperReplacementRecorder.events,
+            label: "\(label) vector custom-to-wrapper",
+            file: file,
+            line: line
+        )
+
+        let wrapperToCustomOldRecorder = AnimationVelocityRecorder()
+        let wrapperToCustomReplacementRecorder = AnimationVelocityRecorder()
+        let wrapperToCustomHarness = GenericAnimatableAttributeHarness(
+            initialValue: VelocityPairPayload(x: 0, y: 0)
+        )
+        driveSourceDefinedWrapperRetarget(
+            harness: wrapperToCustomHarness,
+            oldAnimation: wrapper(recordingAnimation(id: "old", recorder: wrapperToCustomOldRecorder)),
+            replacementAnimation: recordingAnimation(
+                id: "replacement",
+                recorder: wrapperToCustomReplacementRecorder
+            ),
+            oldValue: VelocityPairPayload(x: 1, y: -0.5),
+            replacementValue: VelocityPairPayload(x: 0.25, y: 0.75)
+        )
+        assertNoVelocityAndAnimationSampling(
+            oldEvents: wrapperToCustomOldRecorder.events,
+            replacementEvents: wrapperToCustomReplacementRecorder.events,
+            label: "\(label) vector wrapper-to-custom",
+            file: file,
+            line: line
+        )
+    }
+
+    private func driveSourceDefinedWrapperRetarget<Value>(
+        harness: GenericAnimatableAttributeHarness<Value>,
+        oldAnimation: Animation,
+        replacementAnimation: Animation,
+        oldValue: Value,
+        replacementValue: Value
+    ) where Value: Animatable {
+        harness.setSource(
+            oldValue,
+            transaction: trackedVelocityTransaction(animation: oldAnimation)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.setTime(0.25)
+        _ = harness.currentValue()
+        harness.setTime(0.35)
+        _ = harness.currentValue()
+
+        harness.setSource(
+            replacementValue,
+            transaction: trackedVelocityTransaction(animation: replacementAnimation)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.setTime(0.55)
+        _ = harness.currentValue()
+        harness.setTime(0.65)
+        _ = harness.currentValue()
+    }
+
+    private func driveSourceDefinedWrapperRetarget(
+        harness: AnimatableAttributeHarness,
+        oldAnimation: Animation,
+        replacementAnimation: Animation,
+        oldValue: _OpacityEffect,
+        replacementValue: _OpacityEffect
+    ) {
+        harness.setSource(
+            oldValue,
+            transaction: trackedVelocityTransaction(animation: oldAnimation)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.setTime(0.25)
+        _ = harness.currentValue()
+        harness.setTime(0.35)
+        _ = harness.currentValue()
+
+        harness.setSource(
+            replacementValue,
+            transaction: trackedVelocityTransaction(animation: replacementAnimation)
+        )
+        harness.finalizeTransactionBody()
+        _ = harness.currentValue()
+        harness.setTime(0.55)
+        _ = harness.currentValue()
+        harness.setTime(0.65)
+        _ = harness.currentValue()
+    }
+
+    private func trackedVelocityTransaction(animation: Animation) -> Transaction {
+        var transaction = Transaction(animation: animation)
+        transaction.isContinuous = true
+        transaction.tracksVelocity = true
+        return transaction
+    }
+
+    private func assertNoVelocityAndAnimationSampling(
+        oldEvents: [String],
+        replacementEvents: [String],
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let allEvents = oldEvents + replacementEvents
+        XCTAssertFalse(
+            allEvents.contains { $0.hasPrefix("velocity:") },
+            "\(label): \(allEvents)",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            replacementEvents.contains("animate:replacement"),
+            "\(label): \(replacementEvents)",
+            file: file,
+            line: line
+        )
+    }
+
     private func directSpringAnimations() -> [(String, Animation)] {
         [
             (
@@ -633,6 +882,19 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
             context: &context
         )
         return recorder?.events ?? []
+    }
+}
+
+private struct VelocityPairPayload: Animatable {
+    var x: Double
+    var y: Double
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(x, y) }
+        set {
+            x = newValue.first
+            y = newValue.second
+        }
     }
 }
 

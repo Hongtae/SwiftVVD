@@ -31,11 +31,19 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
             dampingFraction: 0.8,
             blendDuration: 0.10
         )
+        XCTAssertEqual(
+            Animation.spring(duration: 0.0, bounce: 0.20, blendDuration: 0.10),
+            Animation.spring(response: 0.0, dampingFraction: 0.8, blendDuration: 0.10)
+        )
         try assertFluidSpring(
             Animation.spring(duration: -0.20, bounce: 0.20, blendDuration: 0.10),
             response: -0.20,
             dampingFraction: 0.8,
             blendDuration: 0.10
+        )
+        XCTAssertEqual(
+            Animation.spring(duration: -0.20, bounce: 0.20, blendDuration: 0.10),
+            Animation.spring(response: -0.20, dampingFraction: 0.8, blendDuration: 0.10)
         )
     }
 
@@ -52,6 +60,30 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
         )
 
         try assertFluidSpring(
+            Animation.interactiveSpring(duration: 0.15, extraBounce: 1.20, blendDuration: 0.25),
+            response: 0.15,
+            dampingFraction: 0.0,
+            blendDuration: 0.25
+        )
+        XCTAssertEqual(
+            Animation.interactiveSpring(duration: 0.15, extraBounce: 1.20, blendDuration: 0.25),
+            Animation.spring(duration: 0.15, bounce: 1.35, blendDuration: 0.25)
+        )
+
+        try assertFluidSpring(
+            Animation.interactiveSpring(duration: 0.0, extraBounce: 0.05, blendDuration: 0.25),
+            response: 0.0,
+            dampingFraction: 0.8,
+            blendDuration: 0.25
+        )
+        try assertFluidSpring(
+            Animation.interactiveSpring(duration: -0.20, extraBounce: 0.05, blendDuration: 0.25),
+            response: -0.20,
+            dampingFraction: 0.8,
+            blendDuration: 0.25
+        )
+
+        try assertFluidSpring(
             Animation.smooth(duration: 0.50, extraBounce: -0.50),
             response: 0.50,
             dampingFraction: 2.0,
@@ -60,6 +92,18 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
         XCTAssertEqual(
             Animation.smooth(duration: 0.50, extraBounce: -0.50),
             Animation.spring(duration: 0.50, bounce: -0.50)
+        )
+        try assertFluidSpring(
+            Animation.smooth(duration: 0.50, extraBounce: 1.20),
+            response: 0.50,
+            dampingFraction: 0.0,
+            blendDuration: 0.0
+        )
+        try assertFluidSpring(
+            Animation.smooth(duration: 0.0, extraBounce: 0.20),
+            response: 0.0,
+            dampingFraction: 0.8,
+            blendDuration: 0.0
         )
 
         try assertFluidSpring(
@@ -72,6 +116,18 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
             Animation.snappy(duration: 0.50, extraBounce: -0.50),
             Animation.spring(duration: 0.50, bounce: -0.35)
         )
+        try assertFluidSpring(
+            Animation.snappy(duration: 0.50, extraBounce: 1.20),
+            response: 0.50,
+            dampingFraction: 0.0,
+            blendDuration: 0.0
+        )
+        try assertFluidSpring(
+            Animation.snappy(duration: -0.20, extraBounce: 0.05),
+            response: -0.20,
+            dampingFraction: 0.8,
+            blendDuration: 0.0
+        )
 
         try assertFluidSpring(
             Animation.bouncy(duration: 0.50, extraBounce: -0.50),
@@ -82,6 +138,18 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
         XCTAssertEqual(
             Animation.bouncy(duration: 0.50, extraBounce: -0.50),
             Animation.spring(duration: 0.50, bounce: -0.20)
+        )
+        try assertFluidSpring(
+            Animation.bouncy(duration: 0.50, extraBounce: 1.20),
+            response: 0.50,
+            dampingFraction: 0.0,
+            blendDuration: 0.0
+        )
+        try assertFluidSpring(
+            Animation.bouncy(duration: -0.20, extraBounce: -0.10),
+            response: -0.20,
+            dampingFraction: 0.8,
+            blendDuration: 0.0
         )
     }
 
@@ -129,6 +197,12 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
             damping: .nan,
             initialVelocity: 0.30
         )
+        try assertSpringAnimation(
+            Animation.interpolatingSpring(duration: -0.20, bounce: 1.20, initialVelocity: 0.30),
+            stiffness: .infinity,
+            damping: .nan,
+            initialVelocity: 0.30
+        )
     }
 
     func testInterpolatingSpringWithInfiniteStiffnessIsRuntimeImmediate() {
@@ -136,6 +210,7 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
             Animation.interpolatingSpring(duration: 0.0, bounce: 0.20, initialVelocity: 0.30),
             Animation.interpolatingSpring(duration: -0.20, bounce: 0.20, initialVelocity: 0.30),
             Animation.interpolatingSpring(duration: 0.0, bounce: 1.20, initialVelocity: 0.30),
+            Animation.interpolatingSpring(duration: -0.20, bounce: 1.20, initialVelocity: 0.30),
         ]
 
         for animation in animations {

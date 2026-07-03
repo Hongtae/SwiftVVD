@@ -1327,6 +1327,10 @@ public struct AnyTransition {
         )
     }
 
+    var _transitionType: Any.Type {
+        type(of: box)
+    }
+
     func _makeView(
         phase: TransitionPhase,
         inputs: _ViewInputs,

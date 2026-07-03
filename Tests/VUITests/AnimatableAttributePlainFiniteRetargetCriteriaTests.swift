@@ -64,6 +64,68 @@ final class AnimatableAttributePlainFiniteRetargetCriteriaTests: XCTestCase {
         )
     }
 
+    func testPlainFiniteNamedBezierFactoryRetargetCriteriaMovement() {
+        assertRetargetOrder(
+            oldAnimation: .easeInOut(duration: 0.90),
+            oldRole: "firstLongEase",
+            replacementAnimation: .linear(duration: 0.35),
+            replacementRole: "secondShortLinear",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "firstLongEaseRemoved",
+                "secondShortLinearRemoved",
+                "secondShortLinearLogical",
+                "firstLongEaseLogical",
+            ],
+            label: "easeToLinear"
+        )
+        assertRetargetOrder(
+            oldAnimation: .linear(duration: 0.35),
+            oldRole: "firstShortLinear",
+            replacementAnimation: .easeInOut(duration: 0.90),
+            replacementRole: "secondLongEase",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "firstShortLinearLogical",
+                "firstShortLinearRemoved",
+                "secondLongEaseRemoved",
+                "secondLongEaseLogical",
+            ],
+            label: "linearToEase"
+        )
+    }
+
+    func testPlainFiniteCubicUnitCurveRetargetCriteriaMovement() {
+        assertRetargetOrder(
+            oldAnimation: .timingCurve(Self.cubicUnitCurve, duration: 0.90),
+            oldRole: "firstLongCubic",
+            replacementAnimation: .linear(duration: 0.35),
+            replacementRole: "secondShortLinear",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "firstLongCubicRemoved",
+                "secondShortLinearRemoved",
+                "secondShortLinearLogical",
+                "firstLongCubicLogical",
+            ],
+            label: "cubicToLinear"
+        )
+        assertRetargetOrder(
+            oldAnimation: .linear(duration: 0.35),
+            oldRole: "firstShortLinear",
+            replacementAnimation: .timingCurve(Self.cubicUnitCurve, duration: 0.90),
+            replacementRole: "secondLongCubic",
+            retargetTime: 0.20,
+            expectedEvents: [
+                "firstShortLinearLogical",
+                "firstShortLinearRemoved",
+                "secondLongCubicRemoved",
+                "secondLongCubicLogical",
+            ],
+            label: "linearToCubic"
+        )
+    }
+
     private func assertRetargetOrder(
         oldAnimation: Animation,
         oldRole: String,
@@ -160,5 +222,12 @@ final class AnimatableAttributePlainFiniteRetargetCriteriaTests: XCTestCase {
 
     private static var longBezier: Animation {
         .timingCurve(0.25, 0.10, 0.25, 1.0, duration: 0.90)
+    }
+
+    private static var cubicUnitCurve: UnitCurve {
+        .bezier(
+            startControlPoint: UnitPoint(x: 0.18, y: 0.07),
+            endControlPoint: UnitPoint(x: 0.82, y: 0.96)
+        )
     }
 }

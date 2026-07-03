@@ -161,6 +161,44 @@ final class ScrollStateRequestTests: XCTestCase {
         XCTAssertNil(observedTransactions[0].animation)
     }
 
+    func testUpdateScrollStateRequestMergesAmbientTransactionAndRestoresScope() {
+        var stored = ScrollPosition(id: "old")
+        var observedTransactions: [Transaction] = []
+        var bindingTransaction = Transaction(animation: .linear(duration: 1))
+        bindingTransaction[ScrollBindingMarkerKey.self] = 66
+        let binding = Binding<ScrollPosition>(
+            get: { stored },
+            set: { value, transaction in
+                stored = value
+                observedTransactions.append(transaction)
+            }
+        ).transaction(bindingTransaction)
+        let newPosition = ScrollPosition(id: "new")
+        var request = UpdateScrollStateRequest(
+            binding: binding,
+            newPosition: newPosition,
+            isVisible: true,
+            targetDistance: 12
+        )
+        var ambient = Transaction()
+        ambient[ScrollAmbientMarkerKey.self] = 88
+
+        Transaction.withScopedThreadTransaction(ambient) {
+            XCTAssertTrue(request.update())
+            XCTAssertEqual(Transaction.current[ScrollAmbientMarkerKey.self], 88)
+            XCTAssertEqual(Transaction.current[ScrollBindingMarkerKey.self], 0)
+            XCTAssertFalse(Transaction.current.isScrollStateValueUpdate)
+        }
+
+        XCTAssertEqual(stored, newPosition)
+        XCTAssertEqual(observedTransactions.count, 1)
+        XCTAssertTrue(observedTransactions[0].isScrollStateValueUpdate)
+        XCTAssertNil(observedTransactions[0].animation)
+        XCTAssertEqual(observedTransactions[0][ScrollBindingMarkerKey.self], 66)
+        XCTAssertEqual(observedTransactions[0][ScrollAmbientMarkerKey.self], 88)
+        XCTAssertEqual(Transaction.current[ScrollAmbientMarkerKey.self], 0)
+    }
+
     func testUpdateScrollStateRequestSkipsInvisibleOrEqualValue() {
         var stored = ScrollPosition(id: "row")
         var setterCount = 0
@@ -252,6 +290,39 @@ final class ScrollStateRequestTests: XCTestCase {
         XCTAssertTrue(request.hasUpdate)
         XCTAssertTrue(request.update())
         XCTAssertEqual(observedTransactions.count, 2)
+    }
+
+    func testPositionedByUserRequestMergesAmbientTransactionAndRestoresScope() {
+        var stored = ScrollPosition(id: "row")
+        var observedTransactions: [Transaction] = []
+        var bindingTransaction = Transaction(animation: .linear(duration: 1))
+        bindingTransaction[ScrollBindingMarkerKey.self] = 66
+        let binding = Binding<ScrollPosition>(
+            get: { stored },
+            set: { value, transaction in
+                stored = value
+                observedTransactions.append(transaction)
+            }
+        ).transaction(bindingTransaction)
+        var request = PositionedByUserScrollStateRequest(binding: binding)
+        var ambient = Transaction()
+        ambient[ScrollAmbientMarkerKey.self] = 88
+
+        Transaction.withScopedThreadTransaction(ambient) {
+            XCTAssertTrue(request.update())
+            XCTAssertEqual(Transaction.current[ScrollAmbientMarkerKey.self], 88)
+            XCTAssertEqual(Transaction.current[ScrollBindingMarkerKey.self], 0)
+            XCTAssertFalse(Transaction.current.isScrollStateValueUpdate)
+        }
+
+        XCTAssertTrue(stored.isPositionedByUser)
+        XCTAssertNil(stored.viewID(type: String.self))
+        XCTAssertEqual(observedTransactions.count, 1)
+        XCTAssertTrue(observedTransactions[0].isScrollStateValueUpdate)
+        XCTAssertNil(observedTransactions[0].animation)
+        XCTAssertEqual(observedTransactions[0][ScrollBindingMarkerKey.self], 66)
+        XCTAssertEqual(observedTransactions[0][ScrollAmbientMarkerKey.self], 88)
+        XCTAssertEqual(Transaction.current[ScrollAmbientMarkerKey.self], 0)
     }
 
     func testScrollToRequestScopesScrollTransactionAndUpdatesBindingOnSuccess() {

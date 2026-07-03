@@ -39,6 +39,68 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
         )
     }
 
+    func testSharedObserverWithChildInjectedSplitCriteriaWaitsPerCriteria() {
+        let recorder = AnimationCompletionRecorder()
+        let harness = DualAnimatableAttributeHarness(
+            firstInitialValue: _OpacityEffect(opacity: 0),
+            secondInitialValue: _OpacityEffect(opacity: 0)
+        )
+        let fluidAnimation = Animation.spring(
+            response: 0.35,
+            dampingFraction: 0.70,
+            blendDuration: 0.0
+        )
+        let (fastTransaction, fluidTransaction) = sharedCompletionTransactions(
+            firstAnimation: .linear(duration: 0.20),
+            secondAnimation: fluidAnimation,
+            recorder: recorder
+        )
+
+        start(
+            harness,
+            firstTransaction: fastTransaction,
+            secondTransaction: fluidTransaction
+        )
+
+        let frameInterval = fluidAnimation.box.defaultDisplayFrameInterval
+        var sampleTime = frameInterval
+        var didObserveFastSnap = false
+        while sampleTime <= fluidAnimation.box.duration + 0.50,
+              recorder.events.isEmpty {
+            harness.setTime(sampleTime)
+            let firstValue = harness.currentFirstValue()
+            _ = harness.currentSecondValue()
+            if firstValue.opacity == 1.0 {
+                didObserveFastSnap = true
+            }
+            harness.flushCompletionActions()
+            sampleTime += frameInterval
+        }
+        XCTAssertTrue(didObserveFastSnap)
+        XCTAssertEqual(recorder.events, ["shared logical"])
+
+        var didObserveFluidSnap = false
+        let finalSampleTime = fluidAnimation.box.presentationDuration(for: Double(1.0)) + 1.0
+        while sampleTime <= finalSampleTime && recorder.events == ["shared logical"] {
+            harness.setTime(sampleTime)
+            _ = harness.currentFirstValue()
+            let secondValue = harness.currentSecondValue()
+            if secondValue.opacity == 1.0 {
+                didObserveFluidSnap = true
+            }
+            harness.flushCompletionActions()
+            sampleTime += frameInterval
+        }
+        XCTAssertTrue(didObserveFluidSnap)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "shared logical",
+                "shared removed",
+            ]
+        )
+    }
+
     func testSharedObserverWithNilAndFastChildWaitsForRegisteredFastToken() {
         let recorder = AnimationCompletionRecorder()
         let harness = DualAnimatableAttributeHarness(

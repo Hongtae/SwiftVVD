@@ -158,8 +158,16 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         harness.setTime(replacementBoundary + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(Set(recorder.events), ["old logical", "replacement logical"], label, file: file, line: line)
-        XCTAssertEqual(recorder.events.count, 2, label, file: file, line: line)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "replacement logical",
+                "old logical",
+            ],
+            label,
+            file: file,
+            line: line
+        )
     }
 
     private func assertInfiniteWrapperFiniteReplacementCriteriaRetarget(

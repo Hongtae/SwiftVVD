@@ -251,6 +251,63 @@ struct CombinedNilRetargetRecordingAnimation: CustomAnimation {
     }
 }
 
+struct CombinedBoundaryRecordingAnimation: CustomAnimation {
+    var label: String
+    var logicalAt: TimeInterval
+    var nilAt: TimeInterval
+    var recorder: CustomRetargetSampleRecorder
+
+    static func == (
+        lhs: CombinedBoundaryRecordingAnimation,
+        rhs: CombinedBoundaryRecordingAnimation
+    ) -> Bool {
+        lhs.label == rhs.label &&
+            lhs.logicalAt == rhs.logicalAt &&
+            lhs.nilAt == rhs.nilAt
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(label)
+        hasher.combine(logicalAt)
+        hasher.combine(nilAt)
+    }
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        if time >= logicalAt {
+            context.isLogicallyComplete = true
+        }
+        recorder.recordSample(label: label, time: time, input: doubleValue(value))
+        guard time < nilAt else {
+            return nil
+        }
+        var output = value
+        output.scale(by: max(time / nilAt, 0))
+        return output
+    }
+
+    nonisolated func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        _ = previous
+        _ = value
+        _ = time
+        _ = context
+        recorder.recordShouldMerge()
+        return false
+    }
+
+    func doubleValue<Value>(_ value: Value) -> Double where Value: VectorArithmetic {
+        (value as? Double) ?? value.magnitudeSquared.squareRoot()
+    }
+}
+
 final class CustomRetargetSampleRecorder: @unchecked Sendable {
     struct Sample {
         var label: String

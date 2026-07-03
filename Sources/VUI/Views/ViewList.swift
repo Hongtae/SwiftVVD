@@ -136,17 +136,92 @@ struct _ViewList_IteratorStyle: Equatable {
 
 /// A stable identity for a specific view in a ViewList.
 /// Current storage keeps the known index, implicit ID, and explicit ID list.
-/// Canonical, reuse identifier, and explicit binding behavior remain partial.
+/// Explicit binding behavior remains partial.
 struct _ViewList_ID {
     struct Canonical: Hashable {
-        // Canonical form does not yet track requiresImplicitID.
-        var value: Int32
+        var _index: Int32
+        var implicitID: Int32
         var explicitID: AnyHashable?
+
+        init(_index: Int32, implicitID: Int32, explicitID: AnyHashable?) {
+            self._index = _index
+            self.implicitID = implicitID
+            self.explicitID = explicitID
+        }
+
+        init(value: Int32, explicitID: AnyHashable?) {
+            self.init(_index: value, implicitID: value, explicitID: explicitID)
+        }
+
+        var value: Int32 {
+            get { _index }
+            set { _index = newValue }
+        }
+
+        var index: Int {
+            get { Int(_index) }
+            set { _index = Int32(newValue) }
+        }
+
+        var requiresImplicitID: Bool {
+            implicitID >= 0
+        }
     }
 
-    struct Explicit: Hashable {
-        // Explicit ID storage is simplified.
+    struct Explicit: Equatable {
         var id: AnyHashable
+        var reuseID: Int
+        var owner: AGAttribute?
+        var isUnary: Bool
+
+        init(
+            id: AnyHashable,
+            reuseID: Int = 0,
+            owner: AGAttribute? = nil,
+            isUnary: Bool = false
+        ) {
+            self.id = id
+            self.reuseID = reuseID
+            self.owner = owner
+            self.isUnary = isUnary
+        }
+
+        private var ownerRawValue: UInt32 {
+            owner?.rawValue ?? AGAttribute.invalid.rawValue
+        }
+
+        static func == (lhs: Explicit, rhs: Explicit) -> Bool {
+            lhs.id == rhs.id &&
+                lhs.ownerRawValue == rhs.ownerRawValue &&
+                lhs.reuseID == rhs.reuseID &&
+                lhs.isUnary == rhs.isUnary
+        }
+
+        func hashIdentity(into hasher: inout Hasher) {
+            hasher.combine(id)
+            hasher.combine(reuseID)
+        }
+
+        func matches(owner: AGAttribute) -> Bool {
+            ownerRawValue == owner.rawValue
+        }
+    }
+
+    struct ElementCollection: RandomAccessCollection, Equatable {
+        var id: _ViewList_ID
+        var count: Int
+
+        init(id: _ViewList_ID, count: Int) {
+            self.id = id
+            self.count = count
+        }
+
+        var startIndex: Int { 0 }
+        var endIndex: Int { count }
+
+        subscript(position: Int) -> _ViewList_ID {
+            id.elementID(at: position)
+        }
     }
 
     var _index: Int32
@@ -166,26 +241,143 @@ struct _ViewList_ID {
         self.explicitIDs = [Explicit(id: explicitID)]
     }
 
+    static func explicit<ID: Hashable>(_ explicitID: ID, owner: AGAttribute) -> _ViewList_ID {
+        var id = _ViewList_ID(implicitID: 0)
+        id.bind(explicitID: explicitID, owner: owner, isUnary: true, reuseID: 0)
+        return id
+    }
+
+    static func explicit<ID: Hashable>(_ explicitID: ID) -> _ViewList_ID {
+        var id = _ViewList_ID(implicitID: 0)
+        id.bind(explicitID: explicitID, owner: nil, isUnary: true, reuseID: 0)
+        return id
+    }
+
+    mutating func bind<ID: Hashable>(
+        explicitID: ID,
+        owner: AGAttribute,
+        isUnary: Bool,
+        reuseID: Int
+    ) {
+        bind(explicitID: explicitID, owner: Optional(owner), isUnary: isUnary, reuseID: reuseID)
+    }
+
+    mutating func bind<ID: Hashable>(
+        explicitID: ID,
+        owner: AGAttribute,
+        reuseID: Int
+    ) {
+        bind(explicitID: explicitID, owner: Optional(owner), isUnary: false, reuseID: reuseID)
+    }
+
+    mutating func bind<ID: Hashable>(
+        explicitID: ID,
+        owner: AGAttribute,
+        isUnary: Bool
+    ) {
+        bind(explicitID: explicitID, owner: Optional(owner), isUnary: isUnary, reuseID: 0)
+    }
+
+    mutating func bind<ID: Hashable>(
+        explicitID: ID,
+        owner: AGAttribute
+    ) {
+        bind(explicitID: explicitID, owner: Optional(owner), isUnary: false, reuseID: 0)
+    }
+
+    private mutating func bind<ID: Hashable>(
+        explicitID: ID,
+        owner: AGAttribute?,
+        isUnary: Bool,
+        reuseID: Int
+    ) {
+        explicitIDs.append(
+            Explicit(
+                id: AnyHashable(explicitID),
+                reuseID: reuseID,
+                owner: owner,
+                isUnary: isUnary
+            )
+        )
+    }
+
     func elementID(at index: Int) -> _ViewList_ID {
-        // This hash formula is provisional.
         var id = self
-        id._index = Int32(Int(self._index) &* 31 &+ index)
+        id._index = Int32(index)
         return id
     }
 
     var canonicalID: Canonical {
-        if let explicitID = explicitIDs.last?.id {
-            return Canonical(value: _index, explicitID: explicitID)
+        if let explicit = explicitIDs.first {
+            let canonicalImplicitID = explicit.isUnary ? Int32(-1) : implicitID
+            return Canonical(_index: _index, implicitID: canonicalImplicitID, explicitID: explicit.id)
         }
-        return Canonical(value: _index, explicitID: nil)
+        return Canonical(_index: _index, implicitID: implicitID, explicitID: nil)
+    }
+
+    var primaryExplicitID: AnyHashable? {
+        explicitIDs.first?.id
+    }
+
+    var allExplicitIDs: [AnyHashable] {
+        explicitIDs.map(\.id)
+    }
+
+    func explicitID<ID: Hashable>(for type: ID.Type) -> ID? {
+        for explicit in explicitIDs {
+            if let value = explicit.id.base as? ID {
+                return value
+            }
+        }
+        return nil
+    }
+
+    func explicitID<ID: Hashable>(owner: AGAttribute) -> ID? {
+        for explicit in explicitIDs where explicit.matches(owner: owner) {
+            if let value = explicit.id.base as? ID {
+                return value
+            }
+        }
+        return nil
+    }
+
+    func containsID<ID: Hashable>(_ id: ID) -> Bool {
+        for explicit in explicitIDs {
+            if let value = explicit.id.base as? ID, value == id {
+                return true
+            }
+        }
+        return false
+    }
+
+    func elementIDs(count: Int) -> ElementCollection {
+        ElementCollection(id: self, count: count)
+    }
+
+    var reuseIdentifier: Int {
+        var hasher = Hasher()
+        hasher.combine(_index)
+        hasher.combine(implicitID)
+        for explicitID in allExplicitIDs {
+            hasher.combine(explicitID)
+        }
+        return hasher.finalize()
     }
 }
 
-extension _ViewList_ID: Equatable {
+extension _ViewList_ID: Hashable {
     static func == (lhs: _ViewList_ID, rhs: _ViewList_ID) -> Bool {
         lhs._index == rhs._index &&
         lhs.implicitID == rhs.implicitID &&
         lhs.explicitIDs == rhs.explicitIDs
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(_index)
+        hasher.combine(implicitID)
+        for explicit in explicitIDs {
+            explicit.hashIdentity(into: &hasher)
+        }
     }
 }
 
@@ -199,8 +391,27 @@ struct HeterogeneousViewIDsAccumulator {}
 
 // MARK: - _ViewList_SublistTransform
 
+struct _ViewList_SublistTransform_ItemFlags: OptionSet {
+    var rawValue: UInt8
+
+    init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
+    static let graphDependent = _ViewList_SublistTransform_ItemFlags(rawValue: 1)
+}
+
 protocol _ViewList_SublistTransform_Item {
+    static var flags: _ViewList_SublistTransform_ItemFlags { get }
     func apply(to sublist: inout _ViewList_Sublist)
+    func bindID(_ id: inout _ViewList_ID)
+    func wrapSubgraph(into storage: inout _ViewList_SublistSubgraphStorage)
+}
+
+extension _ViewList_SublistTransform_Item {
+    static var flags: _ViewList_SublistTransform_ItemFlags { [] }
+    func bindID(_ id: inout _ViewList_ID) {}
+    func wrapSubgraph(into storage: inout _ViewList_SublistSubgraphStorage) {}
 }
 
 struct _ViewList_SublistTransform {
@@ -221,10 +432,32 @@ struct _ViewList_SublistTransform {
         items.popLast()
     }
 
+    var isEmpty: Bool {
+        items.isEmpty
+    }
+
     func apply(to sublist: inout _ViewList_Sublist) {
-        for item in items {
+        for item in items.reversed() {
             item.apply(to: &sublist)
         }
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        for item in items.reversed() {
+            item.bindID(&id)
+        }
+    }
+
+    func wrapSubgraphs(into storage: inout _ViewList_SublistSubgraphStorage) {
+        for item in items.reversed() {
+            item.wrapSubgraph(into: &storage)
+        }
+    }
+
+    func withTemporaryTransform<Result>(
+        do body: (_ViewList_TemporarySublistTransform) -> Result
+    ) -> Result {
+        body(_ViewList_TemporarySublistTransform(transform: self))
     }
 }
 
@@ -245,13 +478,28 @@ struct _ViewList_TemporarySublistTransform {
         self.storage = storage
         self.flag = flag
     }
+
+    fileprivate init(transform: _ViewList_SublistTransform) {
+        if transform.items.isEmpty {
+            self.storage = nil
+            self.flag = false
+        } else {
+            self.storage = _TemporarySublistTransformStorage(
+                items: transform.items,
+                subgraphCount: transform.subgraphCount
+            )
+            self.flag = true
+        }
+    }
 }
 
 private final class _TemporarySublistTransformStorage {
     var items: [any _ViewList_SublistTransform_Item]
+    var subgraphCount: Int
 
-    init(items: [any _ViewList_SublistTransform_Item] = []) {
+    init(items: [any _ViewList_SublistTransform_Item] = [], subgraphCount: Int = 0) {
         self.items = items
+        self.subgraphCount = subgraphCount
     }
 }
 
@@ -945,17 +1193,58 @@ class ListModifier: _ViewList_SublistTransform_Item {
 extension _ViewList_TemporarySublistTransform {
     /// Pushes a ListModifier during ModifiedViewList.applyNodes, then applies
     /// the stack when sublists are materialized.
-    fileprivate func withPushedItem(_ item: any _ViewList_SublistTransform_Item) -> Self {
-        let storage = self.storage ?? _TemporarySublistTransformStorage()
-        storage.items.append(item)
-        return Self(storage: storage, flag: true)
+    func withPushedItem(_ item: any _ViewList_SublistTransform_Item) -> Self {
+        var items = storage?.items ?? []
+        items.append(item)
+        let subgraphCount = (storage?.subgraphCount ?? 0) + (Self.countsSubgraphs(item) ? 1 : 0)
+        return Self(
+            storage: _TemporarySublistTransformStorage(
+                items: items,
+                subgraphCount: subgraphCount
+            ),
+            flag: true
+        )
     }
 
-    fileprivate func apply(to sublist: inout _ViewList_Sublist) {
-        guard let storage, flag else { return }
-        for item in storage.items {
+    var isEmpty: Bool {
+        guard let storage else { return true }
+        return storage.items.isEmpty
+    }
+
+    func copy() -> _ViewList_SublistTransform {
+        var transform = _ViewList_SublistTransform()
+        guard let storage else { return transform }
+        transform.items = storage.items
+        transform.subgraphCount = storage.subgraphCount
+        return transform
+    }
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        guard let storage else { return }
+        let items = storage.items
+        for item in items.reversed() {
             item.apply(to: &sublist)
         }
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        guard let storage else { return }
+        let items = storage.items
+        for item in items.reversed() {
+            item.bindID(&id)
+        }
+    }
+
+    func wrapSubgraphs(into storage: inout _ViewList_SublistSubgraphStorage) {
+        guard let temporaryStorage = self.storage else { return }
+        let items = temporaryStorage.items
+        for item in items.reversed() {
+            item.wrapSubgraph(into: &storage)
+        }
+    }
+
+    private static func countsSubgraphs(_ item: any _ViewList_SublistTransform_Item) -> Bool {
+        type(of: item).flags.contains(.graphDependent)
     }
 }
 

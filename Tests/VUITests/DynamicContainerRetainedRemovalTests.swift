@@ -137,6 +137,81 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testRetainedTransitionRemovalSetsDidDisappearPhaseBeforeCompletion() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = DynamicContainerTransitionPhaseRecorder()
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var removalEvents: [String] = []
+
+        ref.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: inputs,
+                    transition: AnyTransition(
+                        DynamicContainerPhaseRecordingTransition(recorder: recorder)
+                    )
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(graph: graph, base: inputs)
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.items.first?.phase, 1)
+            if let layout = initial.items.first?.outputs._layoutComputer.attribute?.value {
+                _ = layout.sizeThatFits(.unspecified)
+            }
+            XCTAssertEqual(recorder.events, ["identity"])
+        }
+
+        let retainedItem = try ref.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 0.02))
+            removal.addAnimationCompletion(criteria: .removed) {
+                removalEvents.append("removal removed")
+            }
+            removal.addAnimationCompletion(criteria: .logicallyComplete) {
+                removalEvents.append("removal logical")
+            }
+            source.setValue(EmptyViewList(), transaction: removal)
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertEqual(item.phase, 2)
+            XCTAssertNotNil(item.listener)
+            XCTAssertFalse(try XCTUnwrap(item.listener).isComplete)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
+            if let layout = item.outputs._layoutComputer.attribute?.value {
+                _ = layout.sizeThatFits(.unspecified)
+            }
+            XCTAssertEqual(removalEvents, [])
+            XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
+        XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
+        XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
+
+        ref.withCurrent {
+            graph.inbox.drain()
+            let finalized = infoAttr.value
+            XCTAssertEqual(finalized.removedCount, 0)
+            XCTAssertTrue(finalized.items.isEmpty)
+            XCTAssertEqual(retainedItem.subgraph.nodes.count, 0)
+            XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
+        }
+    }
+
     func testRetainedTransitionRemovalDrainsSurvivingAnimatableCompletionsBeforeDisappear() throws {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -1884,6 +1959,632 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testRetainedUnusedAnimatedRemovalPromotesToRemovalPhaseUntilSeedCompletes() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var graphInputs: _GraphInputs!
+        var lifecycleEvents: [String] = []
+        var removalEvents: [String] = []
+
+        ref.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        Self.makeLifecycleLayoutOutputs(
+                            inputs,
+                            appear: { lifecycleEvents.append("row appear") },
+                            disappear: { lifecycleEvents.append("row disappear") }
+                        )
+                    }
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        base: graphInputs,
+                        maxUnusedItems: 1
+                    )
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.removedCount, 0)
+            XCTAssertEqual(initial.unusedCount, 0)
+            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(lifecycleEvents, ["row appear"])
+        }
+
+        let unusedItem = try ref.withCurrent {
+            source.setValue(EmptyViewList(), transaction: Transaction(animation: nil))
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 0)
+            XCTAssertEqual(retained.unusedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.listener)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+            return item
+        }
+
+        let removedItem = try ref.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 0.02))
+            removal.addAnimationCompletion(criteria: .removed) {
+                removalEvents.append("removal removed")
+            }
+            source.setValue(EmptyViewList(), transaction: removal)
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 1)
+            XCTAssertEqual(retained.unusedCount, 0)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertTrue(item === unusedItem)
+            XCTAssertEqual(item.phase, 2)
+            XCTAssertNotNil(item.listener)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+            XCTAssertEqual(removalEvents, [])
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(removalEvents, ["removal removed"])
+        XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+
+        ref.withCurrent {
+            graph.inbox.drain()
+            let finalized = infoAttr.value
+            XCTAssertEqual(finalized.activeItems.count, 0)
+            XCTAssertEqual(finalized.removedCount, 0)
+            XCTAssertEqual(finalized.unusedCount, 0)
+            XCTAssertTrue(finalized.items.isEmpty)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+            XCTAssertEqual(removalEvents, ["removal removed"])
+            XCTAssertEqual(removedItem.subgraph.nodes.count, 0)
+        }
+    }
+
+    func testRetainedUnusedAnimatedRemovalCanReturnToUnusedCacheAfterCompletion() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var graphInputs: _GraphInputs!
+        var lifecycleEvents: [String] = []
+        var removalEvents: [String] = []
+
+        host.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        Self.makeLifecycleLayoutOutputs(
+                            inputs,
+                            appear: { lifecycleEvents.append("row appear") },
+                            disappear: { lifecycleEvents.append("row disappear") }
+                        )
+                    }
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        base: graphInputs,
+                        maxUnusedItems: 1,
+                        retainCompletedUnusedRemovals: true
+                    )
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.removedCount, 0)
+            XCTAssertEqual(initial.unusedCount, 0)
+            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(lifecycleEvents, ["row appear"])
+        }
+
+        let unusedItem = try host.data.withCurrent {
+            source.setValue(EmptyViewList(), transaction: Transaction(animation: nil))
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 0)
+            XCTAssertEqual(retained.unusedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.listener)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+            return item
+        }
+
+        let removedItem = try host.data.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 0.02))
+            removal.addAnimationCompletion(criteria: .removed) {
+                removalEvents.append("removal removed")
+            }
+            source.setValue(EmptyViewList(), transaction: removal)
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 1)
+            XCTAssertEqual(retained.unusedCount, 0)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertTrue(item === unusedItem)
+            XCTAssertEqual(item.phase, 2)
+            XCTAssertNotNil(item.listener)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+            XCTAssertEqual(removalEvents, [])
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(removalEvents, ["removal removed"])
+        XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+
+        try host.data.withCurrent {
+            graph.inbox.drain()
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 0)
+            XCTAssertEqual(retained.unusedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertTrue(item === unusedItem)
+            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.listener)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
+            XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
+        }
+
+        try host.data.withCurrent {
+            source.setValue(
+                makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        Self.makeLifecycleLayoutOutputs(
+                            inputs,
+                            appear: { lifecycleEvents.append("row appear") },
+                            disappear: { lifecycleEvents.append("row disappear") }
+                        )
+                    }
+                ),
+                transaction: Transaction(animation: nil)
+            )
+
+            let reinserted = infoAttr.value
+            XCTAssertEqual(reinserted.activeItems.count, 1)
+            XCTAssertEqual(reinserted.removedCount, 0)
+            XCTAssertEqual(reinserted.unusedCount, 0)
+            let item = try XCTUnwrap(reinserted.items.first)
+            XCTAssertTrue(item === unusedItem)
+            XCTAssertEqual(item.phase, 1)
+            XCTAssertEqual(
+                lifecycleEvents,
+                ["row appear", "row disappear", "row appear"]
+            )
+        }
+    }
+
+    func testRetainedUnusedRemovalRemovedCompletionPrecedesOldLogicalCompletion() throws {
+        try assertRetainedUnusedAnimatedRemovalCriteriaOrder(
+            oldCriteria: .logicallyComplete,
+            removalCriteria: .removed,
+            expectedEventsAfterRemovalSeed: [
+                "row appear",
+                "row disappear",
+                "removal removed",
+            ],
+            expectedEventsAfterFinalDrain: [
+                "row appear",
+                "row disappear",
+                "removal removed",
+                "old logical",
+            ]
+        )
+    }
+
+    func testRetainedUnusedRemovalLogicalCompletionPrecedesOldRemovedCompletion() throws {
+        try assertRetainedUnusedAnimatedRemovalCriteriaOrder(
+            oldCriteria: .removed,
+            removalCriteria: .logicallyComplete,
+            expectedEventsAfterRemovalSeed: [
+                "row appear",
+                "row disappear",
+                "removal logical",
+            ],
+            expectedEventsAfterFinalDrain: [
+                "row appear",
+                "row disappear",
+                "removal logical",
+                "old removed",
+            ]
+        )
+    }
+
+    func testRetainedUnusedAnimatedRemovalDrainsForkedAnimatableCompletionsAfterRemovalSeed() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var animatableSource: Attribute<_OpacityEffect>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        guard let graph = _AGGraph.current else {
+                            fatalError("DynamicContainer retained-unused fork test element built outside AG context.")
+                        }
+                        let modifier = graph.makeInput(
+                            value: _AppearanceActionModifier(
+                                appear: { recorder.record("row appear") },
+                                disappear: { recorder.record("row disappear") }
+                            )
+                        )
+                        let effect = graph.makeStatefulRule(
+                            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+                        )
+                        graph.makeSideEffectRule {
+                            _ = effect.value
+                            return ()
+                        }
+
+                        let sourceAttr = graph.makeInput(value: _OpacityEffect(opacity: 0))
+                        var graphValue = _GraphValue<_OpacityEffect>(_attribute: sourceAttr)
+                        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+                        let animatedAttr = graphValue._attribute
+                        animatableSource = sourceAttr
+                        animatedValue = animatedAttr
+
+                        let layout = graph.makeRule {
+                            _ = animatedAttr.value
+                            return LayoutComputer.fixed(CGSize(width: 10, height: 10))
+                        }
+                        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+                    }
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        base: graphInputs,
+                        maxUnusedItems: 1
+                    )
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.removedCount, 0)
+            XCTAssertEqual(initial.unusedCount, 0)
+            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(recorder.events, ["row appear"])
+            XCTAssertNotNil(animatableSource)
+            XCTAssertNotNil(animatedValue)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+        }
+
+        func transaction(label: String) -> Transaction {
+            completionTransaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                ),
+                label: label,
+                recorder: recorder
+            )
+        }
+
+        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
+            viewGraph.data.withCurrent {
+                animatableSource.setValue(
+                    _OpacityEffect(opacity: target),
+                    transaction: transaction(label: label)
+                )
+                _ = animatedValue.value
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                graphInputs.time.setValue(Time(seconds: firstSample))
+                _ = animatedValue.value
+                graphInputs.time.setValue(Time(seconds: secondSample))
+                _ = animatedValue.value
+                Self.flushGraphActions(graph)
+            }
+        }
+
+        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
+        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
+        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
+        XCTAssertEqual(recorder.events, ["row appear"])
+
+        let unusedItem = try viewGraph.data.withCurrent {
+            source.setValue(EmptyViewList(), transaction: Transaction(animation: nil))
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 0)
+            XCTAssertEqual(retained.unusedCount, 1)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.listener)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
+            return item
+        }
+
+        let removedItem = try viewGraph.data.withCurrent {
+            var removal = completionTransaction(
+                animation: .linear(duration: 0.02),
+                label: "removal",
+                recorder: recorder
+            )
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(EmptyViewList(), transaction: removal)
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0)
+            XCTAssertEqual(retained.removedCount, 1)
+            XCTAssertEqual(retained.unusedCount, 0)
+            let item = try XCTUnwrap(retained.items.first)
+            XCTAssertTrue(item === unusedItem)
+            XCTAssertEqual(item.phase, 2)
+            XCTAssertNotNil(item.listener)
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "row disappear",
+                "removal removed",
+                "removal logical",
+            ]
+        )
+        XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            _ = infoAttr.value
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "row appear",
+                "row disappear",
+                "removal removed",
+                "removal logical",
+                "old removed",
+                "middle removed",
+                "active removed",
+                "active logical",
+                "old logical",
+                "middle logical",
+            ]
+        )
+        XCTAssertEqual(removedItem.subgraph.nodes.count, 0)
+    }
+
+    private func assertRetainedUnusedAnimatedRemovalCriteriaOrder(
+        oldCriteria: AnimationCompletionCriteria,
+        removalCriteria: AnimationCompletionCriteria,
+        expectedEventsAfterRemovalSeed: [String],
+        expectedEventsAfterFinalDrain: [String],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = AnimationCompletionRecorder()
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+        var animatableSource: Attribute<_OpacityEffect>!
+        var animatedValue: Attribute<_OpacityEffect>!
+
+        func roleLabel(for criteria: AnimationCompletionCriteria) -> String {
+            switch criteria {
+            case .removed:
+                "removed"
+            case .logicallyComplete:
+                "logical"
+            default:
+                fatalError("Unsupported animation completion criteria in retained-unused ordering test.")
+            }
+        }
+
+        func transaction(
+            label: String,
+            criteria: AnimationCompletionCriteria
+        ) -> Transaction {
+            var transaction = Transaction(
+                animation: Animation(
+                    RetargetBoundaryRecordingAnimation(
+                        label: label,
+                        logicalAt: 20,
+                        nilAt: 20,
+                        recorder: sampleRecorder
+                    )
+                )
+            )
+            transaction.addAnimationCompletion(criteria: criteria) {
+                recorder.record("\(label) \(roleLabel(for: criteria))")
+            }
+            return transaction
+        }
+
+        viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(
+                value: makeTransitionList(
+                    inputs: graphInputs,
+                    rows: ["row"],
+                    makeOutputs: { inputs in
+                        guard let graph = _AGGraph.current else {
+                            fatalError("DynamicContainer retained-unused criteria test element built outside AG context.")
+                        }
+                        let modifier = graph.makeInput(
+                            value: _AppearanceActionModifier(
+                                appear: { recorder.record("row appear") },
+                                disappear: { recorder.record("row disappear") }
+                            )
+                        )
+                        let effect = graph.makeStatefulRule(
+                            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
+                        )
+                        graph.makeSideEffectRule {
+                            _ = effect.value
+                            return ()
+                        }
+
+                        let sourceAttr = graph.makeInput(value: _OpacityEffect(opacity: 0))
+                        var graphValue = _GraphValue<_OpacityEffect>(_attribute: sourceAttr)
+                        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+                        let animatedAttr = graphValue._attribute
+                        animatableSource = sourceAttr
+                        animatedValue = animatedAttr
+
+                        let layout = graph.makeRule {
+                            _ = animatedAttr.value
+                            return LayoutComputer.fixed(CGSize(width: 10, height: 10))
+                        }
+                        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+                    }
+                )
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        base: graphInputs,
+                        maxUnusedItems: 1
+                    )
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1, file: file, line: line)
+            XCTAssertEqual(initial.removedCount, 0, file: file, line: line)
+            XCTAssertEqual(initial.unusedCount, 0, file: file, line: line)
+            XCTAssertEqual(initial.items.first?.phase, 1, file: file, line: line)
+            XCTAssertEqual(recorder.events, ["row appear"], file: file, line: line)
+            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001, file: file, line: line)
+        }
+
+        viewGraph.data.withCurrent {
+            animatableSource.setValue(
+                _OpacityEffect(opacity: 1),
+                transaction: transaction(label: "old", criteria: oldCriteria)
+            )
+            _ = animatedValue.value
+            Transaction.dispatchPendingListeners().forEach { $0() }
+            graphInputs.time.setValue(Time(seconds: 0.5))
+            _ = animatedValue.value
+            graphInputs.time.setValue(Time(seconds: 0.6))
+            _ = animatedValue.value
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(recorder.events, ["row appear"], file: file, line: line)
+
+        let unusedItem = try viewGraph.data.withCurrent {
+            source.setValue(EmptyViewList(), transaction: Transaction(animation: nil))
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0, file: file, line: line)
+            XCTAssertEqual(retained.removedCount, 0, file: file, line: line)
+            XCTAssertEqual(retained.unusedCount, 1, file: file, line: line)
+            let item = try XCTUnwrap(retained.items.first, file: file, line: line)
+            XCTAssertEqual(item.phase, 3, file: file, line: line)
+            XCTAssertNil(item.listener, file: file, line: line)
+            XCTAssertGreaterThan(item.subgraph.nodes.count, 0, file: file, line: line)
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"], file: file, line: line)
+            return item
+        }
+
+        let removedItem = try viewGraph.data.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 0.02))
+            removal.addAnimationCompletion(criteria: removalCriteria) {
+                recorder.record("removal \(roleLabel(for: removalCriteria))")
+            }
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(EmptyViewList(), transaction: removal)
+
+            let retained = infoAttr.value
+            XCTAssertEqual(retained.activeItems.count, 0, file: file, line: line)
+            XCTAssertEqual(retained.removedCount, 1, file: file, line: line)
+            XCTAssertEqual(retained.unusedCount, 0, file: file, line: line)
+            let item = try XCTUnwrap(retained.items.first, file: file, line: line)
+            XCTAssertTrue(item === unusedItem, file: file, line: line)
+            XCTAssertEqual(item.phase, 2, file: file, line: line)
+            XCTAssertNotNil(item.listener, file: file, line: line)
+            XCTAssertEqual(recorder.events, ["row appear", "row disappear"], file: file, line: line)
+            return item
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        Self.flushGraphActions(graph)
+        XCTAssertEqual(recorder.events, expectedEventsAfterRemovalSeed, file: file, line: line)
+        XCTAssertTrue(
+            try XCTUnwrap(removedItem.listener, file: file, line: line).isComplete,
+            file: file,
+            line: line
+        )
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            _ = infoAttr.value
+            Self.flushGraphActions(graph)
+        }
+        XCTAssertEqual(recorder.events, expectedEventsAfterFinalDrain, file: file, line: line)
+        XCTAssertEqual(removedItem.subgraph.nodes.count, 0, file: file, line: line)
+    }
+
     func testTransitionRemovalWithoutPositiveAnimationInvalidatesWhenUnusedRetentionIsDisabled() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -2063,11 +2764,13 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     private func makeTransitionList(
         inputs: _GraphInputs,
-        rows: [String] = ["row"]
+        rows: [String] = ["row"],
+        transition: AnyTransition = .opacity
     ) -> any ViewList {
         makeTransitionList(
             inputs: inputs,
             rows: rows,
+            transition: transition,
             makeOutputs: Self.makeFixedLayoutOutputs
         )
     }
@@ -2075,11 +2778,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     private func makeTransitionList(
         inputs: _GraphInputs,
         rows: [String],
+        transition: AnyTransition = .opacity,
         makeOutputs: @escaping (_ViewInputs) -> _ViewOutputs
     ) -> any ViewList {
         var traits = ViewTraitCollection()
         traits[CanTransitionTraitKey.self] = true
-        traits[TransitionTraitKey.self] = .opacity
+        traits[TransitionTraitKey.self] = transition
 
         return TestDynamicRowsViewList(
             rows: rows,
@@ -2266,6 +2970,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         graph: _AGGraph,
         base: _GraphInputs,
         maxUnusedItems: Int? = nil,
+        retainCompletedUnusedRemovals: Bool = false,
         preferenceKeys: PreferenceKeys = PreferenceKeys()
     ) -> _ViewInputs {
         var inputs = _ViewInputs(
@@ -2286,6 +2991,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         if let maxUnusedItems {
             inputs[DynamicContainerMaxUnusedItems.self] = maxUnusedItems
         }
+        inputs[DynamicContainerRetainCompletedUnusedRemovals.self] = retainCompletedUnusedRemovals
         return inputs
     }
 
@@ -2375,6 +3081,68 @@ private final class DynamicContainerLifecycleRecorder {
 
     func append(_ event: String) {
         events.append(event)
+    }
+}
+
+private final class DynamicContainerTransitionPhaseRecorder {
+    var events: [String] = []
+
+    func record(_ phase: TransitionPhase) {
+        let label: String
+        switch phase {
+        case .identity:
+            label = "identity"
+        case .willAppear:
+            label = "willAppear"
+        case .didDisappear:
+            label = "didDisappear"
+        }
+        if events.last != label {
+            events.append(label)
+        }
+    }
+}
+
+private struct DynamicContainerPhaseRecordingTransition: Transition {
+    var recorder: DynamicContainerTransitionPhaseRecorder
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.modifier(
+            DynamicContainerPhaseRecordingModifier(
+                phase: phase,
+                recorder: recorder
+            )
+        )
+    }
+}
+
+private struct DynamicContainerPhaseRecordingModifier: ViewModifier {
+    var phase: TransitionPhase
+    var recorder: DynamicContainerTransitionPhaseRecorder
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside AG context.")
+        }
+        var outputs = body(_Graph(), inputs)
+        guard let childLayout = outputs._layoutComputer.attribute else {
+            let value = modifier._attribute.value
+            value.recorder.record(value.phase)
+            return outputs
+        }
+        let layout = graph.makeRule {
+            let value = modifier._attribute.value
+            value.recorder.record(value.phase)
+            return childLayout.value
+        }
+        outputs._layoutComputer = OptionalAttribute(layout)
+        return outputs
     }
 }
 

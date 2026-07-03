@@ -2,7 +2,7 @@
 //  File: CGTypes.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -74,6 +74,14 @@ extension Double: VectorArithmetic {
 extension CGFloat: VectorArithmetic {
     public mutating func scale(by rhs: Double) { self = self * rhs }
     public var magnitudeSquared: Double { self * self }
+}
+
+extension Double: Animatable {
+    public typealias AnimatableData = Double
+}
+
+extension CGFloat: Animatable {
+    public typealias AnimatableData = CGFloat
 }
 
 extension CGPoint: Animatable {

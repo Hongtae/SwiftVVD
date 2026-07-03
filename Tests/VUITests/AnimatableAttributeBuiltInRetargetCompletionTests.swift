@@ -146,6 +146,87 @@ final class AnimatableAttributeBuiltInRetargetCompletionTests: XCTestCase {
         XCTAssertFalse(recorder.events.contains("active logical"))
     }
 
+    func testResidualRetargetCanDrainNewerLogicalBeforeOlderLogicalAfterActiveRetarget() {
+        let recorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: logicalCompletionTransaction(
+                animation: .spring(
+                    response: 2.40,
+                    dampingFraction: 0.70,
+                    blendDuration: 0.0
+                ),
+                label: "old",
+                recorder: recorder
+            )
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        harness.finalizeTransactionBody()
+
+        harness.setTime(0.65)
+        _ = harness.currentValue()
+        harness.setSource(
+            _OpacityEffect(opacity: 2),
+            transaction: logicalCompletionTransaction(
+                animation: .spring(
+                    response: 0.70,
+                    dampingFraction: 0.70,
+                    blendDuration: 0.0
+                ),
+                label: "middle",
+                recorder: recorder
+            )
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+
+        harness.setTime(1.05)
+        _ = harness.currentValue()
+        harness.setSource(
+            _OpacityEffect(opacity: 3),
+            transaction: logicalCompletionTransaction(
+                animation: .spring(
+                    response: 8.00,
+                    dampingFraction: 0.70,
+                    blendDuration: 0.0
+                ),
+                label: "active",
+                recorder: recorder
+            )
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [])
+
+        harness.setTime(1.30)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [])
+
+        harness.setTime(1.42)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, ["middle logical"])
+
+        harness.setTime(2.55)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "middle logical",
+                "old logical",
+            ]
+        )
+        XCTAssertFalse(recorder.events.contains("active logical"))
+    }
+
     func testNoAnimationRetargetPreservesOldLogicalDeadline() {
         let recorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(

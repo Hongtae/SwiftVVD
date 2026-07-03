@@ -38,20 +38,23 @@ private func declarationAccessPrefix(for declaration: some DeclGroupSyntax) -> S
 }
 
 private func animatableProperties(in declaration: some DeclGroupSyntax) -> [AnimatableProperty] {
-    declaration.memberBlock.members.compactMap { member in
+    declaration.memberBlock.members.flatMap { member -> [AnimatableProperty] in
         guard let variable = member.decl.as(VariableDeclSyntax.self),
               variable.bindingSpecifier.text == "var",
               !hasAttribute(named: "AnimatableIgnored", in: variable.attributes),
-              !variable.modifiers.contains(where: { $0.name.text == "static" || $0.name.text == "class" }),
-              variable.bindings.count == 1,
-              let binding = variable.bindings.first,
-              binding.accessorBlock == nil,
-              let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
-            return nil
+              !variable.modifiers.contains(where: { $0.name.text == "static" || $0.name.text == "class" }) else {
+            return []
         }
-        let name = pattern.identifier.text
-        guard name != "_" else { return nil }
-        return AnimatableProperty(name: name)
+
+        return variable.bindings.compactMap { binding in
+            guard binding.accessorBlock == nil,
+                  let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
+                return nil
+            }
+            let name = pattern.identifier.text
+            guard name != "_" else { return nil }
+            return AnimatableProperty(name: name)
+        }
     }
 }
 

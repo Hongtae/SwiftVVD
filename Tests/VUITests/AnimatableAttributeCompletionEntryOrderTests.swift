@@ -179,8 +179,15 @@ final class AnimatableAttributeCompletionEntryOrderTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(1.50)
+        harness.setTime(0.50)
         _ = harness.currentValue()
+        harness.setTime(0.60)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
+
+        harness.setTime(2.00)
+        XCTAssertEqual(harness.currentValue().opacity, 1.0, accuracy: 0.000_001, file: file, line: line)
         XCTAssertEqual(recorder.events, [], file: file, line: line)
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, expected, file: file, line: line)

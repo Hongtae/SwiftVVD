@@ -2,6 +2,37 @@ import XCTest
 @testable import VUI
 
 final class AnimatableAttributeVelocityTrackingPresentationTests: XCTestCase {
+    func testNoExplicitVelocityTrackingWritesSamplePreviousTargetAtWriteBoundary() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+
+        var transaction = Transaction()
+        transaction.tracksVelocity = true
+
+        harness.setTime(0.60)
+        harness.setSource(
+            _OpacityEffect(opacity: 0.20),
+            transaction: transaction
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+
+        harness.setTime(0.65)
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        harness.setTime(0.70)
+        XCTAssertEqual(harness.currentValue().opacity, 0.20, accuracy: 0.000_001)
+
+        harness.setTime(1.00)
+        harness.setSource(
+            _OpacityEffect(opacity: 0.40),
+            transaction: transaction
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0.20, accuracy: 0.000_001)
+    }
+
     func testNoExplicitVelocityTrackingMultistepWritesStayWithinTargetRange() {
         let fastSamples = samplesForTrackedWrites(
             targets: [0.20, 0.40, 0.60, 0.80, 1.00],

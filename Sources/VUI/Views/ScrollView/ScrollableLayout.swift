@@ -1959,7 +1959,18 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 inputs: inputs
             )
         )
+        let scrollableTransaction: Attribute<Transaction> = graph.makeRule {
+            let inherited = inputs.base.transaction.value
+            _ = view._attribute.value
+            _ = layoutState.value.stateSeed
+            if _AGGraph.currentStatefulInputChanged(view._attribute.identifier),
+               let sourceTransaction = graph.transaction(for: view._attribute.identifier) {
+                return sourceTransaction
+            }
+            return inherited
+        }
         var listInputs = _ViewListInputs(from: inputs)
+        listInputs.base.transaction = scrollableTransaction
         if listInputs.base.options.contains(.viewNeedsGeometry) {
             // Item generators merge their captured base as the receiver, so keep
             // the scroll layout-computer request on that receiver-side lane.
@@ -1981,6 +1992,7 @@ public struct _ScrollableLayoutView<Data, Layout>: View
         }
 
         var dynamicInputs = inputs
+        dynamicInputs.base.transaction = scrollableTransaction
         dynamicInputs[DynamicContainerMaxUnusedItems.self] = 1
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.layoutDirection
@@ -2517,6 +2529,7 @@ private final class ScrollableLayoutViewListState<Data, Layout>
     typealias RowContent = ModifiedContent<Data.Element, Layout.ItemModifier>
 
     struct Item {
+        var content: Attribute<RowContent>
         var elements: _ViewList_SubgraphElements
         var subgraph: AGSubgraph
         var traitListAttr: OptionalAttribute<ViewTraitCollection>
@@ -2553,8 +2566,23 @@ private final class ScrollableLayoutViewListState<Data, Layout>
         state: ScrollableLayoutStateValue<Data, Layout>,
         graph: _AGGraph
     ) {
+        let listTransaction = graph.transaction(for: view.identifier) ?? inputs.base.transaction.value
         var nextOrder: [AnyHashable] = []
         var liveIDs = Set<AnyHashable>()
+
+        func makeContent(
+            index: Data.Index,
+            id: AnyHashable,
+            visibleItem: _ScrollableLayoutItem
+        ) -> RowContent {
+            let item = state.visibleItems.first { $0.id == id } ?? visibleItem
+            let modifier = current.layout.modifier(
+                for: item,
+                layout: state.scrollLayout,
+                state: state.layoutState
+            )
+            return ModifiedContent(content: current.data[index], modifier: modifier)
+        }
 
         for visibleItem in state.visibleItems {
             guard let index = visibleItem.id.base as? Data.Index,
@@ -2565,33 +2593,33 @@ private final class ScrollableLayoutViewListState<Data, Layout>
             let id = visibleItem.id
             nextOrder.append(id)
             liveIDs.insert(id)
+            let content = makeContent(index: index, id: id, visibleItem: visibleItem)
 
-            if items[id] == nil {
+            if let item = items[id] {
+                item.content.setValue(content, transaction: listTransaction)
+            } else {
                 let subgraph = AGSubgraph()
-                let contentAttr: Attribute<RowContent> = AGSubgraph.$current.withValue(subgraph) {
-                    graph.makeRule {
-                        let current = self.view.value
-                        let state = self.layoutState.value
-                        let element = current.data[index]
-                        let item = state.visibleItems.first { $0.id == id } ?? visibleItem
-                        let modifier = current.layout.modifier(
-                            for: item,
-                            layout: state.scrollLayout,
-                            state: state.layoutState
-                        )
-                        return ModifiedContent(content: element, modifier: modifier)
-                    }
+                let contentAttr = AGSubgraph.$current.withValue(subgraph) {
+                    graph.makeInput(value: content)
+                }
+                let contentView = _GraphValue<RowContent>(_attribute: contentAttr)
+                let traitListAttr = AGSubgraph.$current.withValue(subgraph) {
+                    makeContentTraitListAttr(
+                        view: contentView,
+                        graph: graph
+                    )
                 }
                 let generator = TypedUnaryViewGenerator(
-                    _GraphValue(_attribute: contentAttr),
+                    contentView,
                     inputs: inputs
                 )
                 var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
                 elements.wrap(subgraph: _ViewList_Subgraph(subgraph: subgraph))
                 items[id] = Item(
+                    content: contentAttr,
                     elements: elements,
                     subgraph: subgraph,
-                    traitListAttr: generator.traitListAttr
+                    traitListAttr: traitListAttr
                 )
             }
         }
@@ -2609,6 +2637,27 @@ private final class ScrollableLayoutViewListState<Data, Layout>
             seed &+= 1
             order = nextOrder
         }
+    }
+
+    private func makeContentTraitListAttr(
+        view: _GraphValue<RowContent>,
+        graph: _AGGraph
+    ) -> OptionalAttribute<ViewTraitCollection> {
+        let outputs = RowContent._makeViewList(view: view, inputs: inputs)
+        guard case .dynamicList(let listAttr, _) = outputs.views else {
+            return inputs._traits
+        }
+
+        let traitsAttr: Attribute<ViewTraitCollection> = graph.makeRule {
+            let list = listAttr.value
+            var traits = list.traits
+            _ = _forEachSublist(in: list, listAttribute: listAttr) { sublist in
+                traits = sublist.traits
+                return false
+            }
+            return traits
+        }
+        return OptionalAttribute(traitsAttr)
     }
 }
 
