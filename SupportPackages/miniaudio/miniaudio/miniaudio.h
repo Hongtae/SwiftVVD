@@ -3904,7 +3904,18 @@ typedef ma_uint16 wchar_t;
         risk is yours to take and no support will be offered if you enable this option.
         */
         #ifndef MA_NO_PTHREAD_IN_HEADER
+            /*
+            Some C++ importers reject header/module imports inside extern "C".
+            Do not use MA_NO_PTHREAD_IN_HEADER as a workaround here: on some
+            platforms ma_pthread_mutex_t can be smaller than pthread_mutex_t.
+            */
+            #ifdef __cplusplus
+            }
+            #endif
             #include <pthread.h>    /* Unfortunate #include, but needed for pthread_t, pthread_mutex_t and pthread_cond_t types. */
+            #ifdef __cplusplus
+            extern "C" {
+            #endif
             typedef pthread_t       ma_pthread_t;
             typedef pthread_mutex_t ma_pthread_mutex_t;
             typedef pthread_cond_t  ma_pthread_cond_t;
