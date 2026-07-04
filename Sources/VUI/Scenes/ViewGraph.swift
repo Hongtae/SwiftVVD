@@ -171,6 +171,18 @@ struct ViewGraphFeatureBuffer {
         features.append(feature)
     }
 
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+        for feature in features {
+            feature.modifyViewInputs(inputs: &inputs, graph: graph)
+        }
+    }
+
+    func modifyViewOutputs(outputs: inout _ViewOutputs, inputs: _ViewInputs, graph: ViewGraph) {
+        for feature in features {
+            feature.modifyViewOutputs(outputs: &outputs, inputs: inputs, graph: graph)
+        }
+    }
+
     func isHiddenForReuseDidChange(graph: ViewGraph) {
         for feature in features {
             feature.isHiddenForReuseDidChange(graph: graph)
@@ -664,18 +676,25 @@ class ViewGraph: ViewGraphHost {
     }
 
     // Backend init that takes a concrete view value to lift into the graph.
-    convenience init<V: View>(rootViewType: V.Type, content: V, rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
-        self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
+    convenience init<V: View>(
+        rootViewType: V.Type,
+        content: V,
+        rendererHost: any ViewRendererHost,
+        requestedOutputs: Outputs = .defaults,
+        features: [any ViewGraphFeature] = []
+    ) {
+        self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
             _GraphValue<V>(_attribute: g.makeInput(value: content))
         }
     }
 
     convenience init<Content: View>(replaceableContent content: Content,
                                     rendererHost: any ViewRendererHost,
-                                    requestedOutputs: Outputs = .defaults) {
+                                    requestedOutputs: Outputs = .defaults,
+                                    features: [any ViewGraphFeature] = []) {
         var contentAttr: Attribute<AnyView>?
         let erasedContent = AnyView(content)
-        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
+        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
             let attr: Attribute<AnyView> = g.makeInput(value: erasedContent)
             contentAttr = attr
             return _GraphValue<AnyView>(_attribute: attr)
@@ -688,8 +707,9 @@ class ViewGraph: ViewGraphHost {
     // is notified, and the child updates on its next updateOutputs. Caller must evaluate contentAttr in sourceGraph
     // first (call `_ = contentAttr.value`) so the crossGraphRef finds a non-nil cached value.
     convenience init(crossGraphContentAttr: Attribute<AnyView>, sourceGraph: _AGGraph,
-                     rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
-        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
+                     rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults,
+                     features: [any ViewGraphFeature] = []) {
+        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
             _GraphValue<AnyView>(_attribute: g.makeCrossGraphRef(source: crossGraphContentAttr, in: sourceGraph))
         }
     }
@@ -698,11 +718,15 @@ class ViewGraph: ViewGraphHost {
     // root _GraphValue. The _AGGraph passed is self.data.graph (child graph, current).
     private init<V: View>(rootViewType: V.Type, rendererHost: any ViewRendererHost,
                           requestedOutputs: Outputs,
+                          features: [any ViewGraphFeature],
                           makeContent: (_AGGraph) -> _GraphValue<V>) {
         self.requestedOutputs = requestedOutputs
         super.init()
         // Wire rendererHost before _makeView so GestureResponder.init can read rendererHost?.gestureGraph.
         self.rendererHost = rendererHost
+        for feature in features {
+            featureBuffer.append(feature)
+        }
         let time = Time(seconds: 0)
 
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
@@ -748,7 +772,7 @@ class ViewGraph: ViewGraphHost {
             let positionAttr     = g.makeInput(value: CGPoint.zero)
             let containerPosAttr = g.makeInput(value: CGPoint.zero)
             let sizeAttr         = g.makeInput(value: ViewSize(.zero))
-            let viewInputs = _ViewInputs(
+            var viewInputs = _ViewInputs(
                 base: graphInputs,
                 customInputs: PropertyList(),
                 preferences: prefsInputs,
@@ -760,9 +784,11 @@ class ViewGraph: ViewGraphHost {
                 containerSize: OptionalAttribute(),
                 stackOrientation: nil
             )
+            featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
 
             // GestureResponder.init reads the shared gesture graph from ViewGraph.
-            let outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
+            var outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
+            featureBuffer.modifyViewOutputs(outputs: &outputs, inputs: viewInputs, graph: self)
             makePreferenceOutlets(outputs: outputs)
 
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)

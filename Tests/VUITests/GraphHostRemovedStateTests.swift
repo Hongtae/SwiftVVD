@@ -134,6 +134,28 @@ final class GraphHostRemovedStateTests: XCTestCase {
         XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
     }
 
+    func testViewGraphFeatureBufferModifiesRootInputsAndOutputs() {
+        let recorder = ViewGraphFeatureDispatchRecorder()
+        let feature = InputOutputMutatingViewGraphFeature(recorder: recorder)
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: FeatureDispatchRootView.self,
+            content: FeatureDispatchRootView(recorder: recorder),
+            rendererHost: rendererHost,
+            requestedOutputs: [],
+            features: [feature]
+        )
+        rendererHost.storage = viewGraph
+
+        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+        XCTAssertEqual(recorder.events, ["inputs", "root", "outputs"])
+        XCTAssertTrue(recorder.rootUsingGraphicsRenderer)
+        XCTAssertTrue(recorder.rootAnimationsDisabled)
+        XCTAssertTrue(recorder.outputFeatureSawLayoutComputer)
+        XCTAssertTrue(recorder.outputFeatureSawUsingGraphicsRenderer)
+        XCTAssertNil(viewGraph.rootLayoutComputer)
+    }
+
     private func installRemovableRule(in host: GraphHost, recorder: RemovedStateRecorder) {
         host.data.withCurrent {
             AGSubgraph.$current.withValue(host.data.rootSubgraph) {
@@ -201,3 +223,55 @@ private final class RecordingViewGraphFeature: ViewGraphFeature {
 }
 
 private struct DefaultOnlyViewGraphFeature: ViewGraphFeature {}
+
+private final class ViewGraphFeatureDispatchRecorder {
+    var events: [String] = []
+    var rootUsingGraphicsRenderer = false
+    var rootAnimationsDisabled = false
+    var outputFeatureSawLayoutComputer = false
+    var outputFeatureSawUsingGraphicsRenderer = false
+}
+
+private struct InputOutputMutatingViewGraphFeature: ViewGraphFeature {
+    let recorder: ViewGraphFeatureDispatchRecorder
+
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+        recorder.events.append("inputs")
+        inputs[UsingGraphicsRenderer.self] = true
+        inputs.base.options.insert(.animationsDisabled)
+    }
+
+    func modifyViewOutputs(outputs: inout _ViewOutputs, inputs: _ViewInputs, graph: ViewGraph) {
+        recorder.events.append("outputs")
+        recorder.outputFeatureSawLayoutComputer = outputs._layoutComputer.attribute != nil
+        recorder.outputFeatureSawUsingGraphicsRenderer = inputs[UsingGraphicsRenderer.self]
+        outputs._layoutComputer = OptionalAttribute()
+    }
+}
+
+private struct FeatureDispatchRootView: View {
+    let recorder: ViewGraphFeatureDispatchRecorder
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("FeatureDispatchRootView._makeView called outside an active _AGGraph context.")
+        }
+        let recorder = view._attribute.value.recorder
+        recorder.events.append("root")
+        recorder.rootUsingGraphicsRenderer = inputs[UsingGraphicsRenderer.self]
+        recorder.rootAnimationsDisabled = inputs.base.options.contains(.animationsDisabled)
+
+        let layoutComputer = graph.makeRule {
+            LayoutComputer.fixed(CGSize(width: 1, height: 1))
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layoutComputer))
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs(views: .staticList(.merged([])), nextImplicitID: 0, staticCount: 0)
+    }
+}
+
+extension FeatureDispatchRootView: _PrimitiveView {}
