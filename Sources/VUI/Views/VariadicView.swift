@@ -414,7 +414,9 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Root._makeView(root: view[\.root], inputs: inputs) { _, inputs in
-            Content._makeViewList(view: view[\.content], inputs: inputs.listInputs)
+            var listInputs = inputs.listInputs
+            listInputs.formUnion(viewListOptions: Root._viewListOptions)
+            return Content._makeViewList(view: view[\.content], inputs: listInputs)
         }
     }
 
@@ -424,8 +426,12 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
         // a TupleView child node. That is distinct from an app/scene root view
         // entering through _makeViewList. Restore the non-root assertion only
         // after the Tree._makeViewList root invariant is fully modeled.
-        return Root._makeViewList(root: view[\.root], inputs: inputs) { _, inputs in
-            Content._makeViewList(view: view[\.content], inputs: inputs)
+        var rootInputs = inputs
+        rootInputs.formUnion(viewListOptions: Root._viewListOptions)
+        return Root._makeViewList(root: view[\.root], inputs: rootInputs) { _, inputs in
+            var listInputs = inputs
+            listInputs.formUnion(viewListOptions: Root._viewListOptions)
+            return Content._makeViewList(view: view[\.content], inputs: listInputs)
         }
     }
 }

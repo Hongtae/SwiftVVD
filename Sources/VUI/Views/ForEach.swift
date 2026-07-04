@@ -35,6 +35,26 @@ extension ForEach: View where Content: View {
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
+        if view._attribute.value.data is any _ForEachSectionCollectionViewListProducing {
+            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
+                guard let sectionData = view._attribute.value.data as? any _ForEachSectionCollectionViewListProducing else {
+                    return EmptyViewList() as any ViewList
+                }
+                let outputs = sectionData.makeViewList(inputs: inputs, graph: graph)
+                switch outputs.views {
+                case .staticList(let elements):
+                    return BaseViewList(elements: elements) as any ViewList
+                case .dynamicList(let attribute, _):
+                    return attribute.value
+                }
+            }
+            return _ViewListOutputs(
+                views: .dynamicList(viewListAttr, nil),
+                nextImplicitID: 0,
+                staticCount: nil
+            )
+        }
+
         let state = ForEachState<Data, ID, Content>(inputs: inputs)
 
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
@@ -253,6 +273,19 @@ extension ForEach where Content: View {
             }
             content(elementBinding)
         }
+    }
+}
+
+extension ForEach where Data == ForEachSectionCollection<Content>, ID == SectionConfiguration.ID, Content: View {
+    public init<V>(
+        sections view: V,
+        @ViewBuilder content: @escaping (SectionConfiguration) -> Content
+    ) where V: View {
+        self.init(
+            ForEachSectionCollection(subviewOf: view, content: content),
+            id: \.id,
+            content: content
+        )
     }
 }
 

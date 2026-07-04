@@ -921,7 +921,84 @@ enum _ViewList_Node {
     case section(_ViewList_Section)
     case sublist(_ViewList_Sublist)
 }
-struct _ViewList_Section {}
+
+struct _ViewList_Section: ViewList {
+    struct Info {
+        var id: UInt32
+        var isHeader: Bool
+        var isFooter: Bool
+
+        init(id: UInt32 = 0, isHeader: Bool = false, isFooter: Bool = false) {
+            self.id = id
+            self.isHeader = isHeader
+            self.isFooter = isFooter
+        }
+    }
+
+    var id: UInt32
+    var base: _ViewList_Group
+    var traits: ViewTraitCollection
+    var isHierarchical: Bool
+    var containerValues: ContainerValues
+    var subviewIDTransform: _ViewList_SublistTransform
+
+    init(
+        id: UInt32 = 0,
+        base: _ViewList_Group = _ViewList_Group(lists: []),
+        traits: ViewTraitCollection = ViewTraitCollection(),
+        isHierarchical: Bool = false,
+        containerValues: ContainerValues = ContainerValues(),
+        subviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform()
+    ) {
+        self.id = id
+        self.base = base
+        self.traits = traits
+        self.isHierarchical = isHierarchical
+        self.containerValues = containerValues
+        self.subviewIDTransform = subviewIDTransform
+    }
+
+    var header: (list: any ViewList, attribute: Attribute<any ViewList>)? {
+        region(at: 0)
+    }
+
+    var content: (list: any ViewList, attribute: Attribute<any ViewList>)? {
+        region(at: 1)
+    }
+
+    var footer: (list: any ViewList, attribute: Attribute<any ViewList>)? {
+        region(at: 2)
+    }
+
+    func region(at index: Int) -> (list: any ViewList, attribute: Attribute<any ViewList>)? {
+        guard base.lists.indices.contains(index) else {
+            return nil
+        }
+        return base.lists[index]
+    }
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        base.count(style: style)
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        base.estimatedCount(style: style)
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        to(&from, style, .section(self), transform)
+    }
+
+    var debugDescription: String {
+        "_ViewList_Section(id: \(id), count: \(count(style: _ViewList_IteratorStyle())))"
+    }
+}
 
 // MARK: - _ViewList_Group
 

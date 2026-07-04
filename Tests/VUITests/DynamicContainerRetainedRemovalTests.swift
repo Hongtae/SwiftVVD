@@ -1160,14 +1160,20 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     private func assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes<Root: View>(
         @ViewBuilder makeRoot: @escaping ([String], DynamicContainerLifecycleRecorder) -> Root
     ) throws {
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<Root>!
         var layoutAttr: Attribute<LayoutComputer>!
         var removalEvents: [String] = []
 
-        ref.withCurrent {
+        viewGraph.data.withCurrent {
             let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
             let viewInputs = makeViewInputs(graph: graph, base: inputs)
             source = graph.makeInput(value: makeRoot(["row"], recorder))
@@ -1185,7 +1191,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(recorder.events, ["row appear"])
         }
 
-        ref.withCurrent {
+        viewGraph.data.withCurrent {
             var removal = Transaction(animation: .linear(duration: 0.02))
             removal.addAnimationCompletion(criteria: .removed) {
                 removalEvents.append("removal removed")
@@ -1204,7 +1210,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertEqual(recorder.events, ["row appear"])
 
-        ref.withCurrent {
+        viewGraph.data.withCurrent {
             graph.inbox.drain()
             _ = layoutAttr.value
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])

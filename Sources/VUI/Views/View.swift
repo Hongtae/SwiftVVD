@@ -371,8 +371,109 @@ extension IDView {
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Content._makeView(view: view[\.content], inputs: inputs)
     }
+
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        Content._makeViewList(view: view[\.content], inputs: inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("IDView._makeViewList called outside an active _AGGraph context.")
+        }
+        let outputs = Content._makeViewList(view: view[\.content], inputs: inputs)
+        let source = viewListAttribute(from: outputs, graph: graph)
+        let idAttribute = view[\.id]._attribute
+        let owner = view._attribute.identifier
+        let listAttr: Attribute<any ViewList> = graph.makeRule {
+            IDTransformedViewList(
+                base: source.value,
+                id: idAttribute,
+                owner: owner,
+                isUnary: true
+            ) as any ViewList
+        }
+        return _ViewListOutputs(
+            views: .dynamicList(listAttr, nil),
+            nextImplicitID: outputs.nextImplicitID,
+            staticCount: outputs.staticCount
+        )
+    }
+
+    private static func viewListAttribute(
+        from outputs: _ViewListOutputs,
+        graph: _AGGraph
+    ) -> Attribute<any ViewList> {
+        switch outputs.views {
+        case .staticList(let elements):
+            return graph.makeRule {
+                BaseViewList(elements: elements) as any ViewList
+            }
+        case .dynamicList(let attribute, _):
+            return attribute
+        }
+    }
+}
+
+private struct IDTransformedViewList<ID: Hashable>: ViewList {
+    var base: any ViewList
+    var id: Attribute<ID>
+    var owner: AGAttribute
+    var isUnary: Bool
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        base.count(style: style)
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        base.estimatedCount(style: style)
+    }
+
+    var traitKeys: ViewTraitKeys? { base.traitKeys }
+    var traits: ViewTraitCollection { base.traits }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        let item = IDSublistTransformItem(
+            explicitID: id.value,
+            owner: owner,
+            isUnary: isUnary
+        )
+        return base.applyNodes(
+            from: &from,
+            style: style,
+            list: list,
+            transform: transform.withPushedItem(item),
+            to: to
+        )
+    }
+
+    var debugDescription: String {
+        "IDTransformedViewList(\(base))"
+    }
+}
+
+private struct IDSublistTransformItem<ID: Hashable>: _ViewList_SublistTransform_Item {
+    var explicitID: ID
+    var owner: AGAttribute
+    var isUnary: Bool
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        sublist.id.bind(
+            explicitID: explicitID,
+            owner: owner,
+            isUnary: isUnary,
+            reuseID: 0
+        )
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        id.bind(
+            explicitID: explicitID,
+            owner: owner,
+            isUnary: isUnary,
+            reuseID: 0
+        )
     }
 }
 
@@ -573,6 +674,8 @@ public struct _ViewInputs {
 /// Additional list-specific fields (`implicitID`, `options`, `_traits`, etc.) are reserved
 /// for ForEach ID tracking, ViewTrait propagation, and container-context injection respectively.
 public struct _ViewListInputs {
+    static let sectionListOptions: UInt32 = 0x100
+
     /// Shared graph-level inputs such as time, environment, and transaction.
     var base: _GraphInputs
 
@@ -599,6 +702,14 @@ public struct _ViewListInputs {
     /// `MutableBox` allows shared mutation across copies of `_ViewListInputs`
     /// in the same subtree. `nil` when debug instrumentation is not active.
     var debugReplaceableViewCount: MutableBox<Int?>?
+
+    var needsSectionListOutputs: Bool {
+        (options & Self.sectionListOptions) != 0
+    }
+
+    mutating func formUnion(viewListOptions: Int) {
+        options |= UInt32(truncatingIfNeeded: viewListOptions)
+    }
 }
 
 extension _ViewListInputs {

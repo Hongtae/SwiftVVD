@@ -125,6 +125,10 @@ extension TupleView {
             return true
         }
 
+        if inputs.needsSectionListOutputs {
+            return _ViewListOutputs.sectionListOutputs(children, inputs: inputs)
+        }
+
         if children.contains(where: { output in
             if case .dynamicList = output.views { return true }
             return false

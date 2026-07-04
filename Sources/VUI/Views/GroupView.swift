@@ -19,5 +19,14 @@ extension Group: View where Content: View {
     }
 }
 
+extension Group {
+    public init<Base, Result>(
+        sections view: Base,
+        @ViewBuilder transform: @escaping (SectionCollection) -> Result
+    ) where Content == GroupSectionsOfContent<Base, Result>, Base: View, Result: View {
+        self.content = GroupSectionsOfContent(sections: view, content: transform)
+    }
+}
+
 extension Group: _PrimitiveView where Content: View {
 }
