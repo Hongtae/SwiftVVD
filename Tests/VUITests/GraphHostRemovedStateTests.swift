@@ -156,6 +156,34 @@ final class GraphHostRemovedStateTests: XCTestCase {
         XCTAssertNil(viewGraph.rootLayoutComputer)
     }
 
+    func testImageRendererHostViewGraphInstallsGraphicsRendererAndAnimationsDisabledOnly() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.base.options = [.supportsVariableFrameDuration]
+
+            ImageRendererHostViewGraph().modifyViewInputs(inputs: &inputs, graph: viewGraph)
+
+            XCTAssertTrue(inputs[UsingGraphicsRenderer.self])
+            XCTAssertTrue(inputs.base.options.contains(.animationsDisabled))
+            XCTAssertTrue(inputs.base.options.contains(.supportsVariableFrameDuration))
+            XCTAssertEqual(
+                inputs.base.options.rawValue,
+                _GraphInputs.Options.animationsDisabled.rawValue
+                    | _GraphInputs.Options.supportsVariableFrameDuration.rawValue
+            )
+        }
+    }
+
     private func installRemovableRule(in host: GraphHost, recorder: RemovedStateRecorder) {
         host.data.withCurrent {
             AGSubgraph.$current.withValue(host.data.rootSubgraph) {
@@ -163,6 +191,41 @@ final class GraphHostRemovedStateTests: XCTestCase {
                 _ = attr.value
             }
         }
+    }
+
+    private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
+        _GraphInputs(
+            customInputs: PropertyList(),
+            time: graph.makeInput(value: Time()),
+            cachedEnvironment: MutableBox(
+                CachedEnvironment(
+                    environment: graph.makeInput(value: EnvironmentValues.tracking())
+                )
+            ),
+            phase: graph.makeInput(value: Phase()),
+            transaction: graph.makeInput(value: Transaction()),
+            changedDebugProperties: 0,
+            options: [],
+            mergedInputs: []
+        )
+    }
+
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
+        _ViewInputs(
+            base: makeGraphInputs(graph: graph),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(CGSize(width: 10, height: 10))),
+            safeAreaInsets: OptionalAttribute<SafeAreaInsets>(),
+            containerSize: OptionalAttribute<ViewSize>(),
+            stackOrientation: nil
+        )
     }
 }
 

@@ -18,6 +18,8 @@ public typealias CGSize = CoreGraphics.CGSize
 public typealias CGRect = CoreGraphics.CGRect
 
 public typealias CGAffineTransform = CoreGraphics.CGAffineTransform
+public typealias CGContext = CoreGraphics.CGContext
+public typealias CGImage = CoreGraphics.CGImage
 public typealias CGLineCap = CoreGraphics.CGLineCap
 public typealias CGLineJoin = CoreGraphics.CGLineJoin
 
@@ -34,6 +36,10 @@ public typealias CGSize = Foundation.CGSize
 public typealias CGRect = Foundation.CGRect
 
 public typealias CGAffineTransform = AffineTransform
+
+// Empty compatibility placeholders for APIs that accept CoreGraphics image/context types when CoreGraphics is unavailable.
+public struct CGContext: Hashable {}
+public struct CGImage: Hashable, Sendable {}
 
 public enum CGLineCap: Int32, Sendable {
     case butt = 0

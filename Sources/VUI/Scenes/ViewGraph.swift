@@ -190,6 +190,13 @@ struct ViewGraphFeatureBuffer {
     }
 }
 
+struct ImageRendererHostViewGraph: ViewGraphFeature {
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+        inputs[UsingGraphicsRenderer.self] = true
+        inputs.base.options.insert(.animationsDisabled)
+    }
+}
+
 // ViewGraphHost - intermediate base class between GraphHost and ViewGraph.
 // The backend currently drives updateOutputs from the render loop. The class
 // keeps the shared host lifecycle surface so scheduling can be tightened later.
