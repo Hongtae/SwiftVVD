@@ -55,6 +55,10 @@ struct LazyHGridLayout: HVGrid {
     typealias AnimatableData = EmptyAnimatableData
     typealias Cache = _LazyGridLayout.Cache
 
+    static var _lazyLayoutProperties: _LazyLayout_Properties {
+        _LazyLayout_Properties(axes: .horizontal)
+    }
+
     init(
         rows: [GridItem],
         alignment: VerticalAlignment,

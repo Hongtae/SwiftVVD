@@ -105,10 +105,64 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(hGridLayout.pinnedViews, [.sectionFooters])
         XCTAssertEqual(vGridLayout.columns, [GridItem(.fixed(18), spacing: 2)])
         XCTAssertEqual(hGridLayout.rows, [GridItem(.fixed(12), spacing: 3)])
+        XCTAssertEqual(LazyHStackLayout._lazyLayoutProperties.axes, .horizontal)
+        XCTAssertEqual(LazyVStackLayout._lazyLayoutProperties.axes, .vertical)
+        XCTAssertEqual(LazyVGridLayout._lazyLayoutProperties.axes, .vertical)
+        XCTAssertEqual(LazyHGridLayout._lazyLayoutProperties.axes, .horizontal)
         XCTAssertTrue(LazyVStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyHStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyVGridLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyHGridLayout.AnimatableData.self == EmptyAnimatableData.self)
+    }
+
+    func testLazyLayoutPrefetchResultAdvanceToSomeMatchesSampledSurface() {
+        XCTAssertEqual(_LazyLayout_PrefetchResult.none.rawValue, 0)
+        XCTAssertEqual(_LazyLayout_PrefetchResult.some.rawValue, 1)
+        XCTAssertEqual(_LazyLayout_PrefetchResult.all.rawValue, 2)
+
+        var none = _LazyLayout_PrefetchResult.none
+        XCTAssertFalse(none.advanceToSome())
+        XCTAssertEqual(none, .all)
+
+        var some = _LazyLayout_PrefetchResult.some
+        XCTAssertTrue(some.advanceToSome())
+        XCTAssertEqual(some, .some)
+
+        var all = _LazyLayout_PrefetchResult.all
+        XCTAssertTrue(all.advanceToSome())
+        XCTAssertEqual(all, .some)
+    }
+
+    func testScrollPrefetchStateStorageAndCommitMatchesSampledSurface() {
+        let first = ScrollPrefetchState(deadline: 11)
+        let second = ScrollPrefetchState(deadline: 12)
+        XCTAssertEqual(first.deadline, 11)
+        XCTAssertEqual(first.edges, [])
+        XCTAssertNotEqual(first.id, second.id)
+
+        var propertyList = PropertyList()
+        XCTAssertNil(propertyList[ScrollPrefetchState.self].attribute)
+
+        let host = GraphHost()
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let stateAttribute = graph.makeInput(value: first)
+            propertyList[ScrollPrefetchState.self] = OptionalAttribute(stateAttribute)
+            XCTAssertEqual(
+                propertyList[ScrollPrefetchState.self].attribute?.identifier,
+                stateAttribute.identifier
+            )
+
+            var committed = ScrollPrefetchState(deadline: 77)
+            committed.edges = .vertical
+            committed.commit(to: stateAttribute.asWeak())
+
+            let current = stateAttribute.value
+            XCTAssertEqual(current.id, committed.id)
+            XCTAssertEqual(current.deadline, 77)
+            XCTAssertEqual(current.edges, .vertical)
+            XCTAssertFalse(host.hasPendingTransactions)
+        }
     }
 
     func testLazyLayoutPrivateCarrierStorageMatchesFieldMetadataSlice() {
@@ -371,7 +425,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: 2,
                 reuseIdentifier: 4
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             first.insertionTransactionSeed = 18
             first.placementSeed = 10
             first.usedSeed = 20
@@ -386,7 +440,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     transitionType: nil
                 ) === second
             )
-            XCTAssertEqual(cache.lru.generationSeed, 1)
+            XCTAssertEqual(cache.lru.usedSeed, 1)
 
             let placement = _Placement(proposedSize: CGSize(width: 11, height: 13))
             cache.commitPlacedSubviews([
@@ -415,7 +469,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: 2,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             displayed.insertionTransactionSeed = 18
             displayed.placementSeed = 10
             displayed.usedSeed = 1
@@ -461,7 +515,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: 2,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             pendingRemoval.insertionTransactionSeed = 18
             pendingRemoval.placementSeed = 10
             pendingRemoval.usedSeed = 1
@@ -506,7 +560,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: 2,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             fresh.insertionTransactionSeed = 20
             fresh.placementSeed = 10
             fresh.usedSeed = 1
@@ -550,7 +604,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: 2,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
+            cache.placementSeed = 20
             currentSeed.insertionTransactionSeed = 18
             currentSeed.placementSeed = 20
             currentSeed.usedSeed = 1
@@ -869,6 +924,94 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(item.prefetchSeed, 17)
             XCTAssertEqual(item.prefetchPhase, .notPrefetching)
             XCTAssertEqual(item.placement, _Placement(proposedSize: CGSize(width: 20, height: 30)))
+        }
+    }
+
+    func testLazyLayoutViewCachePrefetchCapabilityUsesHookSemanticsAndRendererGate() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (baseCache, _, _) = makeLazyCache(host: host, implicitID: 1)
+            XCTAssertFalse(baseCache.supportsPrefetching)
+            XCTAssertFalse(baseCache.supportsViewHierarchyPrefetching)
+
+            let (prefetchCache, item, _) = makeLazyCache(
+                host: host,
+                implicitID: 2,
+                supportsPrefetching: true
+            )
+            XCTAssertTrue(prefetchCache.supportsPrefetching)
+            XCTAssertTrue(prefetchCache.supportsViewHierarchyPrefetching)
+
+            prefetchCache.inputs[UsingGraphicsRenderer.self] = true
+            XCTAssertFalse(prefetchCache.supportsViewHierarchyPrefetching)
+
+            prefetchCache.inputs[UsingGraphicsRenderer.self] = false
+            Semantics.overrides = Semantics.Overrides(build: .v6, runtime: nil)
+            XCTAssertFalse(prefetchCache.supportsViewHierarchyPrefetching)
+
+            Semantics.overrides = Semantics.Overrides()
+            prefetchCache.commitSeed = 41
+            item.displayIndex = nil
+            item.prefetchPhase = .pendingDisplay
+            item.beginPrefetching(at: ProposedViewSize(width: 20, height: 30))
+            XCTAssertEqual(item.prefetchSeed, 41)
+            XCTAssertEqual(item.prefetchPhase, .prefetching)
+        }
+    }
+
+    func testConcreteLazyLayoutViewCachePrefetchCapabilityUsesParentSubgraphAndAxis() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let vertical = makeConcreteLazyGridCache(
+                host: host,
+                layout: LazyVGridLayout(
+                    columns: [GridItem(.fixed(12))],
+                    alignment: .center,
+                    spacing: nil,
+                    pinnedViews: []
+                ),
+                nearestScrollableAxes: .vertical
+            )
+            XCTAssertTrue(vertical.supportsPrefetching)
+            XCTAssertTrue(vertical.supportsViewHierarchyPrefetching)
+
+            let axisMismatch = makeConcreteLazyGridCache(
+                host: host,
+                layout: LazyVGridLayout(
+                    columns: [GridItem(.fixed(12))],
+                    alignment: .center,
+                    spacing: nil,
+                    pinnedViews: []
+                ),
+                nearestScrollableAxes: .horizontal
+            )
+            XCTAssertFalse(axisMismatch.supportsPrefetching)
+            XCTAssertFalse(axisMismatch.supportsViewHierarchyPrefetching)
+
+            let horizontal = makeConcreteLazyGridCache(
+                host: host,
+                layout: LazyHGridLayout(
+                    rows: [GridItem(.fixed(12))],
+                    alignment: .center,
+                    spacing: nil,
+                    pinnedViews: []
+                ),
+                nearestScrollableAxes: .horizontal
+            )
+            XCTAssertTrue(horizontal.supportsPrefetching)
+            horizontal.parentSubgraph.invalidate()
+            XCTAssertFalse(horizontal.supportsPrefetching)
+            XCTAssertFalse(horizontal.supportsViewHierarchyPrefetching)
         }
     }
 
@@ -1209,6 +1352,38 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutViewCacheResetPrefetchPhasesClearsChildMaxDisplayListSubviews() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, item, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (childCache, _, _) = makeLazyCache(host: host, implicitID: 10)
+            let (unrelatedChildCache, _, _) = makeLazyCache(host: host, implicitID: 11)
+            cache.childCaches[item.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [LazyLayoutCacheChildren.WeakChild(value: childCache)]
+            )
+            item.prefetchSeed = 13
+            item.prefetchPhase = .prefetching
+            childCache.maxDisplayListSubviews = 2
+            unrelatedChildCache.maxDisplayListSubviews = 3
+
+            cache.resetPrefetchPhases()
+
+            XCTAssertEqual(item.prefetchSeed, 0)
+            XCTAssertEqual(item.prefetchPhase, .notPrefetching)
+            XCTAssertNil(childCache.maxDisplayListSubviews)
+            XCTAssertEqual(unrelatedChildCache.maxDisplayListSubviews, 3)
+        }
+    }
+
     func testLazyLayoutViewCacheUpdatePrefetchPhasesNoOpsWithoutCapability() {
         let host = GraphHost()
 
@@ -1225,6 +1400,296 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(item.prefetchSeed, 7)
             XCTAssertEqual(item.prefetchPhase, .pendingDisplay)
             XCTAssertNil(item.placement)
+        }
+    }
+
+    func testLazyLayoutViewCacheUpdatePrefetchPhasesClearsDisplayedActivePrefetchState() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, displayed, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (childCache, _, _) = makeLazyCache(host: host, implicitID: 10)
+            cache.childCaches[displayed.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [LazyLayoutCacheChildren.WeakChild(value: childCache)]
+            )
+            displayed.displayIndex = 0
+            displayed.prefetchPhase = .pendingDisplay
+            cache.maxDisplayListSubviews = 4
+            childCache.maxDisplayListSubviews = 2
+
+            let (_, hiddenPendingDisplay, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            hiddenPendingDisplay.displayIndex = nil
+            hiddenPendingDisplay.prefetchSeed = 7
+            hiddenPendingDisplay.prefetchPhase = .pendingDisplay
+            hiddenPendingDisplay.placement = nil
+
+            cache.updatePrefetchPhases()
+
+            XCTAssertEqual(displayed.prefetchPhase, .notPrefetching)
+            XCTAssertNil(cache.maxDisplayListSubviews)
+            XCTAssertNil(childCache.maxDisplayListSubviews)
+            XCTAssertEqual(hiddenPendingDisplay.prefetchSeed, 7)
+            XCTAssertEqual(hiddenPendingDisplay.prefetchPhase, .pendingDisplay)
+            XCTAssertNil(hiddenPendingDisplay.placement)
+        }
+    }
+
+    func testLazyLayoutViewCacheUpdatePrefetchPhasesClearsAgedPendingRemovalState() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, agedRemoval, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (_, retainedRemoval, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            let (_, pendingDisplay, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 3
+            )
+            cache.lru.transactionSeed = 10
+            cache.lru.maxIdle = 2
+
+            agedRemoval.displayIndex = nil
+            agedRemoval.prefetchPhase = .pendingRemoval
+            agedRemoval.removalTransactionSeed = 7
+
+            retainedRemoval.displayIndex = nil
+            retainedRemoval.prefetchPhase = .pendingRemoval
+            retainedRemoval.removalTransactionSeed = 8
+
+            pendingDisplay.displayIndex = nil
+            pendingDisplay.prefetchPhase = .pendingDisplay
+            pendingDisplay.removalTransactionSeed = 1
+
+            cache.updatePrefetchPhases()
+
+            XCTAssertEqual(agedRemoval.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(retainedRemoval.prefetchPhase, .pendingRemoval)
+            XCTAssertEqual(pendingDisplay.prefetchPhase, .pendingDisplay)
+        }
+    }
+
+    func testLazyLayoutViewCacheAdvancePrefetchDisplayMapsChildSchedulingResult() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, item, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (childCache, _, _) = makeLazyCache(host: host, implicitID: 10)
+            cache.childCaches[item.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [LazyLayoutCacheChildren.WeakChild(value: childCache)]
+            )
+            cache.commitSeed = 33
+            item.prefetchSeed = 33
+            item.prefetchPhase = .prefetching
+            childCache.placedIndices = (min: 0, max: 2)
+
+            XCTAssertEqual(cache.advancePrefetchPhaseForDisplay(item: item), .some)
+            XCTAssertEqual(item.prefetchPhase, .pendingDisplay)
+            XCTAssertEqual(childCache.maxDisplayListSubviews, 0)
+
+            XCTAssertEqual(cache.advancePrefetchPhaseForDisplay(item: item), .some)
+            XCTAssertEqual(childCache.maxDisplayListSubviews, 1)
+
+            childCache.maxDisplayListSubviews = 3
+            XCTAssertEqual(cache.advancePrefetchPhaseForDisplay(item: item), .none)
+            XCTAssertEqual(item.prefetchPhase, .pendingDisplay)
+
+            let (_, noChildItem, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            noChildItem.prefetchSeed = 33
+            noChildItem.prefetchPhase = .prefetching
+            XCTAssertEqual(cache.advancePrefetchPhaseForDisplay(item: noChildItem), .all)
+            XCTAssertEqual(noChildItem.prefetchPhase, .pendingDisplay)
+
+            let (disabledCache, disabledItem, _) = makeLazyCache(
+                host: host,
+                implicitID: 3
+            )
+            disabledItem.prefetchPhase = .prefetching
+            XCTAssertEqual(
+                disabledCache.advancePrefetchPhaseForDisplay(item: disabledItem),
+                .none
+            )
+            XCTAssertEqual(disabledItem.prefetchPhase, .prefetching)
+        }
+    }
+
+    func testLazyLayoutViewCacheAdvancePrefetchRemovalClearsPendingRemovalAndReturnsAll() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, first, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (_, second, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            let (_, retained, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 3
+            )
+            first.prefetchPhase = .pendingRemoval
+            second.prefetchPhase = .pendingRemoval
+            retained.prefetchPhase = .prefetching
+
+            XCTAssertEqual(cache.advancePrefetchPhaseForRemoval(), .all)
+            XCTAssertEqual(first.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(second.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(retained.prefetchPhase, .prefetching)
+
+            XCTAssertEqual(cache.advancePrefetchPhaseForRemoval(), .all)
+
+            let (disabledCache, disabledItem, _) = makeLazyCache(
+                host: host,
+                implicitID: 4
+            )
+            disabledItem.prefetchPhase = .pendingRemoval
+            XCTAssertEqual(disabledCache.advancePrefetchPhaseForRemoval(), .none)
+            XCTAssertEqual(disabledItem.prefetchPhase, .pendingRemoval)
+        }
+    }
+
+    func testLazySubviewPrefetcherResetsOnStateChangeAndHonorsAllowedEdges() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, item, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            cache.allowedPrefetchEdges = .vertical
+            cache.commitSeed = 19
+            item.prefetchSeed = 19
+            item.prefetchPhase = .prefetching
+
+            var horizontalState = ScrollPrefetchState(deadline: 1)
+            horizontalState.edges = .horizontal
+            let stateAttribute = graph.makeInput(value: horizontalState)
+            var prefetcher = makeLazyVStackPrefetcher(
+                graph: graph,
+                state: stateAttribute,
+                cache: cache
+            )
+
+            XCTAssertEqual(prefetcher.updateHostState(), .none)
+            XCTAssertEqual(item.prefetchPhase, .prefetching)
+            XCTAssertFalse(prefetcher.didScheduleContinuation)
+
+            var verticalState = ScrollPrefetchState(deadline: 2)
+            verticalState.edges = .vertical
+            stateAttribute.setValue(verticalState)
+
+            XCTAssertEqual(prefetcher.updateHostState(), .none)
+            XCTAssertEqual(item.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(item.prefetchSeed, 0)
+            XCTAssertFalse(prefetcher.didScheduleContinuation)
+        }
+    }
+
+    func testLazySubviewPrefetcherConsumesDisplayAndRemovalOperationsFromStack() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, displayItem, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (_, removalItem, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            let (childCache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 10
+            )
+            cache.childCaches[displayItem.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [LazyLayoutCacheChildren.WeakChild(value: childCache)]
+            )
+            cache.allowedPrefetchEdges = .vertical
+            cache.commitSeed = 33
+            displayItem.prefetchSeed = 33
+            displayItem.prefetchPhase = .prefetching
+            removalItem.prefetchPhase = .pendingRemoval
+            childCache.placedIndices = (min: 0, max: 2)
+
+            var state = ScrollPrefetchState(deadline: 1)
+            state.edges = .vertical
+            let stateAttribute = graph.makeInput(value: state)
+            var prefetcher = makeLazyVStackPrefetcher(
+                graph: graph,
+                state: stateAttribute,
+                cache: cache
+            )
+            prefetcher.operations = [.removal, .display(displayItem)]
+
+            XCTAssertEqual(prefetcher.updateHostState(), .some)
+            XCTAssertTrue(prefetcher.didScheduleContinuation)
+            XCTAssertEqual(displayItem.prefetchPhase, .pendingDisplay)
+            XCTAssertEqual(childCache.maxDisplayListSubviews, 0)
+            XCTAssertEqual(removalItem.prefetchPhase, .pendingRemoval)
+            XCTAssertEqual(prefetcher.operations.count, 1)
+
+            prefetcher.operations = [.removal]
+
+            XCTAssertEqual(prefetcher.updateHostState(), .all)
+            XCTAssertFalse(prefetcher.didScheduleContinuation)
+            XCTAssertEqual(removalItem.prefetchPhase, .notPrefetching)
         }
     }
 
@@ -1301,7 +1766,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: oldID.index,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 18
             candidate.usedSeed = 12
             candidate.placementSeed = 10
@@ -1318,11 +1783,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(candidate.usedSeed, 0)
             XCTAssertEqual(candidate.prefetchSeed, 0)
             XCTAssertEqual(candidate.prefetchPhase, .notPrefetching)
-            XCTAssertEqual(cache.lru.generationSeed, 1)
+            XCTAssertEqual(cache.lru.usedSeed, 1)
         }
     }
 
-    func testLazyLayoutViewCacheAddItemMarksFreshCandidateWithCommitSeed() {
+    func testLazyLayoutViewCacheAddItemMarksFreshCandidateWithLRUTransactionSeed() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -1335,7 +1800,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             cache.items.removeAll()
             cache.lru.invalidate()
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 0
             candidate.placementSeed = 10
             candidate.displayIndex = nil
@@ -1352,12 +1817,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheAddItemResetRefreshesStateForReuse() {
+    func testLazyLayoutViewCacheAddItemResetRefreshesNonScrollEditStateForReuse() {
         let host = GraphHost()
 
         host.data.withCurrent {
             let (cache, item, state) = makeLazyCache(host: host)
-            cache.commitSeed = 8
+            cache.lru.transactionSeed = 8
             state.setValue(
                 LazyLayoutCacheItem.State(
                     resetDelta: 6,
@@ -1374,8 +1839,129 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 state.value,
                 LazyLayoutCacheItem.State(
                     resetDelta: 7,
-                    phase: .identity,
+                    phase: .willAppear,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+            XCTAssertEqual(item.usedSeed, 0)
+            XCTAssertEqual(item.placementSeed, 0)
+            XCTAssertEqual(item.commitSeed, 0)
+            XCTAssertEqual(item.prefetchSeed, 0)
+            XCTAssertEqual(item.prefetchPhase, .notPrefetching)
+        }
+    }
+
+    func testLazyLayoutViewCacheAddItemNonScrollUsesViewListEditForTransitionState() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let recorder = ViewListEditRecorder()
+            let list = EditingViewList(edit: .inserted, recorder: recorder)
+            let (cache, item, state) = makeLazyCache(host: host, list: list)
+            cache.lru.lastTransactionID.value = 42
+            cache.lru.transactionSeed = 13
+            recorder.ids.removeAll()
+            recorder.transactionIDs.removeAll()
+            state.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 2,
+                    phase: .didDisappear,
+                    enableTransitions: false,
+                    isRemoved: true
+                )
+            )
+
+            cache.addItem(item)
+
+            XCTAssertEqual(item.insertionTransactionSeed, 13)
+            XCTAssertEqual(recorder.ids, [item.id])
+            XCTAssertEqual(recorder.transactionIDs.map(\.value), [42])
+            XCTAssertEqual(
+                state.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 2,
+                    phase: .willAppear,
                     enableTransitions: true,
+                    isRemoved: false
+                )
+            )
+        }
+    }
+
+    func testLazyLayoutViewCacheAddItemFromScrollViewPublishesIdentityStateWithoutReset() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, item, state) = makeLazyCache(host: host)
+            cache.lru.transactionSeed = 11
+            item.usedSeed = 4
+            item.placementSeed = 5
+            item.commitSeed = 6
+            item.prefetchSeed = 7
+            item.prefetchPhase = .prefetching
+            state.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 3,
+                    phase: .didDisappear,
+                    enableTransitions: true,
+                    isRemoved: true
+                )
+            )
+
+            withTransaction(\.fromScrollView, true) {
+                cache.addItem(item)
+            }
+
+            XCTAssertEqual(item.insertionTransactionSeed, 11)
+            XCTAssertEqual(
+                state.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 3,
+                    phase: .identity,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+            XCTAssertEqual(item.usedSeed, 4)
+            XCTAssertEqual(item.placementSeed, 5)
+            XCTAssertEqual(item.commitSeed, 6)
+            XCTAssertEqual(item.prefetchSeed, 7)
+            XCTAssertEqual(item.prefetchPhase, .prefetching)
+        }
+    }
+
+    func testLazyLayoutViewCacheAddItemFromScrollViewResetRefreshesStateAndSeeds() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, item, state) = makeLazyCache(host: host)
+            cache.lru.transactionSeed = 12
+            item.usedSeed = 4
+            item.placementSeed = 5
+            item.commitSeed = 6
+            item.prefetchSeed = 7
+            item.prefetchPhase = .prefetching
+            state.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 8,
+                    phase: .didDisappear,
+                    enableTransitions: true,
+                    isRemoved: true
+                )
+            )
+
+            withTransaction(\.fromScrollView, true) {
+                cache.addItem(item, reset: true)
+            }
+
+            XCTAssertEqual(item.insertionTransactionSeed, 12)
+            XCTAssertEqual(
+                state.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 9,
+                    phase: .identity,
+                    enableTransitions: false,
                     isRemoved: false
                 )
             )
@@ -1399,7 +1985,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: oldID.index,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 18
             candidate.usedSeed = 12
             candidate.placementSeed = 10
@@ -1454,7 +2040,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: oldID.index,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 20
             candidate.placementSeed = 10
 
@@ -1478,7 +2064,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: oldID.index,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
+            cache.placementSeed = 20
             candidate.insertionTransactionSeed = 18
             candidate.placementSeed = 20
 
@@ -1502,7 +2089,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 implicitID: oldID.index,
                 reuseIdentifier: targetID.reuseIdentifier
             )
-            cache.commitSeed = 20
+            cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 18
             candidate.placementSeed = 10
             candidate.displayIndex = 3
@@ -1613,36 +2200,72 @@ final class LazyContainerSurfaceTests: XCTestCase {
         assertLazyStack(layout)
     }
 
+    private final class ViewListEditRecorder {
+        var ids: [_ViewList_ID] = []
+        var transactionIDs: [TransactionID] = []
+    }
+
+    private struct EditingViewList: ViewList {
+        var edit: _ViewList_Edit?
+        var recorder: ViewListEditRecorder?
+
+        func edit(forID id: _ViewList_ID, since: TransactionID) -> _ViewList_Edit? {
+            recorder?.ids.append(id)
+            recorder?.transactionIDs.append(since)
+            return edit
+        }
+    }
+
     private func makeLazyCache(
         host: GraphHost,
         cache existingCache: LazyLayoutViewCache? = nil,
         implicitID: Int = 1,
-        reuseIdentifier: Int = 0
+        reuseIdentifier: Int = 0,
+        supportsPrefetching: Bool = false,
+        list: (any ViewList)? = nil
     ) -> (
         cache: LazyLayoutViewCache,
         item: LazyLayoutCacheItem,
         state: Attribute<LazyLayoutCacheItem.State>
     ) {
         let graph = host.data.graph
+        let listValue: any ViewList = list ?? EmptyViewList()
+        let listAttribute = graph.makeInput(value: listValue)
         let cache: LazyLayoutViewCache
         if let existingCache {
             cache = existingCache
         } else {
             let parentSubgraph = AGSubgraph()
             let inputs = makeViewInputs(graph: graph)
-            cache = LazyLayoutViewCache(
-                viewGraph: host,
-                parentSubgraph: parentSubgraph,
-                inputs: inputs,
-                outputs: _ViewOutputs(),
-                list: graph.makeInput(value: EmptyViewList() as any ViewList),
-                layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
-                nearestScrollableAxes: graph.makeInput(value: Axis.Set()),
-                placedSubviews: graph.makeInput(value: []),
-                prefetchSignal: graph.makeInput(value: ()),
-                scrollPosition: OptionalAttribute(),
-                accessibilityEnabled: graph.makeInput(value: false)
-            )
+            if supportsPrefetching {
+                cache = PrefetchCapableLazyLayoutViewCache(
+                    viewGraph: host,
+                    parentSubgraph: parentSubgraph,
+                    inputs: inputs,
+                    outputs: _ViewOutputs(),
+                    list: listAttribute,
+                    layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
+                    nearestScrollableAxes: graph.makeInput(value: Axis.Set()),
+                    placedSubviews: graph.makeInput(value: []),
+                    prefetchSignal: graph.makeInput(value: ()),
+                    scrollPosition: OptionalAttribute(),
+                    accessibilityEnabled: graph.makeInput(value: false)
+                )
+            } else {
+                cache = LazyLayoutViewCache(
+                    viewGraph: host,
+                    parentSubgraph: parentSubgraph,
+                    inputs: inputs,
+                    outputs: _ViewOutputs(),
+                    list: listAttribute,
+                    layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
+                    nearestScrollableAxes: graph.makeInput(value: Axis.Set()),
+                    placedSubviews: graph.makeInput(value: []),
+                    prefetchSignal: graph.makeInput(value: ()),
+                    scrollPosition: OptionalAttribute(),
+                    accessibilityEnabled: graph.makeInput(value: false)
+                )
+            }
         }
 
         let itemSubgraph = AGSubgraph()
@@ -1652,7 +2275,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             subgraph: itemSubgraph,
             outputs: _ViewOutputs(),
             state: state,
-            list: OptionalAttribute(graph.makeInput(value: EmptyViewList() as any ViewList)),
+            list: OptionalAttribute(listAttribute),
             elements: _ViewList_SubgraphElements(base: EmptyViewListElements()),
             elementIndex: 0,
             id: _ViewList_ID(implicitID: implicitID),
@@ -1666,14 +2289,59 @@ final class LazyContainerSurfaceTests: XCTestCase {
         graph: _AGGraph,
         id: _ViewList_ID,
         traits: ViewTraitCollection = ViewTraitCollection(),
-        section: LazyLayoutCacheSection = LazyLayoutCacheSection()
+        section: LazyLayoutCacheSection = LazyLayoutCacheSection(),
+        list: (any ViewList)? = nil
     ) -> _LazyLayout_Subview.Data {
-        _LazyLayout_Subview.Data(
+        let listValue: any ViewList = list ?? EmptyViewList()
+        return _LazyLayout_Subview.Data(
             elements: _ViewList_SubgraphElements(base: EmptyViewListElements()),
             id: id,
             traits: traits,
-            list: graph.makeInput(value: EmptyViewList() as any ViewList),
+            list: graph.makeInput(value: listValue),
             section: section
+        )
+    }
+
+    private func makeLazyVStackPrefetcher(
+        graph: _AGGraph,
+        state: Attribute<ScrollPrefetchState>,
+        cache: LazyLayoutViewCache
+    ) -> LazySubviewPrefetcher<LazyVStackLayout> {
+        LazySubviewPrefetcher(
+            layout: graph.makeInput(value: LazyVStackLayout(
+                base: _VStackLayout(),
+                pinnedViews: []
+            )),
+            size: graph.makeInput(value: ViewSize(.zero)),
+            position: graph.makeInput(value: CGPoint.zero),
+            transform: graph.makeInput(value: ViewTransform()),
+            environment: graph.makeInput(value: EnvironmentValues()),
+            prefetchState: state,
+            cache: graph.makeInput(value: cache),
+            containerSize: OptionalAttribute()
+        )
+    }
+
+    private func makeConcreteLazyGridCache<LayoutType: LazyLayout>(
+        host: GraphHost,
+        layout: LayoutType,
+        nearestScrollableAxes: Axis.Set
+    ) -> _LazyLayoutViewCache<LayoutType> where LayoutType.Cache == Void {
+        let graph = host.data.graph
+        return _LazyLayoutViewCache(
+            layout: graph.makeInput(value: layout),
+            cacheState: graph.makeInput(value: ()),
+            viewGraph: host,
+            parentSubgraph: AGSubgraph(),
+            inputs: makeViewInputs(graph: graph),
+            outputs: _ViewOutputs(),
+            list: graph.makeInput(value: EmptyViewList() as any ViewList),
+            layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
+            nearestScrollableAxes: graph.makeInput(value: nearestScrollableAxes),
+            placedSubviews: graph.makeInput(value: []),
+            prefetchSignal: graph.makeInput(value: ()),
+            scrollPosition: OptionalAttribute(),
+            accessibilityEnabled: graph.makeInput(value: false)
         )
     }
 
@@ -1712,6 +2380,12 @@ private struct LazyContainerOrdinaryPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [String], nextValue: () -> [String]) {
         value.append(contentsOf: nextValue())
+    }
+}
+
+private final class PrefetchCapableLazyLayoutViewCache: LazyLayoutViewCache {
+    override var supportsPrefetching: Bool {
+        true
     }
 }
 

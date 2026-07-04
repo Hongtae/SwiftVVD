@@ -342,6 +342,9 @@ extension Transaction {
 private struct IsContinuousKey: TransactionKey {
     static let defaultValue: Bool = false
 }
+private struct FromScrollViewKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
 private struct TracksVelocityKey: TransactionKey {
     static let defaultValue: Bool = false
 }
@@ -391,6 +394,11 @@ extension Transaction {
 
     var hasExplicitIsContinuousValue: Bool {
         plist.nonDefaultValue(forKey: TransactionKeyItem<IsContinuousKey>.self) != nil
+    }
+
+    var fromScrollView: Bool {
+        get { self[FromScrollViewKey.self] }
+        set { self[FromScrollViewKey.self] = newValue }
     }
 
     /// Whether the animation system should track and apply gesture velocity.

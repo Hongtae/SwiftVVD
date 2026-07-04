@@ -76,6 +76,227 @@ struct _LazyLayout_Properties: LazyLayoutNamespace {
     }
 }
 
+enum _LazyLayout_PrefetchResult: UInt8, Hashable {
+    case none
+    case some
+    case all
+
+    @discardableResult
+    mutating func advanceToSome() -> Bool {
+        let hadWork = self != .none
+        self = hadWork ? .some : .all
+        return hadWork
+    }
+}
+
+struct ScrollPrefetchState: Equatable, PropertyKey {
+    typealias Value = OptionalAttribute<ScrollPrefetchState>
+
+    static var defaultValue: OptionalAttribute<ScrollPrefetchState> {
+        OptionalAttribute()
+    }
+
+    static func valuesEqual(
+        _ a: OptionalAttribute<ScrollPrefetchState>,
+        _ b: OptionalAttribute<ScrollPrefetchState>
+    ) -> Bool {
+        a.base.identifier == b.base.identifier
+    }
+
+    var id: UniqueID
+    var deadline: UInt64
+    var edges: Edge.Set
+
+    init(deadline: UInt64 = 0) {
+        self.id = UniqueID()
+        self.deadline = deadline
+        self.edges = []
+    }
+
+    func commit(to attribute: WeakAttribute<ScrollPrefetchState>) {
+        guard let graph = _AGGraph.current,
+              attribute.isValid(in: graph) else {
+            return
+        }
+
+        let host = GraphHost.currentHost
+        var transaction = Transaction.current
+        transaction.fromScrollView = true
+        host.asyncTransaction(
+            transaction,
+            id: Transaction.id,
+            mutation: AssignmentGraphMutation(attribute: attribute, value: self),
+            style: .deferred,
+            mayDeferUpdate: false
+        )
+        Update.enqueueAction(reason: 0x09) { [weak host] in
+            host?.flushTransactions()
+        }
+    }
+}
+
+enum LazyPrefetchOperation {
+    case display(LazyLayoutCacheItem)
+    case removal
+}
+
+struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
+    typealias Value = Void
+
+    var _layout: Attribute<LayoutType>
+    var _size: Attribute<ViewSize>
+    var _position: Attribute<CGPoint>
+    var _transform: Attribute<ViewTransform>
+    var _environment: Attribute<EnvironmentValues>
+    var _prefetchState: Attribute<ScrollPrefetchState>
+    var _cache: Attribute<LazyLayoutViewCache>
+    var _containerSize: OptionalAttribute<ViewSize>
+    var operations: [LazyPrefetchOperation]
+    var lastStateID: UniqueID?
+    var lastEdges: Edge.Set
+    var didScheduleContinuation: Bool
+
+    init(
+        layout: Attribute<LayoutType>,
+        size: Attribute<ViewSize>,
+        position: Attribute<CGPoint>,
+        transform: Attribute<ViewTransform>,
+        environment: Attribute<EnvironmentValues>,
+        prefetchState: Attribute<ScrollPrefetchState>,
+        cache: Attribute<LazyLayoutViewCache>,
+        containerSize: OptionalAttribute<ViewSize>
+    ) {
+        self._layout = layout
+        self._size = size
+        self._position = position
+        self._transform = transform
+        self._environment = environment
+        self._prefetchState = prefetchState
+        self._cache = cache
+        self._containerSize = containerSize
+        self.operations = []
+        self.lastStateID = nil
+        self.lastEdges = []
+        self.didScheduleContinuation = false
+    }
+
+    mutating func updateValue() {
+        _ = updateHostState()
+        _AGGraph.setStatefulOutput(())
+    }
+
+    @discardableResult
+    mutating func updateHostState() -> _LazyLayout_PrefetchResult {
+        let info = _prefetchState.value
+        let cache = _cache.value
+
+        if let lastStateID,
+           lastStateID != info.id || lastEdges != info.edges {
+            cache.resetPrefetchPhases()
+        }
+        lastStateID = info.id
+        lastEdges = info.edges
+
+        guard !cache.allowedPrefetchEdges.intersection(info.edges).isEmpty else {
+            didScheduleContinuation = false
+            return .none
+        }
+        return update(info: info, owner: _prefetchState.identifier)
+    }
+
+    @discardableResult
+    mutating func update(
+        info: ScrollPrefetchState,
+        owner: AGAttribute
+    ) -> _LazyLayout_PrefetchResult {
+        didScheduleContinuation = false
+        var result = makeLayoutPrefetchResult(info: info, offset: 0, owner: owner)
+        if result == .some {
+            didScheduleContinuation = true
+            return result
+        }
+
+        let cache = _cache.value
+        while let operation = operations.popLast() {
+            let next: _LazyLayout_PrefetchResult
+            switch operation {
+            case .display(let item):
+                _ = cache.prefetchOutputs()
+                next = cache.advancePrefetchPhaseForDisplay(item: item)
+            case .removal:
+                next = cache.advancePrefetchPhaseForRemoval()
+            }
+            if mergePrefetchResult(next, into: &result) {
+                return result
+            }
+        }
+        return result
+    }
+
+    @discardableResult
+    mutating func makeLayoutPrefetchResult(
+        info: ScrollPrefetchState,
+        offset: Int,
+        owner: AGAttribute
+    ) -> _LazyLayout_PrefetchResult {
+        let axes = LayoutType._lazyLayoutProperties.axes
+        if axes.contains(.horizontal),
+           !info.edges.intersection(.horizontal).isEmpty {
+            let result = makeLayoutPrefetchResult(
+                info: info,
+                offset: offset,
+                axis: .horizontal,
+                owner: owner
+            )
+            if result != .none {
+                return result
+            }
+        }
+        if axes.contains(.vertical),
+           !info.edges.intersection(.vertical).isEmpty {
+            return makeLayoutPrefetchResult(
+                info: info,
+                offset: offset,
+                axis: .vertical,
+                owner: owner
+            )
+        }
+        return .none
+    }
+
+    @discardableResult
+    mutating func makeLayoutPrefetchResult(
+        info: ScrollPrefetchState,
+        offset: Int,
+        axis: Axis,
+        owner: AGAttribute
+    ) -> _LazyLayout_PrefetchResult {
+        _ = info
+        _ = offset
+        _ = axis
+        _ = owner
+        // Viewport candidate materialization is a separate lazy-host slice.
+        return .none
+    }
+
+    private mutating func mergePrefetchResult(
+        _ next: _LazyLayout_PrefetchResult,
+        into result: inout _LazyLayout_PrefetchResult
+    ) -> Bool {
+        switch next {
+        case .none:
+            return false
+        case .all:
+            result = .all
+            return false
+        case .some:
+            result = .some
+            didScheduleContinuation = true
+            return true
+        }
+    }
+}
+
 struct LazyLayoutCacheSection: Hashable {
     var id: UInt32?
     var isHeader: Bool
@@ -546,27 +767,30 @@ struct LazyLayoutCacheChildren {
     }
 }
 
-final class LazyLayoutViewCache: LazyLayoutNamespace {
+class LazyLayoutViewCache: LazyLayoutNamespace {
     struct LeastRecentlyUsedItems {
-        private(set) var generationSeed: UInt32 = 0
-        private var sortedItems: [LazyLayoutCacheItem]?
+        private(set) var usedSeed: UInt32 = 0
+        var maxIdle: Int = 0
+        var lastTransactionID = TransactionID()
+        var transactionSeed: UInt32 = 0
+        private(set) var items: [LazyLayoutCacheItem]?
 
         mutating func invalidate() {
-            sortedItems = nil
+            items = nil
         }
 
         mutating func updatedItems(_ items: [LazyLayoutCacheItem]) -> [LazyLayoutCacheItem] {
-            if let sortedItems {
-                return sortedItems
+            if let cachedItems = self.items {
+                return cachedItems
             }
-            generationSeed &+= 1
+            usedSeed &+= 1
             let sorted = items.sorted {
                 if $0.usedSeed == $1.usedSeed {
                     return $0.reuseIdentifier < $1.reuseIdentifier
                 }
                 return $0.usedSeed < $1.usedSeed
             }
-            sortedItems = sorted
+            self.items = sorted
             return sorted
         }
     }
@@ -678,13 +902,25 @@ final class LazyLayoutViewCache: LazyLayoutNamespace {
 
     func addItem(_ item: LazyLayoutCacheItem, reset: Bool = false) {
         item.cache = self
-        item.insertionTransactionSeed = commitSeed
+        item.insertionTransactionSeed = lru.transactionSeed
+        let transaction = Transaction.current
+        var state = item._state.value
         if reset {
-            var state = item._state.value
             state.resetDelta &+= 1
+        }
+        if transaction.fromScrollView {
             state.phase = .identity
-            state.isRemoved = false
-            item._state.setValue(state, transaction: Transaction.current)
+            state.enableTransitions = false
+        } else {
+            state.phase = .willAppear
+            state.enableTransitions = item._list.attribute?.value.edit(
+                forID: item.id,
+                since: lru.lastTransactionID
+            ) == .inserted
+        }
+        state.isRemoved = false
+        item._state.setValue(state, transaction: transaction)
+        if reset {
             item.usedSeed = 0
             item.placementSeed = 0
             item.commitSeed = 0
@@ -792,9 +1028,9 @@ final class LazyLayoutViewCache: LazyLayoutNamespace {
               item.reuseIdentifier == reuseIdentifier else {
             return false
         }
-        let insertionAge = Int32(bitPattern: commitSeed &- item.insertionTransactionSeed)
+        let insertionAge = Int32(bitPattern: lru.transactionSeed &- item.insertionTransactionSeed)
         guard insertionAge >= 1,
-              item.placementSeed != commitSeed,
+              item.placementSeed != placementSeed,
               item.displayIndex == nil else {
             return false
         }
@@ -812,16 +1048,65 @@ final class LazyLayoutViewCache: LazyLayoutNamespace {
         for item in items.values {
             item.prefetchPhase = .notPrefetching
             item.prefetchSeed = 0
+            resetMaxDisplayListSubviews(item: item)
         }
         signalPrefetch()
     }
 
     func updatePrefetchPhases() {
         guard supportsViewHierarchyPrefetching else { return }
-        for item in items.values where item.prefetchPhase == .pendingDisplay {
-            item.beginPrefetching(at: .unspecified)
+        var didClearItemPhase = false
+        for item in items.values {
+            guard item.displayIndex != nil else {
+                let removalAge = Int32(bitPattern: lru.transactionSeed &- item.removalTransactionSeed)
+                if item.prefetchPhase == .pendingRemoval,
+                   lru.maxIdle < Int(removalAge) {
+                    item.prefetchPhase = .notPrefetching
+                    didClearItemPhase = true
+                }
+                continue
+            }
+            if item.prefetchPhase == .notPrefetching {
+                resetMaxDisplayListSubviews(item: item)
+                continue
+            }
+            maxDisplayListSubviews = nil
+            item.prefetchPhase = .notPrefetching
+            resetMaxDisplayListSubviews(item: item)
+            didClearItemPhase = true
         }
-        signalPrefetch()
+        if didClearItemPhase {
+            signalPrefetch()
+        }
+    }
+
+    func advancePrefetchPhaseForDisplay(item: LazyLayoutCacheItem) -> _LazyLayout_PrefetchResult {
+        guard supportsViewHierarchyPrefetching else { return .none }
+        switch item.prefetchPhase {
+        case .pendingDisplay:
+            guard hasChildPrefetchPhaseWork(item: item) else { return .none }
+            signalPrefetch()
+            return advanceChildPrefetchPhase(item: item) ? .some : .all
+        case .prefetching:
+            item.prefetchPhase = .pendingDisplay
+            signalPrefetch()
+            return setupChildPrefetchPhase(item: item) ? .some : .all
+        default:
+            return .none
+        }
+    }
+
+    func advancePrefetchPhaseForRemoval() -> _LazyLayout_PrefetchResult {
+        guard supportsViewHierarchyPrefetching else { return .none }
+        var didCollect = false
+        for item in items.values where item.prefetchPhase == .pendingRemoval {
+            item.prefetchPhase = .notPrefetching
+            didCollect = true
+        }
+        if didCollect {
+            signalPrefetch()
+        }
+        return .all
     }
 
     func resetMaxDisplayListSubviews(item: LazyLayoutCacheItem) {
@@ -888,8 +1173,14 @@ final class LazyLayoutViewCache: LazyLayoutNamespace {
         }
     }
 
-    var supportsViewHierarchyPrefetching: Bool {
+    var supportsPrefetching: Bool {
         false
+    }
+
+    var supportsViewHierarchyPrefetching: Bool {
+        guard supportsPrefetching else { return false }
+        guard _SemanticFeature<Semantics_v7>.isEnabled else { return false }
+        return !inputs[UsingGraphicsRenderer.self]
     }
 
     private func prefetchOutput(for outputs: _ViewOutputs) -> _ViewOutputs? {
@@ -967,6 +1258,48 @@ final class LazyLayoutViewCache: LazyLayoutNamespace {
         item.transition = nil
         item.transitionType = transitionType
         item.zIndex = data.traits[ZIndexTraitKey.self]
+    }
+}
+
+final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
+    var _layout: Attribute<LayoutType>
+    var cacheState: Attribute<LayoutType.Cache>
+
+    init(
+        layout: Attribute<LayoutType>,
+        cacheState: Attribute<LayoutType.Cache>,
+        viewGraph: GraphHost?,
+        parentSubgraph: AGSubgraph,
+        inputs: _ViewInputs,
+        outputs: _ViewOutputs,
+        list: Attribute<any ViewList>,
+        layoutDirection: Attribute<LayoutDirection>,
+        nearestScrollableAxes: Attribute<Axis.Set>,
+        placedSubviews: Attribute<[_LazyLayout_PlacedSubview]>,
+        prefetchSignal: Attribute<Void>,
+        scrollPosition: OptionalAttribute<Binding<ScrollPosition>>,
+        accessibilityEnabled: Attribute<Bool>
+    ) {
+        self._layout = layout
+        self.cacheState = cacheState
+        super.init(
+            viewGraph: viewGraph,
+            parentSubgraph: parentSubgraph,
+            inputs: inputs,
+            outputs: outputs,
+            list: list,
+            layoutDirection: layoutDirection,
+            nearestScrollableAxes: nearestScrollableAxes,
+            placedSubviews: placedSubviews,
+            prefetchSignal: prefetchSignal,
+            scrollPosition: scrollPosition,
+            accessibilityEnabled: accessibilityEnabled
+        )
+    }
+
+    override var supportsPrefetching: Bool {
+        guard AGSubgraphIsValid(parentSubgraph) else { return false }
+        return !LayoutType._lazyLayoutProperties.axes.intersection(_nearestScrollableAxes.value).isEmpty
     }
 }
 
@@ -1135,9 +1468,21 @@ private final class LazyLayoutCacheItemAnimationListener: AnimationListener, @un
 
 protocol LazyLayout: Layout, _VariadicView_UnaryViewRoot {
     var pinnedViews: PinnedScrollableViews { get }
+    static var _lazyLayoutProperties: _LazyLayout_Properties { get }
 }
 
 extension LazyLayout {
+    static var _lazyLayoutProperties: _LazyLayout_Properties {
+        switch Self.layoutProperties.stackOrientation {
+        case .horizontal:
+            return _LazyLayout_Properties(axes: .horizontal)
+        case .vertical:
+            return _LazyLayout_Properties(axes: .vertical)
+        case nil:
+            return _LazyLayout_Properties()
+        }
+    }
+
     static func _makeView(
         root: _GraphValue<Self>,
         inputs: _ViewInputs,
