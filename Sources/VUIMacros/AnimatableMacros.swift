@@ -1,3 +1,10 @@
+//
+//  File: AnimatableMacros.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
 import SwiftSyntax
 import SwiftSyntaxBuilder
@@ -6,8 +13,10 @@ import SwiftSyntaxMacros
 private struct AnimatableMacroPayload: Codable {
     struct VarDecl: Codable {
         var name: String
+        var line: String?
     }
 
+    var fileName: String?
     var selfName: String
     var animatableDataName: String
     var varDecls: [VarDecl]
@@ -15,10 +24,34 @@ private struct AnimatableMacroPayload: Codable {
 
 private struct AnimatableProperty {
     var name: String
+    var fileName: String?
+    var line: String?
 }
 
 private func hasAttribute(named name: String, in attributes: AttributeListSyntax) -> Bool {
     attributes.description.contains(name)
+}
+
+private func hasModifier(named name: String, in modifiers: DeclModifierListSyntax) -> Bool {
+    modifiers.contains { $0.name.text == name }
+}
+
+private func isStoredBinding(_ binding: PatternBindingSyntax) -> Bool {
+    switch binding.accessorBlock?.accessors {
+    case .none:
+        return true
+    case .accessors(let accessors):
+        return accessors.allSatisfy { accessor in
+            switch accessor.accessorSpecifier.tokenKind {
+            case .keyword(.willSet), .keyword(.didSet):
+                return true
+            default:
+                return false
+            }
+        }
+    case .getter:
+        return false
+    }
 }
 
 private func declarationAccessPrefix(for declaration: some DeclGroupSyntax) -> String {
@@ -37,23 +70,35 @@ private func declarationAccessPrefix(for declaration: some DeclGroupSyntax) -> S
     return ""
 }
 
-private func animatableProperties(in declaration: some DeclGroupSyntax) -> [AnimatableProperty] {
+private func animatableProperties(
+    in declaration: some DeclGroupSyntax,
+    context: some MacroExpansionContext
+) -> [AnimatableProperty] {
     declaration.memberBlock.members.flatMap { member -> [AnimatableProperty] in
         guard let variable = member.decl.as(VariableDeclSyntax.self),
               variable.bindingSpecifier.text == "var",
               !hasAttribute(named: "AnimatableIgnored", in: variable.attributes),
-              !variable.modifiers.contains(where: { $0.name.text == "static" || $0.name.text == "class" }) else {
+              !hasModifier(named: "lazy", in: variable.modifiers) else {
             return []
         }
 
         return variable.bindings.compactMap { binding in
-            guard binding.accessorBlock == nil,
+            guard isStoredBinding(binding),
                   let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
                 return nil
             }
             let name = pattern.identifier.text
             guard name != "_" else { return nil }
-            return AnimatableProperty(name: name)
+            let location = context.location(
+                of: binding.pattern,
+                at: .afterLeadingTrivia,
+                filePathMode: .fileID
+            )
+            return AnimatableProperty(
+                name: name,
+                fileName: location?.file.trimmedDescription,
+                line: location?.line.trimmedDescription
+            )
         }
     }
 }
@@ -202,21 +247,27 @@ public struct AnimatableValuesMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        let properties = animatableProperties(in: declaration)
+        let properties = animatableProperties(in: declaration, context: context)
         guard !properties.isEmpty else {
             diagnose(
                 "'@Animatable' macro has no effect; it can only attach to types with animatable properties.",
                 on: node,
-                in: context
+                in: context,
+                fixIts: [
+                    removeFixIt("Remove '@Animatable'", node: node, id: "remove-animatable"),
+                ]
             )
             return []
         }
 
         let storageName = context.makeUniqueName("_animatableData").text
         let payload = AnimatableMacroPayload(
+            fileName: properties.first?.fileName,
             selfName: "Self",
             animatableDataName: storageName,
-            varDecls: properties.map { AnimatableMacroPayload.VarDecl(name: $0.name) }
+            varDecls: properties.map {
+                AnimatableMacroPayload.VarDecl(name: $0.name, line: $0.line)
+            }
         )
         let payloadData = try JSONEncoder().encode(payload)
         let payloadString = String(data: payloadData, encoding: .utf8) ?? "{}"
@@ -277,7 +328,16 @@ public struct AnimatableValuesDataPropertyMacro: DeclarationMacro {
         }
 
         let declarations = payload.varDecls.map { varDecl in
-            "let \(varDecl.name) = #_SwiftUIAnimatableProperty(\(payload.selfName)[_animatableType: \\.\(varDecl.name)])"
+            let declaration = "let \(varDecl.name) = #_SwiftUIAnimatableProperty(\(payload.selfName)[_animatableType: \\.\(varDecl.name)])"
+            guard let fileName = payload.fileName,
+                  let line = varDecl.line else {
+                return declaration
+            }
+            return """
+            #sourceLocation(file: \(fileName), line: \(line))
+            \(declaration)
+            #sourceLocation()
+            """
         }.joined(separator: "\n    ")
         let arguments = payload.varDecls.map(\.name).joined(separator: ", ")
 
@@ -356,9 +416,16 @@ public struct InvalidAnimatablePropertyMacro: ExpressionMacro {
         in context: some MacroExpansionContext
     ) throws -> ExprSyntax {
         diagnose(
-            "Cannot automatically synthesize 'animatableData'. Mark this property with '@AnimatableIgnored'.",
+            "Cannot automatically synthesize 'animatableData'.",
             on: node,
             in: context
+        )
+        diagnose("Mark this property with '@AnimatableIgnored'.", on: node, in: context, severity: .note)
+        diagnose(
+            "Conform the type of this property to 'Animatable' or 'VectorArithmetic'.",
+            on: node,
+            in: context,
+            severity: .note
         )
         return ExprSyntax(stringLiteral: "VUI.EmptyAnimatableData.self")
     }

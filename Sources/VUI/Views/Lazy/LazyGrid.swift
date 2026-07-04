@@ -7,6 +7,8 @@
 
 import Foundation
 
+private let defaultLazyGridSpacing = ViewSpacing.defaultSpacing
+
 public struct GridItem: Sendable, Equatable {
     public enum Size: Sendable, Equatable {
         case fixed(_: CGFloat)
@@ -276,12 +278,12 @@ struct _LazyGridLayout: Layout {
 
     private func trackSpacings() -> [CGFloat] {
         guard items.count > 1 else { return [] }
-        return items.dropLast().map { $0.spacing ?? 0 }
+        return items.dropLast().map { $0.spacing ?? defaultLazyGridSpacing }
     }
 
     private func majorSpacings(count: Int) -> [CGFloat] {
         guard count > 1 else { return [] }
-        return Array(repeating: spacing ?? 0, count: count - 1)
+        return Array(repeating: spacing ?? defaultLazyGridSpacing, count: count - 1)
     }
 
     private func offsets(sizes: [CGFloat], spacings: [CGFloat]) -> [CGFloat] {
@@ -310,5 +312,248 @@ struct _LazyGridLayout: Layout {
 extension _LazyGridLayout: _VariadicView_UnaryViewRoot {
 }
 
-protocol HVGrid: LazyStack {
+protocol HVGrid: LazyStack where MinorGeometry == [HVGridGeometry] {
+    var gridItems: [GridItem] { get }
+    var minorAxisAnchor: CGFloat { get }
+}
+
+extension HVGrid {
+    func flexibleMinorSize(subviews: _LazyLayout_Subviews) -> CGFloat {
+        guard !gridItems.isEmpty else { return 0 }
+
+        var result = CGFloat.zero
+        for index in gridItems.indices {
+            var from = index
+            var idealMinorSize = CGFloat.zero
+            _ = subviews.apply(from: &from) { _, subview, stop in
+                let item = subview.cache.item(data: subview.data)
+                let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
+                let idealSize = layoutComputer.sizeThatFits(.unspecified)
+                idealMinorSize = Self.majorAxis == .horizontal ? idealSize.height : idealSize.width
+                stop = true
+            }
+            result += resolvedIntrinsicMinorSize(for: gridItems[index], idealMinorSize: idealMinorSize)
+            result += spacing(after: index)
+        }
+        return result
+    }
+
+    func minorGeometry(updatingSize size: inout CGFloat) -> (count: Int, data: [HVGridGeometry]) {
+        guard !gridItems.isEmpty, size.isFinite else {
+            return (0, [])
+        }
+
+        let requestedSize = max(0, size)
+        var remainingSize = requestedSize
+        var flexibleItemCount = 0
+
+        for index in gridItems.indices {
+            switch gridItems[index].size {
+            case .fixed(let value):
+                remainingSize -= max(0, value)
+            case .flexible, .adaptive:
+                flexibleItemCount += 1
+            }
+            remainingSize -= spacing(after: index)
+        }
+
+        var position = CGFloat.zero
+        var geometry: [HVGridGeometry] = []
+        geometry.reserveCapacity(gridItems.count)
+
+        for index in gridItems.indices {
+            let item = gridItems[index]
+            let spacingAfterItem = spacing(after: index)
+            let anchor = anchor(for: item)
+
+            switch item.size {
+            case .fixed(let value):
+                let trackSize = max(0, value)
+                geometry.append(HVGridGeometry(position: position, size: trackSize, anchor: anchor))
+                position += trackSize
+
+            case .flexible(let minimum, let maximum):
+                let trackSize = resolvedFlexibleMinorSize(
+                    remainingSize: remainingSize,
+                    remainingFlexibleItemCount: flexibleItemCount,
+                    minimum: minimum,
+                    maximum: maximum
+                )
+                geometry.append(HVGridGeometry(position: position, size: trackSize, anchor: anchor))
+                remainingSize -= trackSize
+                flexibleItemCount -= 1
+                position += trackSize
+
+            case .adaptive(let minimum, let maximum):
+                let adaptive = resolvedAdaptiveMinorSize(
+                    remainingSize: remainingSize,
+                    remainingFlexibleItemCount: flexibleItemCount,
+                    minimum: minimum,
+                    maximum: maximum,
+                    spacing: spacing(within: item)
+                )
+                for offset in 0..<adaptive.count {
+                    let trackPosition = position + CGFloat(offset) * (adaptive.size + spacing(within: item))
+                    geometry.append(HVGridGeometry(
+                        position: trackPosition,
+                        size: adaptive.size,
+                        anchor: anchor
+                    ))
+                }
+                remainingSize -= adaptive.totalLength
+                flexibleItemCount -= 1
+                position += adaptive.totalLength
+            }
+
+            position += spacingAfterItem
+        }
+
+        if position > requestedSize {
+            size = position
+        } else if position < requestedSize {
+            let offset = (requestedSize - position) * minorAxisAnchor
+            for index in geometry.indices {
+                geometry[index].position += offset
+            }
+        }
+
+        return (geometry.count, geometry)
+    }
+
+    func lengthAndSpacing(
+        subviews: [_LazyLayout_Subview],
+        predecessors: [_LazyLayout_Subview]?,
+        minorGeometry: [HVGridGeometry]
+    ) -> (length: CGFloat, spacing: CGFloat) {
+        guard !subviews.isEmpty else {
+            return (0, 0)
+        }
+        precondition(subviews.count <= minorGeometry.count)
+
+        var length = CGFloat.zero
+        var maximumSpacing = CGFloat.zero
+        for index in subviews.indices {
+            let geometry = minorGeometry[index]
+            let predecessor = predecessors.flatMap { index < $0.count ? $0[index] : nil }
+            let measured = subviews[index].lengthAndSpacing(
+                size: proposedSize(minor: geometry.size, length: nil),
+                axis: Self.majorAxis,
+                predecessor: predecessor,
+                uniformSpacing: spacing
+            )
+            length = max(length, measured.length)
+            maximumSpacing = max(maximumSpacing, measured.spacing)
+        }
+        return (length, maximumSpacing)
+    }
+
+    func place(
+        subviews: [_LazyLayout_Subview],
+        length: CGFloat?,
+        minorGeometry: [HVGridGeometry],
+        emit: (_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint) -> Void
+    ) {
+        guard !subviews.isEmpty else { return }
+        precondition(subviews.count <= minorGeometry.count)
+
+        for index in subviews.indices {
+            let geometry = minorGeometry[index]
+            let point: CGPoint
+            switch Self.majorAxis {
+            case .horizontal:
+                point = CGPoint(x: 0, y: geometry.position)
+            case .vertical:
+                point = CGPoint(x: geometry.position, y: 0)
+            }
+            emit(
+                subviews[index],
+                point,
+                proposedSize(minor: geometry.size, length: length),
+                geometry.anchor
+            )
+        }
+    }
+
+    private func proposedSize(minor: CGFloat, length: CGFloat?) -> ProposedViewSize {
+        switch Self.majorAxis {
+        case .horizontal:
+            return ProposedViewSize(width: length, height: minor)
+        case .vertical:
+            return ProposedViewSize(width: minor, height: length)
+        }
+    }
+
+    private func resolvedIntrinsicMinorSize(for item: GridItem, idealMinorSize: CGFloat) -> CGFloat {
+        switch item.size {
+        case .fixed(let value):
+            return max(0, value)
+        case .flexible(let minimum, let maximum),
+             .adaptive(let minimum, let maximum):
+            return clamped(max(idealMinorSize, minimum), minimum: minimum, maximum: maximum)
+        }
+    }
+
+    private func resolvedFlexibleMinorSize(
+        remainingSize: CGFloat,
+        remainingFlexibleItemCount: Int,
+        minimum: CGFloat,
+        maximum: CGFloat
+    ) -> CGFloat {
+        let share = flexibleShare(
+            remainingSize: remainingSize,
+            remainingFlexibleItemCount: remainingFlexibleItemCount
+        )
+        return clamped(share, minimum: minimum, maximum: maximum)
+    }
+
+    private func resolvedAdaptiveMinorSize(
+        remainingSize: CGFloat,
+        remainingFlexibleItemCount: Int,
+        minimum: CGFloat,
+        maximum: CGFloat,
+        spacing: CGFloat
+    ) -> (count: Int, size: CGFloat, totalLength: CGFloat) {
+        let share = flexibleShare(
+            remainingSize: remainingSize,
+            remainingFlexibleItemCount: remainingFlexibleItemCount
+        )
+        let denominator = minimum + spacing
+        let count: Int
+        if denominator > 0 {
+            count = max(1, Int(floor(max(0, share - minimum) / denominator)) + 1)
+        } else {
+            count = 1
+        }
+        let totalSpacing = spacing * CGFloat(max(0, count - 1))
+        let size = min(maximum, max(0, (share - totalSpacing) / CGFloat(count)))
+        let totalLength = size * CGFloat(count) + totalSpacing
+        return (count, size, totalLength)
+    }
+
+    private func flexibleShare(remainingSize: CGFloat, remainingFlexibleItemCount: Int) -> CGFloat {
+        guard remainingFlexibleItemCount > 0 else { return 0 }
+        return max(0, remainingSize) / CGFloat(remainingFlexibleItemCount)
+    }
+
+    private func clamped(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        min(max(value, minimum), maximum)
+    }
+
+    private func spacing(after index: Int) -> CGFloat {
+        guard index < gridItems.count - 1 else { return 0 }
+        return spacing(within: gridItems[index])
+    }
+
+    private func spacing(within item: GridItem) -> CGFloat {
+        item.spacing ?? defaultLazyGridSpacing
+    }
+
+    private func anchor(for item: GridItem) -> UnitPoint {
+        switch Self.majorAxis {
+        case .horizontal:
+            return UnitPoint(x: 0.5, y: item.alignment?.vertical.fraction ?? minorAxisAnchor)
+        case .vertical:
+            return UnitPoint(x: item.alignment?.horizontal.fraction ?? minorAxisAnchor, y: 0.5)
+        }
+    }
 }

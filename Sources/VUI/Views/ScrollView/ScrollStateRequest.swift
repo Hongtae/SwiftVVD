@@ -553,33 +553,7 @@ struct ScrollStateRequestTransform: StatefulRule {
 
 private extension CGRect {
     func convertedToScrollCoordinateSpace(using transform: ViewTransform) -> CGRect {
-        var points = [
-            CGPoint(x: minX, y: minY),
-            CGPoint(x: maxX, y: minY),
-            CGPoint(x: maxX, y: maxY),
-            CGPoint(x: minX, y: maxY),
-        ]
-        transform.convertGlobal(from: .local, points: &points)
-        return CGRect(cornerPoints: points)
-    }
-
-    init(cornerPoints points: [CGPoint]) {
-        guard let first = points.first else {
-            self = .null
-            return
-        }
-
-        var minX = first.x
-        var minY = first.y
-        var maxX = first.x
-        var maxY = first.y
-        for point in points.dropFirst() {
-            minX = Swift.min(minX, point.x)
-            minY = Swift.min(minY, point.y)
-            maxX = Swift.max(maxX, point.x)
-            maxY = Swift.max(maxY, point.y)
-        }
-        self = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        converted(to: .all, using: transform)
     }
 
     func distance(to other: CGRect) -> CGFloat {

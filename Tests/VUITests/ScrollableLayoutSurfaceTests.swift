@@ -673,6 +673,41 @@ private struct TargetRecordingScrollableLayout: _ScrollableLayout {
     }
 }
 
+private struct ScrollableDecelerationCall: Equatable {
+    var contentOffset: CGPoint
+    var originalContentOffset: CGPoint
+    var velocity: _Velocity<CGSize>
+    var size: CGSize
+}
+
+private final class ScrollableDecelerationRecorder {
+    var calls: [ScrollableDecelerationCall] = []
+}
+
+private struct DecelerationForwardingScrollableLayout: _ScrollableLayout {
+    var recorder: ScrollableDecelerationRecorder
+
+    func update(state: inout Void, proxy: inout _ScrollableLayoutProxy) {
+    }
+
+    func decelerationTarget(
+        contentOffset: CGPoint,
+        originalContentOffset: CGPoint,
+        velocity: _Velocity<CGSize>,
+        size: CGSize
+    ) -> CGPoint? {
+        recorder.calls.append(
+            ScrollableDecelerationCall(
+                contentOffset: contentOffset,
+                originalContentOffset: originalContentOffset,
+                velocity: velocity,
+                size: size
+            )
+        )
+        return CGPoint(x: 111, y: 222)
+    }
+}
+
 final class ScrollableLayoutSurfaceTests: XCTestCase {
     private static func flushGraphActions(_ graph: _AGGraph) {
         graph.drainActionOutbox()
@@ -716,6 +751,32 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertEqual(transaction._scrollViewAnimates, .discreteChanges)
         transaction._scrollViewAnimates = .always
         XCTAssertEqual(transaction._scrollViewAnimates, .always)
+    }
+
+    func testScrollableLayoutViewForwardsDecelerationTargetToLayout() {
+        let recorder = ScrollableDecelerationRecorder()
+        let velocity = _Velocity(valuePerSecond: CGSize(width: 7, height: -8))
+        let view = _ScrollableLayoutView(
+            data: [Text("row")],
+            layout: DecelerationForwardingScrollableLayout(recorder: recorder)
+        )
+
+        let target = view.decelerationTarget(
+            contentOffset: CGPoint(x: 1, y: 2),
+            originalContentOffset: CGPoint(x: 3, y: 4),
+            velocity: velocity,
+            size: CGSize(width: 5, height: 6)
+        )
+
+        XCTAssertEqual(target, CGPoint(x: 111, y: 222))
+        XCTAssertEqual(recorder.calls, [
+            ScrollableDecelerationCall(
+                contentOffset: CGPoint(x: 1, y: 2),
+                originalContentOffset: CGPoint(x: 3, y: 4),
+                velocity: velocity,
+                size: CGSize(width: 5, height: 6)
+            )
+        ])
     }
 
     func testScrollViewBehaviorStorageShapeAndIdleCompletionDispatch() {
@@ -1448,6 +1509,46 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                     ),
                 ]
             )
+        }
+    }
+
+    func testScrollViewChildModifierRewritesContentGeometry() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var config = _ScrollViewConfig()
+            config.contentOffset = .initially(CGPoint(x: 12, y: 34))
+            config.contentInsets = EdgeInsets(top: 10, leading: 5, bottom: 20, trailing: 15)
+
+            let proxy = graph.makeInput(value: _ScrollViewProxy(
+                config: config,
+                contentOffset: CGPoint(x: 12, y: 34),
+                contentSize: CGSize(width: 200, height: 160),
+                pageSize: CGSize(width: 100, height: 80)
+            ))
+            let contentOffset = graph.makeInput(value: CGPoint(x: 12, y: 34))
+            let modifier = graph.makeInput(value: ScrollViewChildModifier())
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.position = graph.makeInput(value: CGPoint(x: 100, y: 200))
+            inputs[ContainingScrollViewInput.self] = _ContainingScrollView(
+                proxy: proxy,
+                contentOffset: contentOffset
+            )
+
+            var childPosition: CGPoint?
+            var childSize: CGSize?
+            _ = ScrollViewChildModifier._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, rewrittenInputs in
+                childPosition = rewrittenInputs.position.value
+                childSize = rewrittenInputs.size.value.value
+                return _ViewOutputs()
+            }
+
+            XCTAssertEqual(childPosition, CGPoint(x: 93, y: 176))
+            XCTAssertEqual(childSize, CGSize(width: 80, height: 50))
         }
     }
 
@@ -2199,6 +2300,70 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
+    func testScrollableLayoutCollectionConvertsVisibleTargetThroughContentCoordinateSpace() throws {
+        let host = GraphHost()
+        let parent = ScrollableLayoutParentScrollable()
+        var scrollablesID: AGAttribute!
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let rows = [
+                ScrollablePreferenceRow(id: 0, child: nil),
+                ScrollablePreferenceRow(id: 1, child: nil),
+                ScrollablePreferenceRow(id: 2, child: nil),
+            ]
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var contentTransform = ViewTransform.identity
+            contentTransform.appendTranslation(CGSize(width: 400, height: 400))
+            contentTransform.appendSizedSpace(
+                id: ScrollCoordinateSpace.content.id,
+                size: CGSize(width: 100, height: 120)
+            )
+            contentTransform.appendTranslation(CGSize(width: -12, height: -18))
+            let transformAttr = graph.makeInput(value: contentTransform)
+            var inputs = makeViewInputs(
+                graph: graph,
+                size: sizeAttr,
+                transform: transformAttr
+            )
+            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.scrollable = OptionalAttribute(parentAttr)
+
+            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+            scrollablesID = scrollablesAttr
+
+            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
+            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
+
+            let targetID = _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
+            XCTAssertTrue(collection.scroll(toCollectionViewID: targetID, anchor: .center))
+            XCTAssertEqual(parent.contentTargets.count, 1)
+
+            let geometry = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 100, height: 120),
+                containerSize: CGSize(width: 100, height: 80)
+            )
+            let target = try XCTUnwrap(parent.contentTargets[0](geometry, .leftToRight))
+            XCTAssertEqual(target.rect, CGRect(x: -12, y: 6, width: 40, height: 20))
+            XCTAssertEqual(target.anchor, .center)
+            XCTAssertTrue(collection.visibleSubviews[0].transform.scrollCoordinateSpaces.contains(.content))
+        }
+    }
+
     func testScrollableLayoutCollectionFallsBackToChildContentTarget() throws {
         let host = GraphHost()
         let parent = ScrollableLayoutParentScrollable()
@@ -2929,7 +3094,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     private func makeViewInputs(
         graph: _AGGraph,
         size: Attribute<ViewSize>,
-        environment: Attribute<EnvironmentValues>? = nil
+        environment: Attribute<EnvironmentValues>? = nil,
+        transform: Attribute<ViewTransform>? = nil
     ) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
@@ -2951,7 +3117,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 keys: PreferenceKeys(),
                 hostKeys: graph.makeInput(value: PreferenceKeys())
             ),
-            transform: graph.makeInput(value: ViewTransform.identity),
+            transform: transform ?? graph.makeInput(value: ViewTransform.identity),
             position: graph.makeInput(value: CGPoint.zero),
             containerPosition: graph.makeInput(value: CGPoint.zero),
             size: size,

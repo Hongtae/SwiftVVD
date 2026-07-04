@@ -148,6 +148,10 @@ public struct HorizontalAlignment: Equatable {
     public func combineExplicit<S>(_ values: S) -> CGFloat? where S: Sequence, S.Element == CGFloat? {
         key.combineExplicit(values)
     }
+
+    var fraction: CGFloat {
+        key.fraction
+    }
 }
 
 public struct VerticalAlignment: Equatable {
@@ -204,6 +208,10 @@ public struct VerticalAlignment: Equatable {
     public func combineExplicit<S>(_ values: S) -> CGFloat? where S: Sequence, S.Element == CGFloat? {
         key.combineExplicit(values)
     }
+
+    var fraction: CGFloat {
+        key.fraction
+    }
 }
 
 /// Marker used by HVStack for its minor-axis alignment type.
@@ -239,3 +247,21 @@ extension AlignmentKey: Sendable {}
 extension HorizontalAlignment: Sendable {}
 extension VerticalAlignment: Sendable {}
 extension Alignment: Sendable {}
+
+extension AlignmentKey {
+    var fraction: CGFloat {
+        let identifier = ObjectIdentifier(id)
+        switch identifier {
+        case ObjectIdentifier(HorizontalAlignment.Leading.self),
+             ObjectIdentifier(VerticalAlignment.Top.self):
+            return 0
+        case ObjectIdentifier(HorizontalAlignment.Trailing.self),
+             ObjectIdentifier(VerticalAlignment.Bottom.self),
+             ObjectIdentifier(VerticalAlignment.FirstTextBaseline.self),
+             ObjectIdentifier(VerticalAlignment.LastTextBaseline.self):
+            return 1
+        default:
+            return 0.5
+        }
+    }
+}

@@ -87,3 +87,47 @@ extension Edge: Sendable {
 
 extension EdgeInsets: Sendable {
 }
+
+extension EdgeInsets {
+    public func inset(by corners: RectangleCornerInsets, edges: Edge.Set = .all) -> EdgeInsets {
+        var result = self
+        if edges.contains(.top) {
+            result.top += max(corners.topLeading.height, corners.topTrailing.height)
+        }
+        if edges.contains(.leading) {
+            result.leading += max(corners.topLeading.width, corners.bottomLeading.width)
+        }
+        if edges.contains(.bottom) {
+            result.bottom += max(corners.bottomLeading.height, corners.bottomTrailing.height)
+        }
+        if edges.contains(.trailing) {
+            result.trailing += max(corners.topTrailing.width, corners.bottomTrailing.width)
+        }
+        return result
+    }
+
+    func `in`(_ edges: Edge.Set) -> EdgeInsets {
+        EdgeInsets(
+            top: edges.contains(.top) ? top : 0,
+            leading: edges.contains(.leading) ? leading : 0,
+            bottom: edges.contains(.bottom) ? bottom : 0,
+            trailing: edges.contains(.trailing) ? trailing : 0
+        )
+    }
+
+    func xFlipIfRightToLeft(layoutDirection: () -> LayoutDirection) -> EdgeInsets {
+        guard layoutDirection() == .rightToLeft else {
+            return self
+        }
+        return EdgeInsets(
+            top: top,
+            leading: trailing,
+            bottom: bottom,
+            trailing: leading
+        )
+    }
+
+    var originOffset: CGSize {
+        CGSize(width: leading, height: top)
+    }
+}

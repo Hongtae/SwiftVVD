@@ -31,6 +31,17 @@ struct ScrollViewConfiguration {
         self.automaticallyAdjustsContentInsets = automaticallyAdjustsContentInsets
         self.interactionActivityTag = interactionActivityTag
     }
+
+    var nonScrollableEdges: Edge.Set {
+        var edges = Edge.Set.all
+        if axes.contains(.horizontal) {
+            edges.subtract(Edge.Set.horizontal)
+        }
+        if axes.contains(.vertical) {
+            edges.subtract(Edge.Set.vertical)
+        }
+        return edges
+    }
 }
 
 /// Scroll container view that wraps content in the system scroll-view shell.
@@ -152,6 +163,9 @@ struct SystemScrollView<Content>: View where Content: View {
         }()
 
         let configuration = view[\.configuration]._attribute
+        let scrollableAxes: Attribute<Axis.Set> = graph.makeRule {
+            configuration.value.axes
+        }
         let contentOffset: Attribute<CGPoint> = graph.makeInput(value: .zero)
         let layoutState: Attribute<SystemScrollLayoutState> = graph.makeRule(
             SystemScrollLayoutStateProvider(
@@ -166,7 +180,39 @@ struct SystemScrollView<Content>: View where Content: View {
         let scrollableAttr: Attribute<any Scrollable> = graph.makeRule(
             ScrollableProvider(scrollable: scrollable)
         )
+        let contentGeometry = graph.makeIndirectAttribute(defaultValue: ScrollGeometry())
+        let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
+            inputs.base.cachedEnvironment.value.environment.value.layoutDirection
+        }
         contentInputs.scrollable = OptionalAttribute(scrollableAttr)
+        let childSafeArea = graph.makeRule(
+            ScrollViewChildSafeArea(
+                safeAreaInsets: inputs.safeAreaInsets,
+                configuration: configuration
+            )
+        )
+        let safeAreaPosition: Attribute<CGPoint> = graph.makeRule(
+            ScrollViewChildPosition(
+                safeAreaInsets: childSafeArea,
+                axes: scrollableAxes,
+                layoutDirection: layoutDirection
+            )
+        )
+        contentInputs.transform = graph.makeRule(
+            ScrollViewContentTransformProvider(
+                transform: inputs.transform,
+                position: inputs.position,
+                safeAreaPosition: safeAreaPosition,
+                geometry: contentGeometry,
+                axes: scrollableAxes
+            )
+        )
+        contentInputs.safeAreaInsets = OptionalAttribute(graph.makeRule(
+            ScrollViewChildSafeAreaInsets(
+                safeAreaInsets: childSafeArea,
+                layoutDirection: layoutDirection
+            )
+        ))
         contentInputs.preferences.keys.insert(ScrollablePreferenceKey.self)
         contentInputs.preferences.keys.insert(UpdateScrollStateRequestKey.self)
 
@@ -187,9 +233,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 layoutComputer: scrollLayoutComputer
             )
         )
-        let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
-            inputs.base.cachedEnvironment.value.environment.value.layoutDirection
-        }
         let geometry: Attribute<ScrollGeometry> = graph.makeRule(
             ScrollGeometryProvider(
                 layoutState: layoutState,
@@ -198,6 +241,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 layoutDirection: layoutDirection
             )
         )
+        graph.setIndirectTarget(contentGeometry, to: geometry)
         scrollable.bindGeometry(geometry, layoutDirection: layoutDirection)
         if let childScrollables = contentOutputs.preferences.value(for: ScrollablePreferenceKey.self) {
             scrollable.bindChildScrollables(Attribute<[any Scrollable]>(childScrollables))
@@ -211,9 +255,6 @@ struct SystemScrollView<Content>: View where Content: View {
         }
 
         if inputs.preferences.keys.contains(ScrollGeometryPreferenceKey.self) {
-            let scrollableAxes: Attribute<Axis.Set> = graph.makeRule {
-                configuration.value.axes
-            }
             let transform: Attribute<ViewTransform> = graph.makeRule(
                 ScrollGeometryTransformProvider(
                     position: inputs.position,
@@ -248,6 +289,72 @@ struct SystemScrollView<Content>: View where Content: View {
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         Content._makeViewList(view: view[\.content], inputs: inputs)
+    }
+}
+
+private struct ScrollViewChildSafeArea: Rule {
+    typealias Value = EdgeInsets
+
+    var safeAreaInsets: OptionalAttribute<SafeAreaInsets>
+    var configuration: Attribute<ScrollViewConfiguration>
+
+    func updateValue() -> EdgeInsets {
+        guard let insets = safeAreaInsets.attribute?.value.value else {
+            return EdgeInsets()
+        }
+        let edges = _SemanticFeature<Semantics_v6>.isEnabled
+            ? configuration.value.nonScrollableEdges
+            : Edge.Set(rawValue: 0)
+        return insets.in(edges)
+    }
+}
+
+private struct ScrollViewChildPosition: Rule {
+    typealias Value = CGPoint
+
+    var safeAreaInsets: Attribute<EdgeInsets>
+    var axes: Attribute<Axis.Set>
+    var layoutDirection: Attribute<LayoutDirection>
+
+    func updateValue() -> CGPoint {
+        guard _SemanticFeature<Semantics_v6>.isEnabled else {
+            return .zero
+        }
+        let offset = safeAreaInsets.value
+            .xFlipIfRightToLeft { layoutDirection.value }
+            .in(originOffsetEdges)
+            .originOffset
+        return CGPoint(x: offset.width, y: offset.height)
+    }
+
+    private var originOffsetEdges: Edge.Set {
+        if layoutDirection.value == .rightToLeft && axes.value == .vertical {
+            return .vertical
+        }
+        return .all
+    }
+}
+
+private struct ScrollViewChildSafeAreaInsets: Rule {
+    typealias Value = SafeAreaInsets
+
+    var safeAreaInsets: Attribute<EdgeInsets>
+    var layoutDirection: Attribute<LayoutDirection>
+
+    func updateValue() -> SafeAreaInsets {
+        let elements: [SafeAreaInsets.Element] = _SemanticFeature<Semantics_v6>.isEnabled
+            ? [
+                SafeAreaInsets.Element(
+                    regions: .container,
+                    insets: safeAreaInsets.value.xFlipIfRightToLeft { layoutDirection.value },
+                    cornerInsets: nil
+                ),
+            ]
+            : []
+        return SafeAreaInsets(
+            space: ScrollCoordinateSpace.safeArea.id,
+            elements: elements
+        )
     }
 }
 

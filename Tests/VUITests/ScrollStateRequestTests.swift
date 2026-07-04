@@ -1500,6 +1500,200 @@ final class ScrollStateRequestTests: XCTestCase {
         }
     }
 
+    func testViewTransformConvertsPointsToNearestScrollCoordinateSpaceMarker() {
+        var transform = ViewTransform.identity
+        transform.appendTranslation(CGSize(width: 300, height: 300))
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.all.id,
+            size: CGSize(width: 200, height: 200)
+        )
+        transform.appendTranslation(CGSize(width: 100, height: 100))
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.all.id,
+            size: CGSize(width: 50, height: 50)
+        )
+        transform.appendTranslation(CGSize(width: -25, height: -40))
+
+        var points = [
+            CGPoint(x: 25, y: 40),
+            CGPoint(x: 35, y: 60),
+        ]
+        transform.convert(to: .all, points: &points)
+
+        XCTAssertEqual(points[0], CGPoint(x: 0, y: 0))
+        XCTAssertEqual(points[1], CGPoint(x: 10, y: 20))
+    }
+
+    func testViewTransformScrollCoordinateConversionStopsAtMarkerBeforeGlobalPosition() {
+        var transform = ViewTransform.identity
+        transform.appendTranslation(CGSize(width: 300, height: 300))
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.all.id,
+            size: CGSize(width: 200, height: 200)
+        )
+        transform.appendTranslation(CGSize(width: -25, height: -40))
+        transform.appendPosition(CGPoint(x: 1_000, y: 2_000))
+
+        var points = [
+            CGPoint(x: 25, y: 40),
+            CGPoint(x: 35, y: 60),
+        ]
+        transform.convert(to: .all, points: &points)
+
+        XCTAssertEqual(points[0], CGPoint(x: 0, y: 0))
+        XCTAssertEqual(points[1], CGPoint(x: 10, y: 20))
+    }
+
+    func testViewTransformScrollCoordinateConversionFallsBackToGlobalWhenMarkerIsMissing() {
+        var transform = ViewTransform.identity
+        transform.appendTranslation(CGSize(width: 3, height: 4))
+
+        var points = [CGPoint(x: 5, y: 6)]
+        transform.convert(to: .all, points: &points)
+
+        XCTAssertEqual(points, [CGPoint(x: 8, y: 10)])
+    }
+
+    func testViewTransformConvertsContentAndSafeAreaUsingNearestMarkers() {
+        var nestedContent = ViewTransform.identity
+        nestedContent.appendTranslation(CGSize(width: 100, height: 100))
+        nestedContent.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 300, height: 300)
+        )
+        nestedContent.appendTranslation(CGSize(width: 40, height: 50))
+        nestedContent.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 80, height: 90)
+        )
+        nestedContent.appendTranslation(CGSize(width: -5, height: -7))
+
+        var points = [CGPoint(x: 10, y: 20)]
+        nestedContent.convert(to: .content, points: &points)
+        XCTAssertEqual(points, [CGPoint(x: 5, y: 13)])
+
+        var safeArea = ViewTransform.identity
+        safeArea.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 100, height: 120)
+        )
+        safeArea.appendTranslation(CGSize(width: 6, height: 8))
+        safeArea.appendSizedSpace(
+            id: ScrollCoordinateSpace.safeArea.id,
+            size: CGSize(width: 88, height: 104)
+        )
+        safeArea.appendTranslation(CGSize(width: -6, height: -8))
+
+        let rect = CGRect(x: 10, y: 20, width: 30, height: 40)
+            .converted(to: .safeArea, using: safeArea)
+        XCTAssertEqual(rect, CGRect(x: 4, y: 12, width: 30, height: 40))
+    }
+
+    func testScrollStateRequestTransformConvertsSubviewFrameToNearestScrollCoordinateSpace() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var selectedTransform = ViewTransform.identity
+            selectedTransform.appendTranslation(CGSize(width: 200, height: 200))
+            selectedTransform.appendSizedSpace(
+                id: ScrollCoordinateSpace.all.id,
+                size: CGSize(width: 50, height: 50)
+            )
+            selectedTransform.appendTranslation(CGSize(width: -100, height: -100))
+
+            let collection = FixedVisibleCollectionScrollable(subviews: [
+                ScrollableCollectionSubview(
+                    id: _ViewList_ID(explicitID: AnyHashable("global-near")),
+                    frame: CGRect(x: 20, y: 20, width: 10, height: 10),
+                    frameInContent: CGRect(x: 20, y: 20, width: 10, height: 10),
+                    transform: .identity
+                ),
+                ScrollableCollectionSubview(
+                    id: _ViewList_ID(explicitID: AnyHashable("scroll-space-near")),
+                    frame: CGRect(x: 100, y: 100, width: 10, height: 10),
+                    frameInContent: CGRect(x: 100, y: 100, width: 10, height: 10),
+                    transform: selectedTransform
+                ),
+            ])
+            let collectionAttr = graph.makeInput(value: collection as any ScrollableCollection)
+            var stored = ScrollPosition(id: "scroll-space-near")
+            let binding = Binding<ScrollPosition>(
+                get: { stored },
+                set: { value, _ in stored = value }
+            )
+            let bindingAttr = graph.makeInput(value: binding)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 10, height: 10)))
+            inputs.base.setScrollPosition(storage: .binding(bindingAttr), kind: .scrollContent)
+
+            let rule = ScrollStateRequestTransform(collection: collectionAttr, inputs: inputs)
+            let ruleAttr = graph.makeStatefulRule(rule)
+            let requests = ruleAttr.value
+
+            XCTAssertEqual(requests.count, 1)
+            guard let request = requests.first as? UpdateScrollStateRequest else {
+                XCTFail("expected UpdateScrollStateRequest")
+                return
+            }
+            XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("scroll-space-near"))
+            XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+        }
+    }
+
+    func testScrollStateRequestTransformIgnoresGlobalPositionAfterScrollCoordinateMarker() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var selectedTransform = ViewTransform.identity
+            selectedTransform.appendTranslation(CGSize(width: 200, height: 200))
+            selectedTransform.appendSizedSpace(
+                id: ScrollCoordinateSpace.all.id,
+                size: CGSize(width: 50, height: 50)
+            )
+            selectedTransform.appendTranslation(CGSize(width: -100, height: -100))
+            selectedTransform.appendPosition(CGPoint(x: 1_000, y: 1_000))
+
+            let collection = FixedVisibleCollectionScrollable(subviews: [
+                ScrollableCollectionSubview(
+                    id: _ViewList_ID(explicitID: AnyHashable("other")),
+                    frame: CGRect(x: 20, y: 20, width: 10, height: 10),
+                    frameInContent: CGRect(x: 20, y: 20, width: 10, height: 10),
+                    transform: .identity
+                ),
+                ScrollableCollectionSubview(
+                    id: _ViewList_ID(explicitID: AnyHashable("selected")),
+                    frame: CGRect(x: 100, y: 100, width: 10, height: 10),
+                    frameInContent: CGRect(x: 100, y: 100, width: 10, height: 10),
+                    transform: selectedTransform
+                ),
+            ])
+            let collectionAttr = graph.makeInput(value: collection as any ScrollableCollection)
+            var stored = ScrollPosition(id: "selected")
+            let binding = Binding<ScrollPosition>(
+                get: { stored },
+                set: { value, _ in stored = value }
+            )
+            let bindingAttr = graph.makeInput(value: binding)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 10, height: 10)))
+            inputs.base.setScrollPosition(storage: .binding(bindingAttr), kind: .scrollContent)
+
+            let rule = ScrollStateRequestTransform(collection: collectionAttr, inputs: inputs)
+            let ruleAttr = graph.makeStatefulRule(rule)
+            let requests = ruleAttr.value
+
+            XCTAssertEqual(requests.count, 1)
+            guard let request = requests.first as? UpdateScrollStateRequest else {
+                XCTFail("expected UpdateScrollStateRequest")
+                return
+            }
+            XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("selected"))
+            XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+        }
+    }
+
     func testScrollStateRequestTransformCapturesLayoutDirectionEnvironment() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

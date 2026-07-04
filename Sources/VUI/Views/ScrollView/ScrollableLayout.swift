@@ -192,12 +192,17 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
             contentInputs.scrollable = OptionalAttribute(scrollableAttr)
             contentInputs.requestsLayoutComputer = true
             contentInputs.preferences.keys.insert(ScrollablePreferenceKey.self)
-            contentInputs = ScrollViewGeometry.rewrite(inputs: contentInputs)
 
-            let contentOutputs = Provider.ScrollableContent._makeView(
-                view: _GraphValue(_attribute: contentAttr),
+            let childModifier = graph.makeInput(value: ScrollViewChildModifier())
+            let contentOutputs = ScrollViewChildModifier._makeView(
+                modifier: _GraphValue(_attribute: childModifier),
                 inputs: contentInputs
-            )
+            ) { _, inputs in
+                Provider.ScrollableContent._makeView(
+                    view: _GraphValue(_attribute: contentAttr),
+                    inputs: inputs
+                )
+            }
 
             let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
                 inputs.base.cachedEnvironment.value.environment.value.layoutDirection
@@ -256,17 +261,26 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
 extension _ScrollView.Main: _PrimitiveView {
 }
 
-private struct _ContainingScrollView {
+struct _ContainingScrollView {
     var proxy: Attribute<_ScrollViewProxy>
     var contentOffset: Attribute<CGPoint>
 }
 
-private struct ContainingScrollViewInput: ViewInput {
+struct ContainingScrollViewInput: ViewInput {
     static var defaultValue: _ContainingScrollView? { nil }
 
     static func valuesEqual(_ a: _ContainingScrollView?, _ b: _ContainingScrollView?) -> Bool {
         a?.proxy.identifier == b?.proxy.identifier &&
             a?.contentOffset.identifier == b?.contentOffset.identifier
+    }
+}
+
+struct ScrollViewChildModifier: ViewModifier, _ViewInputsModifier {
+    typealias Body = Never
+
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        _ = modifier
+        inputs = ScrollViewGeometry.rewrite(inputs: inputs)
     }
 }
 
@@ -2047,6 +2061,7 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 layoutState: layoutState,
                 containerInfo: containerInfo,
                 childGeometries: childGeometries,
+                transform: inputs.transform,
                 parentScrollable: parentScrollable,
                 childScrollables: childScrollables
             ) as any ScrollableCollection
@@ -2187,6 +2202,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
     var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
     var containerInfo: Attribute<DynamicContainer.Info>
     var childGeometries: Attribute<[ViewGeometry]>
+    var transform: Attribute<ViewTransform>
     var parentScrollable: WeakAttribute<any Scrollable>
     var childScrollables: Attribute<[any Scrollable]>?
 
@@ -2197,6 +2213,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
     func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
         let state = layoutState.value
         let geometries = childGeometries.value
+        let transform = transform.value
         for (offset, index) in state.identifiers.enumerated() {
             guard let placement = state.placements[index] else { continue }
             var stop = false
@@ -2206,7 +2223,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
                     id: _ViewList_ID(explicitID: AnyHashable(index)),
                     frame: frame,
                     frameInContent: frame,
-                    transform: .identity
+                    transform: transform
                 ),
                 &stop
             )
@@ -2269,7 +2286,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
               let placement = state.placements[index] else {
             return false
         }
-        let rect = frame(for: placement)
+        let rect = frame(for: placement).converted(to: .content, using: transform.value)
         return setContentTarget { _, _ in
             ScrollTarget(rect: rect, anchor: anchor)
         }

@@ -125,6 +125,36 @@ public struct ScrollGeometry: Equatable, Sendable, CustomDebugStringConvertible 
         visibleRect = CGRect(origin: contentOffset, size: containerSize)
     }
 
+    static func rootViewTransform(contentOffset: CGPoint, containerSize: CGSize) -> ScrollGeometry {
+        ScrollGeometry(
+            contentOffset: contentOffset,
+            contentSize: CGSize(width: CGFloat.infinity, height: CGFloat.infinity),
+            contentInsets: EdgeInsets(),
+            containerSize: containerSize,
+            visibleRect: CGRect(origin: contentOffset, size: containerSize)
+        )
+    }
+
+    static func viewTransform(
+        contentInsets: EdgeInsets,
+        contentSize: CGSize,
+        containerSize: CGSize
+    ) -> ScrollGeometry {
+        let visibleRect = CGRect(
+            x: -contentInsets.leading,
+            y: -contentInsets.top,
+            width: max(containerSize.width + contentInsets.leading + contentInsets.trailing, 0),
+            height: max(containerSize.height + contentInsets.top + contentInsets.bottom, 0)
+        )
+        return ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: contentSize,
+            contentInsets: contentInsets,
+            containerSize: containerSize,
+            visibleRect: visibleRect
+        )
+    }
+
     mutating func applyLayoutDirection(_ layoutDirection: LayoutDirection, contentSize override: CGSize? = nil) {
         guard layoutDirection == .rightToLeft else {
             return
@@ -206,8 +236,14 @@ struct ViewTransform: Equatable, Sendable {
         /// Named coordinate-space marker (by `AnyHashable` name).
         case coordinateSpaceName(AnyHashable)
 
+        /// Coordinate-space marker (by internal coordinate-space id).
+        case coordinateSpaceID(CoordinateSpace.ID)
+
         /// Sized named coordinate-space marker.
         case sizedSpace(name: AnyHashable, size: CGSize)
+
+        /// Sized coordinate-space marker (by internal coordinate-space id).
+        case sizedSpaceID(id: CoordinateSpace.ID, size: CGSize)
 
         /// Reset the accumulated position to an explicit global point.
         case resetPosition(CGPoint)
@@ -273,9 +309,19 @@ struct ViewTransform: Equatable, Sendable {
         _transformItems.append(.coordinateSpaceName(name))
     }
 
+    /// Marks the current position in the chain as an internal coordinate space.
+    mutating func appendCoordinateSpace(id: CoordinateSpace.ID) {
+        _transformItems.append(.coordinateSpaceID(id))
+    }
+
     /// Marks the current position as a sized named coordinate space.
     mutating func appendSizedSpace(name: AnyHashable, size: CGSize) {
         _transformItems.append(.sizedSpace(name: name, size: size))
+    }
+
+    /// Marks the current position as a sized internal coordinate space.
+    mutating func appendSizedSpace(id: CoordinateSpace.ID, size: CGSize) {
+        _transformItems.append(.sizedSpaceID(id: id, size: size))
     }
 
     /// Resets the accumulated global position to an explicit value.
@@ -335,6 +381,24 @@ struct ViewTransform: Equatable, Sendable {
         }
     }
 
+    /// Converts local points into the nearest matching internal coordinate
+    /// space marker carried by this transform. If the marker is absent, fall
+    /// back to the existing local-to-global conversion.
+    func convert<A: MutableCollection>(
+        to space: ScrollCoordinateSpace,
+        points: inout A
+    ) where A.Element == CGPoint {
+        guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: space.id) else {
+            convertGlobal(from: .local, points: &points)
+            return
+        }
+
+        let suffixStart = _transformItems.index(after: markerIndex)
+        for item in _transformItems[suffixStart...] {
+            _applyItem(item, inverted: false, to: &points)
+        }
+    }
+
     // Item iteration.
 
     /// Iterates all transform items in forward or reverse order.
@@ -359,12 +423,77 @@ struct ViewTransform: Equatable, Sendable {
         }
     }
 
+    var containingScrollGeometry: ScrollGeometry? {
+        firstScrollGeometry(inverted: false)
+    }
+
+    var nearestScrollGeometry: ScrollGeometry? {
+        firstScrollGeometry(inverted: true)
+    }
+
+    var scrollCoordinateSpaces: [ScrollCoordinateSpace] {
+        _transformItems.compactMap { item in
+            switch item {
+            case .coordinateSpaceID(let id):
+                return ScrollCoordinateSpace(id: id)
+            case .sizedSpaceID(let id, _):
+                return ScrollCoordinateSpace(id: id)
+            default:
+                return nil
+            }
+        }
+    }
+
+    var scrollCoordinateSpaceSizes: [(ScrollCoordinateSpace, CGSize)] {
+        _transformItems.compactMap { item in
+            guard case let .sizedSpaceID(id, size) = item,
+                  let space = ScrollCoordinateSpace(id: id) else {
+                return nil
+            }
+            return (space, size)
+        }
+    }
+
+    var translations: [CGSize] {
+        _transformItems.compactMap { item in
+            guard case let .translation(value) = item else {
+                return nil
+            }
+            return value
+        }
+    }
+
     // Global position (read-only)
 
     /// The accumulated global position of this view (the origin in window coordinates).
     var globalPosition: CGPoint { _globalPosition }
 
     // Private helpers
+
+    private func firstScrollGeometry(inverted: Bool) -> ScrollGeometry? {
+        var geometry: ScrollGeometry?
+        forEach(inverted: inverted) { item, stop in
+            guard case let .scrollGeometry(value, _) = item else { return }
+            geometry = value
+            stop = true
+        }
+        return geometry
+    }
+
+    private func lastCoordinateSpaceMarkerIndex(matching id: CoordinateSpace.ID) -> [Item].Index? {
+        for index in _transformItems.indices.reversed() {
+            switch _transformItems[index] {
+            case .coordinateSpaceID(let candidate),
+                 .sizedSpaceID(let candidate, _):
+                if candidate == id {
+                    return index
+                }
+            default:
+                continue
+            }
+        }
+        return nil
+    }
 
     private func _applyItem<A: MutableCollection>(
         _ item: Item,
@@ -420,7 +549,8 @@ struct ViewTransform: Equatable, Sendable {
             }
 
         case .position, .positionWithScale, .resetPosition,
-             .coordinateSpaceName, .sizedSpace:
+             .coordinateSpaceName, .coordinateSpaceID,
+             .sizedSpace, .sizedSpaceID:
             // Coordinate-space markers and position items are handled separately
             // (position via _globalPosition; markers are no-ops for point conversion).
             break
@@ -432,14 +562,277 @@ struct ViewTransform: Equatable, Sendable {
     static let identity = ViewTransform()
 }
 
-/// The safe-area insets provided to a view by its nearest ancestor container.
-/// Conceptually equivalent to `EdgeInsets` but kept as a distinct type so
-/// the AG graph can distinguish safe-area changes from general padding changes.
-struct SafeAreaInsets: Equatable, Sendable {
-    var value: EdgeInsets
+extension CGRect {
+    func converted(to space: ScrollCoordinateSpace, using transform: ViewTransform) -> CGRect {
+        var points = [
+            CGPoint(x: minX, y: minY),
+            CGPoint(x: maxX, y: minY),
+            CGPoint(x: maxX, y: maxY),
+            CGPoint(x: minX, y: maxY),
+        ]
+        transform.convert(to: space, points: &points)
+        return CGRect(cornerPoints: points)
+    }
 
-    init() { value = EdgeInsets() }
-    init(_ insets: EdgeInsets) { value = insets }
+    init(cornerPoints points: [CGPoint]) {
+        guard let first = points.first else {
+            self = .null
+            return
+        }
+
+        var minX = first.x
+        var minY = first.y
+        var maxX = first.x
+        var maxY = first.y
+        for point in points.dropFirst() {
+            minX = Swift.min(minX, point.x)
+            minY = Swift.min(minY, point.y)
+            maxX = Swift.max(maxX, point.x)
+            maxY = Swift.max(maxY, point.y)
+        }
+        self = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+}
+
+extension ScrollGeometry {
+    func outsetOffsetAndSize(axis: Axis) -> (offset: CGFloat, size: CGFloat) {
+        switch axis {
+        case .horizontal:
+            return (visibleRect.minX, visibleRect.width)
+        case .vertical:
+            return (visibleRect.minY, visibleRect.height)
+        }
+    }
+}
+
+struct ScrollViewContentTransformProvider: Rule {
+    typealias Value = ViewTransform
+
+    var transform: Attribute<ViewTransform>
+    var position: Attribute<CGPoint>
+    var safeAreaPosition: Attribute<CGPoint>
+    var geometry: Attribute<ScrollGeometry>
+    var axes: Attribute<Axis.Set>
+    var isClipped: Bool
+
+    init(
+        transform: Attribute<ViewTransform>,
+        position: Attribute<CGPoint>,
+        safeAreaPosition: Attribute<CGPoint>,
+        geometry: Attribute<ScrollGeometry>,
+        axes: Attribute<Axis.Set>,
+        isClipped: Bool = true
+    ) {
+        self.transform = transform
+        self.position = position
+        self.safeAreaPosition = safeAreaPosition
+        self.geometry = geometry
+        self.axes = axes
+        self.isClipped = isClipped
+    }
+
+    func updateValue() -> ViewTransform {
+        var value = transform.value
+        value.resetPosition(position.value)
+        let scrollGeometry = geometry.value
+        value.appendScrollGeometry(
+            ScrollGeometry.rootViewTransform(
+                contentOffset: scrollGeometry.contentOffset,
+                containerSize: scrollGeometry.containerSize
+            ),
+            isClipped: true
+        )
+        value.appendScrollGeometry(
+            ScrollGeometry.viewTransform(
+                contentInsets: scrollGeometry.contentInsets,
+                contentSize: scrollGeometry.contentSize,
+                containerSize: scrollGeometry.containerSize
+            ),
+            isClipped: isClipped
+        )
+        value.appendSizedSpace(id: ScrollCoordinateSpace.all.id, size: scrollGeometry.containerSize)
+        let axes = axes.value
+        if axes.contains(.horizontal) {
+            value.appendSizedSpace(id: ScrollCoordinateSpace.horizontal.id, size: scrollGeometry.containerSize)
+        }
+        if axes.contains(.vertical) {
+            value.appendSizedSpace(id: ScrollCoordinateSpace.vertical.id, size: scrollGeometry.containerSize)
+        }
+        value.appendTranslation(CGSize(
+            width: scrollGeometry.contentOffset.x,
+            height: scrollGeometry.contentOffset.y
+        ))
+        value.appendSizedSpace(id: ScrollCoordinateSpace.content.id, size: scrollGeometry.contentSize)
+        if _SemanticFeature<Semantics_v6>.isEnabled {
+            let position = safeAreaPosition.value
+            value.appendTranslation(CGSize(width: position.x, height: position.y))
+            value.appendSizedSpace(
+                id: ScrollCoordinateSpace.safeArea.id,
+                size: scrollGeometry.containerSize.outset(by: scrollGeometry.contentInsets)
+            )
+            value.appendTranslation(CGSize(width: -position.x, height: -position.y))
+        }
+        return value
+    }
+}
+
+public struct RectangleCornerInsets: Hashable, Sendable {
+    public var topLeading: CGSize
+    public var topTrailing: CGSize
+    public var bottomLeading: CGSize
+    public var bottomTrailing: CGSize
+
+    public init() {
+        self.topLeading = .zero
+        self.topTrailing = .zero
+        self.bottomLeading = .zero
+        self.bottomTrailing = .zero
+    }
+
+    public init(
+        topLeading: CGSize,
+        topTrailing: CGSize,
+        bottomLeading: CGSize,
+        bottomTrailing: CGSize
+    ) {
+        self.topLeading = topLeading
+        self.topTrailing = topTrailing
+        self.bottomLeading = bottomLeading
+        self.bottomTrailing = bottomTrailing
+    }
+}
+
+struct AbsoluteRectangleCornerInsets: Hashable, Sendable {
+    var topLeft: CGSize
+    var topRight: CGSize
+    var bottomLeft: CGSize
+    var bottomRight: CGSize
+
+    init() {
+        self.topLeft = .zero
+        self.topRight = .zero
+        self.bottomLeft = .zero
+        self.bottomRight = .zero
+    }
+
+    init(
+        topLeft: CGSize,
+        topRight: CGSize,
+        bottomLeft: CGSize,
+        bottomRight: CGSize
+    ) {
+        self.topLeft = topLeft
+        self.topRight = topRight
+        self.bottomLeft = bottomLeft
+        self.bottomRight = bottomRight
+    }
+
+    init(_ insets: RectangleCornerInsets, layoutDirection: LayoutDirection = .leftToRight) {
+        switch layoutDirection {
+        case .leftToRight:
+            self.init(
+                topLeft: insets.topLeading,
+                topRight: insets.topTrailing,
+                bottomLeft: insets.bottomLeading,
+                bottomRight: insets.bottomTrailing
+            )
+        case .rightToLeft:
+            self.init(
+                topLeft: insets.topTrailing,
+                topRight: insets.topLeading,
+                bottomLeft: insets.bottomTrailing,
+                bottomRight: insets.bottomLeading
+            )
+        }
+    }
+}
+
+public struct SafeAreaRegions: OptionSet, Sendable {
+    public let rawValue: UInt
+
+    @inlinable public init(rawValue: UInt) {
+        self.rawValue = rawValue
+    }
+
+    public static let container = SafeAreaRegions(rawValue: 1)
+    public static let keyboard = SafeAreaRegions(rawValue: 2)
+    public static let all = SafeAreaRegions(rawValue: UInt.max)
+}
+
+struct SafeAreaInsets: Equatable, Sendable {
+    struct Element: Equatable, Sendable {
+        var regions: SafeAreaRegions
+        var insets: EdgeInsets
+        var cornerInsets: AbsoluteRectangleCornerInsets?
+
+        init(
+            regions: SafeAreaRegions,
+            insets: EdgeInsets,
+            cornerInsets: AbsoluteRectangleCornerInsets?
+        ) {
+            self.regions = regions
+            self.insets = insets
+            self.cornerInsets = cornerInsets
+        }
+    }
+
+    indirect enum OptionalValue: Equatable, Sendable {
+        case empty
+        case insets(SafeAreaInsets)
+    }
+
+    var space: CoordinateSpace.ID
+    var elements: [Element]
+    var next: OptionalValue
+
+    var value: EdgeInsets {
+        elements.reduce(next.value) { partial, element in
+            partial.adding(element.insets)
+        }
+    }
+
+    init() {
+        self.init(space: CoordinateSpace.ID(rawValue: 0), elements: [])
+    }
+
+    init(_ insets: EdgeInsets) {
+        self.init(
+            space: CoordinateSpace.ID(rawValue: 0),
+            elements: [Element(regions: .container, insets: insets, cornerInsets: nil)]
+        )
+    }
+
+    init(
+        space: CoordinateSpace.ID,
+        elements: [Element],
+        next: OptionalValue = .empty
+    ) {
+        self.space = space
+        self.elements = elements
+        self.next = next
+    }
 
     static let zero = SafeAreaInsets()
+}
+
+private extension SafeAreaInsets.OptionalValue {
+    var value: EdgeInsets {
+        switch self {
+        case .empty:
+            return EdgeInsets()
+        case .insets(let insets):
+            return insets.value
+        }
+    }
+}
+
+private extension EdgeInsets {
+    func adding(_ other: EdgeInsets) -> EdgeInsets {
+        EdgeInsets(
+            top: top + other.top,
+            leading: leading + other.leading,
+            bottom: bottom + other.bottom,
+            trailing: trailing + other.trailing
+        )
+    }
 }

@@ -965,6 +965,197 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
     }
 }
 
+/// Scrollable collection carrier for dynamic `Layout` children.
+private struct DynamicLayoutScrollable: ScrollableCollection {
+    var containerInfo: Attribute<DynamicContainer.Info>
+    var viewList: Attribute<any ViewList>
+    var geometries: Attribute<[ViewGeometry]>
+    var transform: Attribute<ViewTransform>
+    var parentScrollable: WeakAttribute<any Scrollable>
+    var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
+
+    var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
+        collectionViewIDs()
+    }
+
+    func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
+        let ids = collectionViewIDs()
+        let geometries = geometries.value
+        let transform = transform.value
+        for offset in ids.indices where geometries.indices.contains(offset) {
+            let frame = frame(for: geometries[offset])
+            var stop = false
+            body(
+                ScrollableCollectionSubview(
+                    id: viewListID(from: ids[offset]),
+                    frame: frame,
+                    frameInContent: frame.converted(to: .content, using: transform),
+                    transform: transform
+                ),
+                &stop
+            )
+            if stop { break }
+        }
+    }
+
+    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+        var closest: (subview: ScrollableCollectionSubview, distance: CGFloat)?
+        forEachVisibleSubview { subview, stop in
+            let distance = subview.frame.midpointDistance(to: rect)
+            if closest == nil || distance < closest!.distance {
+                closest = (subview, distance)
+            }
+            stop = false
+        }
+        return closest?.subview
+    }
+
+    func nextVisibleCollectionViewID(
+        towards point: UnitPoint,
+        from id: _ViewList_ID.Canonical,
+        border: CGSize,
+        ignoring pinnedViews: PinnedScrollableViews
+    ) -> _ViewList_ID.Canonical? {
+        nil
+    }
+
+    static func hasMultipleViews(in axis: Axis) -> Bool {
+        false
+    }
+
+    func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
+        viewList.value.firstOffset(forID: id, style: _ViewList_IteratorStyle())
+    }
+
+    func applyCollectionViewIDs(
+        from index: inout Int,
+        to body: (_ViewList_ID.Canonical, inout Bool) -> Void
+    ) -> Bool {
+        var traversalIndex = 0
+        var nextIndex = index
+        var shouldContinue = true
+        _ = _forEachSublist(in: viewList.value, listAttribute: viewList) { sublist in
+            for offset in 0..<sublist.count {
+                if traversalIndex < index {
+                    traversalIndex += 1
+                    continue
+                }
+                let elementIndex = sublist.start + offset
+                let id = sublist.id.elementID(at: elementIndex).canonicalID
+                var stop = false
+                body(id, &stop)
+                traversalIndex += 1
+                nextIndex = traversalIndex
+                if stop {
+                    shouldContinue = false
+                    return false
+                }
+            }
+            return true
+        }
+        index = nextIndex
+        return shouldContinue
+    }
+
+    func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
+        containerInfo.value.item(for: subgraph)?.uniqueId
+    }
+
+    func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {
+        guard let offset = firstCollectionViewIndex(of: id) else {
+            return false
+        }
+        return setContentTarget { _, _ in
+            makeTarget(at: offset, anchor: anchor)
+        }
+    }
+
+    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
+        if let parent = resolvedParentScrollable,
+           parent.setContentTarget(target) {
+            return true
+        }
+        guard let childScrollables else { return false }
+        for child in childScrollables.value {
+            if child.setContentTarget(target) {
+                return true
+            }
+        }
+        return false
+    }
+
+    var allowsContentOffsetAdjustments: Bool {
+        resolvedParentScrollable?.allowsContentOffsetAdjustments ?? false
+    }
+
+    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
+        guard let parent = resolvedParentScrollable else { return false }
+        return parent.adjustContentOffset(by: offset, reason: reason)
+    }
+
+    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
+        if let parent = resolvedParentScrollable,
+           let mapped = parent.mapFirstChild(ofType: type, body: body) {
+            return mapped
+        }
+        guard let childScrollables else { return nil }
+        for child in childScrollables.value {
+            if let mapped = child.mapFirstChild(ofType: type, body: body) {
+                return mapped
+            }
+        }
+        return nil
+    }
+
+    private func collectionViewIDs() -> [_ViewList_ID.Canonical] {
+        var index = 0
+        var ids: [_ViewList_ID.Canonical] = []
+        _ = applyCollectionViewIDs(from: &index) { id, stop in
+            ids.append(id)
+            stop = false
+        }
+        return ids
+    }
+
+    private func makeTarget(at offset: Int, anchor: UnitPoint?) -> ScrollTarget? {
+        let geometries = geometries.value
+        guard geometries.indices.contains(offset) else {
+            return nil
+        }
+        let rect = frame(for: geometries[offset])
+            .converted(to: .content, using: transform.value)
+        return ScrollTarget(rect: rect, anchor: anchor)
+    }
+
+    private func frame(for geometry: ViewGeometry) -> CGRect {
+        CGRect(origin: geometry.origin, size: geometry.dimensions.size.value)
+    }
+
+    private func viewListID(from canonical: _ViewList_ID.Canonical) -> _ViewList_ID {
+        if let explicitID = canonical.explicitID {
+            let implicitID = canonical.implicitID >= 0 ? Int(canonical.implicitID) : 0
+            return _ViewList_ID(explicitID: explicitID, implicitID: implicitID)
+        }
+        return _ViewList_ID(implicitID: Int(canonical.implicitID))
+    }
+
+    private var resolvedParentScrollable: (any Scrollable)? {
+        guard let graph = _AGGraph.current,
+              parentScrollable.isValid(in: graph) else {
+            return nil
+        }
+        return parentScrollable.toStrong().value
+    }
+}
+
+private extension CGRect {
+    func midpointDistance(to other: CGRect) -> CGFloat {
+        let dx = midX - other.midX
+        let dy = midY - other.midY
+        return (dx * dx + dy * dy).squareRoot()
+    }
+}
+
 /// Creates a single AG reduce rule whose input list is resolved dynamically
 /// from `nodeListAttr` at evaluation time.
 ///
@@ -1164,11 +1355,19 @@ extension Layout {
                     containerInfoAttr: containerInfoAttr
                 )
             )
+            let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
+                LayoutChildGeometries(
+                    parentSize: inputs.size,
+                    parentPosition: inputs.position,
+                    layoutComputer: layoutComputerAttr
+                )
+            )
 
             // Two-level dynamic preference reduce.
             // nodeListAttr reads containerInfoAttr to ensure DynamicContainer.Info is current,
             // then collects the ordered per-child preference node IDs.
             var dynMergedPreferences = PreferencesOutputs()
+            var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
             for keyType in inputs.preferences.keys.keys {
                 let nodeListAttr: Attribute<[AGWeakAttribute]> = graph.makeRule {
                     let info = containerInfoAttr.value
@@ -1186,6 +1385,72 @@ extension Layout {
                 }
                 let reducedID = _makeDynReduceAttr(keyType, nodeListAttr: nodeListAttr, in: graph)
                 dynMergedPreferences.append(keyType, node: reducedID)
+                if ObjectIdentifier(keyType) == ObjectIdentifier(ScrollablePreferenceKey.self) {
+                    childScrollables = Attribute<ScrollablePreferenceKey.Value>(reducedID)
+                }
+            }
+
+            let parentScrollable = inputs.weakScrollable
+            let collection: Attribute<any ScrollableCollection> = graph.makeRule {
+                DynamicLayoutScrollable(
+                    containerInfo: containerInfoAttr,
+                    viewList: viewListAttr,
+                    geometries: childGeometries,
+                    transform: inputs.transform,
+                    parentScrollable: parentScrollable,
+                    childScrollables: childScrollables
+                ) as any ScrollableCollection
+            }
+            if inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self),
+               let role = inputs.scrollTargetRole.attribute {
+                let transform: Attribute<(inout ScrollTargetRole.ContentKey.Value) -> Void> = graph.makeRule(
+                    ScrollTargetRole.SetLayout(role: role, collection: collection)
+                )
+                dynMergedPreferences.makePreferenceTransformer(
+                    key: ScrollTargetRole.ContentKey.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
+            }
+            if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
+               let role = inputs.scrollTargetRole.attribute {
+                let transform: Attribute<(inout ScrollTargetRole.Key.Value) -> Void> = graph.makeRule(
+                    ScrollTargetRole.SetLayout(role: role, collection: collection)
+                )
+                dynMergedPreferences.makePreferenceTransformer(
+                    key: ScrollTargetRole.Key.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
+            }
+            if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
+                let transform: Attribute<(inout ScrollablePreferenceKey.Value) -> Void> = graph.makeRule {
+                    let scrollable = collection.value as any Scrollable
+                    return { value in
+                        ScrollablePreferenceKey.reduce(value: &value) { [scrollable] }
+                    }
+                }
+                dynMergedPreferences.makePreferenceTransformer(
+                    key: ScrollablePreferenceKey.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
+            }
+            if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
+                let requests: Attribute<UpdateScrollStateRequestKey.Value> = graph.makeStatefulRule(
+                    ScrollStateRequestTransform(collection: collection, inputs: inputs)
+                )
+                let transform: Attribute<(inout UpdateScrollStateRequestKey.Value) -> Void> = graph.makeRule {
+                    let requests = requests.value
+                    return { value in
+                        UpdateScrollStateRequestKey.reduce(value: &value) { requests }
+                    }
+                }
+                dynMergedPreferences.makePreferenceTransformer(
+                    key: UpdateScrollStateRequestKey.self,
+                    transformAttr: transform,
+                    graph: graph
+                )
             }
             mergedPreferences = dynMergedPreferences
         }

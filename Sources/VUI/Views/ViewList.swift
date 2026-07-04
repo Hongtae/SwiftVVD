@@ -43,10 +43,49 @@ extension ViewList {
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool { false }
-    func firstOffset<A: Hashable>(forID: A, style: _ViewList_IteratorStyle) -> Int? { nil }
+    func firstOffset<A: Hashable>(forID id: A, style: _ViewList_IteratorStyle) -> Int? {
+        var traversalOffset = 0
+        var from = 0
+        var found: Int?
+        _ = applyNodes(
+            from: &from,
+            style: style,
+            list: nil,
+            transform: _ViewList_TemporarySublistTransform()
+        ) { _, _, node, transform in
+            guard case .sublist(var sublist) = node else {
+                return true
+            }
+            transform.apply(to: &sublist)
+            for offset in 0..<sublist.count {
+                let elementIndex = sublist.start + offset
+                let elementID = sublist.id.elementID(at: elementIndex)
+                if _viewListID(elementID, matches: id) {
+                    found = traversalOffset + offset
+                    return false
+                }
+            }
+            traversalOffset += sublist.count
+            return true
+        }
+        return found
+    }
     func edit(forID: _ViewList_ID, since: TransactionID) -> _ViewList_Edit? { nil }
     func print(into: inout SExpPrinter) {}
     var debugDescription: String { "ViewList(\(count(style: _ViewList_IteratorStyle())))" }
+}
+
+private func _viewListID<A: Hashable>(_ viewID: _ViewList_ID, matches target: A) -> Bool {
+    if let canonical = target as? _ViewList_ID.Canonical {
+        return viewID.canonicalID == canonical
+    }
+    if let exactID = target as? _ViewList_ID {
+        return viewID == exactID
+    }
+    if viewID.allExplicitIDs.contains(AnyHashable(target)) {
+        return true
+    }
+    return viewID.containsID(target)
 }
 
 // MARK: - _ViewList_Backing

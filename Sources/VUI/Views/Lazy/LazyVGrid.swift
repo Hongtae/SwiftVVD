@@ -59,6 +59,14 @@ struct LazyVGridLayout: HVGrid {
         _LazyLayout_Properties(axes: .vertical)
     }
 
+    var minorAxisAnchor: CGFloat {
+        alignment.fraction
+    }
+
+    var gridItems: [GridItem] {
+        columns
+    }
+
     init(
         columns: [GridItem],
         alignment: HorizontalAlignment,
