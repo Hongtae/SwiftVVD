@@ -208,6 +208,89 @@ final class ViewListIdentityTests: XCTestCase {
         XCTAssertEqual(collection[2].explicitIDs, base.explicitIDs)
     }
 
+    func testBaseViewListApplyIDsUsesStoredImplicitID() {
+        let list = BaseViewList(
+            elements: FixedCountViewListElements(count: 2),
+            implicitID: 7
+        )
+        var index = 0
+        var ids: [_ViewList_ID] = []
+
+        let completed = list.applyIDs(from: &index) { id in
+            ids.append(id)
+            return true
+        }
+
+        XCTAssertTrue(completed)
+        XCTAssertEqual(ids.map(\.index), [0, 1])
+        XCTAssertEqual(ids.map(\.implicitID), [7, 7])
+        XCTAssertEqual(ids.map(\.canonicalID._index), [0, 1])
+        XCTAssertEqual(ids.map(\.canonicalID.implicitID), [7, 7])
+    }
+
+    func testViewListGroupAddsEntryIdentityForSiblingLists() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let first: Attribute<any ViewList> = graph.makeInput(
+                value: BaseViewList(elements: FixedCountViewListElements(count: 1)) as any ViewList
+            )
+            let second: Attribute<any ViewList> = graph.makeInput(
+                value: BaseViewList(elements: FixedCountViewListElements(count: 1)) as any ViewList
+            )
+            let group = _ViewList_Group(lists: [
+                (first.value, first),
+                (second.value, second),
+            ])
+            var index = 0
+            var ids: [_ViewList_ID] = []
+
+            let completed = group.applyIDs(from: &index) { id in
+                ids.append(id)
+                return true
+            }
+
+            XCTAssertTrue(completed)
+            XCTAssertEqual(ids.count, 2)
+            XCTAssertNotEqual(ids[0].canonicalID, ids[1].canonicalID)
+            let firstEntry = ids[0].canonicalID.explicitID?.base as? _ViewList_GroupEntryID
+            let secondEntry = ids[1].canonicalID.explicitID?.base as? _ViewList_GroupEntryID
+            XCTAssertEqual(firstEntry?.index, 0)
+            XCTAssertEqual(secondEntry?.index, 1)
+            XCTAssertEqual(firstEntry?.owner, first.identifier.rawValue)
+            XCTAssertEqual(secondEntry?.owner, second.identifier.rawValue)
+        }
+    }
+
+    func testViewListGroupPreservesExistingExplicitIdentityAsPrimary() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let rowList: Attribute<any ViewList> = graph.makeInput(
+                value: ExplicitSingleViewList(explicitID: AnyHashable("row")) as any ViewList
+            )
+            let group = _ViewList_Group(lists: [
+                (rowList.value, rowList),
+            ])
+            var index = 0
+            var ids: [_ViewList_ID] = []
+
+            let completed = group.applyIDs(from: &index) { id in
+                ids.append(id)
+                return true
+            }
+
+            XCTAssertTrue(completed)
+            XCTAssertEqual(ids.count, 1)
+            XCTAssertEqual(ids[0].canonicalID.explicitID, AnyHashable("row"))
+            XCTAssertTrue(ids[0].allExplicitIDs.contains { explicitID in
+                explicitID.base is _ViewList_GroupEntryID
+            })
+        }
+    }
+
     func testSublistTransformAppliesBindIDAndWrapSubgraphsInReverseItemOrder() {
         let log = TransformCallLog()
         var transform = _ViewList_SublistTransform()
@@ -341,5 +424,31 @@ private struct FixedCountViewListElements: _ViewList_Elements {
     ) -> (_ViewOutputs?, Bool) {
         from = max(0, from - count)
         return (nil, true)
+    }
+}
+
+private struct ExplicitSingleViewList: ViewList {
+    var explicitID: AnyHashable
+
+    func count(style: _ViewList_IteratorStyle) -> Int { 1 }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        let sublist = _ViewList_Sublist(
+            start: from,
+            count: 1,
+            id: _ViewList_ID(explicitID: explicitID),
+            elements: FixedCountViewListElements(count: 1),
+            traits: ViewTraitCollection(),
+            list: list
+        )
+        let result = to(&from, style, .sublist(sublist), transform)
+        from = 0
+        return result
     }
 }

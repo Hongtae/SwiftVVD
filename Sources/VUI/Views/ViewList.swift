@@ -175,7 +175,7 @@ struct BaseViewList: ViewList {
         let sublist = _ViewList_Sublist(
             start: from,
             count: elements.count,
-            id: _ViewList_ID(implicitID: 0),
+            id: _ViewList_ID(implicitID: implicitID),
             elements: elements,
             traits: traits,
             list: list
@@ -1114,17 +1114,56 @@ struct _ViewList_Group: ViewList {
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        for entry in lists {
+        for (entryIndex, entry) in lists.enumerated() {
+            let entryTransform = transform.withPushedItem(
+                _ViewList_GroupEntryTransform(
+                    owner: entry.attribute.identifier,
+                    index: entryIndex
+                )
+            )
             let cont = entry.list.applyNodes(
                 from: &from,
                 style: style,
                 list: entry.attribute,
-                transform: transform,
+                transform: entryTransform,
                 to: to
             )
             if !cont { return false }
         }
         return true
+    }
+}
+
+struct _ViewList_GroupEntryID: Hashable {
+    var owner: UInt32
+    var index: Int
+    var child: _ViewList_ID.Canonical
+}
+
+private struct _ViewList_GroupEntryTransform: _ViewList_SublistTransform_Item {
+    var owner: AGAttribute
+    var index: Int
+
+    private static let reuseID = Int(bitPattern: ObjectIdentifier(_ViewList_GroupEntryTransform.self))
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        bindID(&sublist.id)
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        let groupID = _ViewList_GroupEntryID(
+            owner: owner.rawValue,
+            index: index,
+            child: id.canonicalID
+        )
+        id.explicitIDs.append(
+            _ViewList_ID.Explicit(
+                id: AnyHashable(groupID),
+                reuseID: Self.reuseID,
+                owner: owner,
+                isUnary: false
+            )
+        )
     }
 }
 
