@@ -1609,8 +1609,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
                 for: id,
                 reuseIdentifier: reuseIdentifier,
                 transitionType: transitionType
-            ) &&
-            item.prefetchPhase != .pendingRemoval
+            )
         }
     }
 

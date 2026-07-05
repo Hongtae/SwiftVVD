@@ -689,7 +689,9 @@ private struct SectionedViewList: ViewList {
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        base.applyNodes(
+        var materializedBaseIndex = max(0, from)
+        var sectionIndex = 0
+        return base.applyNodes(
             from: &from,
             style: style,
             list: listAttribute ?? list,
@@ -697,10 +699,16 @@ private struct SectionedViewList: ViewList {
         ) { nodeFrom, nodeStyle, node, temporaryTransform in
             let sectioned = sectionedNode(
                 from: node,
-                nodeIndex: nodeFrom,
+                sectionIndex: sectionIndex,
+                materializedBaseIndex: materializedBaseIndex,
                 temporaryTransform: temporaryTransform
             )
-            return to(&nodeFrom, nodeStyle, sectioned.node, sectioned.temporaryTransform)
+            if case .section = sectioned.node {
+                sectionIndex += 1
+            }
+            let shouldContinue = to(&nodeFrom, nodeStyle, sectioned.node, sectioned.temporaryTransform)
+            materializedBaseIndex += estimatedCount(of: sectioned.node, style: nodeStyle)
+            return shouldContinue
         }
     }
 
@@ -730,7 +738,8 @@ private struct SectionedViewList: ViewList {
 
     private func sectionedNode(
         from node: _ViewList_Node,
-        nodeIndex: Int,
+        sectionIndex: Int,
+        materializedBaseIndex: Int,
         temporaryTransform: _ViewList_TemporarySublistTransform
     ) -> (node: _ViewList_Node, temporaryTransform: _ViewList_TemporarySublistTransform) {
         switch node {
@@ -738,7 +747,7 @@ private struct SectionedViewList: ViewList {
             temporaryTransform.apply(to: &sublist)
             let rowGeneratedSeed = SectionAccumulator.rowGeneratedSeed(
                 for: sublist.id,
-                sectionIndex: nodeIndex,
+                sectionIndex: sectionIndex,
                 base: rowGeneratedSubviewIDBase
             )
             if let section = SectionAccumulator.makeSection(
@@ -746,7 +755,8 @@ private struct SectionedViewList: ViewList {
                 contentSubgraph: nil,
                 sharedGeneratedSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedOwner: sharedGeneratedSubviewIDOwner,
-                rowGeneratedSeed: rowGeneratedSeed
+                rowGeneratedSeed: rowGeneratedSeed,
+                materializedSectionBaseIndex: materializedBaseIndex
             ) {
                 return (.section(section), _ViewList_TemporarySublistTransform())
             }
@@ -777,6 +787,19 @@ private struct SectionedViewList: ViewList {
 
     var debugDescription: String {
         "SectionedViewList(\(estimatedCount(style: _ViewList_IteratorStyle())))"
+    }
+
+    private func estimatedCount(of node: _ViewList_Node, style: _ViewList_IteratorStyle) -> Int {
+        switch node {
+        case .list(let list, _):
+            return list.estimatedCount(style: style)
+        case .group(let group):
+            return group.estimatedCount(style: style)
+        case .section(let section):
+            return section.estimatedCount(style: style)
+        case .sublist(let sublist):
+            return sublist.count
+        }
     }
 }
 
@@ -1095,7 +1118,8 @@ private struct SectionAccumulator {
         contentSubgraph: AGSubgraph?,
         sharedGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
         sharedGeneratedOwner: AGAttribute,
-        rowGeneratedSeed: _ViewList_ID.GeneratedIDSeed
+        rowGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
+        materializedSectionBaseIndex: Int? = nil
     ) -> _ViewList_Section? {
         guard sublist.count == 1,
               let generator = typedUnaryGenerator(in: sublist.elements),
@@ -1108,13 +1132,22 @@ private struct SectionAccumulator {
         ) else {
             return nil
         }
+        let contentBaseIndex = materializedSectionBaseIndex.map {
+            $0 + (section.header?.list.estimatedCount(style: _ViewList_IteratorStyle()) ?? 0)
+        }
+        let materializedRowGeneratedSeed = contentBaseIndex.map {
+            _ViewList_ID.GeneratedIDSeed(
+                base: UniqueID(value: rowGeneratedSeed.base.value &- UInt32(truncatingIfNeeded: $0)),
+                kind: rowGeneratedSeed.kind
+            )
+        } ?? rowGeneratedSeed
         let includeSharedGeneratedID = !section.isHierarchical
         let contentRowGeneratedSeed = section.isHierarchical
             ? _ViewList_ID.GeneratedIDSeed(
-                base: rowGeneratedSeed.uniqueID(at: 0),
+                base: materializedRowGeneratedSeed.uniqueID(at: 0),
                 kind: .shared
             )
-            : rowGeneratedSeed
+            : materializedRowGeneratedSeed
         section.containerValues = _containerValues(in: sublist.elements, at: sublist.start)
         section.subviewIDTransform = _subviewIDTransform(
             for: sublist.id,
@@ -1130,7 +1163,7 @@ private struct SectionAccumulator {
             sectionOwner: AGAttribute(rawValue: section.id),
             sharedGeneratedSeed: sharedGeneratedSeed,
             sharedGeneratedOwner: sharedGeneratedOwner,
-            rowGeneratedSeed: rowGeneratedSeed,
+            rowGeneratedSeed: materializedRowGeneratedSeed,
             includesSharedGeneratedID: includeSharedGeneratedID,
             includesRowGeneratedID: false
         )

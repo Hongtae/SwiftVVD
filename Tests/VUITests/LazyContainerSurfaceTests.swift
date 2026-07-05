@@ -1768,6 +1768,293 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutSectionedViewListGeneratedRowsAdvanceBySection() {
+        let host = GraphHost()
+
+        func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
+            var result: _ViewList_ID?
+            var from = 0
+            _ = subviews.apply(from: &from) { _, subview, stop in
+                result = subview.data.id
+                stop = true
+            }
+            return result
+        }
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sections = TupleView((
+                Section {
+                    Text("Row A")
+                        .id("row-a")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                        .id("row-b")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))
+            let sectionsAttr = graph.makeInput(value: sections)
+            var inputs = makeViewListInputs(graph: graph)
+            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            let outputs = type(of: sections)._makeViewList(
+                view: _GraphValue(_attribute: sectionsAttr),
+                inputs: inputs
+            )
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("section-list TupleView should produce a dynamic section-aware list")
+                return
+            }
+
+            let (cache, _, _) = makeLazyCache(host: host, list: listAttr.value)
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+
+            var rowIDs: [_ViewList_ID] = []
+            var nodeFrom = 0
+            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
+                guard case .section(let section) = node,
+                      let id = firstID(in: section.content) else {
+                    return
+                }
+                rowIDs.append(id)
+            }
+
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
+            assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 3)
+        }
+    }
+
+    func testLazyLayoutSectionedViewListGeneratedOnlyRowsUseUnaryGeneratedLane() {
+        let host = GraphHost()
+
+        func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
+            var result: _ViewList_ID?
+            var from = 0
+            _ = subviews.apply(from: &from) { _, subview, stop in
+                result = subview.data.id
+                stop = true
+            }
+            return result
+        }
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sections = TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))
+            let sectionsAttr = graph.makeInput(value: sections)
+            var inputs = makeViewListInputs(graph: graph)
+            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            let outputs = type(of: sections)._makeViewList(
+                view: _GraphValue(_attribute: sectionsAttr),
+                inputs: inputs
+            )
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("section-list TupleView should produce a dynamic section-aware list")
+                return
+            }
+
+            let (cache, _, _) = makeLazyCache(host: host, list: listAttr.value)
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+
+            var headerIDs: [_ViewList_ID] = []
+            var rowIDs: [_ViewList_ID] = []
+            var footerIDs: [_ViewList_ID] = []
+            var nodeFrom = 0
+            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
+                guard case .section(let section) = node,
+                      let headerID = firstID(in: section.header),
+                      let id = firstID(in: section.content) else {
+                    return
+                }
+                headerIDs.append(headerID)
+                rowIDs.append(id)
+                if let footerID = firstID(in: section.footer) {
+                    footerIDs.append(footerID)
+                }
+            }
+
+            XCTAssertEqual(headerIDs.count, 2)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(footerIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
+            XCTAssertEqual(
+                headerIDs.map { $0.explicitIDs },
+                rowIDs.map { Array($0.explicitIDs.suffix(2)) }
+            )
+            XCTAssertEqual(
+                footerIDs.map { $0.explicitIDs },
+                rowIDs.map { Array($0.explicitIDs.suffix(2)) }
+            )
+            XCTAssertTrue(headerIDs.allSatisfy {
+                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
+            })
+            XCTAssertTrue(footerIDs.allSatisfy {
+                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
+            })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false,
+                true, false, false,
+            ])
+            XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
+        }
+    }
+
+    func testLazyLayoutSectionedViewListPlainGeneratedOnlyRowsUseSampledStride() {
+        let host = GraphHost()
+
+        func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
+            var result: _ViewList_ID?
+            var from = 0
+            _ = subviews.apply(from: &from) { _, subview, stop in
+                result = subview.data.id
+                stop = true
+            }
+            return result
+        }
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sections = TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                },
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+            ))
+            let sectionsAttr = graph.makeInput(value: sections)
+            var inputs = makeViewListInputs(graph: graph)
+            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            let outputs = type(of: sections)._makeViewList(
+                view: _GraphValue(_attribute: sectionsAttr),
+                inputs: inputs
+            )
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("section-list TupleView should produce a dynamic section-aware list")
+                return
+            }
+
+            let (cache, _, _) = makeLazyCache(host: host, list: listAttr.value)
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+
+            var headerIDs: [_ViewList_ID] = []
+            var rowIDs: [_ViewList_ID] = []
+            var footerIDs: [_ViewList_ID] = []
+            var nodeFrom = 0
+            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
+                guard case .section(let section) = node,
+                      let headerID = firstID(in: section.header),
+                      let id = firstID(in: section.content) else {
+                    return
+                }
+                headerIDs.append(headerID)
+                rowIDs.append(id)
+                if let footerID = firstID(in: section.footer) {
+                    footerIDs.append(footerID)
+                }
+            }
+
+            XCTAssertEqual(headerIDs.count, 2)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(footerIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+            XCTAssertEqual(
+                headerIDs.map { $0.explicitIDs },
+                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
+            )
+            XCTAssertEqual(
+                footerIDs.map { $0.explicitIDs },
+                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
+            )
+            XCTAssertTrue(headerIDs.allSatisfy {
+                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
+            })
+            XCTAssertTrue(footerIDs.allSatisfy {
+                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
+            })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[1].reuseID, rowIDs[1].explicitIDs[1].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false,
+                true, false,
+            ])
+            XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
+        }
+    }
+
     func testGroupSectionsAccumulatorBuildsExplicitAndImplicitConfigurations() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -4813,7 +5100,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheReuseSkipsPendingRemovalCandidates() {
+    func testLazyLayoutViewCacheReuseAllowsPendingRemovalCandidates() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -4843,6 +5130,52 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     for: targetID.canonicalID,
                     reuseIdentifier: targetID.reuseIdentifier,
                     transitionType: nil
+                ) === pendingRemoval
+            )
+
+            cache.items.removeValue(forKey: pendingRemoval.id.canonicalID)
+            cache.lru.invalidate()
+            XCTAssertTrue(
+                cache.reusedItem(
+                    for: targetID.canonicalID,
+                    reuseIdentifier: targetID.reuseIdentifier,
+                    transitionType: nil
+                ) === reusable
+            )
+        }
+    }
+
+    func testLazyLayoutViewCacheReuseSkipsTransitionTypeMismatch() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let targetID = _ViewList_ID(implicitID: 99)
+            let (cache, mismatched, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                reuseIdentifier: targetID.reuseIdentifier
+            )
+            let (_, reusable, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2,
+                reuseIdentifier: targetID.reuseIdentifier
+            )
+            cache.lru.transactionSeed = 20
+            mismatched.insertionTransactionSeed = 18
+            mismatched.placementSeed = 10
+            mismatched.usedSeed = 1
+            mismatched.transitionType = OpacityTransition.self
+            reusable.insertionTransactionSeed = 18
+            reusable.placementSeed = 10
+            reusable.usedSeed = 10
+            reusable.transitionType = IdentityTransition.self
+
+            XCTAssertTrue(
+                cache.reusedItem(
+                    for: targetID.canonicalID,
+                    reuseIdentifier: targetID.reuseIdentifier,
+                    transitionType: IdentityTransition.self
                 ) === reusable
             )
 
@@ -4852,7 +5185,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 cache.reusedItem(
                     for: targetID.canonicalID,
                     reuseIdentifier: targetID.reuseIdentifier,
-                    transitionType: nil
+                    transitionType: IdentityTransition.self
                 )
             )
         }
@@ -5201,6 +5534,64 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 LazyLayoutCacheItem.State(
                     resetDelta: 7,
                     phase: .willAppear,
+                    enableTransitions: true,
+                    isRemoved: false
+                )
+            )
+        }
+    }
+
+    func testLazyLayoutViewCacheUpdateItemPhasesTraversesCachedItems() {
+        let host = GraphHost()
+
+        let (cache, sameSeedItem, sameSeedState, displayedItem, displayedState) = host.data.withCurrent {
+            let first = makeLazyCache(host: host)
+            let second = makeLazyCache(host: host, cache: first.cache, implicitID: 2)
+            return (first.cache, first.item, first.state, second.item, second.state)
+        }
+
+        host.data.withCurrent {
+            cache.placementSeed = 15
+            sameSeedItem.commitSeed = 15
+            sameSeedState.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 2,
+                    phase: .didDisappear,
+                    enableTransitions: true,
+                    isRemoved: true
+                )
+            )
+
+            displayedItem.commitSeed = 14
+            displayedItem.displayIndex = 3
+            displayedItem.willEnableTransitions = true
+            displayedState.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 4,
+                    phase: .identity,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+
+            cache.updateItemPhases()
+
+            XCTAssertEqual(
+                sameSeedState.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 2,
+                    phase: .identity,
+                    enableTransitions: true,
+                    isRemoved: true
+                )
+            )
+            XCTAssertEqual(displayedItem.displayIndex, 3)
+            XCTAssertFalse(displayedItem.willEnableTransitions)
+            XCTAssertEqual(
+                displayedState.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 4,
+                    phase: .didDisappear,
                     enableTransitions: true,
                     isRemoved: false
                 )
@@ -7566,6 +7957,39 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutViewCacheUpdatePrefetchPhasesResetsDisplayedInactiveChildLimit() {
+        let previousSemantics = Semantics.overrides
+        Semantics.overrides = Semantics.Overrides()
+        defer { Semantics.overrides = previousSemantics }
+
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, displayed, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (childCache, _, _) = makeLazyCache(host: host, implicitID: 10)
+            let (unrelatedChildCache, _, _) = makeLazyCache(host: host, implicitID: 11)
+            cache.childCaches[displayed.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [LazyLayoutCacheChildren.WeakChild(value: childCache)]
+            )
+            displayed.displayIndex = 0
+            displayed.prefetchPhase = .notPrefetching
+            cache.maxDisplayListSubviews = 4
+            childCache.maxDisplayListSubviews = 2
+            unrelatedChildCache.maxDisplayListSubviews = 3
+
+            cache.updatePrefetchPhases()
+
+            XCTAssertEqual(displayed.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(cache.maxDisplayListSubviews, 4)
+            XCTAssertNil(childCache.maxDisplayListSubviews)
+            XCTAssertEqual(unrelatedChildCache.maxDisplayListSubviews, 3)
+        }
+    }
+
     func testLazyLayoutViewCacheUpdatePrefetchPhasesClearsAgedPendingRemovalState() {
         let previousSemantics = Semantics.overrides
         Semantics.overrides = Semantics.Overrides()
@@ -8593,6 +9017,45 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             cache.resetMaxDisplayListSubviews(item: item)
             XCTAssertNil(childCache.maxDisplayListSubviews)
+        }
+    }
+
+    func testLazyLayoutViewCacheChildPrefetchPhaseSkipsReleasedWeakChildren() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, item, _) = makeLazyCache(host: host, implicitID: 1)
+            var releasedChild = LazyLayoutCacheChildren.WeakChild(value: nil)
+            do {
+                let (deadChildCache, _, _) = makeLazyCache(host: host, implicitID: 10)
+                deadChildCache.placedIndices = (min: 0, max: 2)
+                deadChildCache.maxDisplayListSubviews = 0
+                releasedChild = LazyLayoutCacheChildren.WeakChild(value: deadChildCache)
+            }
+            cache.childCaches[item.id.canonicalID] = LazyLayoutCacheChildren(children: [releasedChild])
+            cache.commitSeed = 21
+            item.prefetchSeed = 21
+
+            XCTAssertFalse(cache.hasChildPrefetchPhaseWork(item: item))
+            XCTAssertFalse(cache.setupChildPrefetchPhase(item: item))
+            XCTAssertFalse(cache.advanceChildPrefetchPhase(item: item))
+
+            let (liveChildCache, _, _) = makeLazyCache(host: host, implicitID: 11)
+            liveChildCache.placedIndices = (min: 0, max: 2)
+            cache.childCaches[item.id.canonicalID] = LazyLayoutCacheChildren(
+                children: [
+                    releasedChild,
+                    LazyLayoutCacheChildren.WeakChild(value: liveChildCache),
+                ]
+            )
+
+            XCTAssertTrue(cache.setupChildPrefetchPhase(item: item))
+            XCTAssertEqual(liveChildCache.maxDisplayListSubviews, 0)
+            XCTAssertTrue(cache.advanceChildPrefetchPhase(item: item))
+            XCTAssertEqual(liveChildCache.maxDisplayListSubviews, 1)
+
+            cache.resetMaxDisplayListSubviews(item: item)
+            XCTAssertNil(liveChildCache.maxDisplayListSubviews)
         }
     }
 
