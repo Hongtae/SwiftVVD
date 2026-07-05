@@ -859,7 +859,7 @@ final class LogicalCompletionAnimationBox: AnimationBoxBase, @unchecked Sendable
         time: TimeInterval,
         context: AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        base.velocity(value: value, time: time, context: context)
+        nil
     }
 
     override func shouldMerge<Value>(
@@ -868,7 +868,7 @@ final class LogicalCompletionAnimationBox: AnimationBoxBase, @unchecked Sendable
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Bool where Value: VectorArithmetic {
-        base.shouldMerge(previous: previous, value: value, time: time, context: &context)
+        false
     }
 }
 

@@ -170,6 +170,43 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
         }
     }
 
+    func testLogicalCompletionWrappersDoNotCallOldVelocity() {
+        let replacements: [(String, Animation)] = [
+            ("default", .default.logicallyComplete(after: 0.12)),
+            ("fluidSpring", .spring(response: 0.4, dampingFraction: 0.8).logicallyComplete(after: 0.12)),
+            ("springDuration", .spring(duration: 0.4, bounce: 0.2).logicallyComplete(after: 0.12)),
+            ("springValue", .spring(Spring(duration: 0.4, bounce: 0.1)).logicallyComplete(after: 0.12)),
+            ("interactiveDuration", .interactiveSpring(duration: 0.2, extraBounce: 0.1).logicallyComplete(after: 0.12)),
+            ("smooth", .smooth(duration: 0.4, extraBounce: 0.1).logicallyComplete(after: 0.12)),
+            (
+                "directSpring",
+                .interpolatingSpring(mass: 1, stiffness: 80, damping: 12).logicallyComplete(after: 0.12)
+            ),
+            ("linear", .linear(duration: 0.4).logicallyComplete(after: 0.12)),
+        ]
+
+        for (label, replacement) in replacements {
+            let scalarEvents = eventsWhenMerging(
+                replacement: replacement,
+                previous: recordingAnimation(),
+                value: 1.0
+            )
+            XCTAssertTrue(
+                scalarEvents.isEmpty,
+                "\(label) \(type(of: replacement.box)) \(scalarEvents)"
+            )
+            let vectorEvents = eventsWhenMerging(
+                replacement: replacement,
+                previous: recordingAnimation(),
+                value: AnimatablePair(1.0, -0.5)
+            )
+            XCTAssertTrue(
+                vectorEvents.isEmpty,
+                "\(label) \(type(of: replacement.box)) \(vectorEvents)"
+            )
+        }
+    }
+
     func testFiniteWrappersDoNotCallSourceDefinedVelocityInEitherDirection() {
         let wrappers: [(String, Animation)] = [
             (
@@ -464,6 +501,7 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
             ("delay", { $0.delay(0.10) }),
             ("speed", { $0.speed(2.0) }),
             ("repeat", { $0.repeatCount(2, autoreverses: false) }),
+            ("logicalCompletion", { $0.logicallyComplete(after: 0.16) }),
         ]
 
         for (label, wrapper) in wrappers {
@@ -514,6 +552,7 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
             ("delay", { $0.delay(0.10) }),
             ("speed", { $0.speed(2.0) }),
             ("repeat", { $0.repeatCount(2, autoreverses: false) }),
+            ("logicalCompletion", { $0.logicallyComplete(after: 0.16) }),
         ]
 
         for (label, wrapper) in wrappers {

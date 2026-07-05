@@ -4,6 +4,7 @@ import XCTest
 private final class LazyRootInputRecorder {
     var willRemoveBeforeInvalidation = false
     var retainCompletedUnusedRemovals = false
+    var maxUnusedItems = 0
 }
 
 private struct LazyRootInputCaptureView: View, _PrimitiveView {
@@ -18,6 +19,7 @@ private struct LazyRootInputCaptureView: View, _PrimitiveView {
         let recorder = view._attribute.value.recorder
         recorder.willRemoveBeforeInvalidation = inputs.base[DynamicContainerWillRemoveBeforeInvalidation.self]
         recorder.retainCompletedUnusedRemovals = inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
+        recorder.maxUnusedItems = inputs[DynamicContainerMaxUnusedItems.self]
 
         let layout = graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 1, height: 1))
@@ -114,6 +116,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             XCTAssertTrue(recorder.willRemoveBeforeInvalidation)
             XCTAssertTrue(recorder.retainCompletedUnusedRemovals)
+            XCTAssertEqual(recorder.maxUnusedItems, 1)
         }
     }
 
@@ -1684,6 +1687,87 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutSectionRegionSubviewIDsKeepRowGeneratedLaneContentOnly() {
+        let host = GraphHost()
+
+        func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
+            var result: _ViewList_ID?
+            var from = 0
+            _ = subviews.apply(from: &from) { _, subview, stop in
+                result = subview.data.id
+                stop = true
+            }
+            return result
+        }
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sections = TupleView((
+                Section {
+                    Text("Row")
+                        .id("row-id")
+                } header: {
+                    Text("Header")
+                } footer: {
+                    Text("Footer")
+                }
+                .id("section-id"),
+                Text("Tail")
+            ))
+            let sectionsAttr = graph.makeInput(value: sections)
+            var inputs = makeViewListInputs(graph: graph)
+            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            let outputs = type(of: sections)._makeViewList(
+                view: _GraphValue(_attribute: sectionsAttr),
+                inputs: inputs
+            )
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("section-list TupleView should produce a dynamic section-aware list")
+                return
+            }
+
+            let (cache, _, _) = makeLazyCache(host: host, list: listAttr.value)
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+
+            var sectionNode: _LazyLayout_Section?
+            var nodeFrom = 0
+            _ = subviews.applyNodes(from: &nodeFrom) { _, node, stop in
+                guard case .section(let section) = node else {
+                    return
+                }
+                sectionNode = section
+                stop = true
+            }
+            guard let section = sectionNode else {
+                XCTFail("expected a lazy section node")
+                return
+            }
+
+            let headerID = firstID(in: section.header)
+            let contentID = firstID(in: section.content)
+            let footerID = firstID(in: section.footer)
+
+            guard let headerID,
+                  let contentID,
+                  let footerID else {
+                XCTFail("expected header/content/footer IDs")
+                return
+            }
+            XCTAssertEqual(contentID.explicitIDs.count, 4)
+            XCTAssertEqual(contentID.explicitIDs[0].id, AnyHashable("row-id"))
+            XCTAssertTrue(contentID.explicitIDs[1].id.base is UniqueID)
+            XCTAssertEqual(contentID.explicitIDs[2].id, AnyHashable("section-id"))
+            XCTAssertTrue(contentID.explicitIDs[3].id.base is UniqueID)
+            XCTAssertEqual(contentID.explicitIDs[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(contentID.explicitIDs.map(\.isUnary), [true, false, false, false])
+            XCTAssertEqual(headerID.explicitIDs, Array(contentID.explicitIDs.suffix(2)))
+            XCTAssertEqual(footerID.explicitIDs, Array(contentID.explicitIDs.suffix(2)))
+            XCTAssertFalse(headerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+            XCTAssertFalse(footerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+        }
+    }
+
     func testGroupSectionsAccumulatorBuildsExplicitAndImplicitConfigurations() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1814,9 +1898,610 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(snapshot.sectionIDMirrorLabels, ["base"])
             XCTAssertTrue(snapshot.sectionIDBase is UInt32)
             XCTAssertEqual(snapshot.rowIDMirrorLabels, ["base"])
-            XCTAssertEqual(snapshot.rowID?.allExplicitIDs.first, AnyHashable("row-id"))
-            XCTAssertTrue(snapshot.rowID?.allExplicitIDs.contains(AnyHashable("section-id")) == true)
-            XCTAssertEqual(snapshot.rowID?.canonicalID.explicitID, AnyHashable("row-id"))
+            guard let rowID = snapshot.rowID else {
+                XCTFail("expected a captured row _ViewList_ID")
+                return
+            }
+            guard let headerID = snapshot.headerID,
+                  let footerID = snapshot.footerID else {
+                XCTFail("expected captured header/footer _ViewList_ID values")
+                return
+            }
+            XCTAssertEqual(rowID.allExplicitIDs.compactMap { $0.base as? String }, [
+                "row-id",
+                "section-id",
+            ])
+            XCTAssertEqual(rowID.explicitIDs.count, 4)
+            XCTAssertEqual(rowID.explicitIDs[0].id, AnyHashable("row-id"))
+            XCTAssertTrue(rowID.explicitIDs[1].id.base is UniqueID)
+            XCTAssertEqual(rowID.explicitIDs[2].id, AnyHashable("section-id"))
+            XCTAssertTrue(rowID.explicitIDs[3].id.base is UniqueID)
+            XCTAssertEqual(rowID.explicitIDs[0].reuseID, Int(bitPattern: ObjectIdentifier(Text.self)))
+            XCTAssertEqual(rowID.explicitIDs[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertNotEqual(rowID.explicitIDs[2].reuseID, 0)
+            XCTAssertNotEqual(rowID.explicitIDs[3].reuseID, 0)
+            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false, false, false])
+            XCTAssertTrue(rowID.explicitIDs.allSatisfy { $0.owner != nil })
+            XCTAssertNotEqual(rowID.explicitIDs[0].owner, rowID.explicitIDs[3].owner)
+            XCTAssertEqual(rowID.canonicalID.explicitID, AnyHashable("row-id"))
+            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
+            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
+            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false, false])
+            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false, false])
+            XCTAssertFalse(headerID.explicitIDs.contains { $0.id == AnyHashable("row-id") })
+            XCTAssertFalse(footerID.explicitIDs.contains { $0.id == AnyHashable("row-id") })
+        }
+    }
+
+    func testGroupSectionsSubviewIDsInstallGeneratedUniqueIDLanesWithoutRowID() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = Group(sections: Section {
+                Text("Row")
+            } header: {
+                Text("Header")
+            } footer: {
+                Text("Footer")
+            }
+            .id("section-id")) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("Group(sections:) should route through a dynamic section-root list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            guard let rowID = recorder.snapshots.first?.rowID else {
+                XCTFail("expected a captured row _ViewList_ID")
+                return
+            }
+            guard let headerID = recorder.snapshots.first?.headerID,
+                  let footerID = recorder.snapshots.first?.footerID else {
+                XCTFail("expected captured header/footer _ViewList_ID values")
+                return
+            }
+
+            XCTAssertEqual(rowID.explicitIDs.count, 3)
+            XCTAssertTrue(rowID.explicitIDs[0].id.base is UniqueID)
+            XCTAssertEqual(rowID.explicitIDs[1].id, AnyHashable("section-id"))
+            XCTAssertTrue(rowID.explicitIDs[2].id.base is UniqueID)
+            XCTAssertEqual(rowID.explicitIDs[0].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false, false])
+            XCTAssertTrue(rowID.explicitIDs.allSatisfy { $0.owner != nil })
+            XCTAssertNotEqual(rowID.explicitIDs[0].id, rowID.explicitIDs[2].id)
+            XCTAssertEqual(rowID.canonicalID.explicitID, rowID.explicitIDs[0].id)
+            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
+            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
+            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false, false])
+            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false, false])
+            XCTAssertFalse(headerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+            XCTAssertFalse(footerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+        }
+    }
+
+    func testGroupSectionsSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = Group(sections: TupleView((
+                Section {
+                    Text("Row A")
+                        .id("row-a")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                        .id("row-b")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("Group(sections:) should route through a dynamic section-root list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[3].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[3].reuseID, rowIDs[1].explicitIDs[3].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[3].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[3].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false, false,
+                true, false, false, false,
+            ])
+        }
+    }
+
+    func testGroupSectionsGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = Group(sections: TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("Group(sections:) should route through a dynamic section-root list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false,
+                true, false, false,
+            ])
+            XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
+        }
+    }
+
+    func testGroupSectionsPlainSubviewIDGeneratedLanesUseSampledRowLocalStride() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            do {
+                let recorder = SectionIDRecorder()
+                let root = Group(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                            .id("row-a")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    },
+                    Section {
+                        Text("Row B")
+                            .id("row-b")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    }
+                ))) { sections in
+                    SectionIDCaptureView(recorder: recorder, collection: sections)
+                }
+
+                let rootAttr = graph.makeInput(value: root)
+                let outputs = type(of: root)._makeViewList(
+                    view: _GraphValue(_attribute: rootAttr),
+                    inputs: makeViewListInputs(graph: graph)
+                )
+
+                guard case .dynamicList(let listAttr, _) = outputs.views else {
+                    XCTFail("Group(sections:) should route through a dynamic section-root list")
+                    return
+                }
+
+                _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 2)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
+                XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                    true, false, false,
+                    true, false, false,
+                ])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
+                XCTAssertEqual(rowIDs[0].explicitIDs[2].id, rowIDs[1].explicitIDs[2].id)
+            }
+
+            do {
+                let recorder = SectionIDRecorder()
+                let root = Group(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    },
+                    Section {
+                        Text("Row B")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    }
+                ))) { sections in
+                    SectionIDCaptureView(recorder: recorder, collection: sections)
+                }
+
+                let rootAttr = graph.makeInput(value: root)
+                let outputs = type(of: root)._makeViewList(
+                    view: _GraphValue(_attribute: rootAttr),
+                    inputs: makeViewListInputs(graph: graph)
+                )
+
+                guard case .dynamicList(let listAttr, _) = outputs.views else {
+                    XCTFail("Group(sections:) should route through a dynamic section-root list")
+                    return
+                }
+
+                _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 2)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+                XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                    true, false,
+                    true, false,
+                ])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
+                XCTAssertEqual(rowIDs[0].explicitIDs[1].id, rowIDs[1].explicitIDs[1].id)
+                XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
+            }
+        }
+    }
+
+    func testSectionGeneratedUniqueIDStrideExtendsAcrossThreeSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            do {
+                let recorder = SectionIDRecorder()
+                let root = Group(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                            .id("row-a")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    },
+                    Section {
+                        Text("Row B")
+                            .id("row-b")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    },
+                    Section {
+                        Text("Row C")
+                            .id("row-c")
+                    } header: {
+                        Text("Header C")
+                    } footer: {
+                        Text("Footer C")
+                    }
+                ))) { sections in
+                    SectionIDCaptureView(recorder: recorder, collection: sections)
+                }
+
+                guard materializeDynamicViewList(root, graph: graph) else {
+                    return
+                }
+
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 3)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b", "row-c"])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
+                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 2)
+            }
+
+            do {
+                let recorder = SectionIDRecorder()
+                let root = Group(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    }
+                    .id("section-a"),
+                    Section {
+                        Text("Row B")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    }
+                    .id("section-b"),
+                    Section {
+                        Text("Row C")
+                    } header: {
+                        Text("Header C")
+                    } footer: {
+                        Text("Footer C")
+                    }
+                    .id("section-c")
+                ))) { sections in
+                    SectionIDCaptureView(recorder: recorder, collection: sections)
+                }
+
+                guard materializeDynamicViewList(root, graph: graph) else {
+                    return
+                }
+
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 3)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b", "section-c"])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
+                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 2)
+                XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
+            }
+
+            do {
+                let recorder = SectionIDRecorder()
+                let root = ForEach(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    },
+                    Section {
+                        Text("Row B")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    },
+                    Section {
+                        Text("Row C")
+                    } header: {
+                        Text("Header C")
+                    } footer: {
+                        Text("Footer C")
+                    }
+                ))) { section in
+                    SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+                }
+
+                guard materializeDynamicViewList(root, graph: graph) else {
+                    return
+                }
+
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 3)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2, 2])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
+                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 1)
+                XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
+            }
+
+            do {
+                let recorder = SectionIDRecorder()
+                let root = ForEach(sections: TupleView((
+                    Section {
+                        Text("Row A")
+                            .id("row-a")
+                    } header: {
+                        Text("Header A")
+                    } footer: {
+                        Text("Footer A")
+                    }
+                    .id("section-a"),
+                    Section {
+                        Text("Row B")
+                            .id("row-b")
+                    } header: {
+                        Text("Header B")
+                    } footer: {
+                        Text("Footer B")
+                    }
+                    .id("section-b"),
+                    Section {
+                        Text("Row C")
+                            .id("row-c")
+                    } header: {
+                        Text("Header C")
+                    } footer: {
+                        Text("Footer C")
+                    }
+                    .id("section-c")
+                ))) { section in
+                    SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+                }
+
+                guard materializeDynamicViewList(root, graph: graph) else {
+                    return
+                }
+
+                let rowIDs = recorder.snapshots.compactMap(\.rowID)
+                XCTAssertEqual(rowIDs.count, 3)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4, 4])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b", "row-c"])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b", "section-c"])
+                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
+                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 3)
+            }
+        }
+    }
+
+    func testNestedSectionSubviewIDsFlattenIntoOuterContentRegion() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = Group(sections: Section {
+                Section {
+                    Text("Nested Row")
+                        .id("nested-row")
+                } header: {
+                    Text("Nested Header")
+                } footer: {
+                    Text("Nested Footer")
+                }
+                .id("nested-section")
+
+                Text("Outer Row")
+                    .id("outer-row")
+            } header: {
+                Text("Outer Header")
+            } footer: {
+                Text("Outer Footer")
+            }
+            .id("outer-section")) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            guard materializeDynamicViewList(root, graph: graph) else {
+                return
+            }
+
+            guard let snapshot = recorder.snapshots.first else {
+                XCTFail("expected one captured nested section snapshot")
+                return
+            }
+            XCTAssertEqual(recorder.snapshots.count, 1)
+            XCTAssertEqual(snapshot.contentIDs.count, 4)
+
+            guard let headerID = snapshot.headerID,
+                  let footerID = snapshot.footerID else {
+                XCTFail("expected outer header/footer IDs")
+                return
+            }
+            let contentIDs = snapshot.contentIDs
+            XCTAssertEqual(headerID.explicitIDs.count, 1)
+            XCTAssertEqual(headerID.explicitIDs[0].id, AnyHashable("outer-section"))
+            XCTAssertFalse(headerID.explicitIDs[0].isUnary)
+            XCTAssertEqual(footerID.explicitIDs, headerID.explicitIDs)
+
+            let nestedHeader = contentIDs[0].explicitIDs
+            let nestedRow = contentIDs[1].explicitIDs
+            let nestedFooter = contentIDs[2].explicitIDs
+            let outerRow = contentIDs[3].explicitIDs
+
+            XCTAssertEqual(nestedHeader.count, 3)
+            XCTAssertEqual(nestedHeader[0].id, AnyHashable("nested-section"))
+            XCTAssertFalse(nestedHeader[0].isUnary)
+            XCTAssertTrue(nestedHeader[1].id.base is UniqueID)
+            XCTAssertEqual(nestedHeader[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertFalse(nestedHeader[1].isUnary)
+            XCTAssertEqual(nestedHeader[2].id, AnyHashable("outer-section"))
+            XCTAssertFalse(nestedHeader[2].isUnary)
+            XCTAssertEqual(nestedFooter, nestedHeader)
+
+            XCTAssertEqual(nestedRow.count, 5)
+            XCTAssertEqual(nestedRow[0].id, AnyHashable("nested-row"))
+            XCTAssertTrue(nestedRow[0].isUnary)
+            XCTAssertTrue(nestedRow[1].id.base is UniqueID)
+            XCTAssertEqual(nestedRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertFalse(nestedRow[1].isUnary)
+            XCTAssertEqual(nestedRow[2].id, AnyHashable("nested-section"))
+            XCTAssertFalse(nestedRow[2].isUnary)
+            XCTAssertEqual(nestedRow[3].id, nestedHeader[1].id)
+            XCTAssertEqual(nestedRow[3].owner, nestedHeader[1].owner)
+            XCTAssertEqual(nestedRow[3].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertFalse(nestedRow[3].isUnary)
+            XCTAssertEqual(nestedRow[4].id, AnyHashable("outer-section"))
+            XCTAssertFalse(nestedRow[4].isUnary)
+
+            XCTAssertEqual(outerRow.count, 3)
+            XCTAssertEqual(outerRow[0].id, AnyHashable("outer-row"))
+            XCTAssertTrue(outerRow[0].isUnary)
+            XCTAssertEqual(outerRow[1].id, nestedHeader[1].id)
+            XCTAssertEqual(outerRow[1].owner, nestedHeader[1].owner)
+            XCTAssertEqual(outerRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertFalse(outerRow[1].isUnary)
+            XCTAssertEqual(outerRow[2].id, AnyHashable("outer-section"))
+            XCTAssertFalse(outerRow[2].isUnary)
+
+            XCTAssertNotEqual(nestedRow[1].id, nestedHeader[1].id)
+            XCTAssertNotEqual(nestedRow[1].owner, nestedHeader[1].owner)
         }
     }
 
@@ -1909,6 +2594,274 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     footer: "none"
                 ),
             ])
+        }
+    }
+
+    func testForEachSectionsSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = ForEach(sections: TupleView((
+                Section {
+                    Text("Row A")
+                        .id("row-a")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                        .id("row-b")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))) { section in
+                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[3].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[3].reuseID, rowIDs[1].explicitIDs[3].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[3].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[3].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false, false,
+                true, false, false, false,
+            ])
+        }
+    }
+
+    func testForEachSectionsGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = ForEach(sections: TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+                .id("section-a"),
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+                .id("section-b")
+            ))) { section in
+                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false,
+                true, false, false,
+            ])
+            XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
+        }
+    }
+
+    func testForEachSectionsPlainSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = ForEach(sections: TupleView((
+                Section {
+                    Text("Row A")
+                        .id("row-a")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                },
+                Section {
+                    Text("Row B")
+                        .id("row-b")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+            ))) { section in
+                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-a" })
+            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-b" })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[2].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false,
+                true, false, false,
+            ])
+        }
+    }
+
+    func testForEachSectionsPlainGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SectionIDRecorder()
+
+        ref.withCurrent {
+            let root = ForEach(sections: TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                },
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+            ))) { section in
+                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
+                return
+            }
+
+            _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
+            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
+                _ViewList_ID.generatedRowReuseID,
+                _ViewList_ID.generatedRowReuseID,
+            ])
+            XCTAssertEqual(rowIDs[0].explicitIDs[1].reuseID, rowIDs[1].explicitIDs[1].reuseID)
+            XCTAssertEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[1].owner)
+            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false,
+                true, false,
+            ])
+            XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
     }
 
@@ -2343,7 +3296,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 contentHeights: [50, 40],
                 footerHeight: 20
             )
-            let list: any ViewList = _ViewList_Group(lists: [section0, section1, section2])
+            let section3 = makeSection(
+                id: 3,
+                headerHeight: 30,
+                contentHeights: [60, 30],
+                footerHeight: 35
+            )
+            let list: any ViewList = _ViewList_Group(lists: [section0, section1, section2, section3])
             let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
             cache.items.removeAll()
             cache.lru.invalidate()
@@ -2354,28 +3313,267 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 base: _VStackLayout(alignment: .leading, spacing: 0),
                 pinnedViews: []
             )
-            var stackCache = _LazyStack_Cache<LazyVStackLayout>(
-                estimations: EstimationCache(
-                    lengthToCount: [25: 1],
-                    spacingToCount: [0: 1]
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyVStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [0: 1]
+                    )
                 )
-            )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 120),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
 
-            let resolved = stackCache.resolveIndexAndPosition(
-                stack: layout,
-                subviews: subviews,
-                visible: CGFloat(260)..<CGFloat(380),
-                minor: MinorProperties(count: 1, size: 180, geometry: 180)
-            )
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (65, 1, 30),
+                (120, 3, 120),
+                (140, 4, 140),
+                (170, 5, 170),
+                (205, 6, 205),
+                (250, 7, 250),
+                (260, 7, 250),
+                (275, 8, 275),
+                (305, 9, 305),
+                (355, 10, 355),
+                (395, 11, 395),
+                (405, 11, 395),
+                (415, 12, 415),
+            ]
 
-            XCTAssertEqual(resolved.index, 7)
-            XCTAssertEqual(resolved.position, 250)
-            XCTAssertEqual(stackCache.minor?.count, 1)
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(260)..<CGFloat(380))
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 120),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
         }
     }
 
     func testLazyStackCacheResolveIndexAndPositionTraversesHorizontalMultipleSections() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerWidth: CGFloat,
+                contentWidths: [CGFloat],
+                footerWidth: CGFloat
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion([CGSize(width: headerWidth, height: 20)])
+                let content = makeRegion(contentWidths.map { CGSize(width: $0, height: 20) })
+                let footer = makeRegion([CGSize(width: footerWidth, height: 20)])
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let section0 = makeSection(
+                id: 0,
+                headerWidth: 30,
+                contentWidths: [40, 50],
+                footerWidth: 20
+            )
+            let section1 = makeSection(
+                id: 1,
+                headerWidth: 30,
+                contentWidths: [35, 45],
+                footerWidth: 25
+            )
+            let section2 = makeSection(
+                id: 2,
+                headerWidth: 30,
+                contentWidths: [50, 40],
+                footerWidth: 20
+            )
+            let section3 = makeSection(
+                id: 3,
+                headerWidth: 30,
+                contentWidths: [60, 30],
+                footerWidth: 35
+            )
+            let list: any ViewList = _ViewList_Group(lists: [section0, section1, section2, section3])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyHStackLayout(
+                base: _HStackLayout(alignment: .top, spacing: 0),
+                pinnedViews: []
+            )
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyHStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [0: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 120),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (65, 1, 30),
+                (120, 3, 120),
+                (140, 4, 140),
+                (170, 5, 170),
+                (205, 6, 205),
+                (250, 7, 250),
+                (260, 7, 250),
+                (275, 8, 275),
+                (305, 9, 305),
+                (355, 10, 355),
+                (395, 11, 395),
+                (405, 11, 395),
+                (415, 12, 415),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 120),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesSpacingAcrossSections() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerHeight: CGFloat,
+                contentHeights: [CGFloat],
+                footerHeight: CGFloat
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion([CGSize(width: 20, height: headerHeight)])
+                let content = makeRegion(contentHeights.map { CGSize(width: 20, height: $0) })
+                let footer = makeRegion([CGSize(width: 20, height: footerHeight)])
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let section0 = makeSection(
+                id: 0,
+                headerHeight: 30,
+                contentHeights: [40, 50],
+                footerHeight: 20
+            )
+            let section1 = makeSection(
+                id: 1,
+                headerHeight: 30,
+                contentHeights: [35, 45],
+                footerHeight: 25
+            )
+            let section2 = makeSection(
+                id: 2,
+                headerHeight: 30,
+                contentHeights: [50, 40],
+                footerHeight: 20
+            )
+            let list: any ViewList = _ViewList_Group(lists: [section0, section1, section2])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .leading, spacing: 7),
+                pinnedViews: []
+            )
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyVStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 120),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (72, 1, 30),
+                (141, 3, 134),
+                (168, 4, 161),
+                (205, 5, 198),
+                (247, 6, 240),
+                (299, 7, 292),
+                (320, 7, 292),
+                (331, 8, 324),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 120),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesHorizontalSpacingAcrossSections() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -2431,27 +3629,684 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
             let subviews = cache.subviews(context: context)
             let layout = LazyHStackLayout(
-                base: _HStackLayout(alignment: .top, spacing: 0),
+                base: _HStackLayout(alignment: .top, spacing: 7),
                 pinnedViews: []
             )
-            var stackCache = _LazyStack_Cache<LazyHStackLayout>(
-                estimations: EstimationCache(
-                    lengthToCount: [25: 1],
-                    spacingToCount: [0: 1]
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyHStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [7: 1]
+                    )
                 )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 120),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (72, 1, 30),
+                (141, 3, 134),
+                (168, 4, 161),
+                (205, 5, 198),
+                (247, 6, 240),
+                (299, 7, 292),
+                (320, 7, 292),
+                (331, 8, 324),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 120),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionSkipsEmptySectionRegionsInSpacingStream() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerHeights: [CGFloat],
+                contentHeights: [CGFloat],
+                footerHeights: [CGFloat]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion(headerHeights.map { CGSize(width: 20, height: $0) })
+                let content = makeRegion(contentHeights.map { CGSize(width: 20, height: $0) })
+                let footer = makeRegion(footerHeights.map { CGSize(width: 20, height: $0) })
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let sectionA = makeSection(
+                id: 10,
+                headerHeights: [],
+                contentHeights: [40, 30],
+                footerHeights: [20]
+            )
+            let sectionB = makeSection(
+                id: 20,
+                headerHeights: [25],
+                contentHeights: [],
+                footerHeights: [20]
+            )
+            let sectionC = makeSection(
+                id: 30,
+                headerHeights: [30],
+                contentHeights: [35],
+                footerHeights: []
+            )
+            let emptySection = makeSection(
+                id: 35,
+                headerHeights: [],
+                contentHeights: [],
+                footerHeights: []
+            )
+            let sectionD = makeSection(
+                id: 40,
+                headerHeights: [],
+                contentHeights: [45],
+                footerHeights: []
+            )
+            let list: any ViewList = _ViewList_Group(lists: [sectionA, sectionB, sectionC, emptySection, sectionD])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .leading, spacing: 7),
+                pinnedViews: []
             )
 
-            let resolved = stackCache.resolveIndexAndPosition(
-                stack: layout,
-                subviews: subviews,
-                visible: CGFloat(260)..<CGFloat(380),
-                minor: MinorProperties(count: 1, size: 180, geometry: 180)
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyVStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 40),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (47, 1, 40),
+                (84, 2, 77),
+                (111, 3, 104),
+                (143, 4, 136),
+                (170, 5, 163),
+                (207, 6, 200),
+                (249, 7, 242),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 40),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionSkipsEmptySectionRegionsInHorizontalSpacingStream() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerWidths: [CGFloat],
+                contentWidths: [CGFloat],
+                footerWidths: [CGFloat]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion(headerWidths.map { CGSize(width: $0, height: 20) })
+                let content = makeRegion(contentWidths.map { CGSize(width: $0, height: 20) })
+                let footer = makeRegion(footerWidths.map { CGSize(width: $0, height: 20) })
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let sectionA = makeSection(
+                id: 10,
+                headerWidths: [],
+                contentWidths: [40, 30],
+                footerWidths: [20]
+            )
+            let sectionB = makeSection(
+                id: 20,
+                headerWidths: [25],
+                contentWidths: [],
+                footerWidths: [20]
+            )
+            let sectionC = makeSection(
+                id: 30,
+                headerWidths: [30],
+                contentWidths: [35],
+                footerWidths: []
+            )
+            let emptySection = makeSection(
+                id: 35,
+                headerWidths: [],
+                contentWidths: [],
+                footerWidths: []
+            )
+            let sectionD = makeSection(
+                id: 40,
+                headerWidths: [],
+                contentWidths: [45],
+                footerWidths: []
+            )
+            let list: any ViewList = _ViewList_Group(lists: [sectionA, sectionB, sectionC, emptySection, sectionD])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyHStackLayout(
+                base: _HStackLayout(alignment: .top, spacing: 7),
+                pinnedViews: []
             )
 
-            XCTAssertEqual(resolved.index, 7)
-            XCTAssertEqual(resolved.position, 250)
-            XCTAssertEqual(stackCache.minor?.count, 1)
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(260)..<CGFloat(380))
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyHStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [25: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 40),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (47, 1, 40),
+                (84, 2, 77),
+                (111, 3, 104),
+                (143, 4, 136),
+                (170, 5, 163),
+                (207, 6, 200),
+                (249, 7, 242),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 40),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesMultiItemSectionRegionSpacingPrefix() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerHeights: [CGFloat],
+                contentHeights: [CGFloat],
+                footerHeights: [CGFloat]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion(headerHeights.map { CGSize(width: 20, height: $0) })
+                let content = makeRegion(contentHeights.map { CGSize(width: 20, height: $0) })
+                let footer = makeRegion(footerHeights.map { CGSize(width: 20, height: $0) })
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let sectionA = makeSection(
+                id: 10,
+                headerHeights: [10, 15],
+                contentHeights: [20, 25],
+                footerHeights: [12, 18]
+            )
+            let sectionB = makeSection(
+                id: 20,
+                headerHeights: [14],
+                contentHeights: [22],
+                footerHeights: [16, 10]
+            )
+            let list: any ViewList = _ViewList_Group(lists: [sectionA, sectionB])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .leading, spacing: 7),
+                pinnedViews: []
+            )
+
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyVStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [20: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 50),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (17, 1, 10),
+                (39, 2, 32),
+                (66, 3, 59),
+                (98, 4, 91),
+                (117, 5, 110),
+                (142, 6, 135),
+                (163, 7, 156),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 50),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesHorizontalMultiItemSectionRegionSpacingPrefix() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            func makeSection(
+                id: UInt32,
+                headerWidths: [CGFloat],
+                contentWidths: [CGFloat],
+                footerWidths: [CGFloat]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let header = makeRegion(headerWidths.map { CGSize(width: $0, height: 20) })
+                let content = makeRegion(contentWidths.map { CGSize(width: $0, height: 20) })
+                let footer = makeRegion(footerWidths.map { CGSize(width: $0, height: 20) })
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: [header, content, footer])
+                )
+                return (sectionList, graph.makeInput(value: sectionList))
+            }
+
+            let sectionA = makeSection(
+                id: 10,
+                headerWidths: [10, 15],
+                contentWidths: [20, 25],
+                footerWidths: [12, 18]
+            )
+            let sectionB = makeSection(
+                id: 20,
+                headerWidths: [14],
+                contentWidths: [22],
+                footerWidths: [16, 10]
+            )
+            let list: any ViewList = _ViewList_Group(lists: [sectionA, sectionB])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyHStackLayout(
+                base: _HStackLayout(alignment: .top, spacing: 7),
+                pinnedViews: []
+            )
+
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyHStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [20: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 50),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (17, 1, 10),
+                (39, 2, 32),
+                (66, 3, 59),
+                (98, 4, 91),
+                (117, 5, 110),
+                (142, 6, 135),
+                (163, 7, 156),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 50),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesNestedSectionSpacingStream() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            let a0 = makeRegion([CGSize(width: 20, height: 20)])
+            let a1 = makeRegion([CGSize(width: 20, height: 25)])
+            let nestedHeader = makeRegion([CGSize(width: 20, height: 15)])
+            let nestedContent = makeRegion([CGSize(width: 20, height: 30)])
+            let nestedFooter = makeRegion([CGSize(width: 20, height: 10)])
+            let nestedSectionList: any ViewList = _ViewList_Section(
+                id: 11,
+                base: _ViewList_Group(lists: [nestedHeader, nestedContent, nestedFooter])
+            )
+            let nestedSection = (
+                list: nestedSectionList,
+                attribute: graph.makeInput(value: nestedSectionList)
+            )
+
+            let outerHeader = makeRegion([CGSize(width: 20, height: 12)])
+            let outerContentList: any ViewList = _ViewList_Group(lists: [a0, nestedSection, a1])
+            let outerContent = (
+                list: outerContentList,
+                attribute: graph.makeInput(value: outerContentList)
+            )
+            let outerFooter = makeRegion([CGSize(width: 20, height: 18)])
+            let outerSectionList: any ViewList = _ViewList_Section(
+                id: 10,
+                base: _ViewList_Group(lists: [outerHeader, outerContent, outerFooter])
+            )
+            let outerSection = (
+                list: outerSectionList,
+                attribute: graph.makeInput(value: outerSectionList)
+            )
+
+            let secondHeader = makeRegion([CGSize(width: 20, height: 14)])
+            let secondContent = makeRegion([CGSize(width: 20, height: 22)])
+            let secondFooter = makeRegion([CGSize(width: 20, height: 16)])
+            let secondSectionList: any ViewList = _ViewList_Section(
+                id: 20,
+                base: _ViewList_Group(lists: [secondHeader, secondContent, secondFooter])
+            )
+            let secondSection = (
+                list: secondSectionList,
+                attribute: graph.makeInput(value: secondSectionList)
+            )
+
+            let list: any ViewList = _ViewList_Group(lists: [outerSection, secondSection])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .leading, spacing: 7),
+                pinnedViews: []
+            )
+
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyVStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [20: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 80),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (19, 1, 12),
+                (46, 2, 39),
+                (68, 3, 61),
+                (105, 4, 98),
+                (122, 5, 115),
+                (154, 6, 147),
+                (179, 7, 172),
+                (200, 8, 193),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 80),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
+        }
+    }
+
+    func testLazyStackCacheResolveIndexAndPositionPreservesHorizontalNestedSectionSpacingStream() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            let a0 = makeRegion([CGSize(width: 20, height: 20)])
+            let a1 = makeRegion([CGSize(width: 25, height: 20)])
+            let nestedHeader = makeRegion([CGSize(width: 15, height: 20)])
+            let nestedContent = makeRegion([CGSize(width: 30, height: 20)])
+            let nestedFooter = makeRegion([CGSize(width: 10, height: 20)])
+            let nestedSectionList: any ViewList = _ViewList_Section(
+                id: 11,
+                base: _ViewList_Group(lists: [nestedHeader, nestedContent, nestedFooter])
+            )
+            let nestedSection = (
+                list: nestedSectionList,
+                attribute: graph.makeInput(value: nestedSectionList)
+            )
+
+            let outerHeader = makeRegion([CGSize(width: 12, height: 20)])
+            let outerContentList: any ViewList = _ViewList_Group(lists: [a0, nestedSection, a1])
+            let outerContent = (
+                list: outerContentList,
+                attribute: graph.makeInput(value: outerContentList)
+            )
+            let outerFooter = makeRegion([CGSize(width: 18, height: 20)])
+            let outerSectionList: any ViewList = _ViewList_Section(
+                id: 10,
+                base: _ViewList_Group(lists: [outerHeader, outerContent, outerFooter])
+            )
+            let outerSection = (
+                list: outerSectionList,
+                attribute: graph.makeInput(value: outerSectionList)
+            )
+
+            let secondHeader = makeRegion([CGSize(width: 14, height: 20)])
+            let secondContent = makeRegion([CGSize(width: 22, height: 20)])
+            let secondFooter = makeRegion([CGSize(width: 16, height: 20)])
+            let secondSectionList: any ViewList = _ViewList_Section(
+                id: 20,
+                base: _ViewList_Group(lists: [secondHeader, secondContent, secondFooter])
+            )
+            let secondSection = (
+                list: secondSectionList,
+                attribute: graph.makeInput(value: secondSectionList)
+            )
+
+            let list: any ViewList = _ViewList_Group(lists: [outerSection, secondSection])
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyHStackLayout(
+                base: _HStackLayout(alignment: .top, spacing: 7),
+                pinnedViews: []
+            )
+
+            func resolve(_ lowerBound: CGFloat) -> (index: Int, position: CGFloat, cache: _LazyStack_Cache<LazyHStackLayout>) {
+                var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+                    estimations: EstimationCache(
+                        lengthToCount: [20: 1],
+                        spacingToCount: [7: 1]
+                    )
+                )
+                let resolved = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: lowerBound..<(lowerBound + 80),
+                    minor: MinorProperties(count: 1, size: 180, geometry: 180)
+                )
+                return (resolved.index, resolved.position, stackCache)
+            }
+
+            let cases: [(lowerBound: CGFloat, index: Int, position: CGFloat)] = [
+                (0, 0, 0),
+                (19, 1, 12),
+                (46, 2, 39),
+                (68, 3, 61),
+                (105, 4, 98),
+                (122, 5, 115),
+                (154, 6, 147),
+                (179, 7, 172),
+                (200, 8, 193),
+            ]
+
+            for testCase in cases {
+                let resolved = resolve(testCase.lowerBound)
+                XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
+                XCTAssertEqual(
+                    resolved.cache.visibleExtent,
+                    testCase.lowerBound..<(testCase.lowerBound + 80),
+                    "lowerBound \(testCase.lowerBound)"
+                )
+            }
         }
     }
 
@@ -2841,6 +4696,37 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(first.placementSeed, 1)
             XCTAssertEqual(first.commitSeed, 1)
             XCTAssertEqual(first.placement, placement)
+        }
+    }
+
+    func testLazyLayoutViewCacheLRUUpdatedItemsCachesSortedCandidatesUntilInvalidated() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let (cache, first, _) = makeLazyCache(host: host, implicitID: 1, reuseIdentifier: 4)
+            let (_, second, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2,
+                reuseIdentifier: 4
+            )
+            first.usedSeed = 20
+            second.usedSeed = 10
+
+            let firstPass = cache.lru.updatedItems(Array(cache.items.values))
+            XCTAssertEqual(firstPass.map(\.id.index), [2, 1])
+            XCTAssertEqual(cache.lru.usedSeed, 1)
+
+            first.usedSeed = 0
+            second.usedSeed = 30
+            let cachedPass = cache.lru.updatedItems(Array(cache.items.values))
+            XCTAssertEqual(cachedPass.map(\.id.index), [2, 1])
+            XCTAssertEqual(cache.lru.usedSeed, 1)
+
+            cache.lru.invalidate()
+            let refreshedPass = cache.lru.updatedItems(Array(cache.items.values))
+            XCTAssertEqual(refreshedPass.map(\.id.index), [1, 2])
+            XCTAssertEqual(cache.lru.usedSeed, 2)
         }
     }
 
@@ -4630,6 +6516,385 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutHorizontalMiddlePinnedSectionHeaderPushesBeforeNextHeaderPins() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, firstHeader, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, firstBody, _) = makeLazyCache(host: host, cache: cache, implicitID: 2)
+            let (_, secondHeader, _) = makeLazyCache(host: host, cache: cache, implicitID: 3)
+            let (_, secondBody0, _) = makeLazyCache(host: host, cache: cache, implicitID: 4)
+            let (_, secondBody1, _) = makeLazyCache(host: host, cache: cache, implicitID: 5)
+            let (_, secondBody2, _) = makeLazyCache(host: host, cache: cache, implicitID: 6)
+            let (_, secondBody3, _) = makeLazyCache(host: host, cache: cache, implicitID: 7)
+            let (_, thirdHeader, _) = makeLazyCache(host: host, cache: cache, implicitID: 8)
+            let (_, thirdBody, _) = makeLazyCache(host: host, cache: cache, implicitID: 9)
+            let secondBodies = [secondBody0, secondBody1, secondBody2, secondBody3]
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            firstHeader.section = LazyLayoutCacheSection(id: 10, isHeader: true)
+            firstBody.section = LazyLayoutCacheSection(id: 10)
+            secondHeader.section = LazyLayoutCacheSection(id: 20, isHeader: true)
+            for body in secondBodies {
+                body.section = LazyLayoutCacheSection(id: 20)
+            }
+            thirdHeader.section = LazyLayoutCacheSection(id: 30, isHeader: true)
+            thirdBody.section = LazyLayoutCacheSection(id: 30)
+            installSize(CGSize(width: 30, height: 80), on: firstHeader)
+            installSize(CGSize(width: 100, height: 80), on: firstBody)
+            installSize(CGSize(width: 30, height: 80), on: secondHeader)
+            for body in secondBodies {
+                installSize(CGSize(width: 50, height: 80), on: body)
+            }
+            installSize(CGSize(width: 30, height: 80), on: thirdHeader)
+            installSize(CGSize(width: 100, height: 80), on: thirdBody)
+
+            func makePlaced() -> [_LazyLayout_PlacedSubview] {
+                [
+                    _LazyLayout_PlacedSubview(
+                        item: firstHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 0, y: 0)
+                        ),
+                        index: 0
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: firstBody,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 100, height: 80),
+                            at: CGPoint(x: 30, y: 0)
+                        ),
+                        index: 1
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 130, y: 0)
+                        ),
+                        index: 2
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody0,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 160, y: 0)
+                        ),
+                        index: 3
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody1,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 210, y: 0)
+                        ),
+                        index: 4
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody2,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 260, y: 0)
+                        ),
+                        index: 5
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody3,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 310, y: 0)
+                        ),
+                        index: 6
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: thirdHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 360, y: 0)
+                        ),
+                        index: 7
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: thirdBody,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 100, height: 80),
+                            at: CGPoint(x: 390, y: 0)
+                        ),
+                        index: 8
+                    ),
+                ]
+            }
+
+            var firstCollision = makePlaced()
+            firstCollision.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 130, y: 0),
+                    contentSize: CGSize(width: 490, height: 80),
+                    containerSize: CGSize(width: 120, height: 80)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertFalse(firstCollision.contains { $0.item === firstHeader })
+            XCTAssertTrue(firstCollision.contains { $0.item === secondHeader })
+            XCTAssertEqual(
+                firstCollision.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 130, y: 0)
+            )
+
+            var beforePush = makePlaced()
+            beforePush.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 300, y: 0),
+                    contentSize: CGSize(width: 490, height: 80),
+                    containerSize: CGSize(width: 120, height: 80)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertFalse(beforePush.contains { $0.item === firstHeader })
+            XCTAssertTrue(beforePush.contains { $0.item === secondHeader })
+            XCTAssertTrue(beforePush.contains { $0.item === thirdHeader })
+            XCTAssertEqual(
+                beforePush.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 300, y: 0)
+            )
+            XCTAssertEqual(
+                beforePush.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 360, y: 0)
+            )
+
+            var pushed = makePlaced()
+            pushed.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 359, y: 0),
+                    contentSize: CGSize(width: 490, height: 80),
+                    containerSize: CGSize(width: 120, height: 80)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertFalse(pushed.contains { $0.item === firstHeader })
+            XCTAssertTrue(pushed.contains { $0.item === secondHeader })
+            XCTAssertTrue(pushed.contains { $0.item === thirdHeader })
+            XCTAssertEqual(
+                pushed.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 330, y: 0)
+            )
+            XCTAssertEqual(
+                pushed.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 360, y: 0)
+            )
+
+            var atSecondCollision = makePlaced()
+            atSecondCollision.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 360, y: 0),
+                    contentSize: CGSize(width: 490, height: 80),
+                    containerSize: CGSize(width: 120, height: 80)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertFalse(atSecondCollision.contains { $0.item === firstHeader })
+            XCTAssertTrue(atSecondCollision.contains { $0.item === secondHeader })
+            XCTAssertTrue(atSecondCollision.contains { $0.item === thirdHeader })
+            XCTAssertEqual(
+                atSecondCollision.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 330, y: 0)
+            )
+            XCTAssertEqual(
+                atSecondCollision.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 360, y: 0)
+            )
+        }
+    }
+
+    func testLazyLayoutHorizontalShortMiddlePinnedSectionHeadersUseNaturalAndOffscreenPositions() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, firstHeader, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, firstBody, _) = makeLazyCache(host: host, cache: cache, implicitID: 2)
+            let (_, secondHeader, _) = makeLazyCache(host: host, cache: cache, implicitID: 3)
+            let (_, secondBody0, _) = makeLazyCache(host: host, cache: cache, implicitID: 4)
+            let (_, secondBody1, _) = makeLazyCache(host: host, cache: cache, implicitID: 5)
+            let (_, thirdHeader, _) = makeLazyCache(host: host, cache: cache, implicitID: 6)
+            let (_, thirdBody, _) = makeLazyCache(host: host, cache: cache, implicitID: 7)
+            let secondBodies = [secondBody0, secondBody1]
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            firstHeader.section = LazyLayoutCacheSection(id: 10, isHeader: true)
+            firstBody.section = LazyLayoutCacheSection(id: 10)
+            secondHeader.section = LazyLayoutCacheSection(id: 20, isHeader: true)
+            for body in secondBodies {
+                body.section = LazyLayoutCacheSection(id: 20)
+            }
+            thirdHeader.section = LazyLayoutCacheSection(id: 30, isHeader: true)
+            thirdBody.section = LazyLayoutCacheSection(id: 30)
+            installSize(CGSize(width: 30, height: 80), on: firstHeader)
+            installSize(CGSize(width: 100, height: 80), on: firstBody)
+            installSize(CGSize(width: 30, height: 80), on: secondHeader)
+            for body in secondBodies {
+                installSize(CGSize(width: 50, height: 80), on: body)
+            }
+            installSize(CGSize(width: 30, height: 80), on: thirdHeader)
+            installSize(CGSize(width: 100, height: 80), on: thirdBody)
+
+            func makePlaced() -> [_LazyLayout_PlacedSubview] {
+                [
+                    _LazyLayout_PlacedSubview(
+                        item: firstHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 0, y: 0)
+                        ),
+                        index: 0
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: firstBody,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 100, height: 80),
+                            at: CGPoint(x: 30, y: 0)
+                        ),
+                        index: 1
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 130, y: 0)
+                        ),
+                        index: 2
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody0,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 160, y: 0)
+                        ),
+                        index: 3
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondBody1,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 50, height: 80),
+                            at: CGPoint(x: 210, y: 0)
+                        ),
+                        index: 4
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: thirdHeader,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 30, height: 80),
+                            at: CGPoint(x: 260, y: 0)
+                        ),
+                        index: 5
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: thirdBody,
+                        placement: _Placement(
+                            proposedSize: CGSize(width: 100, height: 80),
+                            at: CGPoint(x: 290, y: 0)
+                        ),
+                        index: 6
+                    ),
+                ]
+            }
+
+            func pinned(at offset: CGFloat) -> [_LazyLayout_PlacedSubview] {
+                var placed = makePlaced()
+                placed.pinSectionHeadersAndFooters(
+                    geometry: ScrollGeometry(
+                        contentOffset: CGPoint(x: offset, y: 0),
+                        contentSize: CGSize(width: 390, height: 80),
+                        containerSize: CGSize(width: 120, height: 80)
+                    ),
+                    layoutDirection: .leftToRight,
+                    axes: .horizontal,
+                    pinnedViews: .sectionHeaders
+                )
+                return placed
+            }
+
+            let atFirstCollision = pinned(at: 130)
+            XCTAssertFalse(atFirstCollision.contains { $0.item === firstHeader })
+            XCTAssertEqual(
+                atFirstCollision.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 130, y: 0)
+            )
+
+            let afterMiddleNatural = pinned(at: 131)
+            XCTAssertFalse(afterMiddleNatural.contains { $0.item === firstHeader })
+            XCTAssertEqual(
+                afterMiddleNatural.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 130, y: 0)
+            )
+            XCTAssertEqual(
+                afterMiddleNatural.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 260, y: 0)
+            )
+
+            let atMiddleTrailingEdge = pinned(at: 160)
+            XCTAssertEqual(
+                atMiddleTrailingEdge.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 130, y: 0)
+            )
+            XCTAssertEqual(
+                atMiddleTrailingEdge.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 260, y: 0)
+            )
+
+            let afterMiddleTrailingEdge = pinned(at: 161)
+            XCTAssertEqual(
+                afterMiddleTrailingEdge.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: -30, y: 0)
+            )
+            XCTAssertEqual(
+                afterMiddleTrailingEdge.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 260, y: 0)
+            )
+
+            let beforeThirdCollision = pinned(at: 259)
+            XCTAssertEqual(
+                beforeThirdCollision.first { $0.item === secondHeader }?.placement.anchorPosition,
+                CGPoint(x: -30, y: 0)
+            )
+            XCTAssertEqual(
+                beforeThirdCollision.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 260, y: 0)
+            )
+
+            let atThirdCollision = pinned(at: 260)
+            XCTAssertFalse(atThirdCollision.contains { $0.item === secondHeader })
+            XCTAssertEqual(
+                atThirdCollision.first { $0.item === thirdHeader }?.placement.anchorPosition,
+                CGPoint(x: 260, y: 0)
+            )
+        }
+    }
+
     func testLazyLayoutPinnedSectionHeaderShortRouteUsesBodyItemCountBoundary() {
         let host = GraphHost()
 
@@ -4999,6 +7264,194 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             XCTAssertEqual(
                 shortLengthPinned.first { $0.item === shortLengthLongCount.header }?.placement.anchorPosition,
+                CGPoint(x: 161, y: 0)
+            )
+        }
+    }
+
+    func testLazyGridPinnedSectionHeaderShortRouteUsesMajorGroupBoundary() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 1)
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            func makeItem(
+                implicitID: Int,
+                section: LazyLayoutCacheSection,
+                size: CGSize
+            ) -> LazyLayoutCacheItem {
+                let (_, item, _) = makeLazyCache(host: host, cache: cache, implicitID: implicitID)
+                item.section = section
+                installSize(size, on: item)
+                return item
+            }
+
+            func makeCase(
+                horizontal: Bool,
+                secondBodyCount: Int,
+                implicitIDStart: Int
+            ) -> (secondHeader: LazyLayoutCacheItem, placed: [_LazyLayout_PlacedSubview]) {
+                let headerSize = horizontal
+                    ? CGSize(width: 30, height: 120)
+                    : CGSize(width: 120, height: 30)
+                let bodySize = horizontal
+                    ? CGSize(width: 50, height: 60)
+                    : CGSize(width: 60, height: 50)
+                let thirdBodySize = horizontal
+                    ? CGSize(width: 100, height: 120)
+                    : CGSize(width: 120, height: 100)
+
+                func point(major: CGFloat, minor: CGFloat) -> CGPoint {
+                    horizontal ? CGPoint(x: major, y: minor) : CGPoint(x: minor, y: major)
+                }
+
+                let firstHeader = makeItem(
+                    implicitID: implicitIDStart,
+                    section: LazyLayoutCacheSection(id: UInt32(implicitIDStart), isHeader: true),
+                    size: headerSize
+                )
+                let secondSectionID = UInt32(implicitIDStart + 10)
+                let secondHeader = makeItem(
+                    implicitID: implicitIDStart + 1,
+                    section: LazyLayoutCacheSection(id: secondSectionID, isHeader: true),
+                    size: headerSize
+                )
+                let secondBodies = (0..<secondBodyCount).map { offset in
+                    makeItem(
+                        implicitID: implicitIDStart + 2 + offset,
+                        section: LazyLayoutCacheSection(id: secondSectionID),
+                        size: bodySize
+                    )
+                }
+                let thirdHeaderImplicitID = implicitIDStart + 2 + secondBodies.count
+                let thirdHeader = makeItem(
+                    implicitID: thirdHeaderImplicitID,
+                    section: LazyLayoutCacheSection(id: UInt32(thirdHeaderImplicitID), isHeader: true),
+                    size: headerSize
+                )
+                let thirdBody = makeItem(
+                    implicitID: thirdHeaderImplicitID + 1,
+                    section: LazyLayoutCacheSection(id: UInt32(thirdHeaderImplicitID)),
+                    size: thirdBodySize
+                )
+
+                var placed = [
+                    _LazyLayout_PlacedSubview(
+                        item: firstHeader,
+                        placement: _Placement(proposedSize: headerSize, at: point(major: 0, minor: 0)),
+                        index: 0
+                    ),
+                    _LazyLayout_PlacedSubview(
+                        item: secondHeader,
+                        placement: _Placement(proposedSize: headerSize, at: point(major: 130, minor: 0)),
+                        index: 1
+                    ),
+                ]
+
+                for (offset, body) in secondBodies.enumerated() {
+                    let major = CGFloat(160 + (offset / 2) * 50)
+                    let minor = CGFloat((offset % 2) * 60)
+                    placed.append(
+                        _LazyLayout_PlacedSubview(
+                            item: body,
+                            placement: _Placement(proposedSize: bodySize, at: point(major: major, minor: minor)),
+                            index: 2 + offset
+                        )
+                    )
+                }
+                let thirdHeaderMajor = CGFloat(160 + ((secondBodies.count + 1) / 2) * 50)
+                placed.append(
+                    _LazyLayout_PlacedSubview(
+                        item: thirdHeader,
+                        placement: _Placement(proposedSize: headerSize, at: point(major: thirdHeaderMajor, minor: 0)),
+                        index: 2 + secondBodies.count
+                    )
+                )
+                placed.append(
+                    _LazyLayout_PlacedSubview(
+                        item: thirdBody,
+                        placement: _Placement(proposedSize: thirdBodySize, at: point(major: thirdHeaderMajor + 30, minor: 0)),
+                        index: 3 + secondBodies.count
+                    )
+                )
+
+                return (secondHeader, placed)
+            }
+
+            let verticalShortCase = makeCase(horizontal: false, secondBodyCount: 4, implicitIDStart: 100)
+            var verticalShort = verticalShortCase.placed
+            verticalShort.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 0, y: 161),
+                    contentSize: CGSize(width: 120, height: 390),
+                    containerSize: CGSize(width: 120, height: 120)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertEqual(
+                verticalShort.first { $0.item === verticalShortCase.secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 0, y: -30)
+            )
+
+            let verticalLongCase = makeCase(horizontal: false, secondBodyCount: 6, implicitIDStart: 200)
+            var verticalLong = verticalLongCase.placed
+            verticalLong.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 0, y: 161),
+                    contentSize: CGSize(width: 120, height: 440),
+                    containerSize: CGSize(width: 120, height: 120)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertEqual(
+                verticalLong.first { $0.item === verticalLongCase.secondHeader }?.placement.anchorPosition,
+                CGPoint(x: 0, y: 161)
+            )
+
+            let horizontalShortCase = makeCase(horizontal: true, secondBodyCount: 4, implicitIDStart: 300)
+            var horizontalShort = horizontalShortCase.placed
+            horizontalShort.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 161, y: 0),
+                    contentSize: CGSize(width: 390, height: 120),
+                    containerSize: CGSize(width: 120, height: 120)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertEqual(
+                horizontalShort.first { $0.item === horizontalShortCase.secondHeader }?.placement.anchorPosition,
+                CGPoint(x: -30, y: 0)
+            )
+
+            let horizontalLongCase = makeCase(horizontal: true, secondBodyCount: 6, implicitIDStart: 400)
+            var horizontalLong = horizontalLongCase.placed
+            horizontalLong.pinSectionHeadersAndFooters(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 161, y: 0),
+                    contentSize: CGSize(width: 440, height: 120),
+                    containerSize: CGSize(width: 120, height: 120)
+                ),
+                layoutDirection: .leftToRight,
+                axes: .horizontal,
+                pinnedViews: .sectionHeaders
+            )
+            XCTAssertEqual(
+                horizontalLong.first { $0.item === horizontalLongCase.secondHeader }?.placement.anchorPosition,
                 CGPoint(x: 161, y: 0)
             )
         }
@@ -6529,6 +8982,37 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutViewCacheItemDataMissReusesPendingRemovalCandidate() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let oldID = _ViewList_ID(implicitID: 1)
+            let targetID = _ViewList_ID(implicitID: 99)
+            let (cache, candidate, _) = makeLazyCache(
+                host: host,
+                implicitID: oldID.index,
+                reuseIdentifier: targetID.reuseIdentifier
+            )
+            cache.lru.transactionSeed = 20
+            candidate.insertionTransactionSeed = 18
+            candidate.usedSeed = 12
+            candidate.placementSeed = 10
+            candidate.prefetchSeed = 4
+            candidate.prefetchPhase = .pendingRemoval
+
+            let data = makeLazyData(graph: host.data.graph, id: targetID)
+            let returned = cache.item(data: data)
+
+            XCTAssertTrue(returned === candidate)
+            XCTAssertNil(cache.item(for: oldID.canonicalID))
+            XCTAssertTrue(cache.item(for: targetID.canonicalID) === candidate)
+            XCTAssertEqual(candidate.id, targetID)
+            XCTAssertEqual(candidate.insertionTransactionSeed, 20)
+            XCTAssertEqual(candidate.prefetchSeed, 0)
+            XCTAssertEqual(candidate.prefetchPhase, .notPrefetching)
+        }
+    }
+
     func testLazyLayoutViewCacheItemDataMissCreatesNewItemWhenNoReusableCandidate() {
         let host = GraphHost()
 
@@ -6891,6 +9375,69 @@ final class LazyContainerSurfaceTests: XCTestCase {
     private func makeViewListInputs(graph: _AGGraph) -> _ViewListInputs {
         _ViewListInputs(from: makeViewInputs(graph: graph))
     }
+
+    private func materializeDynamicViewList<Root: View>(
+        _ root: Root,
+        graph: _AGGraph,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let rootAttr = graph.makeInput(value: root)
+        let outputs = type(of: root)._makeViewList(
+            view: _GraphValue(_attribute: rootAttr),
+            inputs: makeViewListInputs(graph: graph)
+        )
+
+        guard case .dynamicList(let listAttr, _) = outputs.views else {
+            XCTFail("expected a dynamic section list", file: file, line: line)
+            return false
+        }
+
+        _ = listAttr.value.count(style: _ViewList_IteratorStyle())
+        return true
+    }
+
+    private func assertRowGeneratedUniqueIDStride(
+        _ rowIDs: [_ViewList_ID],
+        generatedIndex: Int,
+        expectedStride: UInt32,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertGreaterThanOrEqual(rowIDs.count, 2, file: file, line: line)
+        let values = rowIDs.compactMap {
+            $0.explicitIDs.indices.contains(generatedIndex)
+                ? ($0.explicitIDs[generatedIndex].id.base as? UniqueID)?.value
+                : nil
+        }
+        XCTAssertEqual(values.count, rowIDs.count, file: file, line: line)
+        guard values.count >= 2 else { return }
+
+        let strides = zip(values, values.dropFirst()).map {
+            UInt32(abs(Int64($0.1) - Int64($0.0)))
+        }
+        XCTAssertEqual(
+            strides,
+            Array(repeating: expectedStride, count: values.count - 1),
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertGeneratedUniqueIDShared(
+        _ rowIDs: [_ViewList_ID],
+        generatedIndex: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let ids = rowIDs.compactMap {
+            $0.explicitIDs.indices.contains(generatedIndex)
+                ? $0.explicitIDs[generatedIndex].id.base as? UniqueID
+                : nil
+        }
+        XCTAssertEqual(ids.count, rowIDs.count, file: file, line: line)
+        XCTAssertEqual(Set(ids).count, 1, file: file, line: line)
+    }
 }
 
 private final class SectionCollectionRecorder {
@@ -6919,8 +9466,11 @@ private final class SectionIDRecorder {
     struct Snapshot {
         var sectionIDMirrorLabels: [String]
         var sectionIDBase: Any
+        var headerID: _ViewList_ID?
+        var contentIDs: [_ViewList_ID] = []
         var rowIDMirrorLabels: [String]
         var rowID: _ViewList_ID?
+        var footerID: _ViewList_ID?
     }
 
     var snapshots: [Snapshot] = []
@@ -7033,14 +9583,21 @@ private struct SectionIDCaptureView: View, _PrimitiveView {
         let capture = view._attribute.value
         for section in capture.collection {
             let sectionMirror = Mirror(reflecting: section.id)
+            let headerID = firstViewListID(in: section.header)
             let row = section.content.isEmpty ? nil : section.content[section.content.startIndex]
             let rowMirror = row.map { Mirror(reflecting: $0.id) }
+            let footerID = firstViewListID(in: section.footer)
             capture.recorder.snapshots.append(
                 SectionIDRecorder.Snapshot(
                     sectionIDMirrorLabels: sectionMirror.children.map { $0.label ?? "" },
                     sectionIDBase: section.id.base.base,
+                    headerID: headerID,
+                    contentIDs: section.content.indices.compactMap {
+                        section.content[$0].id.base.base as? _ViewList_ID
+                    },
                     rowIDMirrorLabels: rowMirror?.children.map { $0.label ?? "" } ?? [],
-                    rowID: row?.id.base.base as? _ViewList_ID
+                    rowID: row?.id.base.base as? _ViewList_ID,
+                    footerID: footerID
                 )
             )
         }
@@ -7052,6 +9609,13 @@ private struct SectionIDCaptureView: View, _PrimitiveView {
     }
 
     typealias Body = Never
+
+    private static func firstViewListID(in subviews: SubviewsCollection) -> _ViewList_ID? {
+        guard !subviews.isEmpty else {
+            return nil
+        }
+        return subviews[subviews.startIndex].id.base.base as? _ViewList_ID
+    }
 }
 
 private struct SectionConfigurationCaptureView: View, _PrimitiveView {
@@ -7079,6 +9643,50 @@ private struct SectionConfigurationCaptureView: View, _PrimitiveView {
     }
 
     typealias Body = Never
+}
+
+private struct SectionConfigurationIDCaptureView: View, _PrimitiveView {
+    var recorder: SectionIDRecorder
+    var section: SectionConfiguration
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        let capture = view._attribute.value
+        let sectionMirror = Mirror(reflecting: capture.section.id)
+        let headerID = firstViewListID(in: capture.section.header)
+        let row = capture.section.content.isEmpty ? nil : capture.section.content[capture.section.content.startIndex]
+        let rowMirror = row.map { Mirror(reflecting: $0.id) }
+        let footerID = firstViewListID(in: capture.section.footer)
+        capture.recorder.snapshots.append(
+            SectionIDRecorder.Snapshot(
+                sectionIDMirrorLabels: sectionMirror.children.map { $0.label ?? "" },
+                sectionIDBase: capture.section.id.base.base,
+                headerID: headerID,
+                contentIDs: capture.section.content.indices.compactMap {
+                    capture.section.content[$0].id.base.base as? _ViewList_ID
+                },
+                rowIDMirrorLabels: rowMirror?.children.map { $0.label ?? "" } ?? [],
+                rowID: row?.id.base.base as? _ViewList_ID,
+                footerID: footerID
+            )
+        )
+        return _ViewListOutputs(
+            views: .staticList(.merged([])),
+            nextImplicitID: 0,
+            staticCount: 0
+        )
+    }
+
+    typealias Body = Never
+
+    private static func firstViewListID(in subviews: SubviewsCollection) -> _ViewList_ID? {
+        guard !subviews.isEmpty else {
+            return nil
+        }
+        return subviews[subviews.startIndex].id.base.base as? _ViewList_ID
+    }
 }
 
 private struct SectionConfigurationValuesCaptureView: View, _PrimitiveView {

@@ -15,6 +15,66 @@ final class ViewListIdentityTests: XCTestCase {
         XCTAssertEqual(element.canonicalID.explicitID, AnyHashable("row"))
     }
 
+    func testViewListIDElementIDMaterializesGeneratedRowAndSharedSeeds() {
+        let rowSeed = _ViewList_ID.GeneratedIDSeed(
+            base: UniqueID(value: 1_000),
+            kind: .rowLocal
+        )
+        let sharedSeed = _ViewList_ID.GeneratedIDSeed(
+            base: UniqueID(value: 2_000),
+            kind: .shared
+        )
+
+        var generatedOnly = _ViewList_ID(implicitID: 0)
+        generatedOnly.bindGeneratedID(
+            seed: rowSeed,
+            owner: .invalid,
+            isUnary: false,
+            reuseID: _ViewList_ID.generatedRowReuseID
+        )
+        generatedOnly.bindGeneratedID(
+            seed: sharedSeed,
+            owner: .invalid,
+            isUnary: false,
+            reuseID: _ViewList_ID.generatedSectionReuseID
+        )
+
+        let firstGenerated = generatedOnly.elementID(at: 0)
+        let thirdGenerated = generatedOnly.elementID(at: 2)
+
+        XCTAssertEqual(firstGenerated.explicitIDs.count, 2)
+        XCTAssertEqual((firstGenerated.explicitIDs[0].id.base as? UniqueID)?.value, 1_001)
+        XCTAssertEqual((thirdGenerated.explicitIDs[0].id.base as? UniqueID)?.value, 1_003)
+        XCTAssertEqual((firstGenerated.explicitIDs[1].id.base as? UniqueID)?.value, 2_000)
+        XCTAssertEqual((thirdGenerated.explicitIDs[1].id.base as? UniqueID)?.value, 2_000)
+        XCTAssertEqual(firstGenerated.explicitIDs.map(\.isUnary), [true, false])
+        XCTAssertEqual(firstGenerated.canonicalID.explicitID, firstGenerated.explicitIDs[0].id)
+
+        var explicitRow = _ViewList_ID(implicitID: 0)
+        explicitRow.bind(explicitID: "row", owner: .invalid, isUnary: true, reuseID: 17)
+        explicitRow.bindGeneratedID(
+            seed: rowSeed,
+            owner: .invalid,
+            isUnary: false,
+            reuseID: _ViewList_ID.generatedRowReuseID
+        )
+        explicitRow.bindGeneratedID(
+            seed: sharedSeed,
+            owner: .invalid,
+            isUnary: false,
+            reuseID: _ViewList_ID.generatedSectionReuseID
+        )
+
+        let explicitElement = explicitRow.elementID(at: 4)
+
+        XCTAssertEqual(explicitElement.explicitIDs.count, 3)
+        XCTAssertEqual(explicitElement.explicitIDs[0].id, AnyHashable("row"))
+        XCTAssertEqual((explicitElement.explicitIDs[1].id.base as? UniqueID)?.value, 1_005)
+        XCTAssertEqual((explicitElement.explicitIDs[2].id.base as? UniqueID)?.value, 2_000)
+        XCTAssertEqual(explicitElement.explicitIDs.map(\.isUnary), [true, false, false])
+        XCTAssertEqual(explicitElement.canonicalID.explicitID, AnyHashable("row"))
+    }
+
     func testViewListIDCanonicalUsesFirstExplicitIDAndUnarySentinel() {
         var id = _ViewList_ID(implicitID: 5)
         id.explicitIDs = [
@@ -211,6 +271,28 @@ final class ViewListIdentityTests: XCTestCase {
         XCTAssertEqual(log.events, ["bind:second", "bind:first"])
         XCTAssertEqual(copiedID.allExplicitIDs, [AnyHashable("second"), AnyHashable("first")])
     }
+
+    func testViewListApplyIDsEnumeratesTransformedIDsAndUpdatesIndexOnStop() {
+        let list = BaseViewList(elements: FixedCountViewListElements(count: 4))
+        let transform = _ViewList_TemporarySublistTransform()
+            .withPushedItem(ApplyingIDTransformItem(id: "section"))
+        var index = 1
+        var ids: [_ViewList_ID] = []
+
+        let completed = list.applyIDs(from: &index, transform: transform) { id in
+            ids.append(id)
+            return ids.count < 2
+        }
+
+        XCTAssertFalse(completed)
+        XCTAssertEqual(index, 3)
+        XCTAssertEqual(ids.map(\.index), [1, 2])
+        XCTAssertEqual(ids.map(\.allExplicitIDs), [
+            [AnyHashable("section")],
+            [AnyHashable("section")],
+        ])
+        XCTAssertEqual(ids.map(\.canonicalID._index), [1, 2])
+    }
 }
 
 private final class TransformCallLog {
@@ -232,5 +314,32 @@ private struct RecordingTransformItem: _ViewList_SublistTransform_Item {
 
     func wrapSubgraph(into storage: inout _ViewList_SublistSubgraphStorage) {
         log.events.append("wrap:\(name)")
+    }
+}
+
+private struct ApplyingIDTransformItem: _ViewList_SublistTransform_Item {
+    var id: String
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        bindID(&sublist.id)
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        id.bind(explicitID: self.id, owner: .invalid, isUnary: false, reuseID: 0)
+    }
+}
+
+private struct FixedCountViewListElements: _ViewList_Elements {
+    var count: Int
+
+    @discardableResult
+    func makeElements(
+        from: inout Int,
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?,
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+    ) -> (_ViewOutputs?, Bool) {
+        from = max(0, from - count)
+        return (nil, true)
     }
 }

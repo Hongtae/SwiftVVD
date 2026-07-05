@@ -880,6 +880,41 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(vertical.rect.origin, CGPoint(x: 200, y: 400))
     }
 
+    func testViewAlignedScrollTargetBehaviorNoLayoutDoesNotMutateTarget() {
+        func run(
+            behavior: ViewAlignedScrollTargetBehavior = .viewAligned,
+            targetRect: CGRect,
+            axes: Axis.Set = [.vertical]
+        ) -> ScrollTarget {
+            let geometry = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 1_000, height: 1_000),
+                contentInsets: EdgeInsets(),
+                containerSize: CGSize(width: 200, height: 200)
+            )
+            var target = ScrollTarget(rect: targetRect)
+            let context = ScrollTargetBehaviorContext(
+                originalTarget: ScrollTarget(rect: targetRect),
+                velocity: .zero,
+                geometry: geometry,
+                axes: axes
+            )
+            behavior.updateTarget(&target, context: context)
+            return target
+        }
+
+        let vertical = CGRect(x: 0, y: 123, width: 200, height: 200)
+        XCTAssertEqual(run(targetRect: vertical).rect, vertical)
+
+        let horizontal = CGRect(x: 123, y: 0, width: 200, height: 200)
+        XCTAssertEqual(run(targetRect: horizontal, axes: [.horizontal]).rect, horizontal)
+
+        XCTAssertEqual(
+            run(behavior: .viewAligned(anchor: .center), targetRect: vertical).rect,
+            vertical
+        )
+    }
+
     func testScrollEnvironmentSupportStorageShapes() {
         XCTAssertEqual(MemoryLayout<ScrollIndicatorVisibility>.size, 1)
         XCTAssertEqual(MemoryLayout<ScrollIndicatorVisibility>.stride, 1)

@@ -3778,19 +3778,33 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
     }
 
     func testUnitCurveBuiltInRetargetPrunesCompletedNonPrefixFork() {
+        assertUnitCurveBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { .timingCurve(.circularEaseIn, duration: $0) }
+        )
+        assertUnitCurveBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { .timingCurve(.circularEaseOut, duration: $0) }
+        )
+        assertUnitCurveBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { .timingCurve(.circularEaseInOut, duration: $0) }
+        )
+    }
+
+    private func assertUnitCurveBuiltInRetargetPrunesCompletedNonPrefixFork(
+        animation: (TimeInterval) -> Animation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         let recorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
-        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
 
         func logicalTransaction(
             label: String,
             duration: TimeInterval
         ) -> Transaction {
-            var transaction = Transaction(
-                animation: .timingCurve(.circularEaseInOut, duration: duration)
-            )
+            var transaction = Transaction(animation: animation(duration))
             transaction.addAnimationCompletion(criteria: .logicallyComplete) {
                 recorder.record("\(label) logical")
             }
@@ -3804,14 +3818,14 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         harness.setTime(0.5)
         _ = harness.currentValue()
         harness.setTime(0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         harness.setSource(
             _OpacityEffect(opacity: 2),
@@ -3820,14 +3834,14 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         harness.setTime(0.8)
         _ = harness.currentValue()
         harness.setTime(0.9)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         harness.setSource(
             _OpacityEffect(opacity: 3),
@@ -3836,12 +3850,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, [])
+        XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         harness.setTime(1.7)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(recorder.events, ["middle logical"])
+        XCTAssertEqual(recorder.events, ["middle logical"], file: file, line: line)
 
         harness.setTime(3.1)
         _ = harness.currentValue()
@@ -3851,7 +3865,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             [
                 "middle logical",
                 "old logical",
-            ]
+            ],
+            file: file,
+            line: line
         )
 
         harness.setTime(3.6)
@@ -3862,7 +3878,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             [
                 "middle logical",
                 "old logical",
-            ]
+            ],
+            file: file,
+            line: line
         )
     }
 
@@ -4129,6 +4147,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             animation: { .spring(duration: $0, bounce: 0.20, blendDuration: 0.0) }
         )
         assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { .spring(Spring(duration: $0, bounce: 0.20), blendDuration: 0.0) }
+        )
+        assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { .smooth(duration: $0, extraBounce: 0.05) }
         )
         assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
@@ -4136,6 +4157,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { .bouncy(duration: $0, extraBounce: 0.05) }
+        )
+        assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { .interactiveSpring(response: $0, dampingFraction: 0.82, blendDuration: 0.25) }
         )
         assertFluidSpringAliasBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { .interactiveSpring(duration: $0, extraBounce: 0.0, blendDuration: 0.25) }
@@ -9593,6 +9617,54 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 ]
             ),
             (
+                "fluidSpringValueAliasLogicalWrapper",
+                Animation.spring(Spring(duration: 0.45, bounce: 0.0), blendDuration: 0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidSpringValueAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidSpringValueAliasLogicalWrapper logical",
+                    "old logical",
+                    "second logical",
+                    "old removed",
+                    "second removed",
+                    "fluidSpringValueAliasLogicalWrapper removed",
+                ]
+            ),
+            (
+                "fluidInteractiveResponseAliasLogicalWrapper",
+                Animation.interactiveSpring(response: 0.45, dampingFraction: 0.72, blendDuration: 0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidInteractiveResponseAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidInteractiveResponseAliasLogicalWrapper logical",
+                    "old logical",
+                    "second logical",
+                    "old removed",
+                    "second removed",
+                    "fluidInteractiveResponseAliasLogicalWrapper removed",
+                ]
+            ),
+            (
+                "fluidInteractiveDurationAliasLogicalWrapper",
+                Animation.interactiveSpring(duration: 0.45, extraBounce: 0.0, blendDuration: 0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidInteractiveDurationAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidInteractiveDurationAliasLogicalWrapper logical",
+                    "old removed",
+                    "second removed",
+                    "fluidInteractiveDurationAliasLogicalWrapper removed",
+                    "old logical",
+                    "second logical",
+                ]
+            ),
+            (
                 "fluidPropertyAliasLogicalWrapper",
                 Animation.spring
                     .logicallyComplete(after: 0.25),
@@ -9606,6 +9678,54 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                     "old removed",
                     "second removed",
                     "fluidPropertyAliasLogicalWrapper removed",
+                ]
+            ),
+            (
+                "fluidSmoothAliasLogicalWrapper",
+                Animation.smooth(duration: 0.45, extraBounce: 0.0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidSmoothAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidSmoothAliasLogicalWrapper logical",
+                    "old logical",
+                    "second logical",
+                    "old removed",
+                    "second removed",
+                    "fluidSmoothAliasLogicalWrapper removed",
+                ]
+            ),
+            (
+                "fluidSnappyAliasLogicalWrapper",
+                Animation.snappy(duration: 0.45, extraBounce: 0.0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidSnappyAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidSnappyAliasLogicalWrapper logical",
+                    "old removed",
+                    "second removed",
+                    "fluidSnappyAliasLogicalWrapper removed",
+                    "old logical",
+                    "second logical",
+                ]
+            ),
+            (
+                "fluidBouncyAliasLogicalWrapper",
+                Animation.bouncy(duration: 0.45, extraBounce: 0.0)
+                    .logicallyComplete(after: 0.25),
+                ["fluidBouncyAliasLogicalWrapper logical"],
+                1.8,
+                4.8,
+                [
+                    "fluidBouncyAliasLogicalWrapper logical",
+                    "old logical",
+                    "second logical",
+                    "old removed",
+                    "second removed",
+                    "fluidBouncyAliasLogicalWrapper removed",
                 ]
             ),
         ]

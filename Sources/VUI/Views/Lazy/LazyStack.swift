@@ -18,6 +18,7 @@ struct ResettableLazyLayoutRoot<Content>: View where Content: View {
         var lazyInputs = inputs
         lazyInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
         lazyInputs[DynamicContainerRetainCompletedUnusedRemovals.self] = true
+        lazyInputs[DynamicContainerMaxUnusedItems.self] = 1
         return Content._makeView(view: view[\.content], inputs: lazyInputs)
     }
 
@@ -1050,10 +1051,30 @@ struct _LazyLayout_Section: LazyLayoutNamespace {
             cache: cache,
             context: context,
             node: node,
-            transform: transform,
+            transform: regionTransform(for: region),
             section: region.cacheSection(id: base.id),
             baseIndex: baseIndex + precedingEstimatedCount(before: region)
         )
+    }
+
+    private func regionTransform(for region: Region) -> _ViewList_SublistTransform {
+        switch region {
+        case .header, .footer:
+            return mergedTransform(appending: base.headerFooterSubviewIDTransform)
+        case .content:
+            return mergedTransform(appending: base.subviewIDTransform)
+        }
+    }
+
+    private func mergedTransform(
+        appending appended: _ViewList_SublistTransform
+    ) -> _ViewList_SublistTransform {
+        var merged = transform
+        for item in appended.items {
+            merged.push(item)
+        }
+        merged.subgraphCount += appended.subgraphCount
+        return merged
     }
 
     private func entry(
@@ -2003,7 +2024,8 @@ private struct PinnedLazySection {
     var headerIndex: Int?
     var footerIndex: Int?
     var headerFrame: CGRect?
-    var bodyItemCount: Int
+    private var horizontalBodyPositions: [CGFloat]
+    private var verticalBodyPositions: [CGFloat]
 
     init(frame: CGRect) {
         self.horizontalBounds = frame.minX...frame.maxX
@@ -2011,12 +2033,18 @@ private struct PinnedLazySection {
         self.headerIndex = nil
         self.footerIndex = nil
         self.headerFrame = nil
-        self.bodyItemCount = 0
+        self.horizontalBodyPositions = []
+        self.verticalBodyPositions = []
     }
 
     mutating func include(_ frame: CGRect) {
         horizontalBounds = min(horizontalBounds.lowerBound, frame.minX)...max(horizontalBounds.upperBound, frame.maxX)
         verticalBounds = min(verticalBounds.lowerBound, frame.minY)...max(verticalBounds.upperBound, frame.maxY)
+    }
+
+    mutating func recordBody(_ frame: CGRect) {
+        Self.appendUnique(frame.minX, to: &horizontalBodyPositions)
+        Self.appendUnique(frame.minY, to: &verticalBodyPositions)
     }
 
     func bounds(for axis: Axis) -> ClosedRange<CGFloat> {
@@ -2026,6 +2054,22 @@ private struct PinnedLazySection {
         case .vertical:
             return verticalBounds
         }
+    }
+
+    func bodyMajorGroupCount(for axis: Axis) -> Int {
+        switch axis {
+        case .horizontal:
+            return horizontalBodyPositions.count
+        case .vertical:
+            return verticalBodyPositions.count
+        }
+    }
+
+    private static func appendUnique(_ position: CGFloat, to positions: inout [CGFloat]) {
+        guard !positions.contains(where: { abs($0 - position) < 0.001 }) else {
+            return
+        }
+        positions.append(position)
     }
 }
 
@@ -2055,7 +2099,7 @@ extension Array where Element == _LazyLayout_PlacedSubview {
             } else if self[index].isFooter {
                 section.footerIndex = index
             } else {
-                section.bodyItemCount += 1
+                section.recordBody(frame)
             }
             sections[sectionID] = section
         }
@@ -2355,8 +2399,8 @@ extension Array where Element == _LazyLayout_PlacedSubview {
     private func orderedPinnedHeaders(
         in sections: [UInt32: PinnedLazySection],
         axis: Axis
-    ) -> [(index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyItemCount: Int)] {
-        sections.values.compactMap { section -> (index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyItemCount: Int)? in
+    ) -> [(index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyMajorGroupCount: Int)] {
+        sections.values.compactMap { section -> (index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyMajorGroupCount: Int)? in
             guard let index = section.headerIndex,
                   let frame = section.headerFrame else {
                 return nil
@@ -2365,7 +2409,7 @@ extension Array where Element == _LazyLayout_PlacedSubview {
                 index,
                 lowerBound(of: frame, axis: axis),
                 section.bounds(for: axis).upperBound,
-                section.bodyItemCount
+                section.bodyMajorGroupCount(for: axis)
             )
         }.sorted { lhs, rhs in
             if lhs.position == rhs.position {
@@ -2376,9 +2420,9 @@ extension Array where Element == _LazyLayout_PlacedSubview {
     }
 
     private func isShortSectionHeader(
-        _ header: (index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyItemCount: Int)
+        _ header: (index: Int, position: CGFloat, sectionUpperBound: CGFloat, bodyMajorGroupCount: Int)
     ) -> Bool {
-        header.bodyItemCount <= 2
+        header.bodyMajorGroupCount <= 2
     }
 
     private func lowerBound(of frame: CGRect, axis: Axis) -> CGFloat {
@@ -3165,6 +3209,15 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
         let groupIndex = min(maxGroupIndex, Int(floor(visibleStart / estimatedStride)))
         let candidateIndex = groupIndex * minorCount
         guard candidateIndex > 0 else {
+            if let measured = measuredStart(
+                stack: stack,
+                subviews: subviews,
+                visibleStart: visibleStart,
+                minor: minor,
+                style: style
+            ) {
+                return measured
+            }
             return (0, 0)
         }
 
@@ -3177,6 +3230,15 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
         )
         guard prefix.position > visibleStart,
               !prefix.groups.isEmpty else {
+            if let measured = measuredStart(
+                stack: stack,
+                subviews: subviews,
+                visibleStart: visibleStart,
+                minor: minor,
+                style: style
+            ) {
+                return measured
+            }
             return (candidateIndex, prefix.position)
         }
 
@@ -3195,6 +3257,122 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
             allowBeforeFirst: false
         )
         return (placement.index, placement.position)
+    }
+
+    private func measuredStart(
+        stack: LayoutType,
+        subviews: _LazyLayout_Subviews,
+        visibleStart: CGFloat,
+        minor: MinorProperties<LayoutType>,
+        style: _ViewList_IteratorStyle
+    ) -> (index: Int, position: CGFloat)? {
+        let minorCount = max(1, minor.count)
+        var from = 0
+        var currentSubviews: [_LazyLayout_Subview] = []
+        var previousSubviews: [_LazyLayout_Subview]?
+        var position = CGFloat.zero
+        var result: (index: Int, position: CGFloat)?
+
+        func flushCurrentSubviews() {
+            guard result == nil,
+                  !currentSubviews.isEmpty else {
+                currentSubviews.removeAll(keepingCapacity: true)
+                return
+            }
+
+            let measured = stack.lengthAndSpacing(
+                subviews: currentSubviews,
+                predecessors: previousSubviews,
+                minorGeometry: minor.geometry
+            )
+            let startPosition = position
+            let endPosition = position + measured.spacing + measured.length
+            if endPosition > visibleStart {
+                result = (currentSubviews[0].index, startPosition)
+            }
+            position = endPosition
+            previousSubviews = currentSubviews
+            currentSubviews.removeAll(keepingCapacity: true)
+        }
+
+        func collect(_ subview: _LazyLayout_Subview, stop: inout Bool) {
+            guard result == nil else {
+                stop = true
+                return
+            }
+            currentSubviews.append(subview)
+            if currentSubviews.count >= minorCount {
+                flushCurrentSubviews()
+                if result != nil {
+                    stop = true
+                }
+            }
+        }
+
+        func collect(_ child: _LazyLayout_Subviews, stop: inout Bool) {
+            switch child.node {
+            case .sublist:
+                var childFrom = 0
+                let completed = child.apply(from: &childFrom, style: style) { _, subview, childStop in
+                    collect(subview, stop: &childStop)
+                }
+                if !completed {
+                    stop = true
+                }
+            default:
+                var childFrom = 0
+                let completed = child.applyNodes(from: &childFrom, style: style) { _, node, childStop in
+                    switch node {
+                    case .subviews(let nested):
+                        collect(nested, stop: &childStop)
+                    case .section(let nested):
+                        collect(nested, stop: &childStop)
+                    }
+                }
+                if !completed {
+                    stop = true
+                }
+            }
+        }
+
+        func collect(_ section: _LazyLayout_Section, stop: inout Bool) {
+            flushCurrentSubviews()
+            guard result == nil,
+                  !stop else {
+                return
+            }
+
+            collect(section.header, stop: &stop)
+            guard result == nil,
+                  !stop else {
+                return
+            }
+
+            collect(section.content, stop: &stop)
+            flushCurrentSubviews()
+            guard result == nil,
+                  !stop else {
+                return
+            }
+
+            collect(section.footer, stop: &stop)
+            flushCurrentSubviews()
+            if result != nil {
+                stop = true
+            }
+        }
+
+        _ = subviews.applyNodes(from: &from, style: style) { _, node, stop in
+            switch node {
+            case .subviews(let child):
+                collect(child, stop: &stop)
+            case .section(let section):
+                collect(section, stop: &stop)
+            }
+        }
+
+        flushCurrentSubviews()
+        return result
     }
 
     private func measuredPrefix(

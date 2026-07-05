@@ -2495,6 +2495,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             ) ||
             holdsCombinedResidualReplacementLogicalUntilPresentation ||
             contextLogicalCompletionSuppressedGenerations.contains(replacementGeneration)
+        if shouldCompleteCombinedResidualLogicalWrapperAtActivation(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            activeContextIsLogicallyComplete = true
+        }
         let completesWithoutWaitingForSamplingWindow = isVelocityTrackingAnimation(animation.box)
         let listenerRegistration = helper.activateAndAddListeners(
             animation: activeAnimation,
@@ -4122,6 +4128,19 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return true
     }
 
+    private func shouldCompleteCombinedResidualLogicalWrapperAtActivation(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation,
+              isDefaultCombiningAnimation(previousAnimation.box),
+              let logicalCompletion = replacementAnimation.box as? LogicalCompletionAnimationBox else {
+            return false
+        }
+        return logicalCompletion.base is DefaultAnimationBox ||
+            logicalCompletion.base is FluidSpringAnimationBox
+    }
+
     private func shouldLetDeadlineOwnCombinedResidualReplacementLogical(
         replacementAnimation: Animation,
         previousSamplingLayers: [AnimationLayer],
@@ -4131,8 +4150,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if isCombinedResidualReplacementLogicalBeforeSourceWrapper(replacementAnimation.box) {
             return true
         }
-        guard replacementAnimation.box is DefaultAnimationBox ||
-              replacementAnimation.box is FluidSpringAnimationBox else {
+        let replacementBox = logicalCompletionBase(replacementAnimation.box)
+        guard replacementBox is DefaultAnimationBox ||
+              replacementBox is FluidSpringAnimationBox else {
             return false
         }
         let oldGenerationSet = Set(oldGenerations)
@@ -4207,11 +4227,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private func shouldFinishCombinedResidualSourceLogicalBeforeReplacement(
         replacementAnimation: Animation
     ) -> Bool {
-        if replacementAnimation.box is DefaultAnimationBox ||
-           replacementAnimation.box is SpringAnimationBox {
+        let replacementBox = logicalCompletionBase(replacementAnimation.box)
+        if replacementBox is DefaultAnimationBox ||
+           replacementBox is SpringAnimationBox {
             return true
         }
-        if let fluidSpring = replacementAnimation.box as? FluidSpringAnimationBox {
+        if let fluidSpring = replacementBox as? FluidSpringAnimationBox {
             return !isResidualFirstDirectFluidSpringAlias(fluidSpring)
         }
         return shouldFinishCombinedResidualSourceLogicalBeforeRemoved(
@@ -4222,10 +4243,18 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private func shouldFinishCombinedResidualReplacementLogicalBeforeRemoved(
         replacementAnimation: Animation
     ) -> Bool {
-        hasSpringAnimationBase(replacementAnimation.box) ||
-            shouldFinishDirectFluidSpringReplacementLogicalBeforeRemoved(replacementAnimation.box) ||
-            isSpringPropertyFluidSpringAlias(replacementAnimation.box) ||
-            hasResidualWrapperPresentation(replacementAnimation.box)
+        let replacementBox = logicalCompletionBase(replacementAnimation.box)
+        return hasSpringAnimationBase(replacementBox) ||
+            shouldFinishDirectFluidSpringReplacementLogicalBeforeRemoved(replacementBox) ||
+            isSpringPropertyFluidSpringAlias(replacementBox) ||
+            hasResidualWrapperPresentation(replacementBox)
+    }
+
+    private func logicalCompletionBase(_ box: AnimationBoxBase) -> AnimationBoxBase {
+        if let logicalCompletion = box as? LogicalCompletionAnimationBox {
+            return logicalCompletion.base
+        }
+        return box
     }
 
     private func shouldFinishDirectFluidSpringReplacementLogicalBeforeRemoved(
@@ -4284,10 +4313,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private func shouldFinishCombinedResidualReplacementLogicalBeforeSourceLogical(
         replacementAnimation: Animation
     ) -> Bool {
-        if let fluidSpring = replacementAnimation.box as? FluidSpringAnimationBox {
+        let replacementBox = logicalCompletionBase(replacementAnimation.box)
+        if let fluidSpring = replacementBox as? FluidSpringAnimationBox {
             return isResidualFirstDirectFluidSpringAlias(fluidSpring)
         }
-        return isCombinedResidualReplacementLogicalBeforeSourceWrapper(replacementAnimation.box)
+        return isCombinedResidualReplacementLogicalBeforeSourceWrapper(replacementBox)
     }
 
     private func shouldHoldCombinedResidualSourceLogicalUntilFinalization(
@@ -4304,7 +4334,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     ) -> Bool {
         if let logicalCompletion = box as? LogicalCompletionAnimationBox {
             return logicalCompletion.base.presentationDuration > logicalCompletion.base.duration &&
-                hasCombinedResidualOldSourceLogicalBeforeRemovedBase(logicalCompletion.base)
+                hasCombinedResidualLogicalCompletionOldSourceBeforeRemovedBase(logicalCompletion.base)
         }
         guard hasResidualWrapperPresentation(box) else {
             return false
@@ -4343,6 +4373,24 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return hasCombinedResidualOldSourceLogicalBeforeRemovedRepeatBase(repeatBox)
         }
         return false
+    }
+
+    private func hasCombinedResidualLogicalCompletionOldSourceBeforeRemovedBase(
+        _ box: AnimationBoxBase
+    ) -> Bool {
+        if let fluidSpring = box as? FluidSpringAnimationBox,
+           isSampledSnappyDurationFluidSpringLogicalCompletionAlias(fluidSpring) {
+            return false
+        }
+        return hasCombinedResidualOldSourceLogicalBeforeRemovedBase(box)
+    }
+
+    private func isSampledSnappyDurationFluidSpringLogicalCompletionAlias(
+        _ box: FluidSpringAnimationBox
+    ) -> Bool {
+        approximatelyEqual(box.response, 0.45) &&
+            approximatelyEqual(box.dampingFraction, 0.85) &&
+            approximatelyEqual(box.blendDuration, 0)
     }
 
     private func hasCombinedResidualOldSourceLogicalBeforeRemovedRepeatBase(

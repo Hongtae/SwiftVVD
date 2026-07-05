@@ -70,6 +70,49 @@ extension ViewList {
         }
         return found
     }
+
+    @discardableResult
+    func applyIDs(
+        from index: inout Int,
+        listAttribute: Attribute<any ViewList>? = nil,
+        style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
+        transform sublistTransform: _ViewList_TemporarySublistTransform = _ViewList_TemporarySublistTransform(),
+        to body: (_ViewList_ID) -> Bool
+    ) -> Bool {
+        let startIndex = index
+        var traversalIndex = 0
+        var nextIndex = index
+        var completed = true
+        var from = 0
+        _ = applyNodes(
+            from: &from,
+            style: style,
+            list: listAttribute,
+            transform: _ViewList_TemporarySublistTransform()
+        ) { _, _, node, temporaryTransform in
+            guard case .sublist(var sublist) = node else { return true }
+            temporaryTransform.apply(to: &sublist)
+            sublistTransform.apply(to: &sublist)
+            for offset in 0..<sublist.count {
+                if traversalIndex < startIndex {
+                    traversalIndex += 1
+                    continue
+                }
+                let elementIndex = sublist.start + offset
+                let id = sublist.id.elementID(at: elementIndex)
+                traversalIndex += 1
+                nextIndex = traversalIndex
+                if !body(id) {
+                    completed = false
+                    return false
+                }
+            }
+            return true
+        }
+        index = nextIndex
+        return completed
+    }
+
     func edit(forID: _ViewList_ID, since: TransactionID) -> _ViewList_Edit? { nil }
     func print(into: inout SExpPrinter) {}
     var debugDescription: String { "ViewList(\(count(style: _ViewList_IteratorStyle())))" }
@@ -177,6 +220,25 @@ struct _ViewList_IteratorStyle: Equatable {
 /// Current storage keeps the known index, implicit ID, and explicit ID list.
 /// Explicit binding behavior remains partial.
 struct _ViewList_ID {
+    enum GeneratedIDKind: Hashable {
+        case rowLocal
+        case shared
+    }
+
+    struct GeneratedIDSeed: Hashable {
+        var base: UniqueID
+        var kind: GeneratedIDKind
+
+        func uniqueID(at index: Int) -> UniqueID {
+            switch kind {
+            case .rowLocal:
+                return UniqueID(value: base.value &+ UInt32(truncatingIfNeeded: index &+ 1))
+            case .shared:
+                return base
+            }
+        }
+    }
+
     struct Canonical: Hashable {
         var _index: Int32
         var implicitID: Int32
@@ -267,6 +329,9 @@ struct _ViewList_ID {
     var implicitID: Int32
     var explicitIDs: [Explicit] = []
 
+    static let generatedRowReuseID = 8_397_012_648
+    static let generatedSectionReuseID = Int(bitPattern: ObjectIdentifier(_ViewList_ID.self))
+
     var index: Int { Int(_index) }
 
     init(implicitID: Int = 0) {
@@ -340,10 +405,35 @@ struct _ViewList_ID {
         )
     }
 
+    mutating func bindGeneratedID(
+        seed: GeneratedIDSeed,
+        owner: AGAttribute,
+        isUnary: Bool,
+        reuseID: Int
+    ) {
+        bind(explicitID: seed, owner: Optional(owner), isUnary: isUnary, reuseID: reuseID)
+    }
+
     func elementID(at index: Int) -> _ViewList_ID {
         var id = self
         id._index = Int32(index)
+        id.materializeGeneratedIDs(at: index)
         return id
+    }
+
+    private mutating func materializeGeneratedIDs(at index: Int) {
+        var hasUnary = false
+        for explicitIndex in explicitIDs.indices {
+            if let seed = explicitIDs[explicitIndex].id.base as? GeneratedIDSeed {
+                explicitIDs[explicitIndex].id = AnyHashable(seed.uniqueID(at: index))
+                if seed.kind == .rowLocal {
+                    explicitIDs[explicitIndex].isUnary = !hasUnary
+                }
+            }
+            if explicitIDs[explicitIndex].isUnary {
+                hasUnary = true
+            }
+        }
     }
 
     var canonicalID: Canonical {
@@ -941,6 +1031,7 @@ struct _ViewList_Section: ViewList {
     var isHierarchical: Bool
     var containerValues: ContainerValues
     var subviewIDTransform: _ViewList_SublistTransform
+    var headerFooterSubviewIDTransform: _ViewList_SublistTransform
 
     init(
         id: UInt32 = 0,
@@ -948,7 +1039,8 @@ struct _ViewList_Section: ViewList {
         traits: ViewTraitCollection = ViewTraitCollection(),
         isHierarchical: Bool = false,
         containerValues: ContainerValues = ContainerValues(),
-        subviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform()
+        subviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
+        headerFooterSubviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform()
     ) {
         self.id = id
         self.base = base
@@ -956,6 +1048,7 @@ struct _ViewList_Section: ViewList {
         self.isHierarchical = isHierarchical
         self.containerValues = containerValues
         self.subviewIDTransform = subviewIDTransform
+        self.headerFooterSubviewIDTransform = headerFooterSubviewIDTransform
     }
 
     var header: (list: any ViewList, attribute: Attribute<any ViewList>)? {

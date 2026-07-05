@@ -1031,30 +1031,14 @@ private struct DynamicLayoutScrollable: ScrollableCollection {
         from index: inout Int,
         to body: (_ViewList_ID.Canonical, inout Bool) -> Void
     ) -> Bool {
-        var traversalIndex = 0
-        var nextIndex = index
-        var shouldContinue = true
-        _ = _forEachSublist(in: viewList.value, listAttribute: viewList) { sublist in
-            for offset in 0..<sublist.count {
-                if traversalIndex < index {
-                    traversalIndex += 1
-                    continue
-                }
-                let elementIndex = sublist.start + offset
-                let id = sublist.id.elementID(at: elementIndex).canonicalID
-                var stop = false
-                body(id, &stop)
-                traversalIndex += 1
-                nextIndex = traversalIndex
-                if stop {
-                    shouldContinue = false
-                    return false
-                }
-            }
-            return true
+        var emitted = false
+        let completed = viewList.value.applyIDs(from: &index, listAttribute: viewList) { id in
+            emitted = true
+            var stop = false
+            body(id.canonicalID, &stop)
+            return !stop
         }
-        index = nextIndex
-        return shouldContinue
+        return emitted && completed
     }
 
     func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {

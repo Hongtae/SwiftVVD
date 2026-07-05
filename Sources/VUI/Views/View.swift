@@ -385,7 +385,8 @@ extension IDView {
                 base: source.value,
                 id: idAttribute,
                 owner: owner,
-                isUnary: true
+                isUnary: true,
+                reuseID: _viewListTypeReuseID(Content.self)
             ) as any ViewList
         }
         return _ViewListOutputs(
@@ -415,6 +416,7 @@ private struct IDTransformedViewList<ID: Hashable>: ViewList {
     var id: Attribute<ID>
     var owner: AGAttribute
     var isUnary: Bool
+    var reuseID: Int
 
     func count(style: _ViewList_IteratorStyle) -> Int {
         base.count(style: style)
@@ -437,7 +439,8 @@ private struct IDTransformedViewList<ID: Hashable>: ViewList {
         let item = IDSublistTransformItem(
             explicitID: id.value,
             owner: owner,
-            isUnary: isUnary
+            isUnary: isUnary,
+            reuseID: reuseID
         )
         return base.applyNodes(
             from: &from,
@@ -457,13 +460,14 @@ private struct IDSublistTransformItem<ID: Hashable>: _ViewList_SublistTransform_
     var explicitID: ID
     var owner: AGAttribute
     var isUnary: Bool
+    var reuseID: Int
 
     func apply(to sublist: inout _ViewList_Sublist) {
         sublist.id.bind(
             explicitID: explicitID,
             owner: owner,
             isUnary: isUnary,
-            reuseID: 0
+            reuseID: reuseID
         )
     }
 
@@ -472,9 +476,13 @@ private struct IDSublistTransformItem<ID: Hashable>: _ViewList_SublistTransform_
             explicitID: explicitID,
             owner: owner,
             isUnary: isUnary,
-            reuseID: 0
+            reuseID: reuseID
         )
     }
+}
+
+private func _viewListTypeReuseID(_ type: Any.Type) -> Int {
+    Int(bitPattern: ObjectIdentifier(type))
 }
 
 func makeView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutputs {

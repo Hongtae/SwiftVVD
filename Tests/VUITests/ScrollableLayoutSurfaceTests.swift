@@ -2300,6 +2300,52 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
+    func testScrollableLayoutCollectionDoesNotRealizeNonVisibleSourceIDTarget() throws {
+        let host = GraphHost()
+        let parent = ScrollableLayoutParentScrollable()
+        var scrollablesID: AGAttribute!
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let rows = [
+                ScrollablePreferenceRow(id: 0, child: nil),
+                ScrollablePreferenceRow(id: 1, child: nil),
+                ScrollablePreferenceRow(id: 2, child: nil),
+            ]
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 40))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.scrollable = OptionalAttribute(parentAttr)
+
+            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+            scrollablesID = scrollablesAttr
+
+            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
+            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
+            let nonVisibleID = _ViewList_ID(explicitID: AnyHashable(2)).canonicalID
+
+            XCTAssertEqual(collection.visibleCollectionViewIDs, [
+                _ViewList_ID(explicitID: AnyHashable(0)).canonicalID,
+            ])
+            XCTAssertEqual(collection.firstCollectionViewIndex(of: nonVisibleID), 2)
+            XCTAssertFalse(collection.scroll(toCollectionViewID: nonVisibleID, anchor: .top))
+            XCTAssertTrue(parent.contentTargets.isEmpty)
+        }
+    }
+
     func testScrollableLayoutCollectionConvertsVisibleTargetThroughContentCoordinateSpace() throws {
         let host = GraphHost()
         let parent = ScrollableLayoutParentScrollable()

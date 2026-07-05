@@ -697,7 +697,13 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
     }
 
     public func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        fatalError("ViewAlignedScrollTargetBehavior.updateTarget is not implemented.")
+        let collections = context.targets.isEmpty ? context.collections : context.targets
+        guard !collections.isEmpty else {
+            return
+        }
+        // The collection-backed target selection path is intentionally not
+        // approximated until the private candidate search is fully modeled.
+        return
     }
 
     public static func _makeInputs(_ behavior: _GraphValue<ViewAlignedScrollTargetBehavior>, inputs: inout _ViewInputs) {
