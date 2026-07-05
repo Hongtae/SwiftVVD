@@ -1070,6 +1070,88 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicCustomLayoutMoveLayoutRetainedRemovalCollapsesSiblingLayoutSlot() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let recorder = DynamicContainerLifecycleRecorder()
+        var source: Attribute<DynamicContainerMoveLayoutCustomLayoutRoot>!
+        var layoutAttr: Attribute<LayoutComputer>!
+        var removalEvents: [String] = []
+
+        func childGeometries() -> [ViewGeometry] {
+            layoutAttr.value.childGeometries(
+                at: ViewSize(
+                    CGSize(width: 190, height: 42),
+                    proposal: ProposedViewSize(width: 190, height: 42)
+                ),
+                origin: .zero
+            )
+        }
+
+        viewGraph.data.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: inputs)
+            source = graph.makeInput(
+                value: DynamicContainerMoveLayoutCustomLayoutRoot(
+                    rows: ["removed", "sibling"],
+                    recorder: recorder
+                )
+            )
+            let outputs = DynamicContainerMoveLayoutCustomLayoutRoot._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: viewInputs
+            )
+            guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
+                XCTFail("custom Layout root should produce a layout computer")
+                return
+            }
+            layoutAttr = initialLayoutAttr
+
+            let initial = childGeometries()
+            XCTAssertEqual(initial.count, 2)
+            XCTAssertEqual(initial[0].origin.x, 0, accuracy: 0.000_001)
+            XCTAssertEqual(initial[1].origin.x, 80, accuracy: 0.000_001)
+            XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+        }
+
+        viewGraph.data.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 0.02))
+            removal.addAnimationCompletion(criteria: .removed) {
+                removalEvents.append("removal removed")
+            }
+            source.setValue(
+                DynamicContainerMoveLayoutCustomLayoutRoot(rows: ["sibling"], recorder: recorder),
+                transaction: removal
+            )
+
+            let retained = childGeometries()
+            XCTAssertEqual(retained.count, 1)
+            XCTAssertEqual(retained[0].origin.x, 0, accuracy: 0.000_001)
+            XCTAssertEqual(retained[0].dimensions.size.width, 80, accuracy: 0.000_001)
+            XCTAssertEqual(removalEvents, [])
+            XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(removalEvents, ["removal removed"])
+        XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+
+        viewGraph.data.withCurrent {
+            graph.inbox.drain()
+            _ = layoutAttr.value
+            XCTAssertEqual(
+                recorder.events,
+                ["removed appear", "sibling appear", "removed disappear"]
+            )
+        }
+    }
+
     private func assertPublicForEachRetainsTransitionRemovalUntilCompletionSeedFinishes<Content: View>(
         @ViewBuilder content: @escaping (String, DynamicContainerLifecycleRecorder) -> Content
     ) throws {
@@ -3347,6 +3429,24 @@ private struct DynamicContainerOptionalLifecycleRow: View {
     }
 }
 
+private struct DynamicContainerMoveLayoutCustomLayoutRoot: View {
+    var rows: [String]
+    var recorder: DynamicContainerLifecycleRecorder
+
+    var body: some View {
+        DynamicContainerProbeHStackLayout(spacing: 0) {
+            ForEach(rows, id: \.self) { row in
+                DynamicContainerLifecycleSizedRow(
+                    row: row,
+                    width: 80,
+                    recorder: recorder
+                )
+                .transition(.move(edge: .leading))
+            }
+        }
+    }
+}
+
 private struct DynamicContainerOptionalForkRetargetRoot: View {
     var rows: [String]
     var target: Double
@@ -3387,6 +3487,46 @@ private struct DynamicContainerOptionalForkRetargetItem: View {
             capture: capture
         )
         .transition(.opacity)
+    }
+}
+
+private struct DynamicContainerProbeHStackLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            width += size.width
+            height = max(height, size.height)
+            if index > 0 {
+                width += spacing
+            }
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            subview.place(
+                at: CGPoint(x: x, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            x += size.width + spacing
+        }
     }
 }
 

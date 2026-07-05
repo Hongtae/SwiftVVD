@@ -72,7 +72,8 @@ struct LayoutComputer {
         place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
         childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
         priority: Double = 0,
-        explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil
+        explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil,
+        changeCount: UInt = 0
     ) {
         let engine = ClosureLayoutEngine(
             sizeThatFits: sizeThatFits,
@@ -83,7 +84,7 @@ struct LayoutComputer {
             explicitAlignment: explicitAlignment
         )
         self.box = LayoutEngineBox(engine: engine)
-        self.changeCount = 0
+        self.changeCount = changeCount
     }
 
     init(box: some _AnyLayoutEngineBoxDispatch, changeCount: UInt = 0) {

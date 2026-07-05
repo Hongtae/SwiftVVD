@@ -111,6 +111,7 @@ class GraphHost {
         private(set) var rootSubgraph: AGSubgraph
         private(set) var updateSeedAttribute: Attribute<UInt32>
         private(set) var transactionSeedAttribute: Attribute<UInt32>
+        private(set) var phaseAttribute: Attribute<Phase>
 
         init(graph: _AGGraph) {
             let ref = _AGGraphContext(graph: graph)
@@ -118,6 +119,7 @@ class GraphHost {
             var rootSubgraph: AGSubgraph!
             var updateSeedAttribute: Attribute<UInt32>!
             var transactionSeedAttribute: Attribute<UInt32>!
+            var phaseAttribute: Attribute<Phase>!
             ref.withCurrent {
                 globalSubgraph = AGSubgraph()
                 AGSubgraph.$current.withValue(globalSubgraph) {
@@ -125,12 +127,14 @@ class GraphHost {
                 }
                 updateSeedAttribute = graph.makeInput(value: UInt32.zero)
                 transactionSeedAttribute = graph.makeInput(value: UInt32.zero)
+                phaseAttribute = graph.makeInput(value: Phase())
             }
             self.ref = ref
             self.globalSubgraph = globalSubgraph
             self.rootSubgraph = rootSubgraph
             self.updateSeedAttribute = updateSeedAttribute
             self.transactionSeedAttribute = transactionSeedAttribute
+            self.phaseAttribute = phaseAttribute
         }
 
         var graph: _AGGraph {
@@ -246,6 +250,21 @@ class GraphHost {
             }
             continueTransaction(invalidating: weakAttribute)
         }
+    }
+
+    func setPhase(_ phase: Phase) {
+        data.withCurrent {
+            data.phaseAttribute.setValue(phase)
+        }
+    }
+
+    func incrementPhase() {
+        data.withCurrent {
+            var phase = data.phaseAttribute.value
+            phase.rawValue &+= 0x2
+            data.phaseAttribute.setValue(phase)
+        }
+        graphDelegate?.graphDidChange()
     }
 
     func updateRemovedState() {

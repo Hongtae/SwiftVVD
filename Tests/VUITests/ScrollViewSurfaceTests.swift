@@ -137,6 +137,105 @@ private final class ScrollViewChildCollectionScrollable: ScrollableCollection {
     }
 }
 
+private final class ScrollViewBehaviorCollection: ScrollableCollection {
+    var subviews: [ScrollableCollectionSubview]
+
+    init(subviews: [ScrollableCollectionSubview]) {
+        self.subviews = subviews
+    }
+
+    var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
+        subviews.map { $0.id.canonicalID }
+    }
+
+    func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
+        for subview in subviews {
+            var stop = false
+            body(subview, &stop)
+            if stop { break }
+        }
+    }
+
+    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+        subviews.min { lhs, rhs in
+            lhs.frame.midpointDistance(to: rect) < rhs.frame.midpointDistance(to: rect)
+        }
+    }
+
+    func nextVisibleCollectionViewID(
+        towards point: UnitPoint,
+        from id: _ViewList_ID.Canonical,
+        border: CGSize,
+        ignoring pinnedViews: PinnedScrollableViews
+    ) -> _ViewList_ID.Canonical? {
+        nil
+    }
+
+    static func hasMultipleViews(in axis: Axis) -> Bool {
+        false
+    }
+
+    func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
+        visibleCollectionViewIDs.firstIndex(of: id)
+    }
+
+    func applyCollectionViewIDs(
+        from index: inout Int,
+        to body: (_ViewList_ID.Canonical, inout Bool) -> Void
+    ) -> Bool {
+        let ids = visibleCollectionViewIDs
+        guard index < ids.count else { return false }
+        while index < ids.count {
+            var stop = false
+            body(ids[index], &stop)
+            index += 1
+            if stop { return false }
+        }
+        return true
+    }
+
+    func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
+        nil
+    }
+
+    func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {
+        false
+    }
+
+    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
+        false
+    }
+
+    var allowsContentOffsetAdjustments: Bool {
+        false
+    }
+
+    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
+        false
+    }
+
+    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
+        nil
+    }
+}
+
+private extension CGRect {
+    func midpointDistance(to other: CGRect) -> CGFloat {
+        let dx = midX - other.midX
+        let dy = midY - other.midY
+        return (dx * dx + dy * dy).squareRoot()
+    }
+}
+
+private func viewAlignedSubview(id: AnyHashable, frame: CGRect) -> ScrollableCollectionSubview {
+    ScrollableCollectionSubview(
+        id: _ViewList_ID(explicitID: id),
+        frame: frame,
+        frameInContent: frame,
+        transform: ViewTransform()
+    )
+}
+
 private final class ScrollViewTargetSubgraphRecorder {
     var itemSubgraphs: [Int: AGSubgraph] = [:]
 }
@@ -913,6 +1012,60 @@ final class ScrollViewSurfaceTests: XCTestCase {
             run(behavior: .viewAligned(anchor: .center), targetRect: vertical).rect,
             vertical
         )
+    }
+
+    func testViewAlignedScrollTargetBehaviorUsesVisibleCollectionCandidatesAndAnchor() {
+        let subviews = [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 0, y: 0, width: 80, height: 40)),
+            viewAlignedSubview(id: "target", frame: CGRect(x: 0, y: 120, width: 80, height: 40)),
+            viewAlignedSubview(id: "third", frame: CGRect(x: 0, y: 260, width: 80, height: 40)),
+        ]
+        let collection = ScrollViewBehaviorCollection(subviews: subviews)
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 0, y: 135, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: .zero,
+            geometry: geometry,
+            axes: .vertical,
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior(anchor: .center).updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin, CGPoint(x: 0, y: 150))
+        XCTAssertEqual(target.rect.size, CGSize(width: 100, height: 100))
+    }
+
+    func testViewAlignedScrollTargetBehaviorFiltersOversizedVisibleCandidates() {
+        let subviews = [
+            viewAlignedSubview(id: "oversized", frame: CGRect(x: 0, y: 150, width: 80, height: 120)),
+            viewAlignedSubview(id: "target", frame: CGRect(x: 0, y: 170, width: 80, height: 40)),
+        ]
+        let collection = ScrollViewBehaviorCollection(subviews: subviews)
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 0, y: 150, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: .zero,
+            geometry: geometry,
+            axes: .vertical,
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.y, 170)
     }
 
     func testScrollEnvironmentSupportStorageShapes() {

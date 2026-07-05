@@ -1272,7 +1272,7 @@ private func _subviewIDTransform(
     return transform
 }
 
-private func _sectionRegionTransformDroppingSharedGeneratedID(
+func _sectionRegionTransformDroppingSharedGeneratedID(
     _ transform: _ViewList_SublistTransform
 ) -> _ViewList_SublistTransform {
     var filtered = _ViewList_SublistTransform()

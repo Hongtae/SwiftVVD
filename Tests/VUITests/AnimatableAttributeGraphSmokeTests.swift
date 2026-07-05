@@ -4600,6 +4600,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { totalDuration in
+                Animation.linear(duration: totalDuration / 2.0)
+                    .repeatCount(2, autoreverses: true)
+            },
+            expectedOrder: .middleActiveOld
+        )
+        assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { totalDuration in
                 Animation.linear(duration: totalDuration / 2.0 - 0.10)
                     .delay(0.10)
                     .repeatCount(2, autoreverses: false)
@@ -4608,8 +4615,24 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { totalDuration in
+                Animation.linear(duration: totalDuration / 2.0 - 0.10)
+                    .delay(0.10)
+                    .repeatCount(2, autoreverses: true)
+            },
+            expectedOrder: .middleActiveOld
+        )
+        assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { totalDuration in
                 Animation.linear(duration: (totalDuration - 0.20) / 2.0)
                     .repeatCount(2, autoreverses: false)
+                    .delay(0.20)
+            },
+            expectedOrder: .activeOldMiddle
+        )
+        assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { totalDuration in
+                Animation.linear(duration: (totalDuration - 0.20) / 2.0)
+                    .repeatCount(2, autoreverses: true)
                     .delay(0.20)
             },
             expectedOrder: .activeOldMiddle
@@ -4624,8 +4647,24 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
             animation: { totalDuration in
+                Animation.linear(duration: totalDuration)
+                    .speed(2.0)
+                    .repeatCount(2, autoreverses: true)
+            },
+            expectedOrder: .middleActiveOld
+        )
+        assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { totalDuration in
                 Animation.linear(duration: totalDuration / 4.0)
                     .repeatCount(2, autoreverses: false)
+                    .speed(0.5)
+            },
+            expectedOrder: .middleActiveOld
+        )
+        assertFiniteWrapperBuiltInRetargetPrunesCompletedNonPrefixFork(
+            animation: { totalDuration in
+                Animation.linear(duration: totalDuration / 4.0)
+                    .repeatCount(2, autoreverses: true)
                     .speed(0.5)
             },
             expectedOrder: .middleActiveOld

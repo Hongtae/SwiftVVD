@@ -682,6 +682,26 @@ class ViewGraph: ViewGraphHost {
         isUpdating
     }
 
+    func updateGraphPhase(oldParentPhase: Phase?, newParentPhase: Phase) {
+        defer { parentPhase = newParentPhase }
+
+        guard let oldParentPhase else {
+            setPhase(newParentPhase)
+            return
+        }
+
+        let delta = oldParentPhase.rawValue ^ newParentPhase.rawValue
+        if delta >= 0x2 {
+            incrementPhase()
+        } else if (delta & 0x1) != 0 {
+            data.withCurrent {
+                var phase = data.phaseAttribute.value
+                phase.isBeingRemoved = newParentPhase.isBeingRemoved
+                data.phaseAttribute.setValue(phase)
+            }
+        }
+    }
+
     // Backend init that takes a concrete view value to lift into the graph.
     convenience init<V: View>(
         rootViewType: V.Type,
@@ -750,7 +770,7 @@ class ViewGraph: ViewGraphHost {
             let contentGV = makeContent(g)
 
             let timeAttr        = g.makeInput(value: time)
-            let phaseAttr       = g.makeInput(value: Phase())
+            let phaseAttr       = self.data.phaseAttribute
             let transactionAttr = g.makeInput(value: Transaction())
             let envAttr         = g.makeInput(value: EnvironmentValues.tracking())
             let graphInputs = _GraphInputs(

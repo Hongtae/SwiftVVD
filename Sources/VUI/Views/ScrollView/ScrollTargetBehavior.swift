@@ -698,12 +698,26 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
 
     public func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
         let collections = context.targets.isEmpty ? context.collections : context.targets
-        guard !collections.isEmpty else {
+        guard !collections.isEmpty,
+              let axis = ViewAlignedScrollAxis(axes: context.axes) else {
             return
         }
-        // The collection-backed target selection path is intentionally not
-        // approximated until the private candidate search is fully modeled.
-        return
+
+        guard var alignedRect = makeTargetRect(
+            for: target,
+            context: context,
+            collections: collections,
+            axis: axis
+        ) else {
+            return
+        }
+        if let anchor {
+            alignedRect = alignedRect.offsetBy(
+                dx: context.containerSize.width * anchor.x - alignedRect.width * anchor.x,
+                dy: context.containerSize.height * anchor.y - alignedRect.height * anchor.y
+            )
+        }
+        axis.apply(originOf: alignedRect, to: &target.rect)
     }
 
     public static func _makeInputs(_ behavior: _GraphValue<ViewAlignedScrollTargetBehavior>, inputs: inout _ViewInputs) {
@@ -711,6 +725,196 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
 
     public func properties(context: PropertiesContext) -> Properties {
         ScrollTargetBehaviorProperties()
+    }
+
+    private func makeTargetRect(
+        for target: ScrollTarget,
+        context: TargetContext,
+        collections: [any ScrollableCollection],
+        axis: ViewAlignedScrollAxis
+    ) -> CGRect? {
+        let maximumCandidateLength = axis.length(of: context.containerSize) * 1.1
+        var candidates: [CGRect] = []
+
+        for collection in collections {
+            collection.forEachVisibleSubview { subview, stop in
+                appendCandidate(
+                    subview.frameInContent,
+                    maximumLength: maximumCandidateLength,
+                    axis: axis,
+                    to: &candidates
+                )
+                stop = false
+            }
+            if let closest = collection.subviewClosest(to: target.rect) {
+                appendCandidate(
+                    closest.frameInContent,
+                    maximumLength: maximumCandidateLength,
+                    axis: axis,
+                    to: &candidates
+                )
+            }
+        }
+
+        return findClosestRect(
+            in: candidates,
+            targetOffset: target.rect.origin,
+            context: context,
+            axis: axis
+        )
+    }
+
+    private func appendCandidate(
+        _ rect: CGRect,
+        maximumLength: CGFloat,
+        axis: ViewAlignedScrollAxis,
+        to candidates: inout [CGRect]
+    ) {
+        guard axis.length(of: rect) <= maximumLength,
+              !candidates.contains(rect) else {
+            return
+        }
+        candidates.append(rect)
+    }
+
+    private func findClosestRect(
+        in rects: [CGRect],
+        targetOffset: CGPoint,
+        context: TargetContext,
+        axis: ViewAlignedScrollAxis
+    ) -> CGRect? {
+        let sorted = rects.sorted { lhs, rhs in
+            axis.min(of: lhs) < axis.min(of: rhs)
+        }
+        guard let first = sorted.first,
+              let last = sorted.last else {
+            return nil
+        }
+
+        let minimum = axis.min(of: first) - axis.length(of: first)
+        let maximum = axis.max(of: last) + axis.length(of: last)
+        let targetCoordinate = axis.coordinate(of: targetOffset)
+        guard minimum <= targetCoordinate, targetCoordinate <= maximum else {
+            return nil
+        }
+
+        guard let targetIndex = closestRectIndex(in: sorted, to: targetOffset) else {
+            return nil
+        }
+
+        let originalIndex = closestRectIndex(in: sorted, to: context.originalTarget.rect.origin)
+        let velocity = axis.velocity(of: context.velocity, layoutDirection: context.environment.layoutDirection)
+        if originalIndex == targetIndex,
+           velocity != 0 {
+            let step = velocity > 0 ? 1 : -1
+            let nextIndex = targetIndex + step
+            if sorted.indices.contains(nextIndex),
+               axis.min(of: sorted[nextIndex]) != axis.min(of: sorted[targetIndex]) {
+                return sorted[nextIndex]
+            }
+        }
+
+        return sorted[targetIndex]
+    }
+
+    private func closestRectIndex(in rects: [CGRect], to point: CGPoint) -> Int? {
+        guard !rects.isEmpty else { return nil }
+        var closestIndex = rects.startIndex
+        var closestDistance = rects[closestIndex].origin.distance(to: point)
+        for index in rects.indices.dropFirst() {
+            let distance = rects[index].origin.distance(to: point)
+            if distance < closestDistance {
+                closestIndex = index
+                closestDistance = distance
+            }
+        }
+        return closestIndex
+    }
+}
+
+private enum ViewAlignedScrollAxis {
+    case horizontal
+    case vertical
+
+    init?(axes: Axis.Set) {
+        if axes == .vertical {
+            self = .vertical
+        } else if axes == .horizontal {
+            self = .horizontal
+        } else {
+            return nil
+        }
+    }
+
+    func length(of size: CGSize) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return size.width
+        case .vertical:
+            return size.height
+        }
+    }
+
+    func length(of rect: CGRect) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return rect.width
+        case .vertical:
+            return rect.height
+        }
+    }
+
+    func min(of rect: CGRect) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return rect.minX
+        case .vertical:
+            return rect.minY
+        }
+    }
+
+    func max(of rect: CGRect) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return rect.maxX
+        case .vertical:
+            return rect.maxY
+        }
+    }
+
+    func coordinate(of point: CGPoint) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return point.x
+        case .vertical:
+            return point.y
+        }
+    }
+
+    func velocity(of vector: CGVector, layoutDirection: LayoutDirection) -> CGFloat {
+        switch self {
+        case .horizontal:
+            return layoutDirection == .rightToLeft ? -vector.dx : vector.dx
+        case .vertical:
+            return vector.dy
+        }
+    }
+
+    func apply(originOf selected: CGRect, to target: inout CGRect) {
+        switch self {
+        case .horizontal:
+            target.origin.x = selected.origin.x
+        case .vertical:
+            target.origin.y = selected.origin.y
+        }
+    }
+}
+
+private extension CGPoint {
+    func distance(to other: CGPoint) -> CGFloat {
+        let dx = x - other.x
+        let dy = y - other.y
+        return (dx * dx + dy * dy).squareRoot()
     }
 }
 

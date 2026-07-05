@@ -36,7 +36,7 @@ public struct LazyHGrid<Content>: View where Content: View {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         ResettableLazyLayoutRoot<_VariadicView.Tree<LazyHGridLayout, Content>>
-            ._makeView(view: view[\.tree], inputs: inputs)
+            ._makeLazyLayoutView(view: view[\.tree], inputs: inputs)
     }
 
     public typealias Body = Never

@@ -586,6 +586,36 @@ private struct VisibleCountScrollableLayout: _ScrollableLayout {
     }
 }
 
+private struct OffsetSensitiveValidRectScrollableLayout: _ScrollableLayout {
+    var recorder: ScrollableLayoutRecorder
+
+    func update(state: inout Void, proxy: inout _ScrollableLayoutProxy) {
+        recorder.proxyInputs.append(
+            ScrollableProxyInputRecord(
+                size: proxy.size,
+                visibleRect: proxy.visibleRect
+            )
+        )
+
+        let rowStride: CGFloat = 24
+        let lowerBound = max(Int((proxy.visibleRect.minY / rowStride).rounded(.down)), 0)
+        let upperBound = min(proxy.count, lowerBound + 3)
+        proxy.visibleItems = (lowerBound..<upperBound).map { index in
+            _ScrollableLayoutItem(
+                id: proxy[index],
+                proposedSize: CGSize(width: 40, height: 20),
+                anchoring: .topLeading,
+                at: CGPoint(x: 0, y: CGFloat(index) * rowStride)
+            )
+        }
+        proxy.contentSize = CGSize(
+            width: proxy.size.width,
+            height: CGFloat(max(proxy.count, 1)) * rowStride
+        )
+        proxy.validRect = CGRect(origin: .zero, size: proxy.contentSize)
+    }
+}
+
 private struct CenteredScrollableLayout: _ScrollableLayout {
     func update(state: inout Void, proxy: inout _ScrollableLayoutProxy) {
         guard proxy.count > 0 else { return }
@@ -2690,6 +2720,77 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                     visibleRect: CGRect(x: 0, y: 140, width: 100, height: 80)
                 )
             )
+        }
+    }
+
+    func testScrollableLayoutViewOffsetInsideValidRectReusesVisibleItems() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = ScrollableLayoutRecorder()
+        var storedOffset = CGPoint.zero
+
+        try host.data.withCurrent {
+            let binding = Binding<CGPoint>(
+                get: { storedOffset },
+                set: { value, _ in storedOffset = value }
+            )
+            var config = _ScrollViewConfig()
+            config.contentOffset = .binding(binding)
+
+            typealias LayoutView = _ScrollableLayoutView<
+                [ScrollableRecordingRow],
+                OffsetSensitiveValidRectScrollableLayout
+            >
+            typealias Scroll = _ScrollView<LayoutView>
+
+            let rows = (0..<8).map { ScrollableRecordingRow(id: $0, recorder: recorder) }
+            let provider = LayoutView(
+                data: rows,
+                layout: OffsetSensitiveValidRectScrollableLayout(recorder: recorder)
+            )
+            let mainAttr = graph.makeInput(
+                value: Scroll.Main(contentProvider: provider, config: config)
+            )
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.needsGeometry = true
+            let timeAttr = inputs.base.time
+
+            let outputs = Scroll.Main._makeView(
+                view: _GraphValue(_attribute: mainAttr),
+                inputs: inputs
+            )
+            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            func place() {
+                recorder.beginPlacement()
+                layoutAttr.value.place(
+                    at: .zero,
+                    proposal: ProposedViewSize(CGSize(width: 100, height: 80))
+                )
+                recorder.finishPlacement()
+            }
+
+            place()
+            XCTAssertEqual(recorder.proxyInputs, [
+                ScrollableProxyInputRecord(
+                    size: CGSize(width: 100, height: 80),
+                    visibleRect: CGRect(x: 0, y: 0, width: 100, height: 80)
+                ),
+            ])
+            XCTAssertEqual(recorder.placements, [[0, 1, 2]])
+
+            storedOffset = CGPoint(x: 0, y: 48)
+            timeAttr.setValue(Time(seconds: 1))
+            place()
+
+            XCTAssertEqual(recorder.proxyInputs.count, 1)
+            XCTAssertEqual(recorder.placements, [
+                [0, 1, 2],
+                [0, 1, 2],
+            ])
+            XCTAssertFalse(recorder.makeViewIDs.contains(3))
+            XCTAssertFalse(recorder.makeViewIDs.contains(4))
         }
     }
 
