@@ -457,6 +457,28 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
     }
 }
 
+struct DefaultLayoutResponderFilter: StatefulRule {
+    typealias Value = [any ViewResponder]
+
+    var children: Attribute<[any ViewResponder]>
+    var responder: DefaultLayoutViewResponder
+
+    init(
+        children: Attribute<[any ViewResponder]>,
+        responder: DefaultLayoutViewResponder
+    ) {
+        self.children = children
+        self.responder = responder
+    }
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        let childrenChanged = _AGGraph.currentStatefulInputChanged(children.identifier)
+        responder.updateChildren((value: children.value, changed: isInitialValue || childrenChanged))
+        _AGGraph.setStatefulOutput([responder])
+    }
+}
+
 // ActiveGestureSession
 
 /// Represents one active gesture interaction for a single touch/click EventID.

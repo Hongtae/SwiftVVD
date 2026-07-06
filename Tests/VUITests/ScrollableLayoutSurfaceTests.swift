@@ -479,9 +479,19 @@ private struct ScrollableMeasuringRow: View, _PrimitiveView {
     }
 }
 
+private final class ScrollableLayoutLookupMarker {
+    var value: Int
+
+    init(_ value: Int) {
+        self.value = value
+    }
+}
+
 private final class ScrollableLayoutChildScrollable: Scrollable {
     var contentTargets: [(ScrollGeometry, LayoutDirection) -> ScrollTarget?] = []
     var shouldSetContentTarget = false
+    var firstChildMarker: ScrollableLayoutLookupMarker?
+    var mapFirstChildCallCount = 0
 
     func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
         false
@@ -501,13 +511,19 @@ private final class ScrollableLayoutChildScrollable: Scrollable {
     }
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        nil
+        mapFirstChildCallCount += 1
+        if let marker = firstChildMarker as? A {
+            return body(marker)
+        }
+        return nil
     }
 }
 
 private final class ScrollableLayoutParentScrollable: Scrollable {
     var contentTargets: [(ScrollGeometry, LayoutDirection) -> ScrollTarget?] = []
     var shouldSetContentTarget = true
+    var firstChildMarker: ScrollableLayoutLookupMarker?
+    var mapFirstChildCallCount = 0
 
     func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
         false
@@ -527,7 +543,11 @@ private final class ScrollableLayoutParentScrollable: Scrollable {
     }
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        nil
+        mapFirstChildCallCount += 1
+        if let marker = firstChildMarker as? A {
+            return body(marker)
+        }
+        return nil
     }
 }
 
@@ -1632,6 +1652,64 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
+    func testDefaultLayoutResponderFilterUpdatesStableResponderFromChildrenAttribute() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let firstChild = ScrollViewTestResponder()
+            let secondChild = ScrollViewTestResponder()
+            let children: Attribute<[any ViewResponder]> = graph.makeInput(
+                value: [firstChild as any ViewResponder]
+            )
+            let responder = DefaultLayoutViewResponder()
+            let output: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
+                DefaultLayoutResponderFilter(children: children, responder: responder)
+            )
+
+            let initialOutput = output.value
+            XCTAssertEqual(initialOutput.count, 1)
+            XCTAssertTrue(initialOutput.first === responder)
+            XCTAssertEqual(responder.responders.count, 1)
+            XCTAssertTrue(responder.responders.first === firstChild)
+            XCTAssertTrue(firstChild.nextResponder === responder)
+
+            responder.scrollTarget = { geometry, _ in
+                ScrollTarget(
+                    rect: CGRect(origin: geometry.contentOffset, size: geometry.containerSize),
+                    anchor: .topLeading
+                )
+            }
+            children.setValue([secondChild as any ViewResponder])
+
+            let updatedOutput = output.value
+            XCTAssertEqual(updatedOutput.count, 1)
+            XCTAssertTrue(updatedOutput.first === responder)
+            XCTAssertEqual(responder.responders.count, 1)
+            XCTAssertTrue(responder.responders.first === secondChild)
+            XCTAssertTrue(secondChild.nextResponder === responder)
+            XCTAssertNotNil(
+                responder.scrollTarget(
+                    in: ScrollGeometry(
+                        contentOffset: CGPoint(x: 2, y: 3),
+                        contentSize: CGSize(width: 80, height: 90),
+                        containerSize: CGSize(width: 40, height: 50)
+                    ),
+                    layoutDirection: .leftToRight
+                )
+            )
+
+            let manualChild = ScrollViewTestResponder()
+            responder.responders = [manualChild]
+            graph.invalidateAttribute(output.identifier)
+
+            let invalidatedOutput = output.value
+            XCTAssertEqual(invalidatedOutput.count, 1)
+            XCTAssertTrue(invalidatedOutput.first === responder)
+            XCTAssertEqual(responder.responders.count, 1)
+            XCTAssertTrue(responder.responders.first === manualChild)
+        }
+    }
+
     func testDefaultLayoutResponderResetClearsScrollTargetAndChildren() {
         let childResponder = ScrollViewTestResponder()
         let responder = DefaultLayoutViewResponder(
@@ -1654,7 +1732,28 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         )
         XCTAssertNotNil(initialTarget)
 
-        responder.resetGesture()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let gestureSubgraph1 = AGSubgraph()
+            AGSubgraph.$current.withValue(gestureSubgraph1) {
+                _ = graph.makeInput(value: 1)
+            }
+            let gestureSubgraph2 = AGSubgraph()
+            AGSubgraph.$current.withValue(gestureSubgraph2) {
+                _ = graph.makeInput(value: 2)
+            }
+            responder.gestureSubgraph1 = gestureSubgraph1
+            responder.gestureSubgraph2 = gestureSubgraph2
+
+            responder.resetGesture()
+
+            XCTAssertNil(responder.gestureSubgraph1)
+            XCTAssertNil(responder.gestureSubgraph2)
+            XCTAssertFalse(gestureSubgraph1.isValid)
+            XCTAssertFalse(gestureSubgraph2.isValid)
+        }
 
         let resetTarget = responder.scrollTarget(
             in: ScrollGeometry(
@@ -2492,6 +2591,75 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             })
             XCTAssertEqual(parent.contentTargets.count, 2)
             XCTAssertEqual(child.contentTargets.count, 1)
+        }
+    }
+
+    func testScrollableLayoutCollectionMapsFirstChildThroughParentThenChildren() throws {
+        let host = GraphHost()
+        let parent = ScrollableLayoutParentScrollable()
+        let child = ScrollableLayoutChildScrollable()
+        var scrollablesID: AGAttribute!
+
+        parent.firstChildMarker = ScrollableLayoutLookupMarker(11)
+        child.firstChildMarker = ScrollableLayoutLookupMarker(22)
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let rows = [
+                ScrollablePreferenceRow(id: 0, child: child),
+                ScrollablePreferenceRow(id: 1, child: nil),
+                ScrollablePreferenceRow(id: 2, child: nil),
+            ]
+            let viewAttr = graph.makeInput(
+                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
+            )
+            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.scrollable = OptionalAttribute(parentAttr)
+
+            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
+                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+            scrollablesID = scrollablesAttr
+
+            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertTrue(host.hasPendingTransactions)
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
+            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
+
+            let parentResult = collection.mapFirstChild(ofType: ScrollableLayoutLookupMarker.self) { $0.value }
+            XCTAssertEqual(parentResult, 11)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+
+            parent.firstChildMarker = nil
+            parent.mapFirstChildCallCount = 0
+            child.mapFirstChildCallCount = 0
+
+            let childResult = collection.mapFirstChild(ofType: ScrollableLayoutLookupMarker.self) { $0.value }
+            XCTAssertEqual(childResult, 22)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 1)
+
+            parent.mapFirstChildCallCount = 0
+            child.mapFirstChildCallCount = 0
+
+            let directChild = try XCTUnwrap(
+                collection.mapFirstChild(ofType: ScrollableLayoutChildScrollable.self) { $0 }
+            )
+            XCTAssertTrue(directChild === child)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+
+            let missing: Int? = collection.mapFirstChild(ofType: String.self) { _ in 1 }
+            XCTAssertNil(missing)
         }
     }
 

@@ -485,25 +485,35 @@ final class ScrollStateRequestTests: XCTestCase {
         )
 
         XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, edge: .bottom)))
+        XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, edge: .leading)))
+        XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, edge: .trailing)))
         XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, point: CGPoint(x: 12, y: 34))))
         XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, x: 7)))
         XCTAssertTrue(scrollable.scrollToPosition(ScrollPosition(idType: String.self, y: 8)))
 
-        XCTAssertEqual(scrollable.contentTargets.count, 4)
+        XCTAssertEqual(scrollable.contentTargets.count, 6)
         XCTAssertEqual(
             scrollable.contentTargets[0](geometry, .leftToRight)?.rect,
             CGRect(x: 3, y: 180, width: 10, height: 20)
         )
         XCTAssertEqual(
             scrollable.contentTargets[1](geometry, .rightToLeft)?.rect,
-            CGRect(x: 88, y: 34, width: 10, height: 20)
+            CGRect(x: 90, y: 4, width: 10, height: 20)
         )
         XCTAssertEqual(
             scrollable.contentTargets[2](geometry, .rightToLeft)?.rect,
+            CGRect(x: 0, y: 4, width: 10, height: 20)
+        )
+        XCTAssertEqual(
+            scrollable.contentTargets[3](geometry, .rightToLeft)?.rect,
+            CGRect(x: 88, y: 34, width: 10, height: 20)
+        )
+        XCTAssertEqual(
+            scrollable.contentTargets[4](geometry, .rightToLeft)?.rect,
             CGRect(x: 93, y: 4, width: 10, height: 20)
         )
         XCTAssertEqual(
-            scrollable.contentTargets[3](geometry, .leftToRight)?.rect,
+            scrollable.contentTargets[5](geometry, .leftToRight)?.rect,
             CGRect(x: 3, y: 8, width: 10, height: 20)
         )
         XCTAssertTrue(scrollable.contentTargets.allSatisfy { target in

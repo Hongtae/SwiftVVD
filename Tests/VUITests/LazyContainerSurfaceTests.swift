@@ -1614,6 +1614,83 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testStackPlacementSectionNodeStartsInsideContentWithoutReplayingHeader() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            func makeRegion(
+                _ sizes: [CGSize]
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            let header = makeRegion([CGSize(width: 20, height: 10)])
+            let content = makeRegion([
+                CGSize(width: 20, height: 20),
+                CGSize(width: 25, height: 30),
+                CGSize(width: 30, height: 40),
+            ])
+            let footer = makeRegion([CGSize(width: 35, height: 50)])
+            let list: any ViewList = _ViewList_Section(
+                id: 7,
+                base: _ViewList_Group(lists: [header, content, footer])
+            )
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVGridLayout(
+                columns: [GridItem(.fixed(20), spacing: 0), GridItem(.fixed(30), spacing: 0)],
+                alignment: .leading,
+                spacing: 0,
+                pinnedViews: []
+            )
+            var placement = StackPlacement(
+                stack: layout,
+                axis: .vertical,
+                minor: MinorProperties(
+                    count: 2,
+                    size: 50,
+                    geometry: [
+                        HVGridGeometry(position: 0, size: 20, anchor: .leading),
+                        HVGridGeometry(position: 20, size: 30, anchor: .leading),
+                    ]
+                ),
+                visible: CGFloat(0)..<CGFloat(300),
+                placedIndex: (min: Int.max, max: Int.min),
+                placedPosition: (min: .infinity, max: -.infinity),
+                placedQuery: (min: .infinity, max: -.infinity)
+            )
+
+            XCTAssertTrue(placement.place(
+                subviews: subviews,
+                from: 3,
+                position: 100,
+                stopping: .never,
+                style: _ViewList_IteratorStyle()
+            ))
+            XCTAssertFalse(placement.skipFirst)
+            XCTAssertEqual(placement.placedSubviews.map(\.index), [3, 4])
+            XCTAssertEqual(placement.placedSubviews.map(\.item.section), [
+                LazyLayoutCacheSection(id: 7),
+                LazyLayoutCacheSection(id: 7, isFooter: true),
+            ])
+            XCTAssertEqual(placement.position, 190)
+            XCTAssertEqual(placement.index, 5)
+
+            let bodyItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 3 }?.item)
+            XCTAssertEqual(bodyItem.placement?.anchorPosition, CGPoint(x: 0, y: 100))
+            let footerItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 4 }?.item)
+            XCTAssertEqual(footerItem.placement?.anchorPosition, CGPoint(x: 0, y: 140))
+        }
+    }
+
     func testLazyLayoutSectionMaterializesStoredRegionsWithBaseIndexOffsets() {
         let host = GraphHost()
 
@@ -6393,6 +6470,110 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutViewCacheCommitPlacedSubviewsRetainsSourcePresentOffscreenItems() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let list = SegmentedLayoutViewList(
+                graph: graph,
+                sizes: [
+                    CGSize(width: 10, height: 11),
+                    CGSize(width: 20, height: 21),
+                    CGSize(width: 30, height: 31),
+                ]
+            )
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                supportsPrefetching: true,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+            cache.lru.transactionSeed = 8
+            cache.placementSeed = 1
+
+            let retainedID = _ViewList_ID(implicitID: 0).elementID(at: 0)
+            let visibleID = _ViewList_ID(implicitID: 1).elementID(at: 1)
+            let reuseTargetID = _ViewList_ID(implicitID: 2).elementID(at: 2)
+            let retained = cache.item(data: makeLazyData(graph: graph, id: retainedID, list: list))
+            let visible = cache.item(data: makeLazyData(graph: graph, id: visibleID, list: list))
+            let retainedState = retained._state
+            retainedState.setValue(
+                LazyLayoutCacheItem.State(
+                    resetDelta: 3,
+                    phase: .identity,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+            retained.displayIndex = 0
+            retained.placement = _Placement(proposedSize: CGSize(width: 10, height: 11))
+            retained.placementSeed = 1
+            retained.commitSeed = 1
+            retained.insertionTransactionSeed = 1
+
+            cache.commitPlacedSubviews([
+                _LazyLayout_PlacedSubview(
+                    item: visible,
+                    placement: _Placement(proposedSize: CGSize(width: 20, height: 21)),
+                    index: 1
+                ),
+            ])
+
+            XCTAssertEqual(retained.parentingPhase, .inserted)
+            XCTAssertEqual(retained.prefetchPhase, .notPrefetching)
+            XCTAssertTrue(host.hasPendingTransactions)
+
+            host.flushTransactions()
+
+            XCTAssertTrue(cache.item(for: retainedID.canonicalID) === retained)
+            XCTAssertNil(retained.displayIndex)
+            XCTAssertNil(retained.placement)
+            XCTAssertEqual(retained.prefetchPhase, .notPrefetching)
+            XCTAssertEqual(
+                retainedState.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 3,
+                    phase: .didDisappear,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+
+            cache.lru.transactionSeed = 20
+            XCTAssertNil(
+                cache.reusedItem(
+                    for: reuseTargetID.canonicalID,
+                    reuseIdentifier: reuseTargetID.reuseIdentifier,
+                    transitionType: nil
+                )
+            )
+
+            cache.commitPlacedSubviews([
+                _LazyLayout_PlacedSubview(
+                    item: retained,
+                    placement: _Placement(proposedSize: CGSize(width: 10, height: 11)),
+                    index: 0
+                ),
+            ])
+            host.flushTransactions()
+
+            XCTAssertTrue(cache.item(for: retainedID.canonicalID) === retained)
+            XCTAssertEqual(retained.displayIndex, 0)
+            XCTAssertEqual(
+                retainedState.value,
+                LazyLayoutCacheItem.State(
+                    resetDelta: 3,
+                    phase: .identity,
+                    enableTransitions: false,
+                    isRemoved: false
+                )
+            )
+        }
+    }
+
     func testLazyLayoutViewCacheUpdateItemPhaseStaleWillAppearLeavesStateAndPlacements() {
         let host = GraphHost()
         let (cache, item, state) = host.data.withCurrent {
@@ -8742,6 +8923,193 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyGridPinnedSectionFootersUseTrailingAndOffscreenPositions() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 1)
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            func makeItem(
+                implicitID: Int,
+                section: LazyLayoutCacheSection,
+                size: CGSize
+            ) -> LazyLayoutCacheItem {
+                let (_, item, _) = makeLazyCache(host: host, cache: cache, implicitID: implicitID)
+                item.section = section
+                installSize(size, on: item)
+                return item
+            }
+
+            func makeCase(
+                horizontal: Bool,
+                implicitIDStart: Int
+            ) -> (
+                firstFooter: LazyLayoutCacheItem,
+                secondHeader: LazyLayoutCacheItem,
+                placed: [_LazyLayout_PlacedSubview]
+            ) {
+                let headerSize = horizontal
+                    ? CGSize(width: 30, height: 120)
+                    : CGSize(width: 120, height: 30)
+                let bodySize = horizontal
+                    ? CGSize(width: 50, height: 60)
+                    : CGSize(width: 60, height: 50)
+                let footerSize = horizontal
+                    ? CGSize(width: 24, height: 120)
+                    : CGSize(width: 120, height: 24)
+
+                func point(major: CGFloat, minor: CGFloat) -> CGPoint {
+                    horizontal ? CGPoint(x: major, y: minor) : CGPoint(x: minor, y: major)
+                }
+
+                let firstSection = UInt32(implicitIDStart)
+                let secondSection = UInt32(implicitIDStart + 20)
+                let firstHeader = makeItem(
+                    implicitID: implicitIDStart,
+                    section: LazyLayoutCacheSection(id: firstSection, isHeader: true),
+                    size: headerSize
+                )
+                let bodies = (0..<4).map { offset in
+                    makeItem(
+                        implicitID: implicitIDStart + 1 + offset,
+                        section: LazyLayoutCacheSection(id: firstSection),
+                        size: bodySize
+                    )
+                }
+                let firstFooter = makeItem(
+                    implicitID: implicitIDStart + 5,
+                    section: LazyLayoutCacheSection(id: firstSection, isFooter: true),
+                    size: footerSize
+                )
+                let secondHeader = makeItem(
+                    implicitID: implicitIDStart + 6,
+                    section: LazyLayoutCacheSection(id: secondSection, isHeader: true),
+                    size: headerSize
+                )
+
+                var placed = [
+                    _LazyLayout_PlacedSubview(
+                        item: firstHeader,
+                        placement: _Placement(proposedSize: headerSize, at: point(major: 0, minor: 0)),
+                        index: 0
+                    ),
+                ]
+
+                for (offset, body) in bodies.enumerated() {
+                    placed.append(
+                        _LazyLayout_PlacedSubview(
+                            item: body,
+                            placement: _Placement(
+                                proposedSize: bodySize,
+                                at: point(
+                                    major: CGFloat(30 + (offset / 2) * 50),
+                                    minor: CGFloat((offset % 2) * 60)
+                                )
+                            ),
+                            index: 1 + offset
+                        )
+                    )
+                }
+
+                placed.append(
+                    _LazyLayout_PlacedSubview(
+                        item: firstFooter,
+                        placement: _Placement(proposedSize: footerSize, at: point(major: 130, minor: 0)),
+                        index: 5
+                    )
+                )
+                placed.append(
+                    _LazyLayout_PlacedSubview(
+                        item: secondHeader,
+                        placement: _Placement(proposedSize: headerSize, at: point(major: 154, minor: 0)),
+                        index: 6
+                    )
+                )
+
+                return (firstFooter, secondHeader, placed)
+            }
+
+            func assertCase(horizontal: Bool, implicitIDStart: Int) throws {
+                let sample = makeCase(horizontal: horizontal, implicitIDStart: implicitIDStart)
+                let contentSize = horizontal
+                    ? CGSize(width: 304, height: 120)
+                    : CGSize(width: 120, height: 304)
+                let containerSize = CGSize(width: 120, height: 120)
+                let axis: Axis.Set = horizontal ? .horizontal : .vertical
+                let pinnedOffset = CGPoint.zero
+                let naturalOffset = horizontal ? CGPoint(x: 40, y: 0) : CGPoint(x: 0, y: 40)
+                let sectionEndOffset = horizontal ? CGPoint(x: 154, y: 0) : CGPoint(x: 0, y: 154)
+                let pinnedPosition = horizontal ? CGPoint(x: 96, y: 0) : CGPoint(x: 0, y: 96)
+                let footerNaturalPosition = horizontal ? CGPoint(x: 130, y: 0) : CGPoint(x: 0, y: 130)
+                let secondHeaderPosition = horizontal ? CGPoint(x: 154, y: 0) : CGPoint(x: 0, y: 154)
+
+                var pinned = sample.placed
+                pinned.pinSectionHeadersAndFooters(
+                    geometry: ScrollGeometry(
+                        contentOffset: pinnedOffset,
+                        contentSize: contentSize,
+                        containerSize: containerSize
+                    ),
+                    layoutDirection: .leftToRight,
+                    axes: axis,
+                    pinnedViews: .sectionFooters
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(pinned.first { $0.item === sample.firstFooter }).placement.anchorPosition,
+                    pinnedPosition
+                )
+
+                var natural = sample.placed
+                natural.pinSectionHeadersAndFooters(
+                    geometry: ScrollGeometry(
+                        contentOffset: naturalOffset,
+                        contentSize: contentSize,
+                        containerSize: containerSize
+                    ),
+                    layoutDirection: .leftToRight,
+                    axes: axis,
+                    pinnedViews: .sectionFooters
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(natural.first { $0.item === sample.firstFooter }).placement.anchorPosition,
+                    footerNaturalPosition
+                )
+
+                var offscreen = sample.placed
+                offscreen.pinSectionHeadersAndFooters(
+                    geometry: ScrollGeometry(
+                        contentOffset: sectionEndOffset,
+                        contentSize: contentSize,
+                        containerSize: containerSize
+                    ),
+                    layoutDirection: .leftToRight,
+                    axes: axis,
+                    pinnedViews: .sectionFooters
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(offscreen.first { $0.item === sample.firstFooter }).placement.anchorPosition,
+                    footerNaturalPosition
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(offscreen.first { $0.item === sample.secondHeader }).placement.anchorPosition,
+                    secondHeaderPosition
+                )
+            }
+
+            try assertCase(horizontal: false, implicitIDStart: 500)
+            try assertCase(horizontal: true, implicitIDStart: 600)
+        }
+    }
+
     func testLazyGridPinnedSectionHeadersRemainAtFooterBoundaryWhenFootersAlsoPinned() throws {
         let host = GraphHost()
 
@@ -10930,6 +11298,166 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 child.lastTarget,
                 ScrollTarget(rect: CGRect(x: 20, y: 30, width: 10, height: 12), anchor: .center)
             )
+
+            parent.firstChildMarker = LazyScrollableLookupMarker(11)
+            let parentResult = scrollable.mapFirstChild(ofType: LazyScrollableLookupMarker.self) { $0.value }
+            XCTAssertEqual(parentResult, 11)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+
+            parent.firstChildMarker = nil
+            parent.mapFirstChildCallCount = 0
+            child.mapFirstChildCallCount = 0
+            child.firstChildMarker = LazyScrollableLookupMarker(22)
+            let childResult = scrollable.mapFirstChild(ofType: LazyScrollableLookupMarker.self) { $0.value }
+            XCTAssertEqual(childResult, 22)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 1)
+
+            parent.mapFirstChildCallCount = 0
+            child.mapFirstChildCallCount = 0
+            let directChild = scrollable.mapFirstChild(ofType: LazyRecordingScrollable.self) { $0 }
+            XCTAssertTrue(directChild === child)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+        }
+    }
+
+    func testLazyScrollableNextVisibleCollectionViewIDUsesVisibleLazyIndexes() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let list = SegmentedLayoutViewList(
+                graph: graph,
+                sizes: Array(repeating: CGSize(width: 10, height: 10), count: 6)
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: LazyVGridLayout(
+                    columns: [GridItem(.fixed(10))],
+                    alignment: .center,
+                    spacing: nil,
+                    pinnedViews: [.sectionHeaders]
+                ),
+                nearestScrollableAxes: [.horizontal, .vertical]
+            )
+            cache._list = graph.makeInput(value: list as any ViewList)
+
+            func item(
+                implicitID: Int,
+                at origin: CGPoint,
+                section: LazyLayoutCacheSection = LazyLayoutCacheSection()
+            ) -> _LazyLayout_PlacedSubview {
+                let item = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID,
+                    list: list
+                ).item
+                item.section = section
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(value: LayoutComputer.fixed(CGSize(width: 10, height: 10)))
+                    )
+                )
+                return _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(
+                        proposedSize: CGSize(width: 10, height: 10),
+                        anchoring: .topLeading,
+                        at: origin
+                    ),
+                    index: implicitID
+                )
+            }
+
+            cache._placedSubviews.setValue([
+                item(implicitID: 0, at: CGPoint(x: 0, y: 20)),
+                item(implicitID: 1, at: CGPoint(x: 20, y: 0)),
+                item(implicitID: 2, at: CGPoint(x: 20, y: 20)),
+                item(implicitID: 3, at: CGPoint(x: 42, y: 20)),
+                item(
+                    implicitID: 4,
+                    at: CGPoint(x: 20, y: 42),
+                    section: LazyLayoutCacheSection(id: 1, isHeader: true)
+                ),
+                item(implicitID: 5, at: CGPoint(x: 22, y: 64)),
+            ])
+
+            let parent = LazyRecordingScrollable(acceptsTargets: false)
+            let parentAttr = graph.makeInput(value: parent as any Scrollable)
+            let childrenAttr = graph.makeInput(value: [any Scrollable]())
+            let scrollable = LazyScrollable<LazyVGridLayout>(
+                position: graph.makeInput(value: CGPoint.zero).asWeak(),
+                transform: graph.makeInput(value: ViewTransform()).asWeak(),
+                parent: parentAttr.asWeak(),
+                children: childrenAttr.asWeak(),
+                cache: cache
+            )
+
+            var collectionIndex = 0
+            var collectionIDs: [_ViewList_ID.Canonical] = []
+            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
+                collectionIDs.append(id)
+                stop = false
+            })
+            XCTAssertEqual(collectionIDs.count, 6)
+
+            let source = collectionIDs[2]
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .top,
+                    from: source,
+                    border: .zero,
+                    ignoring: []
+                ),
+                collectionIDs[1]
+            )
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .leading,
+                    from: source,
+                    border: .zero,
+                    ignoring: []
+                ),
+                collectionIDs[0]
+            )
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .trailing,
+                    from: source,
+                    border: .zero,
+                    ignoring: []
+                ),
+                collectionIDs[3]
+            )
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .bottom,
+                    from: source,
+                    border: .zero,
+                    ignoring: []
+                ),
+                collectionIDs[4]
+            )
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .bottom,
+                    from: source,
+                    border: .zero,
+                    ignoring: [.sectionHeaders]
+                ),
+                collectionIDs[5]
+            )
+            XCTAssertNil(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .center,
+                    from: source,
+                    border: .zero,
+                    ignoring: []
+                )
+            )
         }
     }
 
@@ -11990,11 +12518,21 @@ private struct IndexedLayoutViewListElements: _ViewList_Elements {
     }
 }
 
+private final class LazyScrollableLookupMarker {
+    var value: Int
+
+    init(_ value: Int) {
+        self.value = value
+    }
+}
+
 private final class LazyRecordingScrollable: Scrollable {
     var acceptsTargets: Bool
     var targetRequestCount = 0
     var lastTarget: ScrollTarget?
     var adjustedOffsets: [(CGSize, ContentOffsetAdjustmentReason)] = []
+    var firstChildMarker: LazyScrollableLookupMarker?
+    var mapFirstChildCallCount = 0
 
     init(acceptsTargets: Bool) {
         self.acceptsTargets = acceptsTargets
@@ -12020,7 +12558,11 @@ private final class LazyRecordingScrollable: Scrollable {
     }
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        nil
+        mapFirstChildCallCount += 1
+        if let marker = firstChildMarker as? A {
+            return body(marker)
+        }
+        return nil
     }
 }
 

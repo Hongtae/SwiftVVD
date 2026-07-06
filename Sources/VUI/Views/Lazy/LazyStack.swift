@@ -1052,17 +1052,20 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 transform: transform,
                 cache: cache,
                 context: context,
-                baseIndex: index
+                baseIndex: baseIndex
             )
             body(&index, .section(child), &shouldStop)
             from = max(0, index - baseIndex)
             return !shouldStop
         }
 
-        var traversalIndex = baseIndex + max(0, from)
-        return forEachNode(from: &from, style: style) { node, temporaryTransform in
+        var traversalIndex = baseIndex
+        return forEachNode(from: &from, style: style) { nodeFrom, node, temporaryTransform in
             var shouldStop = false
-            let nodeTransform = combinedTransform(with: temporaryTransform)
+            var nodeTransform = combinedTransform(with: temporaryTransform)
+            if section.id != nil {
+                nodeTransform = _viewListTransformDroppingGroupEntryIDs(nodeTransform)
+            }
 
             switch node {
             case .section(let section):
@@ -1073,9 +1076,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     context: context,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex
+                var index = child.baseIndex + max(0, nodeFrom)
                 body(&index, .section(child), &shouldStop)
                 traversalIndex = child.baseIndex + section.estimatedCount(style: style)
+                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
 
             case .sublist(let sublist):
                 let child = _LazyLayout_Subviews(
@@ -1086,9 +1090,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex
+                var index = child.baseIndex + max(0, nodeFrom)
                 body(&index, .subviews(child), &shouldStop)
                 traversalIndex = index + max(0, sublist.count - max(0, sublist.start))
+                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
 
             case .list(let list, let attribute):
                 let child = _LazyLayout_Subviews(
@@ -1099,9 +1104,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex
+                var index = child.baseIndex + max(0, nodeFrom)
                 body(&index, .subviews(child), &shouldStop)
                 traversalIndex = child.baseIndex + list.estimatedCount(style: style)
+                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
 
             case .group(let group):
                 let child = _LazyLayout_Subviews(
@@ -1112,9 +1118,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex
+                var index = child.baseIndex + max(0, nodeFrom)
                 body(&index, .subviews(child), &shouldStop)
                 traversalIndex = child.baseIndex + group.estimatedCount(style: style)
+                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
             }
             return !shouldStop
         }
@@ -1199,7 +1206,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
             list: listAttribute,
             transform: _ViewList_TemporarySublistTransform()
         ) { nodeFrom, nodeStyle, node, temporaryTransform in
-            let nodeTransform = combinedTransform(baseTransform, with: temporaryTransform)
+            var nodeTransform = combinedTransform(baseTransform, with: temporaryTransform)
+            if dropNestedSectionSharedGeneratedID {
+                nodeTransform = _viewListTransformDroppingGroupEntryIDs(nodeTransform)
+            }
             switch node {
             case .sublist(var sublist):
                 nodeTransform.apply(to: &sublist)
@@ -1310,7 +1320,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
     private func forEachNode(
         from: inout Int,
         style: _ViewList_IteratorStyle,
-        body: (_ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+        body: (inout Int, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
         switch node {
         case .list(let list, let listAttribute):
@@ -1319,8 +1329,8 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 style: style,
                 list: listAttribute,
                 transform: _ViewList_TemporarySublistTransform()
-            ) { _, _, node, temporaryTransform in
-                body(node, temporaryTransform)
+            ) { nodeFrom, _, node, temporaryTransform in
+                body(&nodeFrom, node, temporaryTransform)
             }
         case .group(let group):
             return group.applyNodes(
@@ -1328,14 +1338,13 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 style: style,
                 list: nil,
                 transform: _ViewList_TemporarySublistTransform()
-            ) { _, _, node, temporaryTransform in
-                body(node, temporaryTransform)
+            ) { nodeFrom, _, node, temporaryTransform in
+                body(&nodeFrom, node, temporaryTransform)
             }
         case .section(let section):
-            return body(.section(section), _ViewList_TemporarySublistTransform())
+            return body(&from, .section(section), _ViewList_TemporarySublistTransform())
         case .sublist(let sublist):
-            from = 0
-            return body(.sublist(sublist), _ViewList_TemporarySublistTransform())
+            return body(&from, .sublist(sublist), _ViewList_TemporarySublistTransform())
         }
     }
 
@@ -2143,9 +2152,22 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
                 in: removalTransaction,
                 animation: removalTransaction.effectiveAnimation
             )
+            if item.parentingPhase == .inserted {
+                item.displayIndex = nil
+                item.placement = nil
+                item.prefetchPhase = .notPrefetching
+            }
             return
         }
         guard item.animationCount == 0 else { return }
+        if item.parentingPhase == .inserted {
+            item.displayIndex = nil
+            item.placement = nil
+            item.prefetchPhase = .notPrefetching
+            state.isRemoved = false
+            item._state.setValue(state, transaction: currentListTransaction())
+            return
+        }
         item.displayIndex = nil
         item.placement = nil
         item.prefetchPhase = supportsViewHierarchyPrefetching ? .pendingRemoval : .notPrefetching
@@ -2172,6 +2194,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
             item.commitSeed = placementSeed
             item.placement = placedSubview.placement
             item.pendingPlacement = nil
+            item.parentingPhase = .inserted
             minPlacedIndex = min(minPlacedIndex, placedSubview.index)
             maxPlacedIndex = max(maxPlacedIndex, placedSubview.index)
         }
@@ -2183,6 +2206,13 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
 
         var hasStaleItems = false
         for item in items.values where item.commitSeed != placementSeed {
+            if containsCurrentListItem(item) {
+                item.parentingPhase = .inserted
+                item.prefetchPhase = .notPrefetching
+                hasStaleItems = true
+                continue
+            }
+            item.parentingPhase = .removed
             item.removalTransactionSeed = lru.transactionSeed
             item.prefetchPhase = supportsViewHierarchyPrefetching ? .pendingRemoval : .notPrefetching
             item.willEnableTransitions = item.transitionType != nil
@@ -2253,6 +2283,9 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
     ) -> Bool {
         guard item.id.canonicalID != id,
               item.reuseIdentifier == reuseIdentifier else {
+            return false
+        }
+        guard item.parentingPhase != .inserted else {
             return false
         }
         let insertionAge = Int32(bitPattern: lru.transactionSeed &- item.insertionTransactionSeed)
@@ -2464,6 +2497,13 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
         return data.traits[TransitionTraitKey.self]
     }
 
+    private func containsCurrentListItem(_ item: LazyLayoutCacheItem) -> Bool {
+        _list.value.firstOffset(
+            forID: item.id.canonicalID,
+            style: _ViewList_IteratorStyle()
+        ) != nil
+    }
+
     private func makeNewItem(
         data: _LazyLayout_Subview.Data,
         anyTransition transition: AnyTransition?
@@ -2622,7 +2662,7 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     }
 }
 
-struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection {
+struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableContainer {
     var position: WeakAttribute<CGPoint>
     var transform: WeakAttribute<ViewTransform>
     var parent: WeakAttribute<any Scrollable>
@@ -2669,7 +2709,32 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection {
         border: CGSize,
         ignoring pinnedViews: PinnedScrollableViews
     ) -> _ViewList_ID.Canonical? {
-        nil
+        guard let source = placedSubviews.first(where: { lazyCollectionID($0.id, matches: id) }) else {
+            return nil
+        }
+        let sourceFrame = navigationFrame(for: source).insetBy(
+            dx: -border.width,
+            dy: -border.height
+        )
+        var best: (index: Int, distance: CGFloat)?
+        for candidate in placedSubviews {
+            guard !lazyCollectionID(candidate.id, matches: id),
+                  !candidate.matches(pinnedViews),
+                  let distance = navigationDistance(
+                    from: sourceFrame,
+                    to: navigationFrame(for: candidate),
+                    towards: point
+                  ) else {
+                continue
+            }
+            if best == nil || distance < best!.distance {
+                best = (candidate.index, distance)
+            }
+        }
+        guard let index = best?.index else {
+            return nil
+        }
+        return collectionViewID(at: index)
     }
 
     static func hasMultipleViews(in axis: Axis) -> Bool {
@@ -2713,39 +2778,12 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection {
         }
     }
 
-    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        if let parent = resolvedParent,
-           parent.setContentTarget(target) {
-            return true
-        }
-        for child in resolvedChildren {
-            if child.setContentTarget(target) {
-                return true
-            }
-        }
-        return false
+    var containerParentScrollable: (any Scrollable)? {
+        resolvedParent
     }
 
-    var allowsContentOffsetAdjustments: Bool {
-        resolvedParent?.allowsContentOffsetAdjustments ?? false
-    }
-
-    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
-        guard let parent = resolvedParent else { return false }
-        return parent.adjustContentOffset(by: offset, reason: reason)
-    }
-
-    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        if let parent = resolvedParent,
-           let mapped = parent.mapFirstChild(ofType: type, body: body) {
-            return mapped
-        }
-        for child in resolvedChildren {
-            if let mapped = child.mapFirstChild(ofType: type, body: body) {
-                return mapped
-            }
-        }
-        return nil
+    var containerChildScrollables: [any Scrollable] {
+        resolvedChildren
     }
 
     static var accessibilityRole: AccessibilityLayoutRole? {
@@ -2773,6 +2811,57 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection {
 
     private var resolvedChildren: [any Scrollable] {
         value(for: children) ?? []
+    }
+
+    private func collectionViewID(at index: Int) -> _ViewList_ID.Canonical? {
+        var offset = index
+        var result: _ViewList_ID.Canonical?
+        _ = cache?._list.value.applyIDs(from: &offset, listAttribute: cache?._list) { id in
+            result = id.canonicalID
+            return false
+        }
+        return result
+    }
+
+    private func navigationFrame(for placedSubview: _LazyLayout_PlacedSubview) -> CGRect {
+        cache?.targetFrame(for: placedSubview) ?? placedSubview.frame
+    }
+
+    private func navigationDistance(
+        from source: CGRect,
+        to candidate: CGRect,
+        towards point: UnitPoint
+    ) -> CGFloat? {
+        let dx = point.x - 0.5
+        let dy = point.y - 0.5
+        let epsilon = CGFloat.ulpOfOne
+
+        var primary = CGFloat.zero
+        var cross = CGFloat.zero
+        if abs(dx) >= abs(dy) {
+            if dx > epsilon {
+                primary = candidate.minX - source.maxX
+            } else if dx < -epsilon {
+                primary = source.minX - candidate.maxX
+            } else {
+                return nil
+            }
+            cross = candidate.midY - source.midY
+        } else {
+            if dy > epsilon {
+                primary = candidate.minY - source.maxY
+            } else if dy < -epsilon {
+                primary = source.minY - candidate.maxY
+            } else {
+                return nil
+            }
+            cross = candidate.midX - source.midX
+        }
+
+        guard primary >= -epsilon else {
+            return nil
+        }
+        return (primary * primary + cross * cross).squareRoot()
     }
 
     private func value<T>(for weakAttribute: WeakAttribute<T>) -> T? {
@@ -3832,10 +3921,12 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
             return
         }
 
-        var headerFrom = 0
-        _ = section.header.apply(from: &headerFrom, style: style) { _, subview, childStop in
-            placeBoundary(subview: subview)
-            childStop = shouldStop()
+        if index < section.content.baseIndex {
+            var headerFrom = max(0, index - section.header.baseIndex)
+            _ = section.header.apply(from: &headerFrom, style: style) { _, subview, childStop in
+                placeBoundary(subview: subview)
+                childStop = shouldStop()
+            }
         }
         guard !shouldStop() else {
             return
@@ -3846,6 +3937,9 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
             placeBody(subview: subview)
             childStop = shouldStop()
         }
+        from = roundedSectionTraversalPointer(
+            contentBaseIndex: section.content.baseIndex
+        )
         if !contentCompleted {
             return
         }
@@ -3860,6 +3954,12 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
             childStop = shouldStop()
         }
         flushMinorGroup()
+    }
+
+    private func roundedSectionTraversalPointer(contentBaseIndex: Int) -> Int {
+        let minorCount = max(1, minor.count)
+        let contentOffset = max(0, index - contentBaseIndex)
+        return contentBaseIndex + (contentOffset / minorCount) * minorCount
     }
 
     mutating func measureBackwards(

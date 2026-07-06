@@ -1167,6 +1167,20 @@ private struct _ViewList_GroupEntryTransform: _ViewList_SublistTransform_Item {
     }
 }
 
+func _viewListTransformDroppingGroupEntryIDs(
+    _ transform: _ViewList_SublistTransform
+) -> _ViewList_SublistTransform {
+    var filtered = _ViewList_SublistTransform()
+    for item in transform.items {
+        if item is _ViewList_GroupEntryTransform {
+            continue
+        }
+        filtered.push(item)
+    }
+    filtered.subgraphCount = transform.subgraphCount
+    return filtered
+}
+
 /// A contiguous slice of a ViewList passed to the `applyNodes` callback.
 struct _ViewList_Sublist {
     var start: Int

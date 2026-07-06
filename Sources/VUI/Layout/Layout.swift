@@ -966,7 +966,7 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
 }
 
 /// Scrollable collection carrier for dynamic `Layout` children.
-private struct DynamicLayoutScrollable: ScrollableCollection {
+private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContainer {
     var containerInfo: Attribute<DynamicContainer.Info>
     var viewList: Attribute<any ViewList>
     var geometries: Attribute<[ViewGeometry]>
@@ -1054,41 +1054,12 @@ private struct DynamicLayoutScrollable: ScrollableCollection {
         }
     }
 
-    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        if let parent = resolvedParentScrollable,
-           parent.setContentTarget(target) {
-            return true
-        }
-        guard let childScrollables else { return false }
-        for child in childScrollables.value {
-            if child.setContentTarget(target) {
-                return true
-            }
-        }
-        return false
+    var containerParentScrollable: (any Scrollable)? {
+        resolvedParentScrollable
     }
 
-    var allowsContentOffsetAdjustments: Bool {
-        resolvedParentScrollable?.allowsContentOffsetAdjustments ?? false
-    }
-
-    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
-        guard let parent = resolvedParentScrollable else { return false }
-        return parent.adjustContentOffset(by: offset, reason: reason)
-    }
-
-    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        if let parent = resolvedParentScrollable,
-           let mapped = parent.mapFirstChild(ofType: type, body: body) {
-            return mapped
-        }
-        guard let childScrollables else { return nil }
-        for child in childScrollables.value {
-            if let mapped = child.mapFirstChild(ofType: type, body: body) {
-                return mapped
-            }
-        }
-        return nil
+    var containerChildScrollables: [any Scrollable] {
+        childScrollables?.value ?? []
     }
 
     private func collectionViewIDs() -> [_ViewList_ID.Canonical] {

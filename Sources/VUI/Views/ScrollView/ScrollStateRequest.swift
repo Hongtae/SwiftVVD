@@ -16,6 +16,11 @@ protocol Scrollable {
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B?
 }
 
+protocol ScrollableContainer: Scrollable {
+    var containerParentScrollable: (any Scrollable)? { get }
+    var containerChildScrollables: [any Scrollable] { get }
+}
+
 extension Scrollable {
     func scrollToPosition(_ position: ScrollPosition) -> Bool {
         if let id = position._anyViewID {
@@ -42,6 +47,46 @@ extension Scrollable {
             }
         }
         return true
+    }
+}
+
+extension ScrollableContainer {
+    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
+        if let parent = containerParentScrollable,
+           parent.setContentTarget(target) {
+            return true
+        }
+        for child in containerChildScrollables {
+            if child.setContentTarget(target) {
+                return true
+            }
+        }
+        return false
+    }
+
+    var allowsContentOffsetAdjustments: Bool {
+        containerParentScrollable?.allowsContentOffsetAdjustments ?? false
+    }
+
+    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
+        guard let parent = containerParentScrollable else { return false }
+        return parent.adjustContentOffset(by: offset, reason: reason)
+    }
+
+    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
+        if let parent = containerParentScrollable,
+           let mapped = parent.mapFirstChild(ofType: type, body: body) {
+            return mapped
+        }
+        for child in containerChildScrollables {
+            if let typedChild = child as? A {
+                return body(typedChild)
+            }
+            if let mapped = child.mapFirstChild(ofType: type, body: body) {
+                return mapped
+            }
+        }
+        return nil
     }
 }
 

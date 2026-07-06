@@ -96,17 +96,32 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         let currentPhase = phase.value
         if let lastPhase,
            lastPhase.rawValue != currentPhase.rawValue {
-            disappeared()
+            if !currentPhase.isBeingRemoved || !hasDeferredRemovalBoundary() {
+                disappeared()
+            }
         }
         lastPhase = currentPhase
+
+        guard currentPhase.isInserted else {
+            _AGGraph.setStatefulOutput(())
+            return
+        }
 
         let modifierValue = modifier.value
         appear = modifierValue.appear
         disappear = modifierValue.disappear
-        if !isRemoved && currentPhase.isInserted {
+        if !isRemoved {
             appeared()
         }
         _AGGraph.setStatefulOutput(())
+    }
+
+    private func hasDeferredRemovalBoundary() -> Bool {
+        guard let graph = _AGGraph.current,
+              let transaction = graph.transaction(for: phase.identifier) else {
+            return false
+        }
+        return transaction.animationCompletionObserver != nil
     }
 
     mutating func appeared() {

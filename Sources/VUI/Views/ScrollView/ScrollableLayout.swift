@@ -234,7 +234,10 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
                     childResponders = graph.makeInput(value: ViewRespondersKey.defaultValue)
                 }
                 let responder: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
-                    _ScrollViewDefaultLayoutResponderRule(childResponders: childResponders)
+                    DefaultLayoutResponderFilter(
+                        children: childResponders,
+                        responder: DefaultLayoutViewResponder()
+                    )
                 )
                 outputs.preferences.setValue(responder.identifier, for: ViewRespondersKey.self)
             }
@@ -1475,25 +1478,6 @@ private struct _ScrollViewMainScrollableProvider: Rule {
     }
 }
 
-private struct _ScrollViewDefaultLayoutResponderRule: StatefulRule {
-    typealias Value = [any ViewResponder]
-
-    var childResponders: Attribute<[any ViewResponder]>
-    var responder: DefaultLayoutViewResponder?
-
-    mutating func updateValue() {
-        let currentResponder: DefaultLayoutViewResponder
-        if let responder {
-            currentResponder = responder
-        } else {
-            currentResponder = DefaultLayoutViewResponder()
-            responder = currentResponder
-        }
-        currentResponder.update(responders: childResponders.value, scrollTarget: nil)
-        _AGGraph.setStatefulOutput([currentResponder])
-    }
-}
-
 private final class _ScrollViewMainScrollable: Scrollable {
     private let node: ScrollViewNode
     private let parent: WeakAttribute<any Scrollable>
@@ -2193,7 +2177,7 @@ private struct ScrollableLayoutStateValue<Data, Layout>
     }
 }
 
-private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
+private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, ScrollableContainer
     where Data: RandomAccessCollection,
           Layout: _ScrollableLayout,
           Data.Index: Hashable {
@@ -2292,31 +2276,12 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection
         }
     }
 
-    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        if let parent = resolvedParentScrollable,
-           parent.setContentTarget(target) {
-            return true
-        }
-        guard let childScrollables else { return false }
-        for child in childScrollables.value {
-            if child.setContentTarget(target) {
-                return true
-            }
-        }
-        return false
+    var containerParentScrollable: (any Scrollable)? {
+        resolvedParentScrollable
     }
 
-    var allowsContentOffsetAdjustments: Bool {
-        resolvedParentScrollable?.allowsContentOffsetAdjustments ?? false
-    }
-
-    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
-        guard let parent = resolvedParentScrollable else { return false }
-        return parent.adjustContentOffset(by: offset, reason: reason)
-    }
-
-    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        nil
+    var containerChildScrollables: [any Scrollable] {
+        childScrollables?.value ?? []
     }
 
     private func canonicalID(for index: Data.Index) -> _ViewList_ID.Canonical {

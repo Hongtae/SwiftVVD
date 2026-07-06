@@ -1058,6 +1058,46 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
+    func testChildUpdateKeepsStoredPhaseTransactionAndSeedBeforePublish() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0, 1],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .eventDriven(trigger: AnyEquatable(1))
+            )
+            var baseTransaction = Transaction()
+            baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 377
+            var storedPhaseTransaction = Transaction()
+            storedPhaseTransaction[PhaseAnimatorTransactionWidthKey.self] = 911
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: baseTransaction)
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.none
+            )
+            let isVisible = graph.makeInput(value: true)
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: isVisible.asWeak()
+            )
+            child.lastBehavior = container.behavior
+            child.phaseChangeTransaction = storedPhaseTransaction
+            child.phaseChangeTransactionSeed = 123
+
+            let childValue = graph.makeStatefulRule(child)
+
+            XCTAssertEqual(childValue.value.content.width, 0)
+            XCTAssertEqual(childValue.value.phaseChangeTransaction[PhaseAnimatorTransactionWidthKey.self], 911)
+            XCTAssertEqual(childValue.value.phaseChangeTransactionSeed, 123)
+        }
+    }
+
     func testChildUpdateSinglePhaseRepeatingDoesNotCreateCompletionTransaction() {
         withPhaseAnimatorHost { viewGraph, graph in
             typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer

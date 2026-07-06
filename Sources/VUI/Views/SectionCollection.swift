@@ -482,7 +482,10 @@ private struct SubviewsCollectionViewList: ViewList {
         ) -> Bool {
             var sublist = sourceSublist
             for temporaryTransform in temporaryTransforms {
-                temporaryTransform.apply(to: &sublist)
+                let transform = _viewListTransformDroppingGroupEntryIDs(
+                    temporaryTransform.copy()
+                )
+                transform.apply(to: &sublist)
             }
             for sublistTransform in sublistTransforms {
                 sublistTransform.apply(to: &sublist)
@@ -1077,7 +1080,7 @@ private struct SectionAccumulator {
         sectionIndex: Int,
         base: UniqueID
     ) -> _ViewList_ID.GeneratedIDSeed {
-        let stride = id.explicitIDs.isEmpty ? 29 : 34
+        let stride = _sectionExplicitIDs(from: id).isEmpty ? 29 : 34
         let offset = UInt32(truncatingIfNeeded: sectionIndex &* stride)
         return _ViewList_ID.GeneratedIDSeed(
             base: UniqueID(value: base.value &+ offset),
@@ -1259,8 +1262,9 @@ private func _subviewIDTransform(
             reuseID: _ViewList_ID.generatedSectionReuseID
         ))
     }
-    if !id.explicitIDs.isEmpty {
-        transform.push(SectionSubviewIDTransformItem(explicitIDs: id.explicitIDs))
+    let sectionExplicitIDs = _sectionExplicitIDs(from: id)
+    if sectionExplicitIDs.isEmpty == false {
+        transform.push(SectionSubviewIDTransformItem(explicitIDs: sectionExplicitIDs))
     }
     if includesRowGeneratedID {
         transform.push(SectionGeneratedSubviewIDTransformItem(
@@ -1270,6 +1274,10 @@ private func _subviewIDTransform(
         ))
     }
     return transform
+}
+
+private func _sectionExplicitIDs(from id: _ViewList_ID) -> [_ViewList_ID.Explicit] {
+    id.explicitIDs.filter { ($0.id.base is _ViewList_GroupEntryID) == false }
 }
 
 func _sectionRegionTransformDroppingSharedGeneratedID(
