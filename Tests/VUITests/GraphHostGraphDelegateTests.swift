@@ -184,6 +184,44 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         }
         XCTAssertTrue(recorder.events.isEmpty)
     }
+
+    func testWindowControllerUpdateEnvironmentPropagatesParentPhaseToChildViewGraph() {
+        let parent = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(namespace: .app, sceneID: SceneID(EmptyView.self))
+        )
+        let child = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(namespace: .app, sceneID: SceneID(Optional<EmptyView>.self))
+        )
+        child.parentWindow = parent
+
+        XCTAssertTrue(child.viewGraph.parentHost === parent.viewGraph)
+
+        var childPhase = Phase()
+        childPhase.resetSeed = 7
+        childPhase.isBeingRemoved = true
+        child.viewGraph.setPhase(childPhase)
+
+        var oldParentPhase = Phase()
+        oldParentPhase.resetSeed = 2
+        child.viewGraph.parentPhase = oldParentPhase
+
+        var newParentPhase = Phase()
+        newParentPhase.resetSeed = 3
+        parent.viewGraph.setPhase(newParentPhase)
+
+        child.viewGraph.data.withCurrent {
+            child.updateEnvironment()
+        }
+
+        XCTAssertEqual(child.viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
+        child.viewGraph.data.withCurrent {
+            let next = child.viewGraph.data.phaseAttribute.value
+            XCTAssertEqual(next.resetSeed, 8)
+            XCTAssertTrue(next.isBeingRemoved)
+        }
+    }
 }
 
 private final class DelegateGraphHost: GraphHost {

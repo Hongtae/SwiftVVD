@@ -11753,6 +11753,114 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyStackMakeViewPhaseResetRefreshesConcreteCache() throws {
+        let host = GraphHost()
+        var scrollablesID: AGAttribute!
+        var phaseAttr: Attribute<Phase>!
+        var layoutComputer: LayoutComputer!
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let stack = LazyVStack(spacing: 0) {
+                LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+                LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+            }
+            let source = graph.makeInput(value: stack)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(width: 20, height: 20))
+            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            phaseAttr = inputs.base.phase
+
+            let outputs = type(of: stack)._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: inputs
+            )
+            layoutComputer = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            scrollablesID = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
+            let scrollable = try XCTUnwrap(
+                scrollables.compactMap { $0 as? LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>> }.first
+            )
+            let cache = try XCTUnwrap(scrollable.cache)
+
+            cache.lru.transactionSeed = 44
+            cache.commitSeed = 33
+            cache.placementSeed = 34
+
+            var phase = phaseAttr.value
+            phase.resetSeed = 2
+            phaseAttr.setValue(phase)
+            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+
+            XCTAssertEqual(cache.lru.transactionSeed, 2)
+            XCTAssertEqual(cache.commitSeed, 1)
+            XCTAssertEqual(cache.placementSeed, 2)
+            XCTAssertEqual(cache.items.count, 2)
+        }
+    }
+
+    func testLazyStackMakeViewParentPhaseChangeRefreshesConcreteCache() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
+        rendererHost.storage = viewGraph
+        var scrollablesID: AGAttribute!
+        var layoutComputer: LayoutComputer!
+
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let stack = LazyVStack(spacing: 0) {
+                LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+                LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+            }
+            let source = graph.makeInput(value: stack)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.base.phase = viewGraph.data.phaseAttribute
+            inputs.size = graph.makeInput(value: ViewSize(width: 20, height: 20))
+            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+
+            let outputs = type(of: stack)._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: inputs
+            )
+            layoutComputer = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            scrollablesID = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+        }
+
+        viewGraph.flushTransactions()
+
+        try viewGraph.data.withCurrent {
+            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
+            let scrollable = try XCTUnwrap(
+                scrollables.compactMap { $0 as? LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>> }.first
+            )
+            let cache = try XCTUnwrap(scrollable.cache)
+
+            cache.lru.transactionSeed = 144
+            cache.commitSeed = 133
+            cache.placementSeed = 134
+
+            var oldParentPhase = Phase()
+            oldParentPhase.resetSeed = 1
+            var newParentPhase = Phase()
+            newParentPhase.resetSeed = 2
+            viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
+            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+
+            XCTAssertEqual(viewGraph.data.phaseAttribute.value.resetSeed, 1)
+            XCTAssertEqual(cache.lru.transactionSeed, 2)
+            XCTAssertEqual(cache.commitSeed, 1)
+            XCTAssertEqual(cache.placementSeed, 2)
+            XCTAssertEqual(cache.items.count, 2)
+        }
+    }
+
     private func assertLazyLayout<L: LazyLayout>(_: L) {
     }
 

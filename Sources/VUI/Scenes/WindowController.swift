@@ -1446,6 +1446,15 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     func updateEnvironment() {
+        if let parentGraph = parentWindow?.viewGraph {
+            let parentPhase = parentGraph.data.withCurrent {
+                parentGraph.data.phaseAttribute.value
+            }
+            viewGraph.updateGraphPhase(
+                oldParentPhase: viewGraph.parentPhase,
+                newParentPhase: parentPhase
+            )
+        }
         viewGraph.envAttr?.setValue(self.environment)
     }
 

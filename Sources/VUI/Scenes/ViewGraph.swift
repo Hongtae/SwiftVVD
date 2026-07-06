@@ -433,6 +433,10 @@ class ViewGraph: ViewGraphHost {
     // this to reach the shared gesture graph during view construction.
     weak var rendererHost: (any ViewRendererHost)?
 
+    override var parentHost: GraphHost? {
+        (rendererHost as? WindowController)?.parentWindow?.viewGraph
+    }
+
     // AG input attributes updated by WindowController's root-value updater.
     private(set) var sizeAttr: Attribute<ViewSize>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
