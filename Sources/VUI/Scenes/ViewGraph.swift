@@ -934,12 +934,14 @@ class ViewGraph: ViewGraphHost {
         self.rootResourceList   = rootRLResult
     }
 
-    /// Updates host outputs, then refreshes the time input every frame.
+    /// Flushes queued graph transactions around host output evaluation.
     override func updateOutputs(at time: Time) {
         beginNextUpdate(at: time)
+        flushTransactions()
         runTransaction {
             super.updateOutputs(at: time)
         }
+        flushTransactions()
         updatePreferences()
     }
 
