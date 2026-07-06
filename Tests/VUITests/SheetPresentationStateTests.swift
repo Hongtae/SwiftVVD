@@ -49,6 +49,35 @@ final class SheetPresentationStateTests: XCTestCase {
 
         XCTAssertFalse(controller.shouldClose(window: fakeWindow))
     }
+
+    @MainActor
+    func testStateDrivenSheetPresentationSurvivesInactiveRootChainedSheet() throws {
+        var capturedFirstBinding: Binding<Bool>?
+        var capturedSecondBinding: Binding<Bool>?
+        let view = RootChainedTwoSheetProbe { first, second in
+            capturedFirstBinding = first
+            capturedSecondBinding = second
+        }
+        let controller = WindowController(
+            content: view,
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(RootChainedTwoSheetProbe.self)
+            )
+        )
+        let fakeWindow = try XCTUnwrap(
+            TestWindow(name: "test", style: [], delegate: nil, data: [:])
+        )
+
+        XCTAssertTrue(controller.shouldClose(window: fakeWindow))
+        controller.viewGraph.updateOutputs(at: Time(seconds: 0))
+        capturedFirstBinding?.wrappedValue = true
+        XCTAssertEqual(capturedSecondBinding?.wrappedValue, false)
+        controller.viewGraph.updateOutputs(at: Time(seconds: 1))
+
+        XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+    }
+
 }
 
 private struct StateDrivenSheetProbe: View {
@@ -81,6 +110,23 @@ private struct TwoSheetProbe: View {
                     Text("Second")
                 }
         }
+    }
+}
+
+private struct RootChainedTwoSheetProbe: View {
+    var capture: (Binding<Bool>, Binding<Bool>) -> Void
+    @State private var firstPresented = false
+    @State private var secondPresented = false
+
+    var body: some View {
+        let _ = capture($firstPresented, $secondPresented)
+        EmptyView()
+            .sheet(isPresented: $firstPresented) {
+                Text("First")
+            }
+            .sheet(isPresented: $secondPresented) {
+                Text("Second")
+            }
     }
 }
 

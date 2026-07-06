@@ -962,13 +962,30 @@ extension PreferencesOutputs {
             }
             previousValue = value
 
+            let transaction = Transaction.current
+            let id = Transaction.id
+            if host.isUpdating {
+                host.continueTransaction(
+                    CustomGraphMutation {
+                        guard let graph = _AGGraph.current,
+                              targetWeak.isValid(in: graph) else {
+                            return
+                        }
+                        Transaction.withScopedThreadTransaction(transaction) {
+                            targetWeak.toStrong().setValue(value, transaction: transaction)
+                        }
+                    }
+                )
+                return
+            }
+
             Update.enqueueAction(reason: 0x11) { [weak host] in
                 guard let host else {
                     return
                 }
                 host.asyncTransaction(
-                    Transaction.current,
-                    id: Transaction.id,
+                    transaction,
+                    id: id,
                     mutation: AssignmentGraphMutation(attribute: targetWeak, value: value),
                     style: .deferred,
                     mayDeferUpdate: true

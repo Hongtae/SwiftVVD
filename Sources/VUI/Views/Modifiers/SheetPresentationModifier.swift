@@ -145,7 +145,9 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
                 case .keyed(var dict):
                     dict[namespaceID] = transaction
                     value = .keyed(dict)
-                case .single, .none:
+                case .single:
+                    break
+                case .none:
                     value = .keyed([namespaceID: transaction])
                 }
             }
