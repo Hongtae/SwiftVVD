@@ -67,14 +67,14 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         func makeTrueBranchView() -> _GraphValue<TrueContent> {
-            let attr: Attribute<TrueContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+            let attr: Attribute<TrueContent> = AGSubgraph.withCurrent(state.activeSubgraph) {
                 graph.makeRule { trueBranchValue() }
             }
             return _GraphValue(_attribute: attr)
         }
 
         func makeFalseBranchView() -> _GraphValue<FalseContent> {
-            let attr: Attribute<FalseContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+            let attr: Attribute<FalseContent> = AGSubgraph.withCurrent(state.activeSubgraph) {
                 graph.makeRule { falseBranchValue() }
             }
             return _GraphValue(_attribute: attr)
@@ -93,12 +93,12 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             let outputs: _ViewOutputs
             if initialIsTrue {
                 _ = trueBranchValue()
-                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                outputs = AGSubgraph.withCurrent(state.activeSubgraph) {
                     TrueContent._makeView(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
                 _ = falseBranchValue()
-                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                outputs = AGSubgraph.withCurrent(state.activeSubgraph) {
                     FalseContent._makeView(view: makeFalseBranchView(), inputs: inputs)
                 }
             }
@@ -120,12 +120,12 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             let outputs: _ViewOutputs
             if nowTrue {
                 _ = trueBranchValue()
-                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                outputs = AGSubgraph.withCurrent(state.activeSubgraph) {
                     TrueContent._makeView(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
                 _ = falseBranchValue()
-                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                outputs = AGSubgraph.withCurrent(state.activeSubgraph) {
                     FalseContent._makeView(view: makeFalseBranchView(), inputs: inputs)
                 }
             }
@@ -218,14 +218,14 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         func makeTrueBranchView() -> _GraphValue<TrueContent> {
-            let attr: Attribute<TrueContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+            let attr: Attribute<TrueContent> = AGSubgraph.withCurrent(state.activeSubgraph) {
                 graph.makeRule { trueBranchValue() }
             }
             return _GraphValue(_attribute: attr)
         }
 
         func makeFalseBranchView() -> _GraphValue<FalseContent> {
-            let attr: Attribute<FalseContent> = AGSubgraph.$current.withValue(state.activeSubgraph) {
+            let attr: Attribute<FalseContent> = AGSubgraph.withCurrent(state.activeSubgraph) {
                 graph.makeRule { falseBranchValue() }
             }
             return _GraphValue(_attribute: attr)
@@ -234,12 +234,12 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         func makeBranchOutputs(isTrue: Bool) -> _ViewListOutputs {
             if isTrue {
                 _ = trueBranchValue()
-                return AGSubgraph.$current.withValue(state.activeSubgraph) {
+                return AGSubgraph.withCurrent(state.activeSubgraph) {
                     TrueContent._makeViewList(view: makeTrueBranchView(), inputs: inputs)
                 }
             } else {
                 _ = falseBranchValue()
-                return AGSubgraph.$current.withValue(state.activeSubgraph) {
+                return AGSubgraph.withCurrent(state.activeSubgraph) {
                     FalseContent._makeViewList(view: makeFalseBranchView(), inputs: inputs)
                 }
             }

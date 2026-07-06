@@ -242,7 +242,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = GraphHost()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -271,7 +271,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = GraphHost()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -306,7 +306,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.removedState = .unattached
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -333,7 +333,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.removedState = .unattached
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -365,7 +365,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.removedState = .unattached
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -404,7 +404,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.removedState = .unattached
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -429,7 +429,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.removedState = .unattached
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -460,7 +460,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = GraphHost()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -488,7 +488,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = AppearanceDelegateGraphHost(delegate: delegate)
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(
@@ -519,7 +519,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = AppearanceDelegateGraphHost(delegate: delegate)
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let modifier = host.data.graph.makeInput(value: _AppearanceActionModifier())
                 let phase = host.data.graph.makeInput(value: Phase())
                 let effect = host.data.graph.makeStatefulRule(
@@ -537,7 +537,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         let host = GraphHost()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 var events: [String] = []
                 let modifier = host.data.graph.makeInput(
                     value: _AppearanceActionModifier(

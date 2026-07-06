@@ -122,7 +122,7 @@ class GraphHost {
             var phaseAttribute: Attribute<Phase>!
             ref.withCurrent {
                 globalSubgraph = AGSubgraph()
-                AGSubgraph.$current.withValue(globalSubgraph) {
+                AGSubgraph.withCurrent(globalSubgraph) {
                     rootSubgraph = AGSubgraph()
                 }
                 updateSeedAttribute = graph.makeInput(value: UInt32.zero)

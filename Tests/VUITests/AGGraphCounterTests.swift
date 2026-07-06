@@ -126,7 +126,7 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
-    func testCurrentContextTokenPropagatesToChildTask() {
+    func testCurrentContextDoesNotPropagateToChildTask() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
         let probe = CurrentContextTaskProbe(graph: graph)
@@ -138,7 +138,7 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(probe.wait(), .success)
         }
 
-        XCTAssertTrue(probe.observed)
+        XCTAssertFalse(probe.observed)
     }
 
     func testCurrentContextTokenMapAllowsReturningToOuterGraph() {

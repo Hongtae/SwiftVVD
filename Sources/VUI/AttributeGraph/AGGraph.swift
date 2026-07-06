@@ -7,6 +7,7 @@
 
 import Foundation
 import Synchronization
+import VVD
 
 // Single-threaded design: no internal synchronization.
 // The caller is responsible for ensuring that all operations on a given
@@ -15,8 +16,7 @@ import Synchronization
 // All methods on _AGGraph require that _AGGraph.current is already bound
 // to this instance (via _AGGraph.withCurrent(self) { ... }) before
 // they are called. Violating this precondition causes a runtime assertion failure.
-// The unchecked Sendable conformance exists only because TaskLocal graph binding
-// requires a Sendable value; it is not a thread-safety guarantee.
+// The unchecked Sendable conformance is not a thread-safety guarantee.
 
 final class _AGGraph: @unchecked Sendable {
     // MARK: Node Storage
@@ -155,14 +155,26 @@ final class _AGGraph: @unchecked Sendable {
     // to the appropriate point in the frame loop.
     var pendingActions: [() -> Void] = []
 
-    // MARK: Task Locals
+    // MARK: Thread Locals
 
     typealias ChangeSet = _AGChangeSet
 
-    @TaskLocal fileprivate static var currentStorage: _AGGraph?
-    @TaskLocal static var changeSet: ChangeSet?
-    @TaskLocal static var currentlyEvaluatingNode: AGAttribute?
-    @TaskLocal static var currentlyUpdatingGraphs: Set<ObjectIdentifier>?
+    private static let currentStorage = _AGThreadLocal<_AGGraph?>(nil)
+    private static let changeSetStorage = _AGThreadLocal<ChangeSet?>(nil)
+    private static let currentlyEvaluatingNodeStorage = _AGThreadLocal<AGAttribute?>(nil)
+    private static let currentlyUpdatingGraphsStorage = _AGThreadLocal<Set<ObjectIdentifier>?>(nil)
+
+    static var changeSet: ChangeSet? {
+        changeSetStorage.value
+    }
+
+    static var currentlyEvaluatingNode: AGAttribute? {
+        currentlyEvaluatingNodeStorage.value
+    }
+
+    static var currentlyUpdatingGraphs: Set<ObjectIdentifier>? {
+        currentlyUpdatingGraphsStorage.value
+    }
 
     init() {}
 
@@ -173,26 +185,44 @@ final class _AGGraph: @unchecked Sendable {
 
 extension _AGGraph {
     static var current: _AGGraph? {
-        guard let graph = currentStorage else { return nil }
+        guard let graph = currentStorage.value else { return nil }
 #if DEBUG
         graph._debugValidateCurrentContext()
 #endif
         return graph
     }
 
-    // Binds the raw graph. DEBUG builds also validate TaskLocal lineage ownership.
+    // Binds the raw graph. DEBUG builds also validate nested binding ownership.
     static func withCurrent<R>(_ graph: _AGGraph, _ body: () throws -> R) rethrows -> R {
 #if DEBUG
         return try graph._debugWithCurrentExecutionContext {
-            try _AGGraph.$currentStorage.withValue(graph) {
+            try _AGGraph.currentStorage.withValue(graph) {
                 try body()
             }
         }
 #else
-        return try _AGGraph.$currentStorage.withValue(graph) {
+        return try _AGGraph.currentStorage.withValue(graph) {
             try body()
         }
 #endif
+    }
+
+    static func withChangeSet<R>(_ changeSet: ChangeSet?, _ body: () throws -> R) rethrows -> R {
+        try changeSetStorage.withValue(changeSet) {
+            try body()
+        }
+    }
+
+    static func withCurrentlyEvaluatingNode<R>(_ attribute: AGAttribute?, _ body: () throws -> R) rethrows -> R {
+        try currentlyEvaluatingNodeStorage.withValue(attribute) {
+            try body()
+        }
+    }
+
+    static func withCurrentlyUpdatingGraphs<R>(_ graphs: Set<ObjectIdentifier>?, _ body: () throws -> R) rethrows -> R {
+        try currentlyUpdatingGraphsStorage.withValue(graphs) {
+            try body()
+        }
     }
 
     static func compareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
@@ -214,48 +244,36 @@ extension _AGGraph {
     // Reference identity for one active graph-current binding generation.
     private final class AGExecutionToken: @unchecked Sendable {}
 
-    // Stored on the graph so different TaskLocal lineages contend on one state.
+    // Stored on the graph so different thread-local bindings contend on one state.
     private struct AGExecutionState {
         var token: AGExecutionToken?
         var depth: Int = 0
+        var threadID: Platform.ThreadID?
     }
 
-    // Child tasks inherit this map, so same-lineage graph use can pass validation.
-    @TaskLocal private static var currentExecutionTokens: [ObjectIdentifier: AGExecutionToken]?
-
-    // Installs this graph's active token into the current TaskLocal lineage.
     private func _debugWithCurrentExecutionContext<R>(_ body: () throws -> R) rethrows -> R {
         let token = _debugEnterCurrentContext()
         defer { _debugLeaveCurrentContext(token) }
 
-        var tokens = _AGGraph.currentExecutionTokens ?? [:]
-        tokens[ObjectIdentifier(self)] = token
-        return try _AGGraph.$currentExecutionTokens.withValue(tokens) {
-            try body()
-        }
+        return try body()
     }
 
-    // Allows same-lineage re-entry, but rejects independent concurrent binding.
+    // Allows same-thread re-entry, but rejects independent concurrent binding.
     private func _debugEnterCurrentContext() -> AGExecutionToken {
-        let graphID = ObjectIdentifier(self)
-        let inheritedToken = _AGGraph.currentExecutionTokens?[graphID]
-
+        let threadID = Platform.currentThreadID()
         return debugExecutionState.withLock { state in
             if let activeToken = state.token {
-                guard inheritedToken === activeToken else {
-                    fatalError("_AGGraph entered outside its active TaskLocal execution context.")
+                guard state.threadID == threadID else {
+                    fatalError("_AGGraph entered outside its active thread-local execution context.")
                 }
                 state.depth += 1
                 return activeToken
             }
 
-            guard inheritedToken == nil else {
-                fatalError("_AGGraph TaskLocal execution context escaped after the graph context ended.")
-            }
-
             let token = AGExecutionToken()
             state.token = token
             state.depth = 1
+            state.threadID = threadID
             return token
         }
     }
@@ -269,19 +287,16 @@ extension _AGGraph {
             state.depth -= 1
             if state.depth == 0 {
                 state.token = nil
+                state.threadID = nil
             }
         }
     }
 
-    // Catches direct/stale currentStorage bindings before callers use the graph.
     private func _debugValidateCurrentContext() {
-        let graphID = ObjectIdentifier(self)
-        guard let token = _AGGraph.currentExecutionTokens?[graphID] else {
-            fatalError("_AGGraph.current used outside its active TaskLocal execution context.")
-        }
+        let threadID = Platform.currentThreadID()
         debugExecutionState.withLock { state in
-            guard state.token === token else {
-                fatalError("_AGGraph.current used with a stale TaskLocal execution context.")
+            guard state.token != nil, state.depth > 0, state.threadID == threadID else {
+                fatalError("_AGGraph.current used outside its active thread-local execution context.")
             }
         }
     }

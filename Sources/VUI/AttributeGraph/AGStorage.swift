@@ -30,7 +30,7 @@ extension _AGGraph {
     }
 
     static func withRuleContext<T>(_ attribute: AGAttribute, body: () -> T) -> T {
-        $currentlyEvaluatingNode.withValue(attribute) {
+        _AGGraph.withCurrentlyEvaluatingNode(attribute) {
             body()
         }
     }
@@ -571,7 +571,7 @@ extension _AGGraph {
         }
         updateCounter &+= 1
         activeGraphs.insert(graphID)
-        return _AGGraph.$currentlyUpdatingGraphs.withValue(activeGraphs) {
+        return _AGGraph.withCurrentlyUpdatingGraphs(activeGraphs) {
             body()
         }
     }
@@ -593,7 +593,7 @@ extension _AGGraph {
             // If it doesn't, the previous cached value is retained unchanged.
             clearInputs(for: id)
             Update.begin()
-            _AGGraph.$currentlyEvaluatingNode.withValue(id) {
+            _AGGraph.withCurrentlyEvaluatingNode(id) {
                 box.callUpdate()
             }
             slots[index].node!.needsEvaluation = false
@@ -633,7 +633,7 @@ extension _AGGraph {
         case .rule(let rule, _):
             // Regular computed rule: re-run the closure and store the result.
             clearInputs(for: id)
-            let newValue = _AGGraph.$currentlyEvaluatingNode.withValue(id) {
+            let newValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
                 rule()
             }
             slots[index].node!.value = newValue
@@ -647,7 +647,7 @@ extension _AGGraph {
             // When target is nil, the stored default value is retained unchanged.
             clearInputs(for: id)
             if let target {
-                let targetValue = _AGGraph.$currentlyEvaluatingNode.withValue(id) {
+                let targetValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
                     value(for: target)
                 }
                 slots[index].node!.value = targetValue
@@ -735,7 +735,7 @@ extension _AGGraph {
     /// the callback's side-reads (e.g. `@State` getter, `@Observable` access) from
     /// accidentally becoming inputs of the enclosing rule.
     static func withoutTracking<R>(_ action: () throws -> R) rethrows -> R {
-        try Self.$currentlyEvaluatingNode.withValue(nil) { try action() }
+        try _AGGraph.withCurrentlyEvaluatingNode(nil) { try action() }
     }
 
     private func addDependency(from parent: AGAttribute, dependsOn child: AGAttribute) {

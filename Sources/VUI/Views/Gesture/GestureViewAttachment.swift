@@ -225,7 +225,7 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
         if _responder == nil {
             // First evaluation: create the GestureResponder inside the dedicated subgraph.
             // The responder is born in ViewGraph's AG context (GestureFilter runs in ViewGraph's AG).
-            AGSubgraph.$current.withValue(subgraph) {
+            AGSubgraph.withCurrent(subgraph) {
                 _responder = GestureResponder<M>(
                     modifierAttr: modifierAttr,
                     currentModifier: currentModifier,

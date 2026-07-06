@@ -247,7 +247,7 @@ final class LocationObserverNotificationTests: XCTestCase {
 
         staleHost.data.withCurrent {
             staleSubgraph = AGSubgraph()
-            AGSubgraph.$current.withValue(staleSubgraph) {
+            AGSubgraph.withCurrent(staleSubgraph) {
                 staleSignal = staleHost.data.graph.makeInput(value: ()).asWeak().raw
             }
         }

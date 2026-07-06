@@ -9,10 +9,10 @@ final class ViewListSubgraphLifecycleTests: XCTestCase {
         var retainedSubgraph: _ViewList_Subgraph!
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 childSubgraph = AGSubgraph()
             }
-            AGSubgraph.$current.withValue(childSubgraph) {
+            AGSubgraph.withCurrent(childSubgraph) {
                 let attr = host.data.graph.makeStatefulRule(
                     ViewListSubgraphRecorderRule(recorder: recorder)
                 )
@@ -40,10 +40,10 @@ final class ViewListSubgraphLifecycleTests: XCTestCase {
         var retainedSubgraph: _ViewList_Subgraph!
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 childSubgraph = AGSubgraph()
             }
-            AGSubgraph.$current.withValue(childSubgraph) {
+            AGSubgraph.withCurrent(childSubgraph) {
                 let attr = host.data.graph.makeStatefulRule(
                     ViewListSubgraphRecorderRule(recorder: recorder)
                 )
@@ -76,7 +76,7 @@ final class ViewListSubgraphLifecycleTests: XCTestCase {
         var retainedSubgraph: _ViewList_Subgraph!
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 childSubgraph = AGSubgraph()
             }
             retainedSubgraph = _ViewList_Subgraph(subgraph: childSubgraph)

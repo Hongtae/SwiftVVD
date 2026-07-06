@@ -42,7 +42,7 @@ struct LayoutProxyAttributes {
 // MARK: - LayoutProxy
 
 /// Proxy for a child view in a Layout.
-/// Dependency tracking uses @TaskLocal reads.
+/// Dependency tracking uses AG thread-local reads.
 struct LayoutProxy {
     var context: AnyRuleContext?
     var attributes: LayoutProxyAttributes

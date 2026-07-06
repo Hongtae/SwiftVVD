@@ -1737,11 +1737,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             let gestureSubgraph1 = AGSubgraph()
-            AGSubgraph.$current.withValue(gestureSubgraph1) {
+            AGSubgraph.withCurrent(gestureSubgraph1) {
                 _ = graph.makeInput(value: 1)
             }
             let gestureSubgraph2 = AGSubgraph()
-            AGSubgraph.$current.withValue(gestureSubgraph2) {
+            AGSubgraph.withCurrent(gestureSubgraph2) {
                 _ = graph.makeInput(value: 2)
             }
             responder.gestureSubgraph1 = gestureSubgraph1

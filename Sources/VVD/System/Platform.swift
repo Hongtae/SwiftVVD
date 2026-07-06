@@ -86,14 +86,24 @@ public class Platform {
 }
 
 extension Platform {
-    public typealias ThreadID = UInt
+    package typealias ThreadID = UInt
 
-    public static func threadYield() {
+    package static func threadYield() {
         VVDThreadYield()
     }
 
-    public static func currentThreadID() -> ThreadID {
+    package static func currentThreadID() -> ThreadID {
         return VVDThreadCurrentId()
+    }
+}
+
+package enum ThreadLocalStorage {
+    package static func get(_ key: UnsafeRawPointer) -> UnsafeMutableRawPointer? {
+        VVDThreadLocalGet(key)
+    }
+
+    package static func set(_ key: UnsafeRawPointer, _ value: UnsafeMutableRawPointer?) {
+        VVDThreadLocalSet(key, value)
     }
 }
 

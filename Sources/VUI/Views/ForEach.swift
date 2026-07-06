@@ -92,7 +92,7 @@ extension ForEach: View where Content: View {
 
                 if state.items[id] == nil {
                     let subgraph = AGSubgraph()
-                    let contentAttr: Attribute<Content> = AGSubgraph.$current.withValue(subgraph) {
+                    let contentAttr: Attribute<Content> = AGSubgraph.withCurrent(subgraph) {
                         graph.makeRule {
                             let fe = view._attribute.value
                             var si = fe.data.startIndex
@@ -107,7 +107,7 @@ extension ForEach: View where Content: View {
                         }
                     }
                     let contentView = _GraphValue(_attribute: contentAttr)
-                    let traitListAttr = AGSubgraph.$current.withValue(subgraph) {
+                    let traitListAttr = AGSubgraph.withCurrent(subgraph) {
                         Self.makeContentTraitListAttr(
                             view: contentView,
                             inputs: inputs,

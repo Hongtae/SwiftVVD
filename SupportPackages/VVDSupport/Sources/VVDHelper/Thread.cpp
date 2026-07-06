@@ -2,10 +2,11 @@
  File: Thread.cpp
  Author: Hongtae Kim (tiff2766@gmail.com)
 
- Copyright (c) 2004-2024 Hongtae Kim. All rights reserved.
+ Copyright (c) 2004-2026 Hongtae Kim. All rights reserved.
  
 *******************************************************************************/
 
+#include <unordered_map>
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
@@ -40,4 +41,28 @@ extern "C" uintptr_t VVDThreadCurrentId()
 #else
     return (uintptr_t)pthread_self();
 #endif
+}
+
+static thread_local std::unordered_map<const void *, void *> values;
+
+extern "C" void* VVDThreadLocalGet(const void* slot)
+{
+    if (!slot)
+        return nullptr;
+
+    auto it = values.find(slot);
+    if (it != values.end())
+        return it->second;
+    return nullptr;
+}
+
+extern "C" void VVDThreadLocalSet(const void* slot, void* value)
+{
+    if (!slot)
+        return;
+
+    if (value)
+        values[slot] = value;
+    else
+        values.erase(slot);
 }

@@ -172,7 +172,7 @@ final class ContextMenuResponder: ViewResponder {
         let actions = ContextMenuPopupActions()
         let initialItems = self.itemList.value.menuItems
         let liveContentSubgraph = AGSubgraph()
-        AGSubgraph.$current.withValue(liveContentSubgraph) {
+        AGSubgraph.withCurrent(liveContentSubgraph) {
             // Update the already-open popup root content when the collected
             // item-list source invalidates. The session owns this subgraph so
             // dismissing the menu also stops the source-graph side effect.

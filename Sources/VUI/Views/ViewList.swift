@@ -1252,7 +1252,7 @@ private struct PlaceholderInfo: StatefulRule {
         releaseElements = item.elements.retain()
         var childInputs = inputs
         childInputs.copyCaches()
-        let concrete = AGSubgraph.$current.withValue(subgraph) {
+        let concrete = AGSubgraph.withCurrent(subgraph) {
             item.elements.makeOneElement(at: item.index, inputs: childInputs) { elementInputs, makeView in
                 makeView(elementInputs)
             }

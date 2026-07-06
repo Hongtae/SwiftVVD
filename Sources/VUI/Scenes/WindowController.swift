@@ -649,7 +649,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
 
         let changeSet = _AGChangeSet()
-        _AGGraph.$changeSet.withValue(changeSet) {
+        _AGGraph.withChangeSet(changeSet) {
 
             // Drain platform input events before AG evaluation.
             let events = self.inputEvents.withLock { events in
@@ -755,7 +755,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         viewGraph.data.withCurrent {
             let changeSet = _AGChangeSet()
-            _AGGraph.$changeSet.withValue(changeSet) {
+            _AGGraph.withChangeSet(changeSet) {
                 let displayList = rootDisplayList.value
                 displayList.draw(in: context)
             }

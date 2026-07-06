@@ -208,7 +208,7 @@ extension AnyGestureResponder {
         let newSubgraph = AGSubgraph()
         childSubgraph = newSubgraph
 
-        let outputs = AGSubgraph.$current.withValue(newSubgraph) {
+        let outputs = AGSubgraph.withCurrent(newSubgraph) {
             makeChild(inputs)
         }
         cachedGestureOutputs = outputs

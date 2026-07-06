@@ -186,7 +186,7 @@ final class GraphHostRemovedStateTests: XCTestCase {
 
     private func installRemovableRule(in host: GraphHost, recorder: RemovedStateRecorder) {
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let attr = host.data.graph.makeStatefulRule(RemovableRecorderRule(recorder: recorder))
                 _ = attr.value
             }

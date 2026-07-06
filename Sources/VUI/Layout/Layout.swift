@@ -771,7 +771,7 @@ struct DynamicContainerInfo: StatefulRule {
         var baseInputs = capturedInputs
         baseInputs.copyCaches()
 
-        let item: DynamicContainer.ItemInfo? = AGSubgraph.$current.withValue(subgraph) {
+        let item: DynamicContainer.ItemInfo? = AGSubgraph.withCurrent(subgraph) {
             let parentTransform = capturedInputs.transform
 
             var firstOutputs: _ViewOutputs?

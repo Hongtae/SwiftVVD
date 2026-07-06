@@ -17,7 +17,7 @@ import Synchronization
 /// Must be created while an _AGGraph context is active (`_AGGraph.current != nil`).
 /// The owning _AGGraph is captured at creation time and validated on `invalidate()`.
 ///
-/// Wrap node-creation code in `AGSubgraph.$current.withValue(subgraph) { ... }` to
+/// Wrap node-creation code in `AGSubgraph.withCurrent(subgraph) { ... }` to
 /// automatically register every node created in that scope to this subgraph.
 /// Call `invalidate()` to batch-remove all registered nodes at once.
 ///
@@ -28,7 +28,7 @@ import Synchronization
 /// Typical use: ForEach item lifecycle:
 /// ```swift
 /// let subgraph = AGSubgraph()
-/// AGSubgraph.$current.withValue(subgraph) {
+/// AGSubgraph.withCurrent(subgraph) {
 ///     Content._makeView(view: itemGraph, inputs: inputs)
 /// }
 /// itemSubgraphs[id] = subgraph
@@ -45,7 +45,18 @@ final class AGSubgraph: @unchecked Sendable {
     private(set) var isValid: Bool = true
     weak let graph: _AGGraph?
 
-    @TaskLocal static var current: AGSubgraph? = nil
+    private static let currentStorage = _AGThreadLocal<AGSubgraph?>(nil)
+
+    static var current: AGSubgraph? {
+        currentStorage.value
+    }
+
+    @discardableResult
+    static func withCurrent<R>(_ subgraph: AGSubgraph?, _ body: () throws -> R) rethrows -> R {
+        try currentStorage.withValue(subgraph) {
+            try body()
+        }
+    }
 
     init() {
         guard let graph = _AGGraph.current else {

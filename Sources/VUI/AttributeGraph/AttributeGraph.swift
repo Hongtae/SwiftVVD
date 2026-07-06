@@ -40,7 +40,11 @@ struct _AGGraphContext: @unchecked Sendable {
 
     /// The currently active _AGGraphContext for the running AG evaluation pass.
     /// Set by withCurrent(_:). Reading context gives the owning GraphHost subclass.
-    @TaskLocal static var current: _AGGraphContext? = nil
+    private static let currentStorage = _AGThreadLocal<_AGGraphContext?>(nil)
+
+    static var current: _AGGraphContext? {
+        currentStorage.value
+    }
 
     init(graph: _AGGraph, context: AnyObject? = nil) {
         self.graph = graph
@@ -61,7 +65,7 @@ struct _AGGraphContext: @unchecked Sendable {
     }
 
     private func withCurrentBinding<R>(_ body: () throws -> R) rethrows -> R {
-        return try _AGGraphContext.$current.withValue(self) {
+        return try _AGGraphContext.currentStorage.withValue(self) {
             try _AGGraph.withCurrent(graph) {
                 try body()
             }
@@ -71,7 +75,7 @@ struct _AGGraphContext: @unchecked Sendable {
 
 // MARK: - _AGChangeSet
 
-/// Records attributes that were mutated during an `_AGGraph.$changeSet.withValue(_:)`
+/// Records attributes that were mutated during an `_AGGraph.withChangeSet(_:)`
 /// scope, partitioned by owning _AGGraph instance.
 ///
 /// Storage is keyed by `ObjectIdentifier(graph)` so attributes from different graphs

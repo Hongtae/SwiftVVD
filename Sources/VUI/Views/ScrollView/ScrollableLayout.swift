@@ -2459,7 +2459,7 @@ private final class ScrollableLayoutMeasurementTemplate<Data>
         graph: _AGGraph
     ) {
         let subgraph = AGSubgraph()
-        let built = AGSubgraph.$current.withValue(subgraph) {
+        let built = AGSubgraph.withCurrent(subgraph) {
             var templateInputs = inputs
             templateInputs.copyCaches()
             templateInputs.position = graph.makeInput(value: CGPoint.zero)
@@ -2581,11 +2581,11 @@ private final class ScrollableLayoutViewListState<Data, Layout>
                 item.content.setValue(content, transaction: listTransaction)
             } else {
                 let subgraph = AGSubgraph()
-                let contentAttr = AGSubgraph.$current.withValue(subgraph) {
+                let contentAttr = AGSubgraph.withCurrent(subgraph) {
                     graph.makeInput(value: content)
                 }
                 let contentView = _GraphValue<RowContent>(_attribute: contentAttr)
-                let traitListAttr = AGSubgraph.$current.withValue(subgraph) {
+                let traitListAttr = AGSubgraph.withCurrent(subgraph) {
                     makeContentTraitListAttr(
                         view: contentView,
                         graph: graph

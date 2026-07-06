@@ -41,7 +41,7 @@ private struct AnyViewContainer: StatefulRule {
             let childInputs = inputs
 
             func makeConcreteView<V: View>(_: V) -> _ViewOutputs {
-                AGSubgraph.$current.withValue(subgraph) {
+                AGSubgraph.withCurrent(subgraph) {
                     let concreteAttr: Attribute<V> = graph.makeRule {
                         viewAttr.value._view as! V
                     }
@@ -50,7 +50,7 @@ private struct AnyViewContainer: StatefulRule {
             }
 
             let concrete = makeConcreteView(currentView)
-            AGSubgraph.$current.withValue(subgraph) {
+            AGSubgraph.withCurrent(subgraph) {
                 concrete.attachIndirectOutputs(to: placeholders)
             }
         }

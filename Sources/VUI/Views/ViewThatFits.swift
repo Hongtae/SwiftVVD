@@ -195,7 +195,7 @@ private final class SizeFittingState {
         baseInputs.copyCaches()
         baseInputs.base[ViewPhaseOverride.self] = OptionalAttribute(phaseAttr)
 
-        let outputs = AGSubgraph.$current.withValue(subgraph) {
+        let outputs = AGSubgraph.withCurrent(subgraph) {
             sublist.elements.makeOneElement(at: offset, inputs: baseInputs) { elementInputs, makeView in
                 var childInputs = elementInputs
                 childInputs.position = posAttr

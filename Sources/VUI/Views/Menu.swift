@@ -368,7 +368,7 @@ final class MenuDropdownResponder: AnyHoverResponder {
         let actions = ContextMenuPopupActions()
         let initialItems = itemList.value.menuItems
         let liveContentSubgraph = AGSubgraph()
-        AGSubgraph.$current.withValue(liveContentSubgraph) {
+        AGSubgraph.withCurrent(liveContentSubgraph) {
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
                 session?.root?.replaceMenuItems(items)

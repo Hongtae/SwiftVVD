@@ -64,7 +64,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         let model = ViewObservationTransactionModel()
 
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
                 let source = graph.makeInput(value: ObservationTransactionRoot(model: model))
                 let outputs = ObservationTransactionRoot._makeView(
@@ -108,7 +108,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         }
 
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 host.data.rootSubgraph.update()
 
                 let propagated = try XCTUnwrap(host.data.graph.transaction(for: layoutAttr.identifier))
@@ -136,7 +136,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         }
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 host.data.rootSubgraph.update()
 
                 XCTAssertNil(host.data.graph.transaction(for: layoutAttr.identifier))
@@ -164,7 +164,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         }
 
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 host.data.rootSubgraph.update()
 
                 let propagated = try XCTUnwrap(host.data.graph.transaction(for: layoutAttr.identifier))
@@ -194,7 +194,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         await waiter.wait()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 host.data.rootSubgraph.update()
 
                 XCTAssertNil(host.data.graph.transaction(for: layoutAttr.identifier))
@@ -219,7 +219,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         await waiter.wait()
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 host.data.rootSubgraph.update()
 
                 XCTAssertNil(host.data.graph.transaction(for: layoutAttr.identifier))
@@ -233,7 +233,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         model: ViewObservationTransactionModel
     ) throws -> Attribute<LayoutComputer> {
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
                 let source = graph.makeInput(value: ObservationTransactionRoot(model: model))
                 let outputs = ObservationTransactionRoot._makeView(

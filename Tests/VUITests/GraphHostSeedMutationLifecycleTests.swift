@@ -79,7 +79,7 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         var observedDuringPostUpdate: Int?
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 source = host.data.graph.makeInput(value: 1)
                 derived = host.data.graph.makeRule {
                     source.value * 2

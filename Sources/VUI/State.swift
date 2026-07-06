@@ -117,7 +117,7 @@ extension State {
             // Synchronous cache so wrappedValue.get works outside AG context
             // (e.g. inside button action closures captured during body evaluation).
             let cache = MutableBox<Value>(initialValue)
-            let attr: Attribute<Value> = AGSubgraph.$current.withValue(wiringSubgraph) {
+            let attr: Attribute<Value> = AGSubgraph.withCurrent(wiringSubgraph) {
                 graph.makeInput(value: initialValue)
             }
             // Capture the owning graph so the getter can detect cross-graph calls.

@@ -213,7 +213,7 @@ extension Optional: View where Wrapped: View {
                     fatalError("Optional<\(Wrapped.self)> missing wrapped value while rebuilding active branch.")
                 }
                 state.lastWrappedValue = wrappedValue
-                let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
+                let wrappedAttr: Attribute<Wrapped> = AGSubgraph.withCurrent(state.subgraph) {
                     graph.makeRule {
                         if let current = view._attribute.value {
                             state.lastWrappedValue = current
@@ -225,7 +225,7 @@ extension Optional: View where Wrapped: View {
                         return snapshot
                     }
                 }
-                let outputs = AGSubgraph.$current.withValue(state.subgraph) {
+                let outputs = AGSubgraph.withCurrent(state.subgraph) {
                     Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
                 }
                 state.lcAttr = outputs._layoutComputer.attribute
@@ -282,7 +282,7 @@ extension Optional: View where Wrapped: View {
         func makeWrappedOutputs() -> _ViewListOutputs? {
             guard let wrappedValue = view._attribute.value else { return nil }
             state.lastWrappedValue = wrappedValue
-            let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
+            let wrappedAttr: Attribute<Wrapped> = AGSubgraph.withCurrent(state.subgraph) {
                 graph.makeRule {
                     if let current = view._attribute.value {
                         state.lastWrappedValue = current
@@ -294,7 +294,7 @@ extension Optional: View where Wrapped: View {
                     return snapshot
                 }
             }
-            return AGSubgraph.$current.withValue(state.subgraph) {
+            return AGSubgraph.withCurrent(state.subgraph) {
                 Wrapped._makeViewList(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
             }
         }

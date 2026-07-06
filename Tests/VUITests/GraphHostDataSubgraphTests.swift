@@ -29,7 +29,7 @@ final class GraphHostDataSubgraphTests: XCTestCase {
         var identifier: AGAttribute!
 
         host.data.withCurrent {
-            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 identifier = host.data.graph.makeInput(value: 42).identifier
             }
         }

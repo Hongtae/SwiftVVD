@@ -2516,7 +2516,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
         let release = data.elements.retain()
         var childInputs = inputs
         childInputs.copyCaches()
-        let materialized = AGSubgraph.$current.withValue(subgraph) {
+        let materialized = AGSubgraph.withCurrent(subgraph) {
             let state = graph.makeInput(value: LazyLayoutCacheItem.State())
             let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
             var transitionPhaseSetters: [_TransitionPhaseSetter] = []

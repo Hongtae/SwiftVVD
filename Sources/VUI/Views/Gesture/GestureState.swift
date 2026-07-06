@@ -120,7 +120,7 @@ extension GestureState {
 
             let initialValue = currentGS._value
             let cache = MutableBox<Value>(initialValue)
-            let attr: Attribute<Value> = AGSubgraph.$current.withValue(wiringSubgraph) {
+            let attr: Attribute<Value> = AGSubgraph.withCurrent(wiringSubgraph) {
                 graph.makeInput(value: initialValue)
             }
             let location = LocationBox(location: FunctionalLocation<Value>(

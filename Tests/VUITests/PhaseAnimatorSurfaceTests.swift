@@ -125,7 +125,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 animation: { _ in nil }
             )
-            let outputs: _ViewOutputs = AGSubgraph.$current.withValue(viewGraph.data.rootSubgraph) {
+            let outputs: _ViewOutputs = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
                 let source = graph.makeInput(value: view)
                 return type(of: view)._makeView(
                     view: _GraphValue(_attribute: source),
@@ -168,7 +168,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
 
             let source: Attribute<Animator>
             let outputs: _ViewOutputs
-            (source, outputs) = AGSubgraph.$current.withValue(viewGraph.data.rootSubgraph) {
+            (source, outputs) = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
                 let animator = makeAnimator(trigger: 0)
                 let source = graph.makeInput(value: animator)
                 let outputs = type(of: animator)._makeView(

@@ -203,7 +203,7 @@ final class BindableTransactionPropagationTests: XCTestCase {
 
         let host = GraphHost()
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
                 let source = graph.makeInput(value: BindableLocalTransactionRoot(model: model))
                 let outputs = BindableLocalTransactionRoot._makeView(
@@ -245,7 +245,7 @@ final class BindableTransactionPropagationTests: XCTestCase {
 
         let host = GraphHost()
         try host.data.withCurrent {
-            try AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
                 let source = graph.makeInput(value: BindableAmbientTransactionRoot(model: model))
                 let outputs = BindableAmbientTransactionRoot._makeView(

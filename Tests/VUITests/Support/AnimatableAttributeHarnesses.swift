@@ -41,7 +41,7 @@ final class AnimatableAttributeHarness {
             )
             let subgraph = AGSubgraph()
             animatableSubgraph = subgraph
-            AGSubgraph.$current.withValue(subgraph) {
+            AGSubgraph.withCurrent(subgraph) {
                 var graphValue = _GraphValue<_OpacityEffect>(_attribute: source)
                 _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs)
                 animated = graphValue._attribute
@@ -206,7 +206,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
             )
             let subgraph = AGSubgraph()
             animatableSubgraph = subgraph
-            AGSubgraph.$current.withValue(subgraph) {
+            AGSubgraph.withCurrent(subgraph) {
                 var graphValue = _GraphValue<Value>(_attribute: source)
                 Value._makeAnimatable(value: &graphValue, inputs: inputs)
                 animated = graphValue._attribute
@@ -437,7 +437,7 @@ final class AnimatableFrameAttributeHarness {
             }
             let subgraph = AGSubgraph()
             animatableSubgraph = subgraph
-            AGSubgraph.$current.withValue(subgraph) {
+            AGSubgraph.withCurrent(subgraph) {
                 let attributes = makeAnimatableFrameAttributes(
                     in: &inputs,
                     position: rawPosition,

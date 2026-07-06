@@ -26,7 +26,7 @@ final class LocationStorageTests: XCTestCase {
 
         host.data.withCurrent {
             signalSubgraph = AGSubgraph()
-            AGSubgraph.$current.withValue(signalSubgraph) {
+            AGSubgraph.withCurrent(signalSubgraph) {
                 signal = host.data.graph.makeInput(value: ()).asWeak().raw
             }
         }
