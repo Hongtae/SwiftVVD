@@ -2,22 +2,108 @@
 //  File: GraphicsContext+Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import Synchronization
 import VVD
 
 extension GraphicsContext {
     public struct ResolvedText {
-        enum Storage {
+        enum Run {
             case text([TypeFace], String)
             case attachment([TypeFace], ResolvedImage)
         }
-        var storage: [Storage]
-        var scaleFactor: CGFloat
 
-        var drawMissingGlyphs: Bool = false
+        final class Storage: AppLifetimeResource, @unchecked Sendable {
+            private struct State: @unchecked Sendable {
+                var runs: [Run]
+                var cachedLines: [LineGlyphs]?
+                var terminated: Bool = false
+            }
+
+            private let state: Mutex<State>
+            let scaleFactor: CGFloat
+            let drawMissingGlyphs: Bool
+
+            init(runs: [Run], scaleFactor: CGFloat, drawMissingGlyphs: Bool) {
+                self.state = Mutex(State(runs: runs))
+                self.scaleFactor = scaleFactor
+                self.drawMissingGlyphs = drawMissingGlyphs
+            }
+
+            var runs: [Run] {
+                var runs: [Run] = []
+                state.withLock { state in
+                    runs = state.runs
+                }
+                return runs
+            }
+
+            func lineGlyphs(make: ([Run]) -> [LineGlyphs]) -> [LineGlyphs] {
+                var cachedLines: [LineGlyphs]?
+                var runs: [Run]?
+                var terminated = false
+                state.withLock { state in
+                    if state.terminated {
+                        terminated = true
+                    } else if let lines = state.cachedLines {
+                        cachedLines = lines
+                    } else {
+                        runs = state.runs
+                    }
+                }
+
+                if terminated {
+                    return []
+                }
+                if let cachedLines {
+                    return cachedLines
+                }
+                guard let runs else {
+                    return []
+                }
+
+                let made = make(runs)
+                var lineGlyphs = made
+
+                state.withLock { state in
+                    if state.terminated {
+                        lineGlyphs = []
+                    } else if let cachedLines = state.cachedLines {
+                        lineGlyphs = cachedLines
+                    } else {
+                        state.cachedLines = made
+                    }
+                }
+                return lineGlyphs
+            }
+
+            override func purgeResources(reason: ResourcePurgeReason) {
+                state.withLock { state in
+                    state.cachedLines = nil
+                    if reason == .appTermination {
+                        state.runs.removeAll()
+                        state.terminated = true
+                    }
+                }
+            }
+        }
+
+        private let storage: Storage
+
+        init(runs: [Run], scaleFactor: CGFloat, drawMissingGlyphs: Bool = false) {
+            self.storage = Storage(
+                runs: runs,
+                scaleFactor: scaleFactor,
+                drawMissingGlyphs: drawMissingGlyphs
+            )
+        }
+
+        var runs: [Run] { storage.runs }
+        fileprivate var scaleFactor: CGFloat { storage.scaleFactor }
+        fileprivate var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
         public var shading: Shading = .foreground
 
@@ -30,6 +116,7 @@ extension GraphicsContext {
             let scale = 1.0 / self.scaleFactor
             return self.sizeInPixel(maxWidth: maxWidth, maxHeight: maxHeight) * scale
         }
+
         public func measure(maxWidth: CGFloat? = nil, maxHeight: CGFloat? = nil) -> CGSize {
             var width: Int = .max
             var height: Int = .max
@@ -42,6 +129,7 @@ extension GraphicsContext {
             let scale = 1.0 / self.scaleFactor
             return self.sizeInPixel(maxWidth: width, maxHeight: height) * scale
         }
+
         public func firstBaseline(in size: CGSize) -> CGFloat {
             let width = max(size.width, 0) * self.scaleFactor
             let height = max(size.height, 0) * self.scaleFactor
@@ -55,6 +143,7 @@ extension GraphicsContext {
             }
             return .zero
         }
+
         public func lastBaseline(in size: CGSize) -> CGFloat {
             let width = max(size.width, 0) * self.scaleFactor
             let height = max(size.height, 0) * self.scaleFactor
@@ -161,9 +250,14 @@ extension GraphicsContext {
         }
 
         func makeGlyphs(maxWidth: Int = .max, maxHeight: Int = .max) -> [LineGlyphs] {
-            let lineGlyphs = _makeGlyphs()
+            let lineGlyphs = storage.lineGlyphs { runs in
+                Self._makeGlyphs(
+                    runs: runs,
+                    scaleFactor: self.scaleFactor,
+                    drawMissingGlyphs: self.drawMissingGlyphs
+                )
+            }
 
-            //return lineGlyphs
             return _lineWrap(lineGlyphs, maxWidth: maxWidth, maxHeight: maxHeight)
         }
 
@@ -320,7 +414,10 @@ extension GraphicsContext {
             return result
         }
 
-        private func _makeGlyphs() -> [LineGlyphs] {
+        private static func _makeGlyphs(
+            runs: [Run],
+            scaleFactor: CGFloat,
+            drawMissingGlyphs: Bool) -> [LineGlyphs] {
             var lines: [LineGlyphs] = []
             var glyphs: [Glyph] = []
 
@@ -346,8 +443,7 @@ extension GraphicsContext {
                 descender = 0
             }
 
-        storageLoop:
-            for s in self.storage {
+            for s in runs {
                 if case let .text(faces, text) = s {
                     if faces.isEmpty || text.isEmpty { continue }
 
@@ -358,7 +454,7 @@ extension GraphicsContext {
                         let scalars = components.removeFirst()
                         let textGlyphs = TextGlyphs.from(unicodeScalars: scalars,
                                                          with: faces,
-                                                         drawMissingGlyphs: self.drawMissingGlyphs,
+                                                         drawMissingGlyphs: drawMissingGlyphs,
                                                          prevFace: face1,
                                                          prevChar: char1)
                         face1 = textGlyphs.lastFace
@@ -381,9 +477,9 @@ extension GraphicsContext {
                 if case let .attachment(faces, image) = s {
                     let face = faces.first { $0.hasGlyph(for: ".") } ?? faces[0]
                     let size = image.size
-                    let baseline = image.baseline * self.scaleFactor
-                    let height = size.height * self.scaleFactor
-                    let width = size.width * self.scaleFactor
+                    let baseline = image.baseline * scaleFactor
+                    let height = size.height * scaleFactor
+                    let width = size.width * scaleFactor
 
                     var glyph = Glyph(scalar: UnicodeScalar(0), face: face)
                     glyph.texture = image.texture

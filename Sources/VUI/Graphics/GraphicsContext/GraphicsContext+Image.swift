@@ -10,21 +10,46 @@ import VVD
 
 extension GraphicsContext {
     public struct ResolvedImage {
+        final class Storage: AppLifetimeResource, @unchecked Sendable {
+            var texture: Texture?
+            let width: Int
+            let height: Int
+
+            init(texture: Texture?) {
+                self.texture = texture
+                self.width = texture?.width ?? 0
+                self.height = texture?.height ?? 0
+            }
+
+            override func purgeResources(reason: ResourcePurgeReason) {
+                if reason == .appTermination {
+                    self.texture = nil
+                }
+            }
+        }
 
         public var size: CGSize {
-            if let texture {
-                let width = CGFloat(texture.width) * self.scaleFactor
-                let height = CGFloat(texture.height) * self.scaleFactor
-                return CGSize(width: width, height: height)
-            }
-            return .zero
+            CGSize(width: CGFloat(storage.width) * scaleFactor,
+                   height: CGFloat(storage.height) * scaleFactor)
         }
         public let baseline: CGFloat
         public var shading: Shading?
 
-        let texture: Texture?
+        private let storage: Storage
         let textureTransform: CGAffineTransform
         let scaleFactor: CGFloat
+
+        var texture: Texture? {
+            storage.texture
+        }
+
+        init(baseline: CGFloat, shading: Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
+            self.baseline = baseline
+            self.shading = shading
+            self.storage = Storage(texture: texture)
+            self.textureTransform = textureTransform
+            self.scaleFactor = scaleFactor
+        }
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {

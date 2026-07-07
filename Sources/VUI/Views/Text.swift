@@ -65,7 +65,7 @@ class LocalizedTextStorage: AnyTextStorage {
     override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         //let text = String(localized: self.key)
         let text = self.key
-        return .init(storage: [.text(typeFaces, text)], scaleFactor: context.contentScaleFactor)
+        return .init(runs: [.text(typeFaces, text)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -92,7 +92,7 @@ class ConcatenatedTextStorage: AnyTextStorage {
     override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         let first = first._resolve(context: context)
         let second = second._resolve(context: context)
-        return .init(storage: first.storage + second.storage, scaleFactor: context.contentScaleFactor)
+        return .init(runs: first.runs + second.runs, scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -123,7 +123,7 @@ class AttachmentTextStorage: AnyTextStorage {
 
     override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         let image = context.resolve(self.image)
-        return .init(storage: [.attachment(typeFaces, image)], scaleFactor: context.contentScaleFactor)
+        return .init(runs: [.attachment(typeFaces, image)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -266,16 +266,16 @@ public struct Text: Equatable {
         let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
 
         if faces.isEmpty == false {
-            var storage: [GraphicsContext.ResolvedText.Storage] = []
+            var runs: [GraphicsContext.ResolvedText.Run] = []
             if case let .verbatim(text) = self.storage {
-                storage = [.text(faces, text)]
-                return GraphicsContext.ResolvedText(storage: storage, scaleFactor: context.contentScaleFactor)
+                runs = [.text(faces, text)]
+                return GraphicsContext.ResolvedText(runs: runs, scaleFactor: context.contentScaleFactor)
             }
             else if case let .anyTextStorage(text) = self.storage {
                 return text.resolve(typeFaces: faces, context: context)
             }
         }
-        return .init(storage: [], scaleFactor: context.contentScaleFactor)
+        return .init(runs: [], scaleFactor: context.contentScaleFactor)
     }
 }
 

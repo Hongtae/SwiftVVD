@@ -45,6 +45,11 @@ protocol TypeFace {
     var descender: CGFloat { get }
 
     func isEqual(to: any TypeFace) -> Bool
+    func purgeResources(reason: ResourcePurgeReason)
+}
+
+extension TypeFace {
+    func purgeResources(reason: ResourcePurgeReason) {}
 }
 
 extension TextureFont: TypeFace {
@@ -65,6 +70,10 @@ extension TextureFont: TypeFace {
             return self === other
         }
         return false
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+        clearCache()
     }
 }
 

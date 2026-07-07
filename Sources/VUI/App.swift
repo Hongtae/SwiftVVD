@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 import VVD
 
 typealias Log = VVD.Log
@@ -104,6 +105,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     func finalize(application: Application) {
+        AppLifetimeResource.purgeAllResources(reason: .appTermination)
         self.appGraph = nil
         self.windowsController = nil
         self.graphicsDeviceContext = nil
@@ -113,6 +115,39 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
     init() {
         self.app = A()
+    }
+}
+
+enum ResourcePurgeReason {
+    case lowMemory
+    case appTermination
+}
+
+class AppLifetimeResource: @unchecked Sendable {
+    init() {
+        Self._appResources.withLock { resources in
+            var res = resources.filter { $0.value != nil }
+            res.append(WeakObject(self))
+            resources = res
+        }
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+    }
+
+    private static let _appResources = Mutex<[WeakObject<AppLifetimeResource>]>([])
+
+    fileprivate static func purgeAllResources(reason: ResourcePurgeReason = .appTermination) {
+        let res = _appResources.withLock { resources in
+            let live = resources.compactMap { $0.value }
+            if reason == .appTermination {
+                resources.removeAll()
+            } else {
+                resources = resources.filter { $0.value != nil }
+            }
+            return live
+        }
+        res.reversed().forEach { $0.purgeResources(reason: reason) }
     }
 }
 
