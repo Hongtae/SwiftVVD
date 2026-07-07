@@ -225,11 +225,9 @@ struct SheetContent<Content: View>: View {
 
 /// ViewModifier for presenting a sheet when isPresented is true.
 struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvider>: ViewModifier {
-    typealias Body = SheetContent<
-        ModifiedContent<
-            _ViewModifier_Content<SheetPresentationModifier>,
-            CoreSheetPresentationModifier<AnchorProvider>
-        >
+    typealias Body = ModifiedContent<
+        _ViewModifier_Content<SheetPresentationModifier>,
+        CoreSheetPresentationModifier<AnchorProvider>
     >
 
     // Property-wrapper storage keeps the binding backing field, wrapped value,
@@ -276,7 +274,7 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
             activeInspector: activeInspector,
             anchorProvider: anchorProvider
         )
-        return SheetContent(content: content.modifier(coreModifier))
+        return content.modifier(coreModifier)
     }
 }
 
@@ -300,11 +298,9 @@ extension SheetPresentationModifier where AnchorProvider == NullSheetAnchor<Shee
 
 /// ViewModifier for presenting a sheet driven by an optional Identifiable item.
 struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorProvider: SheetAnchorProvider>: ViewModifier {
-    typealias Body = SheetContent<
-        ModifiedContent<
-            _ViewModifier_Content<ItemSheetPresentationModifier>,
-            CoreSheetPresentationModifier<AnchorProvider>
-        >
+    typealias Body = ModifiedContent<
+        _ViewModifier_Content<ItemSheetPresentationModifier>,
+        CoreSheetPresentationModifier<AnchorProvider>
     >
 
     let _item: Binding<Item?>
@@ -349,7 +345,7 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
             activeInspector: nil,
             anchorProvider: anchorProvider
         )
-        return SheetContent(content: content.modifier(coreModifier))
+        return content.modifier(coreModifier)
     }
 }
 
