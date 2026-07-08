@@ -11330,7 +11330,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let graph = host.data.graph
             let list = SegmentedLayoutViewList(
                 graph: graph,
-                sizes: Array(repeating: CGSize(width: 10, height: 10), count: 6)
+                sizes: Array(repeating: CGSize(width: 10, height: 10), count: 7)
             )
             let cache = makeConcreteLazyGridCache(
                 host: host,
@@ -11376,13 +11376,18 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 item(implicitID: 0, at: CGPoint(x: 0, y: 20)),
                 item(implicitID: 1, at: CGPoint(x: 20, y: 0)),
                 item(implicitID: 2, at: CGPoint(x: 20, y: 20)),
-                item(implicitID: 3, at: CGPoint(x: 42, y: 20)),
+                item(
+                    implicitID: 3,
+                    at: CGPoint(x: 42, y: 20),
+                    section: LazyLayoutCacheSection(id: 2, isFooter: true)
+                ),
                 item(
                     implicitID: 4,
                     at: CGPoint(x: 20, y: 42),
                     section: LazyLayoutCacheSection(id: 1, isHeader: true)
                 ),
                 item(implicitID: 5, at: CGPoint(x: 22, y: 64)),
+                item(implicitID: 6, at: CGPoint(x: 64, y: 20)),
             ])
 
             let parent = LazyRecordingScrollable(acceptsTargets: false)
@@ -11402,7 +11407,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 collectionIDs.append(id)
                 stop = false
             })
-            XCTAssertEqual(collectionIDs.count, 6)
+            XCTAssertEqual(collectionIDs.count, 7)
 
             let source = collectionIDs[2]
             XCTAssertEqual(
@@ -11431,6 +11436,15 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     ignoring: []
                 ),
                 collectionIDs[3]
+            )
+            XCTAssertEqual(
+                scrollable.nextVisibleCollectionViewID(
+                    towards: .trailing,
+                    from: source,
+                    border: .zero,
+                    ignoring: [.sectionFooters]
+                ),
+                collectionIDs[6]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(

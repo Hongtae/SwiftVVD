@@ -1,11 +1,15 @@
 #if canImport(Darwin)
 import Darwin
+#elseif canImport(WinSDK)
+import CRT
+import ucrt
+import WinSDK
 #endif
 import Foundation
 import XCTest
 @testable import VUI
 
-#if canImport(Darwin)
+#if canImport(Darwin) || canImport(WinSDK)
 private let swiftUIScrollViewContentOffsetBindingReadWarning =
     "ScrollView contentOffset binding has been read; this will cause grossly inefficient view performance as the ScrollView's content will be updated whenever its contentOffset changes. Read the contentOffset binding in a view that is not parented between the creator of the binding and the ScrollView to avoid this."
 
@@ -15,6 +19,7 @@ private enum StandardOutputCaptureError: Error {
     case redirectFailed
 }
 
+#if canImport(Darwin)
 private func captureStandardOutput(_ body: () throws -> Void) throws -> String {
     fflush(stdout)
     let original = dup(STDOUT_FILENO)
@@ -53,6 +58,47 @@ private func captureStandardOutput(_ body: () throws -> Void) throws -> String {
     }
     return String(decoding: data, as: UTF8.self)
 }
+#elseif canImport(WinSDK)
+private func captureStandardOutput(_ body: () throws -> Void) throws -> String {
+    fflush(stdout)
+    let standardOutput = _fileno(stdout)
+    let original = _dup(standardOutput)
+    guard original >= 0 else {
+        throw StandardOutputCaptureError.duplicateFailed
+    }
+
+    var fileDescriptors = [Int32](repeating: 0, count: 2)
+    guard _pipe(&fileDescriptors, 4096, _O_BINARY) == 0 else {
+        _close(original)
+        throw StandardOutputCaptureError.pipeFailed
+    }
+
+    guard _dup2(fileDescriptors[1], standardOutput) == 0 else {
+        _close(original)
+        _close(fileDescriptors[0])
+        _close(fileDescriptors[1])
+        throw StandardOutputCaptureError.redirectFailed
+    }
+    _close(fileDescriptors[1])
+
+    var bodyError: Error?
+    do {
+        try body()
+    } catch {
+        bodyError = error
+    }
+
+    fflush(stdout)
+    _dup2(original, standardOutput)
+    _close(original)
+
+    let data = FileHandle(fileDescriptor: fileDescriptors[0], closeOnDealloc: true).readDataToEndOfFile()
+    if let bodyError {
+        throw bodyError
+    }
+    return String(decoding: data, as: UTF8.self)
+}
+#endif
 #endif
 
 private struct ScrollableGeometryInputRecord: Equatable {
@@ -390,6 +436,127 @@ private final class ScrollViewTestResponder: ViewResponder {
         let count = min(points.count, 64)
         let mask = count == 64 ? UInt64.max : ((UInt64(1) << UInt64(count)) - 1)
         return ContainsPointsResult(mask: mask, priority: 16, children: [])
+    }
+}
+
+private struct RecordingLayoutGestureEventBindingCall: Equatable {
+    var eventCount: Int
+    var proxyCount: Int
+    var firstChildContainsEventLocation: Bool
+}
+
+private enum RecordingLayoutGestureEventBindingStore {
+    nonisolated(unsafe) static var calls: [RecordingLayoutGestureEventBindingCall] = []
+
+    static func reset() {
+        calls = []
+    }
+}
+
+private struct LayoutGesturePreferenceKey: PreferenceKey {
+    static var defaultValue: [String] { [] }
+
+    static func reduce(value: inout [String], nextValue: () -> [String]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private final class LayoutGesturePreferenceResponder: MultiViewResponder, ViewResponder {
+    let hitTestKey: UInt32
+    weak var nextResponder: ResponderNode?
+    var gestureContainer: AnyObject? { nil }
+    var value: String
+    var makeGestureCount = 0
+
+    init(hitTestKey: UInt32, value: String) {
+        self.hitTestKey = hitTestKey
+        self.value = value
+        super.init()
+    }
+
+    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+        .include
+    }
+
+    func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ContainsPointsOptions
+    ) -> ContainsPointsResult {
+        let count = min(points.count, 64)
+        let mask = count == 64 ? UInt64.max : ((UInt64(1) << UInt64(count)) - 1)
+        return ContainsPointsResult(mask: mask, priority: 16, children: [])
+    }
+
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        guard let graph = _AGGraph.current else {
+            fatalError("LayoutGesturePreferenceResponder.makeGesture requires AG context.")
+        }
+        makeGestureCount += 1
+        let phase: Attribute<GesturePhase<Void>> = graph.makeInput(value: .possible(nil))
+        var outputs = _GestureOutputs(phase: phase)
+        if inputs.preferences.keys.contains(LayoutGesturePreferenceKey.self) {
+            let preference = graph.makeRule {
+                [self.value]
+            }
+            outputs.preferences.append(LayoutGesturePreferenceKey.self, node: preference.identifier)
+        }
+        return outputs
+    }
+}
+
+private struct RecordingLayoutGesture: LayoutGesture, LayoutGestureResponderProvider {
+    var responder: MultiViewResponder
+
+    typealias Value = Void
+    typealias Body = Never
+
+    var layoutGestureResponder: MultiViewResponder {
+        responder
+    }
+
+    static func updateEventBindings(
+        _ eventBindings: inout [EventID: any EventType],
+        proxy: LayoutGestureChildProxy
+    ) {
+        var firstChildContainsEventLocation = false
+        if let (eventID, event) = eventBindings.first,
+           proxy.indices.contains(0) {
+            _ = proxy.bindChild(index: 0, event: event, id: eventID)
+            if let location = event.location {
+                firstChildContainsEventLocation = proxy[0].containsGlobalLocation(location)
+            }
+        }
+        RecordingLayoutGestureEventBindingStore.calls.append(
+            RecordingLayoutGestureEventBindingCall(
+                eventCount: eventBindings.count,
+                proxyCount: proxy.count,
+                firstChildContainsEventLocation: firstChildContainsEventLocation
+            )
+        )
+    }
+}
+
+private struct RecordingPreferenceLayoutGesture: LayoutGesture, LayoutGestureResponderProvider {
+    var responder: MultiViewResponder
+
+    typealias Value = Void
+    typealias Body = Never
+
+    var layoutGestureResponder: MultiViewResponder {
+        responder
+    }
+
+    static func updateEventBindings(
+        _ eventBindings: inout [EventID: any EventType],
+        proxy: LayoutGestureChildProxy
+    ) {
+        for index in proxy.indices {
+            guard let match = eventBindings.first(where: { $0.key.serial == index + 1 }) else {
+                continue
+            }
+            _ = proxy.bindChild(index: index, event: match.value, id: match.key)
+        }
     }
 }
 
@@ -1794,6 +1961,347 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertEqual(events.count, 2)
     }
 
+    func testLayoutGestureMakeGestureRoutesEventsThroughUpdateEventBindings() {
+        RecordingLayoutGestureEventBindingStore.reset()
+        defer { RecordingLayoutGestureEventBindingStore.reset() }
+
+        let gestureGraph = GestureGraph()
+        let child = DefaultLayoutViewResponder()
+        let root = DefaultLayoutViewResponder(responders: [child])
+        let eventID = EventID(type: TappableEvent.self, serial: 31)
+
+        gestureGraph.data.withCurrent {
+            func assertPossibleNil(_ phase: GesturePhase<Void>, file: StaticString = #filePath, line: UInt = #line) {
+                guard case .possible(nil) = phase else {
+                    XCTFail("expected possible(nil)", file: file, line: line)
+                    return
+                }
+            }
+
+            let graph = gestureGraph.data.graph
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
+            let events = graph.makeInput(value: [
+                eventID: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began)
+            ] as [EventID: any EventType])
+            let resetSeed = graph.makeInput(value: UInt32(0))
+            let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
+            let preferenceKeys = graph.makeInput(value: PreferenceKeys())
+            var inputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: nil,
+                events: events,
+                time: viewInputs.base.time,
+                resetSeed: resetSeed,
+                inheritedPhase: inheritedPhase,
+                gesturePreferenceKeys: preferenceKeys
+            )
+            inputs.options = .gestureGraph
+
+            let gesture = graph.makeInput(value: RecordingLayoutGesture(responder: root))
+            let outputs = RecordingLayoutGesture._makeGesture(
+                gesture: _GraphValue(_attribute: gesture),
+                inputs: inputs
+            )
+
+            XCTAssertTrue(RecordingLayoutGestureEventBindingStore.calls.isEmpty)
+            assertPossibleNil(outputs.phase.value)
+            XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls, [
+                RecordingLayoutGestureEventBindingCall(
+                    eventCount: 1,
+                    proxyCount: 1,
+                    firstChildContainsEventLocation: true
+                )
+            ])
+            XCTAssertTrue(gestureGraph.eventBindingManager.bindings[eventID]?.responder === child)
+
+            assertPossibleNil(outputs.phase.value)
+            XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls.count, 1)
+
+            events.setValue([
+                eventID: TappableEvent(location: CGPoint(x: 6, y: 7), phase: .moved)
+            ])
+            assertPossibleNil(outputs.phase.value)
+            XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls.count, 2)
+        }
+    }
+
+    func testLayoutGestureCombinesChildGesturePreferences() throws {
+        let gestureGraph = GestureGraph()
+        let first = LayoutGesturePreferenceResponder(hitTestKey: 91, value: "first")
+        let second = LayoutGesturePreferenceResponder(hitTestKey: 92, value: "second")
+        let root = DefaultLayoutViewResponder(responders: [first, second])
+        let firstID = EventID(type: TappableEvent.self, serial: 1)
+        let secondID = EventID(type: TappableEvent.self, serial: 2)
+
+        try gestureGraph.data.withCurrent {
+            let graph = gestureGraph.data.graph
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
+            let events = graph.makeInput(value: [
+                firstID: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+                secondID: TappableEvent(location: CGPoint(x: 6, y: 7), phase: .began)
+            ] as [EventID: any EventType])
+            let resetSeed = graph.makeInput(value: UInt32(0))
+            let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
+            let preferenceKeys = graph.makeInput(value: PreferenceKeys())
+            var inputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: nil,
+                events: events,
+                time: viewInputs.base.time,
+                resetSeed: resetSeed,
+                inheritedPhase: inheritedPhase,
+                gesturePreferenceKeys: preferenceKeys
+            )
+            inputs.options = .gestureGraph
+            inputs.preferences.keys.insert(LayoutGesturePreferenceKey.self)
+
+            let gesture = graph.makeInput(value: RecordingPreferenceLayoutGesture(responder: root))
+            let outputs = RecordingPreferenceLayoutGesture._makeGesture(
+                gesture: _GraphValue(_attribute: gesture),
+                inputs: inputs
+            )
+
+            let preferenceID = try XCTUnwrap(outputs.preferences.value(for: LayoutGesturePreferenceKey.self))
+            XCTAssertEqual(Attribute<LayoutGesturePreferenceKey.Value>(preferenceID).value, ["first", "second"])
+            XCTAssertEqual(first.makeGestureCount, 1)
+            XCTAssertEqual(second.makeGestureCount, 1)
+
+            XCTAssertEqual(Attribute<LayoutGesturePreferenceKey.Value>(preferenceID).value, ["first", "second"])
+            XCTAssertEqual(first.makeGestureCount, 1)
+            XCTAssertEqual(second.makeGestureCount, 1)
+        }
+    }
+
+    func testLayoutGestureChildProxyCollectionUsesResponderChildren() {
+        let first = DefaultLayoutViewResponder()
+        let second = DefaultLayoutViewResponder()
+        let root = DefaultLayoutViewResponder(responders: [first, second])
+        let proxy = LayoutGestureChildProxy(responder: root)
+
+        XCTAssertEqual(proxy.startIndex, 0)
+        XCTAssertEqual(proxy.endIndex, 2)
+        XCTAssertTrue(proxy[0].containsGlobalLocation(CGPoint(x: 1, y: 2)))
+        XCTAssertTrue(proxy[1].binds(EventBinding(responder: second)))
+        XCTAssertFalse(proxy[0].binds(EventBinding(responder: second)))
+    }
+
+    func testLayoutGestureChildProxyBindChildRoutesThroughEventBindingManager() {
+        let child = DefaultLayoutViewResponder()
+        let root = DefaultLayoutViewResponder(responders: [child])
+        let eventBindingManager = EventBindingManager()
+        let proxy = LayoutGestureChildProxy(
+            responder: root,
+            eventBindingManager: eventBindingManager
+        )
+        let eventID = EventID(type: TappableEvent.self, serial: 7)
+
+        let result = proxy.bindChild(
+            index: 0,
+            event: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+            id: eventID
+        )
+
+        XCTAssertNil(result?.from)
+        XCTAssertTrue(result?.to?.responder === child)
+        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === child)
+        XCTAssertNil(LayoutGestureChildProxy(responder: root).bindChild(
+            index: 0,
+            event: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+            id: eventID
+        ))
+    }
+
+    func testLayoutGestureBoxStoresChildEventsThroughUpdateEventBindings() {
+        RecordingLayoutGestureEventBindingStore.reset()
+        defer { RecordingLayoutGestureEventBindingStore.reset() }
+
+        let eventBindingManager = EventBindingManager()
+        let child = DefaultLayoutViewResponder()
+        let root = DefaultLayoutViewResponder(responders: [child])
+        let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
+        let eventID = EventID(type: TappableEvent.self, serial: 41)
+
+        box.updateResponder(root)
+
+        let initialGeneration = box.generation
+        let initialSeed = box.childSeed(at: 0)
+
+        box.willSendEvents([
+            eventID: TappableEvent(location: CGPoint(x: 3, y: 4), phase: .began)
+        ], gesture: RecordingLayoutGesture(responder: root))
+
+        XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls, [
+            RecordingLayoutGestureEventBindingCall(
+                eventCount: 1,
+                proxyCount: 1,
+                firstChildContainsEventLocation: true
+            )
+        ])
+        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === child)
+        XCTAssertEqual(Set(box.childEvents(at: 0).keys), [eventID])
+        XCTAssertEqual(box.childSeed(at: 0), initialSeed)
+        XCTAssertGreaterThan(box.generation, initialGeneration)
+    }
+
+    func testLayoutGestureBoxBumpsPreviousChildSeedWhenBindingMoves() {
+        let eventBindingManager = EventBindingManager()
+        let first = DefaultLayoutViewResponder()
+        let second = DefaultLayoutViewResponder()
+        let root = DefaultLayoutViewResponder(responders: [first, second])
+        let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
+        let proxy = LayoutGestureChildProxy(box: box)
+        let eventID = EventID(type: TappableEvent.self, serial: 42)
+
+        box.updateResponder(root)
+        eventBindingManager.rebindEvent(eventID, to: first)
+
+        let firstSeed = box.childSeed(at: 0)
+        let secondSeed = box.childSeed(at: 1)
+        let generation = box.generation
+
+        let movement = proxy.bindChild(
+            index: 1,
+            event: TappableEvent(location: CGPoint(x: 8, y: 9), phase: .moved),
+            id: eventID
+        )
+
+        XCTAssertTrue(movement?.from?.responder === first)
+        XCTAssertTrue(movement?.to?.responder === second)
+        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === second)
+        XCTAssertGreaterThan(box.childSeed(at: 0), firstSeed)
+        XCTAssertEqual(box.childSeed(at: 1), secondSeed)
+        XCTAssertGreaterThan(box.generation, generation)
+    }
+
+    func testLayoutGestureBoxUpdateResetSeedInvalidatesChildSubgraphs() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let child = DefaultLayoutViewResponder()
+            let root = DefaultLayoutViewResponder(responders: [child])
+            let box = LayoutGestureBox()
+            let childSubgraph = AGSubgraph()
+
+            box.updateResponder(root)
+            box.setChildSubgraph(childSubgraph, at: 0)
+
+            let seed = box.childSeed(at: 0)
+            let generation = box.generation
+            XCTAssertTrue(box.childSubgraph(at: 0) === childSubgraph)
+            XCTAssertTrue(AGSubgraphIsValid(childSubgraph))
+
+            box.updateResetSeed(1)
+
+            XCTAssertNil(box.childSubgraph(at: 0))
+            XCTAssertFalse(AGSubgraphIsValid(childSubgraph))
+            XCTAssertGreaterThan(box.childSeed(at: 0), seed)
+            XCTAssertGreaterThan(box.generation, generation)
+        }
+    }
+
+    func testLayoutGestureBoxUpdateResponderInvalidatesRemovedChildSubgraphs() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let removed = DefaultLayoutViewResponder()
+            let kept = DefaultLayoutViewResponder()
+            let initialRoot = DefaultLayoutViewResponder(responders: [removed, kept])
+            let updatedRoot = DefaultLayoutViewResponder(responders: [kept])
+            let box = LayoutGestureBox()
+            let removedSubgraph = AGSubgraph()
+            let keptSubgraph = AGSubgraph()
+
+            box.updateResponder(initialRoot)
+            box.setChildSubgraph(removedSubgraph, at: 0)
+            box.setChildSubgraph(keptSubgraph, at: 1)
+
+            XCTAssertTrue(box.childSubgraph(at: 0) === removedSubgraph)
+            XCTAssertTrue(box.childSubgraph(at: 1) === keptSubgraph)
+            XCTAssertTrue(AGSubgraphIsValid(removedSubgraph))
+            XCTAssertTrue(AGSubgraphIsValid(keptSubgraph))
+
+            box.updateResponder(updatedRoot)
+
+            XCTAssertEqual(box.childCount, 1)
+            XCTAssertTrue(box.childSubgraph(at: 0) === keptSubgraph)
+            XCTAssertFalse(AGSubgraphIsValid(removedSubgraph))
+            XCTAssertTrue(AGSubgraphIsValid(keptSubgraph))
+        }
+    }
+
+    func testLayoutGestureBoxUpdateResponderReordersChildrenByIdentity() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let first = DefaultLayoutViewResponder()
+            let second = DefaultLayoutViewResponder()
+            let initialRoot = DefaultLayoutViewResponder(responders: [first, second])
+            let updatedRoot = DefaultLayoutViewResponder(responders: [second, first])
+            let box = LayoutGestureBox()
+            let firstSubgraph = AGSubgraph()
+            let secondSubgraph = AGSubgraph()
+
+            box.updateResponder(initialRoot)
+            box.setChildSubgraph(firstSubgraph, at: 0)
+            box.setChildSubgraph(secondSubgraph, at: 1)
+
+            let firstSeed = box.childSeed(at: 0)
+            let secondSeed = box.childSeed(at: 1)
+            let generation = box.generation
+
+            box.updateResponder(updatedRoot)
+
+            XCTAssertEqual(box.childCount, 2)
+            XCTAssertTrue(box.child(at: 0).binds(EventBinding(responder: second)))
+            XCTAssertTrue(box.child(at: 1).binds(EventBinding(responder: first)))
+            XCTAssertTrue(box.childSubgraph(at: 0) === secondSubgraph)
+            XCTAssertTrue(box.childSubgraph(at: 1) === firstSubgraph)
+            XCTAssertEqual(box.childSeed(at: 0), secondSeed)
+            XCTAssertEqual(box.childSeed(at: 1), firstSeed)
+            XCTAssertGreaterThan(box.generation, generation)
+            XCTAssertTrue(AGSubgraphIsValid(firstSubgraph))
+            XCTAssertTrue(AGSubgraphIsValid(secondSubgraph))
+        }
+    }
+
+    func testLayoutGestureBoxResetsTerminalChildren() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let child = DefaultLayoutViewResponder()
+            let root = DefaultLayoutViewResponder(responders: [child])
+            let box = LayoutGestureBox()
+            let childSubgraph = AGSubgraph()
+
+            box.updateResponder(root)
+            box.setChildSubgraph(childSubgraph, at: 0)
+            box.setChildPhase(.ended(()), at: 0)
+
+            guard case .ended = box.phase() else {
+                XCTFail("expected ended phase before terminal reset")
+                return
+            }
+
+            let seed = box.childSeed(at: 0)
+            let generation = box.generation
+            XCTAssertTrue(box.childSubgraph(at: 0) === childSubgraph)
+            XCTAssertTrue(AGSubgraphIsValid(childSubgraph))
+
+            box.resetTerminalChildren()
+
+            guard case .possible(nil) = box.phase() else {
+                XCTFail("expected possible(nil) phase after terminal reset")
+                return
+            }
+            XCTAssertNil(box.childSubgraph(at: 0))
+            XCTAssertFalse(AGSubgraphIsValid(childSubgraph))
+            XCTAssertGreaterThan(box.childSeed(at: 0), seed)
+            XCTAssertGreaterThan(box.generation, generation)
+        }
+    }
+
     func testDefaultLayoutResponderMakeGestureBuildsStoredSubgraphs() throws {
         let graph = _AGGraph()
 
@@ -1853,16 +2361,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertTrue(firstSubgraph.children.contains { $0 === secondSubgraph })
             XCTAssertTrue(secondSubgraph.nodes.contains(outputs.phase.identifier))
 
-            let target = responder.scrollTarget(
-                in: ScrollGeometry(
-                    contentOffset: CGPoint(x: 1, y: 2),
-                    contentSize: CGSize(width: 100, height: 120),
-                    containerSize: CGSize(width: 40, height: 30)
-                ),
-                layoutDirection: .leftToRight
-            )
-            XCTAssertNil(target)
-            XCTAssertNotNil(responder.scrollTarget)
+            XCTAssertNil(responder.scrollTarget)
 
             responder.resetGesture()
             XCTAssertNil(responder.gestureSubgraph1)
@@ -1870,6 +2369,58 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertFalse(firstSubgraph.isValid)
             XCTAssertFalse(secondSubgraph.isValid)
             XCTAssertNil(responder.scrollTarget)
+        }
+    }
+
+    func testDefaultLayoutResponderChildrenChangeInvalidatesStoredLayoutGesture() throws {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let initialChild = ScrollViewTestResponder()
+            let updatedChild = ScrollViewTestResponder()
+            let children: Attribute<[any ViewResponder]> = graph.makeInput(
+                value: [initialChild as any ViewResponder]
+            )
+            let responder = DefaultLayoutViewResponder()
+            let output: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
+                DefaultLayoutResponderFilter(children: children, responder: responder)
+            )
+
+            XCTAssertTrue(output.value.first === responder)
+            XCTAssertFalse(host.hasPendingTransactions)
+
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
+            let events = graph.makeInput(value: [:] as [EventID: any EventType])
+            let resetSeed = graph.makeInput(value: UInt32(0))
+            let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
+            let preferenceKeys = graph.makeInput(value: PreferenceKeys())
+            let viewSubgraph = AGSubgraph()
+
+            var gestureInputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: viewSubgraph,
+                events: events,
+                time: viewInputs.base.time,
+                resetSeed: resetSeed,
+                inheritedPhase: inheritedPhase,
+                gesturePreferenceKeys: preferenceKeys
+            )
+            gestureInputs.options = .gestureGraph
+
+            let gestureOutputs = responder.makeGesture(inputs: gestureInputs)
+            guard case .possible(nil) = gestureOutputs.phase.value else {
+                XCTFail("expected possible(nil)")
+                return
+            }
+            XCTAssertFalse(host.hasPendingTransactions)
+
+            children.setValue([updatedChild as any ViewResponder])
+            XCTAssertTrue(output.value.first === responder)
+            XCTAssertEqual(responder.responders.count, 1)
+            XCTAssertTrue(responder.responders.first === updatedChild)
+            XCTAssertTrue(host.hasPendingTransactions)
         }
     }
 
@@ -2066,7 +2617,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    #if canImport(Darwin)
+    #if canImport(Darwin) || canImport(WinSDK)
     func testScrollViewUpdateWarnsWithSwiftUIContentOffsetBindingReadMessage() throws {
         let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()

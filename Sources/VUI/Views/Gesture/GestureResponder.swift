@@ -93,6 +93,10 @@ protocol AnyGestureResponder: AnyObject {
 extension ViewResponder {
     func resetGesture() {}
 
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        inputs.makeDefaultOutputs()
+    }
+
     /// Returns true if self appears in the nextResponder chain leading up to ancestor.
     ///
     /// ResponderNode.parent chain is not used.
@@ -267,6 +271,9 @@ protocol ViewResponder: AnyObject {
 
     /// Returns the hit-test result for a set of points (global coordinate space).
     func containsGlobalPoints(_ points: [CGPoint], cacheKey: UInt32?, options: ContainsPointsOptions) -> ContainsPointsResult
+
+    /// Builds this responder's gesture subtree for layout gesture routing.
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()>
 }
 
 // ViewResponder Nested Types (stand-alone for clarity)
@@ -342,6 +349,10 @@ class MultiViewResponder: ResponderNode {
         for r in responders {
             if r.nextResponder == nil { r.nextResponder = self }
         }
+        childrenDidChange()
+    }
+
+    func childrenDidChange() {
     }
 
     func resetGesture() {
@@ -400,6 +411,9 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
     var scrollTarget: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
     var gestureSubgraph1: AGSubgraph?
     var gestureSubgraph2: AGSubgraph?
+    private weak var layoutGestureInvalidationHost: GraphHost?
+    private weak var layoutGestureGraph: _AGGraph?
+    private var layoutGestureAttribute: AGWeakAttribute?
 
     init(
         responders: [any ViewResponder] = [],
@@ -462,8 +476,6 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
             gestureSubgraph2 = secondSubgraph
         }
 
-        scrollTarget = { _, _ in nil }
-
         let activeSubgraph = gestureSubgraph2 ?? firstSubgraph
         return AGSubgraph.withCurrent(activeSubgraph) {
             guard let graph = _AGGraph.current else {
@@ -472,6 +484,9 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
             var childInputs = inputs
             childInputs.viewSubgraph = activeSubgraph
             let gestureAttr = graph.makeInput(value: DefaultLayoutGesture(responder: self))
+            layoutGestureAttribute = graph.weakAttributeIfValid(for: gestureAttr.identifier)
+            layoutGestureGraph = graph
+            layoutGestureInvalidationHost = _AGGraphContext.current?.context as? GraphHost
             return DefaultLayoutGesture._makeGesture(
                 gesture: _GraphValue(_attribute: gestureAttr),
                 inputs: childInputs
@@ -479,11 +494,44 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
         }
     }
 
+    override func childrenDidChange() {
+        invalidateLayoutGesture()
+        super.childrenDidChange()
+    }
+
     override func resetGesture() {
         scrollTarget = nil
+        layoutGestureAttribute = nil
+        layoutGestureGraph = nil
+        layoutGestureInvalidationHost = nil
         resetSubgraph(&gestureSubgraph1)
         resetSubgraph(&gestureSubgraph2)
         super.resetGesture()
+    }
+
+    private func invalidateLayoutGesture() {
+        guard let layoutGestureAttribute else { return }
+        if let host = layoutGestureInvalidationHost {
+            host.asyncTransaction(
+                Transaction.current,
+                id: Transaction.id,
+                mutation: InvalidatingGraphMutation(attribute: layoutGestureAttribute),
+                style: .deferred,
+                mayDeferUpdate: true
+            )
+            return
+        }
+
+        guard let graph = _AGGraph.current,
+              graph === layoutGestureGraph,
+              layoutGestureAttribute.isValid(in: graph) else {
+            return
+        }
+        graph.invalidateAttribute(
+            layoutGestureAttribute.toStrong(),
+            transaction: Transaction.current,
+            propagateTransaction: !Transaction.current.isEmpty
+        )
     }
 
     private func resetSubgraph(_ subgraph: inout AGSubgraph?) {
@@ -495,11 +543,15 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
     }
 }
 
-struct DefaultLayoutGesture: LayoutGesture, PrimitiveDebuggableGesture {
+struct DefaultLayoutGesture: LayoutGesture, PrimitiveDebuggableGesture, LayoutGestureResponderProvider {
     var responder: MultiViewResponder
 
     typealias Value = Void
     typealias Body = Never
+
+    var layoutGestureResponder: MultiViewResponder {
+        responder
+    }
 }
 
 struct DefaultLayoutResponderFilter: StatefulRule {
@@ -660,6 +712,12 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         }
         let localModifierAttr: Attribute<M> = graph.makeInput(value: currentModifier)
         return M._makeSessionGesture(modifier: _GraphValue(_attribute: localModifierAttr), inputs: inputs)
+    }
+
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        makeWrappedGesture(inputs: inputs) { [self] modifiedInputs in
+            makeSubviewsGesture(inputs: modifiedInputs)
+        }
     }
 
     func accepts(eventType: Any.Type) -> Bool {

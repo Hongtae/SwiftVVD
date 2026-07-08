@@ -439,9 +439,531 @@ protocol PubliclyPrimitiveGesture: PrimitiveGesture {}
 
 protocol PrimitiveDebuggableGesture: PrimitiveGesture {}
 
-struct LayoutGestureChildProxy {}
+final class LayoutGestureBox {
+    struct ChildRecord {
+        var responder: (any ViewResponder)?
+        var seed: UInt32
+        var events: [EventID: any EventType]
+        var phase: GesturePhase<Void>
+        var subgraph: AGSubgraph? = nil
+        var outputs: _GestureOutputs<Void>? = nil
 
-protocol LayoutGesture: PrimitiveGesture where Value == Void {}
+        func binds(_ binding: EventBinding) -> Bool {
+            guard let responderNode = responder as? ResponderNode else {
+                return false
+            }
+            if binding.responder === responderNode {
+                return true
+            }
+            return (binding.responder as? any ViewResponder)?.isDescendant(of: responderNode) ?? false
+        }
+
+        func containsGlobalLocation(_ location: CGPoint) -> Bool {
+            guard let responder else {
+                return false
+            }
+            let result = responder.containsGlobalPoints(
+                [location],
+                cacheKey: nil,
+                options: ContainsPointsOptions()
+            )
+            return (result.mask & 1) != 0
+        }
+    }
+
+    var eventBindingManager: EventBindingManager?
+    private(set) var children: [ChildRecord] = []
+    private(set) var generation: UInt32 = 0
+    private var nextChildSeed: UInt32 = 0
+    private var resetSeed: UInt32 = 0
+
+    init(eventBindingManager: EventBindingManager? = nil) {
+        self.eventBindingManager = eventBindingManager
+    }
+
+    var childCount: Int {
+        children.count
+    }
+
+    func updateResetSeed(_ seed: UInt32) {
+        guard resetSeed != seed else { return }
+        resetSeed = seed
+        if !children.isEmpty {
+            for index in children.indices {
+                children[index].events.removeAll()
+                children[index].phase = .possible(nil)
+                resetChildSubgraph(at: index)
+                bumpChildSeed(at: index)
+            }
+        }
+        bumpGeneration()
+    }
+
+    func updateResponder(_ responder: MultiViewResponder) {
+        var oldChildren = children
+        var newChildren: [ChildRecord] = []
+        var changed = oldChildren.count != responder.responders.count
+
+        for childResponder in responder.responders {
+            if let oldIndex = oldChildren.firstIndex(where: { $0.responder === childResponder }) {
+                var child = oldChildren.remove(at: oldIndex)
+                child.responder = childResponder
+                if oldIndex != newChildren.count {
+                    changed = true
+                }
+                newChildren.append(child)
+            } else {
+                newChildren.append(ChildRecord(
+                    responder: childResponder,
+                    seed: nextSeed(),
+                    events: [:],
+                    phase: .possible(nil)
+                ))
+                changed = true
+            }
+        }
+
+        if !oldChildren.isEmpty {
+            for oldChild in oldChildren {
+                invalidateChildSubgraph(oldChild.subgraph)
+            }
+            changed = true
+        }
+        guard changed else { return }
+        children = newChildren
+        bumpGeneration()
+    }
+
+    func child(at index: Int) -> LayoutGestureChildProxy.Child {
+        precondition(children.indices.contains(index), "LayoutGestureChildProxy index out of range")
+        return LayoutGestureChildProxy.Child(responder: children[index].responder)
+    }
+
+    func childEvents(at index: Int) -> [EventID: any EventType] {
+        precondition(children.indices.contains(index), "LayoutGestureBox child index out of range")
+        return children[index].events
+    }
+
+    func childEventsForRule(at index: Int) -> [EventID: any EventType] {
+        guard children.indices.contains(index) else { return [:] }
+        return children[index].events
+    }
+
+    func childSeed(at index: Int) -> UInt32 {
+        precondition(children.indices.contains(index), "LayoutGestureBox child index out of range")
+        return children[index].seed &+ resetSeed
+    }
+
+    func childSeedForRule(at index: Int) -> UInt32 {
+        guard children.indices.contains(index) else {
+            return 0x10000 &+ resetSeed
+        }
+        return children[index].seed &+ resetSeed
+    }
+
+    func childSubgraph(at index: Int) -> AGSubgraph? {
+        precondition(children.indices.contains(index), "LayoutGestureBox child index out of range")
+        return children[index].subgraph
+    }
+
+    func setChildSubgraph(_ subgraph: AGSubgraph?, at index: Int) {
+        precondition(children.indices.contains(index), "LayoutGestureBox child index out of range")
+        children[index].subgraph = subgraph
+    }
+
+    func bindChild(
+        index: Int,
+        event: any EventType,
+        id: EventID
+    ) -> (from: EventBinding?, to: EventBinding?)? {
+        precondition(children.indices.contains(index), "LayoutGestureChildProxy index out of range")
+        guard let eventBindingManager else {
+            return nil
+        }
+        let child = children[index]
+        let target: ResponderNode?
+        if let location = event.location {
+            target = child.containsGlobalLocation(location) ? child.responder as? ResponderNode : nil
+        } else {
+            target = child.responder as? ResponderNode
+        }
+
+        let movement = eventBindingManager.rebindEvent(id, to: target)
+        if let oldBinding = movement?.from,
+           let oldIndex = children.firstIndex(where: { $0.binds(oldBinding) }) {
+            bumpChildSeed(at: oldIndex)
+            bumpGeneration()
+        }
+        return movement
+    }
+
+    func willSendEvents<G: LayoutGesture>(
+        _ events: [EventID: any EventType],
+        gesture: G,
+        inputs: _GestureInputs? = nil,
+        boxValueAttribute: Attribute<LayoutGestureBoxValue>? = nil
+    ) {
+        clearStoredChildEvents()
+        guard !events.isEmpty else { return }
+
+        var mutableEvents = events
+        G.updateEventBindings(&mutableEvents, proxy: LayoutGestureChildProxy(box: self))
+        guard !mutableEvents.isEmpty else { return }
+
+        for index in children.indices {
+            let filtered = childEvents(from: mutableEvents, index: index)
+            guard !filtered.isEmpty else { continue }
+            children[index].events = filtered
+            bumpGeneration()
+        }
+
+        guard let inputs, let boxValueAttribute else { return }
+        for index in children.indices where !children[index].events.isEmpty {
+            ensureChildGesture(
+                at: index,
+                inputs: inputs,
+                boxValueAttribute: boxValueAttribute
+            )
+        }
+    }
+
+    func phase() -> GesturePhase<Void> {
+        var sawActive = false
+        var sawEnded = false
+
+        for index in children.indices {
+            switch childPhase(at: index) {
+            case .failed:
+                return .failed
+            case .ended:
+                sawEnded = true
+            case .active:
+                sawActive = true
+            case .possible:
+                continue
+            }
+        }
+
+        if sawEnded {
+            return .ended(())
+        }
+        if sawActive {
+            return .active(())
+        }
+        return .possible(nil)
+    }
+
+    func resetTerminalChildren() {
+        var changed = false
+        for index in children.indices where childPhase(at: index).isTerminal {
+            children[index].phase = .possible(nil)
+            children[index].events.removeAll()
+            resetChildSubgraph(at: index)
+            bumpChildSeed(at: index)
+            changed = true
+        }
+        if changed {
+            bumpGeneration()
+        }
+    }
+
+    func setChildPhase(_ phase: GesturePhase<Void>, at index: Int) {
+        precondition(children.indices.contains(index), "LayoutGestureBox child index out of range")
+        children[index].phase = phase
+        children[index].outputs = nil
+        bumpGeneration()
+    }
+
+    func preferenceValue<K: PreferenceKey>(for key: K.Type) -> K.Value {
+        var result = K.defaultValue
+        var hasValue = false
+        for child in children {
+            guard let preferenceAttr = child.outputs?.preferences.value(for: K.self) else {
+                continue
+            }
+            let value = Attribute<K.Value>(preferenceAttr).value
+            if hasValue {
+                K.reduce(value: &result) { value }
+            } else {
+                result = value
+                hasValue = true
+            }
+        }
+        return result
+    }
+
+    private func ensureChildGesture(
+        at index: Int,
+        inputs: _GestureInputs,
+        boxValueAttribute: Attribute<LayoutGestureBoxValue>
+    ) {
+        guard children.indices.contains(index),
+              children[index].outputs == nil,
+              let responder = children[index].responder else {
+            return
+        }
+        guard _AGGraph.current != nil else {
+            fatalError("LayoutGestureBox.ensureChildGesture requires AG context")
+        }
+
+        let parentSubgraph = inputs.viewSubgraph
+        let childSubgraph = AGSubgraph.withCurrent(parentSubgraph) {
+            AGSubgraph()
+        }
+
+        guard let graph = _AGGraph.current else {
+            fatalError("LayoutGestureBox.ensureChildGesture requires AG context")
+        }
+
+        let outputs = AGSubgraph.withCurrent(childSubgraph) {
+            var childInputs = inputs
+            childInputs.viewSubgraph = childSubgraph
+            let childEvents = graph.makeRule(LayoutChildEvents(
+                boxValue: boxValueAttribute,
+                index: index
+            ))
+            let childSeed = graph.makeRule(LayoutChildSeed(
+                boxValue: boxValueAttribute,
+                index: index
+            ))
+            childInputs._events = childEvents
+            childInputs._resetSeed = childSeed
+            return responder.makeGesture(inputs: childInputs)
+        }
+        children[index].subgraph = childSubgraph
+        children[index].outputs = outputs
+    }
+
+    private func childEvents(
+        from events: [EventID: any EventType],
+        index: Int
+    ) -> [EventID: any EventType] {
+        guard let eventBindingManager else { return [:] }
+        let child = children[index]
+        var filtered: [EventID: any EventType] = [:]
+        for (eventID, event) in events {
+            guard let binding = eventBindingManager.bindings[eventID],
+                  child.binds(binding) else {
+                continue
+            }
+            filtered[eventID] = event
+        }
+        return filtered
+    }
+
+    private func clearStoredChildEvents() {
+        var changed = false
+        for index in children.indices where !children[index].events.isEmpty {
+            children[index].events.removeAll()
+            changed = true
+        }
+        if changed {
+            bumpGeneration()
+        }
+    }
+
+    private func resetChildSubgraph(at index: Int) {
+        invalidateChildSubgraph(children[index].subgraph)
+        children[index].subgraph = nil
+        children[index].outputs = nil
+    }
+
+    private func invalidateChildSubgraph(_ subgraph: AGSubgraph?) {
+        guard let subgraph else { return }
+        if let graph = _AGGraph.current, graph === subgraph.graph, AGSubgraphIsValid(subgraph) {
+            subgraph.invalidate()
+        }
+    }
+
+    private func nextSeed() -> UInt32 {
+        defer { nextChildSeed &+= 1 }
+        return nextChildSeed
+    }
+
+    private func bumpChildSeed(at index: Int) {
+        children[index].seed &+= 1
+    }
+
+    private func bumpGeneration() {
+        generation &+= 1
+    }
+
+    private func childPhase(at index: Int) -> GesturePhase<Void> {
+        guard children.indices.contains(index) else { return .possible(nil) }
+        if let outputs = children[index].outputs {
+            return outputs.phase.value
+        }
+        return children[index].phase
+    }
+}
+
+struct LayoutGestureBoxValue {
+    var box: LayoutGestureBox
+    var seed: UInt32
+}
+
+private struct LayoutChildEvents: Rule {
+    typealias Value = [EventID: any EventType]
+
+    var boxValue: Attribute<LayoutGestureBoxValue>
+    var index: Int
+
+    func updateValue() -> [EventID: any EventType] {
+        boxValue.value.box.childEventsForRule(at: index)
+    }
+}
+
+private struct LayoutChildSeed: Rule {
+    typealias Value = UInt32
+
+    var boxValue: Attribute<LayoutGestureBoxValue>
+    var index: Int
+
+    func updateValue() -> UInt32 {
+        boxValue.value.box.childSeedForRule(at: index)
+    }
+}
+
+struct LayoutGestureChildProxy: RandomAccessCollection {
+    struct Child {
+        var responder: (any ViewResponder)?
+
+        func binds(_ binding: EventBinding) -> Bool {
+            guard let responderNode = responder as? ResponderNode else {
+                return false
+            }
+            if binding.responder === responderNode {
+                return true
+            }
+            return (binding.responder as? any ViewResponder)?.isDescendant(of: responderNode) ?? false
+        }
+
+        func containsGlobalLocation(_ location: CGPoint) -> Bool {
+            guard let responder else {
+                return false
+            }
+            let result = responder.containsGlobalPoints(
+                [location],
+                cacheKey: nil,
+                options: ContainsPointsOptions()
+            )
+            return (result.mask & 1) != 0
+        }
+    }
+
+    typealias Index = Int
+    typealias Element = Child
+
+    private var box: LayoutGestureBox?
+
+    init() {
+        self.box = nil
+    }
+
+    init(
+        responder: MultiViewResponder,
+        eventBindingManager: EventBindingManager? = nil
+    ) {
+        let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
+        box.updateResponder(responder)
+        self.box = box
+    }
+
+    init(box: LayoutGestureBox) {
+        self.box = box
+    }
+
+    var startIndex: Int {
+        0
+    }
+
+    var endIndex: Int {
+        box?.childCount ?? 0
+    }
+
+    subscript(position: Int) -> Child {
+        guard let box else {
+            preconditionFailure("LayoutGestureChildProxy index out of range")
+        }
+        return box.child(at: position)
+    }
+
+    func bindChild(
+        index: Int,
+        event: any EventType,
+        id: EventID
+    ) -> (from: EventBinding?, to: EventBinding?)? {
+        box?.bindChild(index: index, event: event, id: id)
+    }
+}
+
+protocol LayoutGesture: PrimitiveGesture where Value == Void {
+    static func updateEventBindings(
+        _ eventBindings: inout [EventID: any EventType],
+        proxy: LayoutGestureChildProxy
+    )
+}
+
+protocol LayoutGestureResponderProvider {
+    var layoutGestureResponder: MultiViewResponder { get }
+}
+
+private func currentLayoutGestureEventBindingManager() -> EventBindingManager? {
+    guard let context = _AGGraphContext.current?.context else {
+        return nil
+    }
+    if let eventGraphHost = context as? any EventGraphHost {
+        return eventGraphHost.eventBindingManager
+    }
+    if let viewGraph = context as? ViewGraph {
+        return viewGraph.rendererHost?.gestureGraph?.eventBindingManager
+    }
+    if let rendererHost = context as? any ViewRendererHost {
+        return rendererHost.gestureGraph?.eventBindingManager
+    }
+    return nil
+}
+
+private struct LayoutGestureUpdateRule<G: LayoutGesture>: StatefulRule {
+    typealias Value = LayoutGestureBoxValue
+
+    var gesture: Attribute<G>
+    var events: Attribute<[EventID: any EventType]>
+    var resetSeed: Attribute<UInt32>
+    var inputs: _GestureInputs
+    var box: LayoutGestureBox
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        let eventsChanged = _AGGraph.currentStatefulInputChanged(events.identifier)
+        box.updateResetSeed(resetSeed.value)
+        let gestureValue = gesture.value
+        if let provider = gestureValue as? any LayoutGestureResponderProvider {
+            box.updateResponder(provider.layoutGestureResponder)
+        }
+
+        if isInitialValue || eventsChanged {
+            box.willSendEvents(
+                events.value,
+                gesture: gestureValue,
+                inputs: inputs,
+                boxValueAttribute: context.attribute
+            )
+        }
+
+        _AGGraph.setStatefulOutput(LayoutGestureBoxValue(box: box, seed: box.generation))
+    }
+}
+
+private struct LayoutGesturePreferenceCombiner<K: PreferenceKey>: Rule {
+    typealias Value = K.Value
+
+    var boxValue: Attribute<LayoutGestureBoxValue>
+
+    func updateValue() -> K.Value {
+        boxValue.value.box.preferenceValue(for: K.self)
+    }
+}
 
 extension LayoutGesture {
     static func updateEventBindings(
@@ -450,7 +972,32 @@ extension LayoutGesture {
     ) {}
 
     static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Void> {
-        inputs.makeDefaultOutputs()
+        guard let graph = _AGGraph.current else {
+            fatalError("LayoutGesture._makeGesture requires AG context")
+        }
+        let box = LayoutGestureBox(eventBindingManager: currentLayoutGestureEventBindingManager())
+        let update = graph.makeStatefulRule(LayoutGestureUpdateRule(
+            gesture: gesture._attribute,
+            events: inputs.events,
+            resetSeed: inputs.resetSeed,
+            inputs: inputs,
+            box: box
+        ))
+        let phase: Attribute<GesturePhase<Void>> = graph.makeRule {
+            let value = update.value
+            let phase = value.box.phase()
+            value.box.resetTerminalChildren()
+            return phase
+        }
+        var outputs = _GestureOutputs(phase: phase)
+        for key in inputs.preferences.keys.keys {
+            func appendPreference<K: PreferenceKey>(_ key: K.Type) {
+                let attr = graph.makeRule(LayoutGesturePreferenceCombiner<K>(boxValue: update))
+                outputs.preferences.append(K.self, node: attr.identifier)
+            }
+            appendPreference(key)
+        }
+        return outputs
     }
 }
 

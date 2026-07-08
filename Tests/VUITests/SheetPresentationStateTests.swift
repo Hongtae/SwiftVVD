@@ -3,81 +3,92 @@ import XCTest
 @testable import VUI
 
 final class SheetPresentationStateTests: XCTestCase {
-    @MainActor
-    func testStateDrivenSheetPresentationEnqueuesModalAfterBindingSet() throws {
-        var capturedBinding: Binding<Bool>?
-        let view = StateDrivenSheetProbe { binding in
-            capturedBinding = binding
-        }
-        let controller = WindowController(
-            content: view,
-            scene: WindowKey(namespace: .app, sceneID: SceneID(StateDrivenSheetProbe.self))
-        )
-        let fakeWindow = try XCTUnwrap(
-            TestWindow(name: "test", style: [], delegate: nil, data: [:])
-        )
-
-        XCTAssertTrue(controller.shouldClose(window: fakeWindow))
-        controller.viewGraph.updateOutputs(at: Time(seconds: 0))
-        capturedBinding?.wrappedValue = true
-        controller.viewGraph.updateOutputs(at: Time(seconds: 1))
-
-        XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+    func testStateDrivenSheetPresentationEnqueuesModalAfterBindingSet() async throws {
+        try await runStateDrivenSheetPresentationEnqueuesModalAfterBindingSet()
     }
 
-    @MainActor
-    func testStateDrivenSheetPresentationSurvivesInactiveSiblingSheetBranch() throws {
-        var capturedFirstBinding: Binding<Bool>?
-        var capturedSecondBinding: Binding<Bool>?
-        let view = TwoSheetProbe { first, second in
-            capturedFirstBinding = first
-            capturedSecondBinding = second
-        }
-        let controller = WindowController(
-            content: view,
-            scene: WindowKey(namespace: .app, sceneID: SceneID(TwoSheetProbe.self))
-        )
-        let fakeWindow = try XCTUnwrap(
-            TestWindow(name: "test", style: [], delegate: nil, data: [:])
-        )
-
-        XCTAssertTrue(controller.shouldClose(window: fakeWindow))
-        controller.viewGraph.updateOutputs(at: Time(seconds: 0))
-        capturedFirstBinding?.wrappedValue = true
-        XCTAssertEqual(capturedSecondBinding?.wrappedValue, false)
-        controller.viewGraph.updateOutputs(at: Time(seconds: 1))
-
-        XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+    func testStateDrivenSheetPresentationSurvivesInactiveSiblingSheetBranch() async throws {
+        try await runStateDrivenSheetPresentationSurvivesInactiveSiblingSheetBranch()
     }
 
-    @MainActor
-    func testStateDrivenSheetPresentationSurvivesInactiveRootChainedSheet() throws {
-        var capturedFirstBinding: Binding<Bool>?
-        var capturedSecondBinding: Binding<Bool>?
-        let view = RootChainedTwoSheetProbe { first, second in
-            capturedFirstBinding = first
-            capturedSecondBinding = second
-        }
-        let controller = WindowController(
-            content: view,
-            scene: WindowKey(
-                namespace: .app,
-                sceneID: SceneID(RootChainedTwoSheetProbe.self)
-            )
-        )
-        let fakeWindow = try XCTUnwrap(
-            TestWindow(name: "test", style: [], delegate: nil, data: [:])
-        )
-
-        XCTAssertTrue(controller.shouldClose(window: fakeWindow))
-        controller.viewGraph.updateOutputs(at: Time(seconds: 0))
-        capturedFirstBinding?.wrappedValue = true
-        XCTAssertEqual(capturedSecondBinding?.wrappedValue, false)
-        controller.viewGraph.updateOutputs(at: Time(seconds: 1))
-
-        XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+    func testStateDrivenSheetPresentationSurvivesInactiveRootChainedSheet() async throws {
+        try await runStateDrivenSheetPresentationSurvivesInactiveRootChainedSheet()
     }
+}
 
+@MainActor
+private func runStateDrivenSheetPresentationEnqueuesModalAfterBindingSet() throws {
+    var capturedBinding: Binding<Bool>?
+    let view = StateDrivenSheetProbe { binding in
+        capturedBinding = binding
+    }
+    let controller = WindowController(
+        content: view,
+        scene: WindowKey(namespace: .app, sceneID: SceneID(StateDrivenSheetProbe.self))
+    )
+    let fakeWindow = try XCTUnwrap(
+        TestWindow(name: "test", style: [], delegate: nil, data: [:])
+    )
+
+    XCTAssertTrue(controller.shouldClose(window: fakeWindow))
+    controller.viewGraph.updateOutputs(at: Time(seconds: 0))
+    capturedBinding?.wrappedValue = true
+    controller.viewGraph.updateOutputs(at: Time(seconds: 1))
+
+    XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+}
+
+@MainActor
+private func runStateDrivenSheetPresentationSurvivesInactiveSiblingSheetBranch() throws {
+    var capturedFirstBinding: Binding<Bool>?
+    var capturedSecondBinding: Binding<Bool>?
+    let view = TwoSheetProbe { first, second in
+        capturedFirstBinding = first
+        capturedSecondBinding = second
+    }
+    let controller = WindowController(
+        content: view,
+        scene: WindowKey(namespace: .app, sceneID: SceneID(TwoSheetProbe.self))
+    )
+    let fakeWindow = try XCTUnwrap(
+        TestWindow(name: "test", style: [], delegate: nil, data: [:])
+    )
+
+    XCTAssertTrue(controller.shouldClose(window: fakeWindow))
+    controller.viewGraph.updateOutputs(at: Time(seconds: 0))
+    capturedFirstBinding?.wrappedValue = true
+    XCTAssertEqual(capturedSecondBinding?.wrappedValue, false)
+    controller.viewGraph.updateOutputs(at: Time(seconds: 1))
+
+    XCTAssertFalse(controller.shouldClose(window: fakeWindow))
+}
+
+@MainActor
+private func runStateDrivenSheetPresentationSurvivesInactiveRootChainedSheet() throws {
+    var capturedFirstBinding: Binding<Bool>?
+    var capturedSecondBinding: Binding<Bool>?
+    let view = RootChainedTwoSheetProbe { first, second in
+        capturedFirstBinding = first
+        capturedSecondBinding = second
+    }
+    let controller = WindowController(
+        content: view,
+        scene: WindowKey(
+            namespace: .app,
+            sceneID: SceneID(RootChainedTwoSheetProbe.self)
+        )
+    )
+    let fakeWindow = try XCTUnwrap(
+        TestWindow(name: "test", style: [], delegate: nil, data: [:])
+    )
+
+    XCTAssertTrue(controller.shouldClose(window: fakeWindow))
+    controller.viewGraph.updateOutputs(at: Time(seconds: 0))
+    capturedFirstBinding?.wrappedValue = true
+    XCTAssertEqual(capturedSecondBinding?.wrappedValue, false)
+    controller.viewGraph.updateOutputs(at: Time(seconds: 1))
+
+    XCTAssertFalse(controller.shouldClose(window: fakeWindow))
 }
 
 private struct StateDrivenSheetProbe: View {
