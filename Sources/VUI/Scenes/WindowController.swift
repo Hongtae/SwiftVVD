@@ -609,19 +609,23 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
-    private func flushCrossGraphSourceIfNeeded() {
-        guard let sourceGraph = crossGraphSourceGraph else { return }
+    @discardableResult
+    private func flushCrossGraphSourceIfNeeded() -> Bool {
+        guard let sourceGraph = crossGraphSourceGraph else { return false }
         guard window == nil else {
             // Platform presentation children have their own render task. Their
             // source graph is owned by the parent window's update loop, so
             // draining it here would make one _AGGraph run on two threads.
-            return
+            return false
         }
+        let hadPendingWork = sourceGraph.inbox.hasPendingWork ||
+            !sourceGraph.actionOutbox.isEmpty
         _AGGraph.withCurrent(sourceGraph) {
             sourceGraph.inbox.drain()
             sourceGraph.drainActions()
         }
-        drainActionOutbox(sourceGraph)
+        let drainedOutbox = drainActionOutbox(sourceGraph)
+        return hadPendingWork || drainedOutbox
     }
 
     @discardableResult
@@ -648,14 +652,35 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             viewGraph.valuesNeedingUpdate.insert(.size)
         }
 
-        let changeSet = _AGChangeSet()
-        _AGGraph.withChangeSet(changeSet) {
+        let events = self.inputEvents.withLock { events in
+            defer { events.removeAll() }
+            return events
+        }
+        let hadRootValueUpdates = !viewGraph.valuesNeedingUpdate.isEmpty
+        let hadScheduledViewUpdate = viewGraph.hasScheduledViewUpdate
+        let hadGraphWork = viewGraph.hasPendingTransactions ||
+            viewGraph.hasPendingGraphMutations ||
+            viewGraph.data.graph.inbox.hasPendingWork ||
+            !viewGraph.data.graph.actionOutbox.isEmpty
+        let hadViewChangedWhileDrawing = self.viewChangedWhileDrawing
+
+        var needsLayoutPass = !hasDeliveredViewLayoutUpdate ||
+            sizeChanged ||
+            !events.isEmpty ||
+            hadRootValueUpdates ||
+            hadScheduledViewUpdate ||
+            hadGraphWork ||
+            hadViewChangedWhileDrawing
+
+        var flushedCrossGraphSource = false
+        var drainedGestureOutbox = false
+        var drainedViewOutbox = false
+        var loadedResources = false
+
+        let updateChangeSet = _AGChangeSet()
+        _AGGraph.withChangeSet(updateChangeSet) {
 
             // Drain platform input events before AG evaluation.
-            let events = self.inputEvents.withLock { events in
-                defer { events.removeAll() }
-                return events
-            }
             events.forEach {
                 switch $0 {
                 case .keyboard(let event): self.onKeyboardEvent(event: event)
@@ -671,6 +696,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             if let gg = self.gestureGraph {
                 let actions = gg.data.graph.actionOutbox
                 if !actions.isEmpty {
+                    drainedGestureOutbox = true
                     gg.data.graph.actionOutbox.removeAll()
                     actions.forEach { $0() }
                 }
@@ -678,14 +704,15 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
             // updateOutputs flushes dirty bits, async changes, then evaluates AG.
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
-            flushCrossGraphSourceIfNeeded()
+            flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()
             viewGraph.updateOutputs(at: time)
-            drainActionOutbox(viewGraph.data.graph)
+            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph)
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
             viewGraph.data.withCurrent {
                 if let resourceList = viewGraph.rootResourceList?.value,
                    !resourceList.items.isEmpty {
+                    loadedResources = true
                     withGC(false) { context in
                         for task in resourceList.items {
                             task(context)
@@ -693,44 +720,77 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     }
                     viewGraph.data.graph.inbox.drain()
                     viewGraph.data.graph.drainActions()
-                    drainActionOutbox(viewGraph.data.graph)
+                    drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 }
             }
+        }
 
-            // Layout pass: determine root view size/position after AG evaluation completes.
-            viewGraph.data.withCurrent {
-                let lc = rootLayoutComputer.value
-                let proposal = ProposedViewSize(width: cachedContentSize.width,
-                                               height: cachedContentSize.height)
-                let center = CGPoint(x: cachedContentSize.width / 2,
-                                     y: cachedContentSize.height / 2)
-                lc.place(at: center, anchor: .center, proposal: proposal)
+        let updateChangedIDs = updateChangeSet.ids(for: viewGraph.data.graph)
+        var clockIDs: Set<AGAttribute> = [
+            viewGraph.data.updateSeedAttribute.identifier,
+            viewGraph.data.transactionSeedAttribute.identifier
+        ]
+        if let timeID = viewGraph.timeAttr?.identifier {
+            clockIDs.insert(timeID)
+        }
+        let meaningfulUpdateChange = updateChangedIDs.contains { id in
+            !clockIDs.contains(id)
+        }
+        needsLayoutPass = needsLayoutPass ||
+            flushedCrossGraphSource ||
+            drainedGestureOutbox ||
+            drainedViewOutbox ||
+            loadedResources ||
+            meaningfulUpdateChange
 
-                let previousRootFittedSize = cachedRootFittedSize
-                let rootFittedSize = observesRootFittedSizeForLayoutUpdates
-                    ? viewGraph.rootFittedSize?.value
-                    : nil
-                if let rootFittedSize {
-                    cachedRootFittedSize = rootFittedSize
+        var layoutChanged = false
+        if needsLayoutPass {
+            let layoutChangeSet = _AGChangeSet()
+            _AGGraph.withChangeSet(layoutChangeSet) {
+                // Layout pass: determine root view size/position after AG evaluation completes.
+                viewGraph.data.withCurrent {
+                    let lc = rootLayoutComputer.value
+                    let proposal = ProposedViewSize(width: cachedContentSize.width,
+                                                   height: cachedContentSize.height)
+                    let center = CGPoint(x: cachedContentSize.width / 2,
+                                         y: cachedContentSize.height / 2)
+                    lc.place(at: center, anchor: .center, proposal: proposal)
+
+                    let previousRootFittedSize = cachedRootFittedSize
+                    let rootFittedSize = observesRootFittedSizeForLayoutUpdates
+                        ? viewGraph.rootFittedSize?.value
+                        : nil
+                    if let rootFittedSize {
+                        cachedRootFittedSize = rootFittedSize
+                    }
+                    let rootFittedSizeChanged = rootFittedSize.map { $0 != previousRootFittedSize } ?? false
+
+                    if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
+                        hasDeliveredViewLayoutUpdate = true
+                        // Modal/presentation-child controllers use this hook to fit their platform
+                        // window after AG layout values are available. The hook is
+                        // driven by the root fitted-size rule rather than the host
+                        // window's proposed sizeAttr, because resource/content
+                        // changes can alter natural modal size without changing the
+                        // platform content size first.
+                        onViewLayoutUpdated()
+                    }
                 }
-                let rootFittedSizeChanged = rootFittedSize.map { $0 != previousRootFittedSize } ?? false
-
-                if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
-                    hasDeliveredViewLayoutUpdate = true
-                    // Modal/presentation-child controllers use this hook to fit their platform
-                    // window after AG layout values are available. The hook is
-                    // driven by the root fitted-size rule rather than the host
-                    // window's proposed sizeAttr, because resource/content
-                    // changes can alter natural modal size without changing the
-                    // platform content size first.
-                    onViewLayoutUpdated()
-                }
+                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
             }
-            drainActionOutbox(viewGraph.data.graph)
+            layoutChanged = !layoutChangeSet.isEmpty
         }
         // Preserve redraw requests raised earlier in this frame, including
         // child modal input handled during the parent event pass.
-        redraw = redraw || !changeSet.isEmpty || self.viewChangedWhileDrawing
+        redraw = redraw ||
+            hadScheduledViewUpdate ||
+            meaningfulUpdateChange ||
+            layoutChanged ||
+            flushedCrossGraphSource ||
+            drainedGestureOutbox ||
+            drainedViewOutbox ||
+            loadedResources ||
+            hadViewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
 
         // Overlay presentation children: update after self.

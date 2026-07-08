@@ -521,6 +521,14 @@ class ViewGraph: ViewGraphHost {
         nextUpdate.views.reasons
     }
 
+    var hasScheduledViewUpdate: Bool {
+        let views = nextUpdate.views
+        return !(views.time == .infinity) ||
+            views.interval.isFinite ||
+            views.hasZeroInterval ||
+            !views.reasons.isEmpty
+    }
+
     var viewGraphFeatureCount: Int {
         featureBuffer.count
     }

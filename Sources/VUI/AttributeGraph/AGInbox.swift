@@ -32,6 +32,10 @@ import Synchronization
 final class AGInbox: @unchecked Sendable {
     private let pendingWork: Mutex<[@Sendable () -> Void]> = Mutex([])
 
+    var hasPendingWork: Bool {
+        pendingWork.withLock { !$0.isEmpty }
+    }
+
     /// Enqueues a work item.  Safe to call from any thread.
     /// The closure runs on the AG thread with `_AGGraph.current` already bound.
     func enqueue(_ work: @escaping @Sendable () -> Void) {
