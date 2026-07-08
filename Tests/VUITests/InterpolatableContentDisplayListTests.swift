@@ -1995,16 +1995,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(noTransitionSameObjectInterpolator.activeDuration, 0)
         XCTAssertFalse(noTransitionSameObjectInterpolator.onlyFades)
 
-        let renderOptionInterpolator = RBDisplayListInterpolator(
-            from: from,
-            to: to,
-            options: [
-                .transition: opacity,
-                .fadeInOutFraction: Float(0.33),
-                .rasterizationScale: Float(3),
-                .colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-            ]
-        )
+        var renderOptions: [RBDisplayListInterpolatorOptionKey: Any] = [
+            .transition: opacity,
+            .fadeInOutFraction: Float(0.33),
+            .rasterizationScale: Float(3),
+        ]
+        #if canImport(CoreGraphics)
+        renderOptions[.colorSpace] = CGColorSpace(name: CGColorSpace.sRGB)!
+        #endif
+        let renderOptionInterpolator = RBDisplayListInterpolator(from: from, to: to, options: renderOptions)
         XCTAssertEqual(renderOptionInterpolator.options[.fadeInOutFraction] as? Float, 0.33)
         XCTAssertEqual(renderOptionInterpolator.options[.rasterizationScale] as? Float, 3)
         XCTAssertEqual(renderOptionInterpolator.activeDuration, 1)
@@ -2675,7 +2674,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         matchingEffects.delayScale = 2
         XCTAssertTrue(effects.isEqual(effects))
         XCTAssertFalse(effects.isEqual(matchingEffects))
+        #if canImport(ObjectiveC)
         XCTAssertFalse(effects.responds(to: NSSelectorFromString("copyWithZone:")))
+        #endif
 
         let matchingSequencer = RBAnimationSequencer()
         matchingSequencer.distanceMode = 1
@@ -2685,7 +2686,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         matchingSequencer.added = matchingEffects
         XCTAssertTrue(sequencer.isEqual(sequencer))
         XCTAssertFalse(sequencer.isEqual(matchingSequencer))
+        #if canImport(ObjectiveC)
         XCTAssertFalse(sequencer.responds(to: NSSelectorFromString("copyWithZone:")))
+        #endif
 
         let phaseSequencer = RBAnimationSequencer()
         phaseSequencer.startPoint = .zero

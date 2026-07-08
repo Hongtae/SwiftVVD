@@ -1,9 +1,11 @@
-import CoreGraphics
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 import XCTest
 @testable import VUI
 
+#if canImport(Darwin)
 private let swiftUIScrollViewContentOffsetBindingReadWarning =
     "ScrollView contentOffset binding has been read; this will cause grossly inefficient view performance as the ScrollView's content will be updated whenever its contentOffset changes. Read the contentOffset binding in a view that is not parented between the creator of the binding and the ScrollView to avoid this."
 
@@ -51,6 +53,7 @@ private func captureStandardOutput(_ body: () throws -> Void) throws -> String {
     }
     return String(decoding: data, as: UTF8.self)
 }
+#endif
 
 private struct ScrollableGeometryInputRecord: Equatable {
     var id: Int
@@ -2063,6 +2066,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
+    #if canImport(Darwin)
     func testScrollViewUpdateWarnsWithSwiftUIContentOffsetBindingReadMessage() throws {
         let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
@@ -2109,6 +2113,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             output
         )
     }
+    #endif
 
     func testScrollViewUpdateUsesInheritedTransactionAfterSourceCommitTransaction() throws {
         let graph = _AGGraph()

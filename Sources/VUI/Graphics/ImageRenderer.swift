@@ -5,63 +5,95 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import Combine
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
 import Foundation
 import Observation
 
-public final class ImageRenderer<Content>: ObservableObject where Content: View {
-    public final let objectWillChange = PassthroughSubject<Void, Never>()
-
+@Observable
+public final class ImageRenderer<Content> where Content: View {
     public final var content: Content {
-        didSet {
-            host.setContent(content)
-            markChanged()
+        get {
+            access(keyPath: \.content)
+            return _content
+        }
+        set {
+            withMutation(keyPath: \.content) {
+                _content = newValue
+                host.setContent(newValue)
+            }
         }
     }
 
     public final var proposedSize: ProposedViewSize {
-        didSet {
-            markChanged()
+        get {
+            access(keyPath: \.proposedSize)
+            return _proposedSize
+        }
+        set {
+            withMutation(keyPath: \.proposedSize) {
+                _proposedSize = newValue
+            }
         }
     }
 
     public final var scale: CGFloat {
-        didSet {
-            markChanged()
+        get {
+            access(keyPath: \.scale)
+            return _scale
+        }
+        set {
+            withMutation(keyPath: \.scale) {
+                _scale = newValue
+            }
         }
     }
 
     public final var isOpaque: Bool {
-        didSet {
-            markChanged()
+        get {
+            access(keyPath: \.isOpaque)
+            return _isOpaque
+        }
+        set {
+            withMutation(keyPath: \.isOpaque) {
+                _isOpaque = newValue
+            }
         }
     }
 
     public final var colorMode: ColorRenderingMode {
-        didSet {
-            markChanged()
+        get {
+            access(keyPath: \.colorMode)
+            return _colorMode
+        }
+        set {
+            withMutation(keyPath: \.colorMode) {
+                _colorMode = newValue
+            }
         }
     }
 
     public final var allowedDynamicRange: Image.DynamicRange? {
-        didSet {
-            markChanged()
+        get {
+            access(keyPath: \.allowedDynamicRange)
+            return _allowedDynamicRange
+        }
+        set {
+            withMutation(keyPath: \.allowedDynamicRange) {
+                _allowedDynamicRange = newValue
+            }
         }
     }
 
-    @usableFromInline final var observationEnabled: Bool
-
     public init(content view: Content) {
-        self.content = view
-        self.proposedSize = .unspecified
-        self.scale = 1
-        self.isOpaque = false
-        self.colorMode = .nonLinear
-        self.allowedDynamicRange = nil
-        self.observationEnabled = false
+        self._content = view
+        self._proposedSize = .unspecified
+        self._scale = 1
+        self._isOpaque = false
+        self._colorMode = .nonLinear
+        self._allowedDynamicRange = nil
+        self._observationEnabled = false
 
         let host = ImageRendererHost(content: view)
         let graph = ViewGraph(
@@ -79,7 +111,6 @@ public final class ImageRenderer<Content>: ObservableObject where Content: View 
         let size = resolvedRenderSize()
         let currentScale = scale
         guard size.width > 0, size.height > 0, currentScale > 0 else {
-            resetChangeNotification()
             return nil
         }
 
@@ -95,14 +126,12 @@ public final class ImageRenderer<Content>: ObservableObject where Content: View 
                   space: colorSpace,
                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ) else {
-            resetChangeNotification()
             return nil
         }
 
         render(rasterizationScale: currentScale, in: context)
         return context.makeImage()
         #else
-        resetChangeNotification()
         return nil
         #endif
     }
@@ -120,7 +149,6 @@ public final class ImageRenderer<Content>: ObservableObject where Content: View 
         _ = rasterizationScale
         _ = renderer
         #endif
-        resetChangeNotification()
     }
 
     public final func render(
@@ -135,34 +163,33 @@ public final class ImageRenderer<Content>: ObservableObject where Content: View 
         _ = rasterizationScale
         _ = context
         #endif
-        resetChangeNotification()
     }
 
     public final var isObservationEnabled: Bool {
-        get { observationEnabled }
-        set { observationEnabled = newValue }
+        get {
+            access(keyPath: \.isObservationEnabled)
+            return _observationEnabled
+        }
+        set {
+            withMutation(keyPath: \.isObservationEnabled) {
+                _observationEnabled = newValue
+            }
+        }
     }
-
-    public typealias ObjectWillChangePublisher = PassthroughSubject<Void, Never>
 
     var viewGraph: ViewGraph {
         host.viewGraph
     }
 
+    @ObservationIgnored private var _content: Content
+    @ObservationIgnored private var _proposedSize: ProposedViewSize
+    @ObservationIgnored private var _scale: CGFloat
+    @ObservationIgnored private var _isOpaque: Bool
+    @ObservationIgnored private var _colorMode: ColorRenderingMode
+    @ObservationIgnored private var _allowedDynamicRange: Image.DynamicRange?
+    @ObservationIgnored private var _observationEnabled: Bool
+    @ObservationIgnored
     private let host: ImageRendererHost<Content>
-    private var pendingObjectWillChange = false
-
-    private func markChanged() {
-        guard !pendingObjectWillChange else {
-            return
-        }
-        pendingObjectWillChange = true
-        objectWillChange.send()
-    }
-
-    private func resetChangeNotification() {
-        pendingObjectWillChange = false
-    }
 
     private func resolvedRenderSize() -> CGSize {
         host.updateOutputsForRender()
@@ -173,8 +200,6 @@ public final class ImageRenderer<Content>: ObservableObject where Content: View 
     }
 
 }
-
-extension ImageRenderer: Observable {}
 
 @available(*, unavailable)
 extension ImageRenderer: Sendable {}

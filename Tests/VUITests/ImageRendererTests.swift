@@ -1,11 +1,9 @@
-import Combine
-import CoreGraphics
 import Observation
 import XCTest
 @testable import VUI
 
 final class ImageRendererTests: XCTestCase {
-    func testImageRendererDefaultsAndCoalescesObjectWillChange() {
+    func testImageRendererDefaultsAndNotifiesObservationChanges() {
         let renderer = ImageRenderer(content: ImageRendererFixedRoot(size: .zero))
 
         XCTAssertNil(renderer.proposedSize.width)
@@ -17,19 +15,19 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertFalse(renderer.isObservationEnabled)
         requireObservable(renderer)
 
-        var notificationCount = 0
-        let cancellable = renderer.objectWillChange.sink {
-            notificationCount += 1
-        }
+        let notificationCounter = ImageRendererObservationCounter()
+        trackImageRenderer(renderer, counter: notificationCounter)
 
         renderer.proposedSize = ProposedViewSize(width: 80, height: 40)
-        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(notificationCounter.count, 1)
 
         renderer.scale = 2
         renderer.isOpaque = true
         renderer.colorMode = .linear
         renderer.content = ImageRendererFixedRoot(size: CGSize(width: 21, height: 11))
-        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(notificationCounter.count, 1)
+
+        trackImageRenderer(renderer, counter: notificationCounter)
 
         var renderCallbackCount = 0
         renderer.render { _, draw in
@@ -39,17 +37,18 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertEqual(renderCallbackCount, 1)
 
         renderer.isOpaque = false
-        XCTAssertEqual(notificationCount, 2)
-        _ = cancellable
+        XCTAssertEqual(notificationCounter.count, 2)
     }
 
     func testImageRendererCGImageSurface() {
+        #if canImport(CoreGraphics)
         let renderer = ImageRenderer(content: ImageRendererFixedRoot(size: CGSize(width: 21, height: 11)))
         renderer.scale = 2
 
         let image = renderer.cgImage
         XCTAssertEqual(image?.width, 42)
         XCTAssertEqual(image?.height, 22)
+        #endif
     }
 
     func testImageRendererRenderUsesRootLayoutSize() {
@@ -66,21 +65,22 @@ final class ImageRendererTests: XCTestCase {
         XCTAssertEqual(callbackSize.height, 11)
     }
 
-    func testImageRendererDirectContextRenderResetsChangeNotification() {
+    func testImageRendererDirectContextRenderDoesNotMutateObservedState() {
         let renderer = ImageRenderer(content: ImageRendererFixedRoot(size: CGSize(width: 21, height: 11)))
 
-        var notificationCount = 0
-        let cancellable = renderer.objectWillChange.sink {
-            notificationCount += 1
-        }
+        let notificationCounter = ImageRendererObservationCounter()
+        trackImageRenderer(renderer, counter: notificationCounter)
 
         renderer.proposedSize = ProposedViewSize(width: 80, height: 40)
-        XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(notificationCounter.count, 1)
+
+        trackImageRenderer(renderer, counter: notificationCounter)
 
         renderer.render(rasterizationScale: 1.5, in: makeBitmapContext(width: 21, height: 11))
+        XCTAssertEqual(notificationCounter.count, 1)
+
         renderer.scale = 2
-        XCTAssertEqual(notificationCount, 2)
-        _ = cancellable
+        XCTAssertEqual(notificationCounter.count, 2)
     }
 
     func testImageRendererInstallsGraphicsRendererRootFeature() {
@@ -153,6 +153,7 @@ private struct ImageRendererFixedRoot: View {
 extension ImageRendererFixedRoot: _PrimitiveView {}
 
 private func makeBitmapContext(width: Int, height: Int) -> CGContext {
+    #if canImport(CoreGraphics)
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     return CGContext(
         data: nil,
@@ -163,6 +164,36 @@ private func makeBitmapContext(width: Int, height: Int) -> CGContext {
         space: colorSpace,
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     )!
+    #else
+    _ = width
+    _ = height
+    return CGContext()
+    #endif
 }
 
 private func requireObservable<T: Observable>(_ value: T) {}
+
+private final class ImageRendererObservationCounter: @unchecked Sendable {
+    var count = 0
+
+    func increment() {
+        count += 1
+    }
+}
+
+private func trackImageRenderer<Content: View>(
+    _ renderer: ImageRenderer<Content>,
+    counter: ImageRendererObservationCounter
+) {
+    withObservationTracking {
+        _ = renderer.content
+        _ = renderer.proposedSize
+        _ = renderer.scale
+        _ = renderer.isOpaque
+        _ = renderer.colorMode
+        _ = renderer.allowedDynamicRange
+        _ = renderer.isObservationEnabled
+    } onChange: {
+        counter.increment()
+    }
+}

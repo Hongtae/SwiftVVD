@@ -1,4 +1,3 @@
-import CoreGraphics
 import XCTest
 @testable import VUI
 
