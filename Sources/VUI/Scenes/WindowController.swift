@@ -668,7 +668,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             sizeChanged ||
             !events.isEmpty ||
             hadRootValueUpdates ||
-            hadScheduledViewUpdate ||
             hadGraphWork ||
             hadViewChangedWhileDrawing
 
