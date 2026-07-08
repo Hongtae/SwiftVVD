@@ -112,6 +112,46 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testInputOnlyUpdateDoesNotRepeatRootLayoutPlacement() {
+        let counter = LayoutSchedulingCounter()
+        let controller = WindowController(
+            content: LayoutSchedulingRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingRoot.self)
+            )
+        )
+
+        var redraw = false
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Input-only layout scheduling test should not request graphics resources.")
+        }
+
+        controller.updateView(
+            tick: 0,
+            delta: 1.0 / 60.0,
+            date: controller.date,
+            contentSize: CGSize(width: 120, height: 80),
+            redraw: &redraw,
+            withGC
+        )
+        let initialPlacements = counter.placements
+        XCTAssertGreaterThan(initialPlacements, 0)
+
+        controller.enqueueInputAction {}
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 120, height: 80),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertEqual(counter.placements, initialPlacements)
+    }
+
+    @MainActor
     private func displayBounds(in controller: WindowController) throws -> CGRect {
         try controller.viewGraph.data.withCurrent {
             try XCTUnwrap(controller.viewGraph.rootDisplayList?.value.interpolationBounds)

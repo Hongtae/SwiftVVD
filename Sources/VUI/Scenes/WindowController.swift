@@ -666,7 +666,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         var needsLayoutPass = !hasDeliveredViewLayoutUpdate ||
             sizeChanged ||
-            !events.isEmpty ||
             hadRootValueUpdates ||
             hadGraphWork ||
             hadViewChangedWhileDrawing
