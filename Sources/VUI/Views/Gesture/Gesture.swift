@@ -425,14 +425,34 @@ public struct GestureMask: OptionSet, Sendable {
 /// Platform-specific gesture inputs, reserved for recognizer bridge state.
 struct PlatformGestureInputs {}
 
-// PubliclyPrimitiveGesture / TappableEventType
+// PrimitiveGesture / PubliclyPrimitiveGesture / LayoutGesture / TappableEventType
+
+/// Marker protocol for gestures implemented by an internal primitive route.
+protocol PrimitiveGesture: Gesture {}
 
 /// Marker protocol for gesture types that implement recognition via `body` computed property.
 ///
 /// Body-based gesture construction is handled by the generic `Gesture`
 /// implementation using `gesture[\.body]` key-path nodes, then recursing into the
 /// returned modifier chain.
-protocol PubliclyPrimitiveGesture: Gesture {}
+protocol PubliclyPrimitiveGesture: PrimitiveGesture {}
+
+protocol PrimitiveDebuggableGesture: PrimitiveGesture {}
+
+struct LayoutGestureChildProxy {}
+
+protocol LayoutGesture: PrimitiveGesture where Value == Void {}
+
+extension LayoutGesture {
+    static func updateEventBindings(
+        _ eventBindings: inout [EventID: any EventType],
+        proxy: LayoutGestureChildProxy
+    ) {}
+
+    static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Void> {
+        inputs.makeDefaultOutputs()
+    }
+}
 
 /// Protocol for tap/click event types that carry a button identifier.
 protocol TappableEventType: EventType {
@@ -721,6 +741,9 @@ public struct _GestureInputs {
     /// The view inputs from which this gesture input is derived.
     var viewInputs: _ViewInputs
 
+    /// The view subgraph that owns gesture construction for view-responder shells.
+    var viewSubgraph: AGSubgraph?
+
     /// AG attribute holding the current event dictionary.
     var _events: Attribute<[EventID: any EventType]>
 
@@ -783,6 +806,7 @@ public struct _GestureInputs {
         gesturePreferenceKeys: Attribute<PreferenceKeys>
     ) {
         self.viewInputs = viewInputs
+        self.viewSubgraph = viewSubgraph
         self._events = events
         self._time = time
         self._resetSeed = resetSeed
@@ -790,7 +814,6 @@ public struct _GestureInputs {
         self.preferences = PreferencesInputs(keys: PreferenceKeys(), hostKeys: gesturePreferenceKeys)
         self.options = []
         self.platformInputs = PlatformGestureInputs()
-        _ = viewSubgraph // captured for AG subgraph registration (stored opaquely)
     }
 
     // Factory Methods

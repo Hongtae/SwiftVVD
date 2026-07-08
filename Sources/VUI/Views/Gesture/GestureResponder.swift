@@ -441,6 +441,44 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
         scrollTarget?(geometry, layoutDirection)
     }
 
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        let defaultOutputs: _GestureOutputs<()> = inputs.makeDefaultOutputs()
+        guard let viewSubgraph = inputs.viewSubgraph, viewSubgraph.isValid else {
+            return defaultOutputs
+        }
+
+        resetSubgraph(&gestureSubgraph2)
+        resetSubgraph(&gestureSubgraph1)
+
+        let firstSubgraph = AGSubgraph.withCurrent(viewSubgraph) {
+            AGSubgraph()
+        }
+        gestureSubgraph1 = firstSubgraph
+
+        if inputs.options.contains(.gestureGraph) {
+            let secondSubgraph = AGSubgraph.withCurrent(firstSubgraph) {
+                AGSubgraph()
+            }
+            gestureSubgraph2 = secondSubgraph
+        }
+
+        scrollTarget = { _, _ in nil }
+
+        let activeSubgraph = gestureSubgraph2 ?? firstSubgraph
+        return AGSubgraph.withCurrent(activeSubgraph) {
+            guard let graph = _AGGraph.current else {
+                fatalError("DefaultLayoutViewResponder.makeGesture requires AG context")
+            }
+            var childInputs = inputs
+            childInputs.viewSubgraph = activeSubgraph
+            let gestureAttr = graph.makeInput(value: DefaultLayoutGesture(responder: self))
+            return DefaultLayoutGesture._makeGesture(
+                gesture: _GraphValue(_attribute: gestureAttr),
+                inputs: childInputs
+            )
+        }
+    }
+
     override func resetGesture() {
         scrollTarget = nil
         resetSubgraph(&gestureSubgraph1)
@@ -455,6 +493,13 @@ final class DefaultLayoutViewResponder: MultiViewResponder, ViewResponder {
         }
         subgraph = nil
     }
+}
+
+struct DefaultLayoutGesture: LayoutGesture, PrimitiveDebuggableGesture {
+    var responder: MultiViewResponder
+
+    typealias Value = Void
+    typealias Body = Never
 }
 
 struct DefaultLayoutResponderFilter: StatefulRule {

@@ -1777,6 +1777,99 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertEqual(responder.resetCount, 1)
     }
 
+    func testDefaultLayoutGestureUpdateEventBindingsDefaultIsNoOp() {
+        let firstID = EventID(type: TappableEvent.self, serial: 1)
+        let secondID = EventID(type: TappableEvent.self, serial: 2)
+        var events: [EventID: any EventType] = [
+            firstID: TappableEvent(location: CGPoint(x: 1, y: 2), phase: .began),
+            secondID: TappableEvent(location: CGPoint(x: 3, y: 4), phase: .moved)
+        ]
+
+        DefaultLayoutGesture.updateEventBindings(&events, proxy: LayoutGestureChildProxy())
+
+        XCTAssertEqual(Set(events.keys), [firstID, secondID])
+        XCTAssertEqual(events.count, 2)
+    }
+
+    func testDefaultLayoutResponderMakeGestureBuildsStoredSubgraphs() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            func assertPossibleNil(_ phase: GesturePhase<Void>, file: StaticString = #filePath, line: UInt = #line) {
+                guard case .possible(nil) = phase else {
+                    XCTFail("expected possible(nil)", file: file, line: line)
+                    return
+                }
+            }
+
+            let responder = DefaultLayoutViewResponder()
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
+            let events = graph.makeInput(value: [:] as [EventID: any EventType])
+            let resetSeed = graph.makeInput(value: UInt32(0))
+            let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
+            let preferenceKeys = graph.makeInput(value: PreferenceKeys())
+
+            var invalidInputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: nil,
+                events: events,
+                time: viewInputs.base.time,
+                resetSeed: resetSeed,
+                inheritedPhase: inheritedPhase,
+                gesturePreferenceKeys: preferenceKeys
+            )
+            invalidInputs.options = .gestureGraph
+
+            let invalidOutputs = responder.makeGesture(inputs: invalidInputs)
+            assertPossibleNil(invalidOutputs.phase.value)
+            XCTAssertNil(responder.gestureSubgraph1)
+            XCTAssertNil(responder.gestureSubgraph2)
+            XCTAssertNil(responder.scrollTarget)
+
+            let viewSubgraph = AGSubgraph()
+            var validInputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: viewSubgraph,
+                events: events,
+                time: viewInputs.base.time,
+                resetSeed: resetSeed,
+                inheritedPhase: inheritedPhase,
+                gesturePreferenceKeys: preferenceKeys
+            )
+            validInputs.options = .gestureGraph
+
+            let outputs = responder.makeGesture(inputs: validInputs)
+            assertPossibleNil(outputs.phase.value)
+
+            let firstSubgraph = try XCTUnwrap(responder.gestureSubgraph1)
+            let secondSubgraph = try XCTUnwrap(responder.gestureSubgraph2)
+            XCTAssertTrue(firstSubgraph.parent === viewSubgraph)
+            XCTAssertTrue(secondSubgraph.parent === firstSubgraph)
+            XCTAssertTrue(viewSubgraph.children.contains { $0 === firstSubgraph })
+            XCTAssertTrue(firstSubgraph.children.contains { $0 === secondSubgraph })
+            XCTAssertTrue(secondSubgraph.nodes.contains(outputs.phase.identifier))
+
+            let target = responder.scrollTarget(
+                in: ScrollGeometry(
+                    contentOffset: CGPoint(x: 1, y: 2),
+                    contentSize: CGSize(width: 100, height: 120),
+                    containerSize: CGSize(width: 40, height: 30)
+                ),
+                layoutDirection: .leftToRight
+            )
+            XCTAssertNil(target)
+            XCTAssertNotNil(responder.scrollTarget)
+
+            responder.resetGesture()
+            XCTAssertNil(responder.gestureSubgraph1)
+            XCTAssertNil(responder.gestureSubgraph2)
+            XCTAssertFalse(firstSubgraph.isValid)
+            XCTAssertFalse(secondSubgraph.isValid)
+            XCTAssertNil(responder.scrollTarget)
+        }
+    }
+
     func testScrollViewProxyDerivedGeometryAppliesContentInsets() {
         var config = _ScrollViewConfig()
         config.contentInsets = EdgeInsets(top: 10, leading: 5, bottom: 20, trailing: 15)
