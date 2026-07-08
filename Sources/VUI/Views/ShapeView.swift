@@ -22,23 +22,26 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
+        var animatedShape = view[\.shape]
+        Content._makeAnimatable(value: &animatedShape, inputs: inputs.base)
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let v = view._attribute.value   // dep: shape/style changes
+            let shape = animatedShape._attribute.value
             return LayoutComputer(
-                sizeThatFits: { proposal in v.shape.sizeThatFits(proposal) }
+                sizeThatFits: { proposal in shape.sizeThatFits(proposal) }
             )
         }
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
-            let v = view._attribute.value   // dep: shape/style/fillStyle changes
+            let v = view._attribute.value   // dep: style/fillStyle changes
+            let shape = animatedShape._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
             var list = DisplayList()
             //Log.debug("ShapeView: size=\(viewSize), position=\(position)")
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
-                let strokeStyle = (v.shape as? ShapeStrokeStyleProviding)?.strokeStyle
+                let strokeStyle = (shape as? ShapeStrokeStyleProviding)?.strokeStyle
                 list.appendShapeItem(
                     role: Content.role,
                     style: v.style,
@@ -46,10 +49,10 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
                     fillStyle: v.fillStyle,
                     strokeStyle: strokeStyle
                 ) { context in
-                    if let drawer = v.shape as? ShapeDrawer {
+                    if let drawer = shape as? ShapeDrawer {
                         drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
                     } else {
-                        let path = v.shape.path(in: frame)
+                        let path = shape.path(in: frame)
                         context.fill(path, with: .style(v.style), style: v.fillStyle)
                     }
                 }

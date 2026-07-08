@@ -129,6 +129,62 @@ private struct StateAnimationLabModifierStackRoot: View {
     }
 }
 
+private struct ShapeAnimatableSizingProbe: Shape {
+    var width: CGFloat
+
+    var animatableData: CGFloat {
+        get { width }
+        set { width = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        CGSize(width: width, height: 12)
+    }
+}
+
+private struct StateShapeAnimatableRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: ShapeAnimatableSizingProbe {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return ShapeAnimatableSizingProbe(width: expanded ? 48 : 12)
+    }
+}
+
+private struct StateAnimationLabShapeFrameRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return HStack(spacing: 28) {
+            RoundedRectangle(cornerRadius: expanded ? 28 : 10)
+                .fill(expanded ? Color.purple : Color.blue)
+                .frame(
+                    width: expanded ? 180 : 72,
+                    height: expanded ? 96 : 72
+                )
+                .scaleEffect(expanded ? 1.08 : 0.78)
+                .rotationEffect(.degrees(expanded ? 8 : -8))
+                .offset(
+                    x: expanded ? 42 : -42,
+                    y: expanded ? 8 : -8
+                )
+                .opacity(expanded ? 0.92 : 0.55)
+        }
+        .frame(width: 420, height: 240)
+    }
+}
+
 @MainActor
 private final class ObservationAsyncWaiter {
     private var continuation: CheckedContinuation<Void, Never>?
@@ -305,6 +361,170 @@ final class ViewObservationTransactionTests: XCTestCase {
                 XCTAssertLessThan(midpointBounds.minX, finalBounds.minX)
             }
         }
+    }
+
+    func testDefaultBodyStateActionAnimationLabModifierStackSamplesEveryTenthSecond() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateAnimationLabModifierStackRoot(probe: probe))
+                let outputs = StateAnimationLabModifierStackRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                    )
+                )
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+                let initialBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                withAnimation(.linear(duration: 1.0)) {
+                    toggle()
+                }
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                var samples: [(time: Double, bounds: CGRect)] = []
+                for step in 0...10 {
+                    let sampleTime = Double(step) / 10.0
+                    time.setValue(Time(seconds: sampleTime))
+                    host.data.rootSubgraph.update()
+                    let bounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                    samples.append((sampleTime, bounds))
+                }
+
+                time.setValue(Time(seconds: 2.0))
+                host.data.rootSubgraph.update()
+                let finalBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+
+                let distinctIntermediateMinX = Set(
+                    samples.dropFirst().dropLast().map { ($0.bounds.minX * 1_000).rounded() }
+                )
+                XCTAssertGreaterThanOrEqual(distinctIntermediateMinX.count, 3)
+                XCTAssertEqual(samples.first?.bounds, initialBounds)
+                XCTAssertNotEqual(samples.last?.bounds, initialBounds)
+                XCTAssertNotEqual(samples.last?.bounds, finalBounds)
+                XCTAssertLessThan(samples[1].bounds.minX, finalBounds.minX)
+                XCTAssertLessThan(samples[5].bounds.minX, finalBounds.minX)
+                XCTAssertGreaterThan(samples[5].bounds.minX, initialBounds.minX)
+            }
+        }
+    }
+
+    func testDefaultBodyStateActionShapeAnimatableDataSamplesEveryTenthSecond() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateShapeAnimatableRoot(probe: probe))
+                let outputs = StateShapeAnimatableRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph, time: time)
+                )
+                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                let initialWidth = layoutAttr.value.sizeThatFits(.unspecified).width
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                withAnimation(.linear(duration: 1.0)) {
+                    toggle()
+                }
+                host.data.rootSubgraph.update()
+                _ = layoutAttr.value.sizeThatFits(.unspecified)
+
+                var samples: [(time: Double, width: CGFloat)] = []
+                for step in 0...10 {
+                    let sampleTime = Double(step) / 10.0
+                    time.setValue(Time(seconds: sampleTime))
+                    host.data.rootSubgraph.update()
+                    samples.append((
+                        sampleTime,
+                        layoutAttr.value.sizeThatFits(.unspecified).width
+                    ))
+                }
+
+                time.setValue(Time(seconds: 2.0))
+                host.data.rootSubgraph.update()
+                let finalWidth = layoutAttr.value.sizeThatFits(.unspecified).width
+
+                XCTAssertEqual(initialWidth, 12)
+                XCTAssertEqual(finalWidth, 48)
+                XCTAssertGreaterThan(samples[1].width, initialWidth)
+                XCTAssertLessThan(samples[1].width, finalWidth)
+                XCTAssertGreaterThan(samples[5].width, samples[1].width)
+                XCTAssertLessThan(samples[5].width, finalWidth)
+            }
+        }
+    }
+
+    func testDefaultBodyStateActionAnimationLabShapeFrameSamplesEveryTenthSecond() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateAnimationLabShapeFrameRoot.self,
+            content: StateAnimationLabShapeFrameRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleBounds(at seconds: Double) throws -> CGRect {
+            host.updateOutputs(at: Time(seconds: seconds))
+            return try host.data.withCurrent {
+                try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                    let layout = try XCTUnwrap(host.rootLayoutComputer).value
+                    let proposalSize = CGSize(width: 420, height: 240)
+                    layout.place(
+                        at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
+                        anchor: .center,
+                        proposal: ProposedViewSize(proposalSize)
+                    )
+                    return try XCTUnwrap(host.rootDisplayList?.value.interpolationBounds)
+                }
+            }
+        }
+
+        let initialBounds = try sampleBounds(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, bounds: CGRect)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            samples.append((sampleTime, try sampleBounds(at: sampleTime)))
+        }
+
+        let finalBounds = try sampleBounds(at: 2.0)
+
+        XCTAssertNotEqual(initialBounds, finalBounds)
+        XCTAssertGreaterThan(samples[1].bounds.width, initialBounds.width)
+        XCTAssertLessThan(samples[1].bounds.width, finalBounds.width)
+        XCTAssertGreaterThan(samples[5].bounds.width, samples[1].bounds.width)
+        XCTAssertLessThan(samples[5].bounds.width, finalBounds.width)
     }
 
     func testKeyPathThrowingBodyMutationPropagatesScopedTransaction() throws {
