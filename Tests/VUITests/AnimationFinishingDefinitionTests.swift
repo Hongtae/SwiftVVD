@@ -2,6 +2,14 @@ import XCTest
 @testable import VUI
 
 final class AnimationFinishingDefinitionTests: XCTestCase {
+    func testAngleAnimatableDataUsesScaledRadians() {
+        var angle = Angle.degrees(180)
+        XCTAssertEqual(angle.animatableData, Double.pi * 128.0, accuracy: 0.000_001)
+
+        angle.animatableData = 90
+        XCTAssertEqual(angle.radians, 90.0 / 128.0, accuracy: 0.000_001)
+    }
+
     func testRotationEffectFinishingDefinitionRequiresAngleSettledAndAnchorUnchanged() {
         let context = makeAnimationContext(
             for: _RotationEffect.self,
@@ -32,6 +40,34 @@ final class AnimationFinishingDefinitionTests: XCTestCase {
                 data: .init(
                     delta: _RotationEffect.AnimatableData(0.0, UnitPoint(x: .ulpOfOne, y: 0).animatableData),
                     velocity: _RotationEffect.AnimatableData(0.0, UnitPoint.zero.animatableData)
+                )
+            )
+        )
+    }
+
+    func testRotationEffectFinishingDefinitionUsesScaledAngleData() {
+        let context = makeAnimationContext(
+            for: _RotationEffect.self,
+            state: AnimationState<_RotationEffect.AnimatableData>(),
+            environment: EnvironmentValues()
+        )
+
+        let visibleDelta = _RotationEffect(angle: .degrees(16), anchor: .zero).animatableData
+        XCTAssertFalse(
+            context.shouldFinishEarly(
+                data: .init(
+                    delta: visibleDelta,
+                    velocity: .zero
+                )
+            )
+        )
+
+        let tinyDelta = _RotationEffect(angle: .radians(0.009), anchor: .zero).animatableData
+        XCTAssertTrue(
+            context.shouldFinishEarly(
+                data: .init(
+                    delta: tinyDelta,
+                    velocity: .zero
                 )
             )
         )

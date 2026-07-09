@@ -34,8 +34,8 @@ extension Angle: Animatable, _VectorMath {
     public typealias AnimatableData = Double
 
     public var animatableData: Double {
-        get { radians }
-        set { radians = newValue }
+        get { radians * 128.0 }
+        set { radians = newValue / 128.0 }
     }
 
     public static var zero: Angle { .init(radians: 0) }

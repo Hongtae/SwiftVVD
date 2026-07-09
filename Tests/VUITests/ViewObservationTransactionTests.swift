@@ -113,6 +113,28 @@ private struct AnimationLabDisplayLeaf: View, _PrimitiveView {
     }
 }
 
+private struct AnimationLabItemLeaf: View, _PrimitiveView {
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
+        }
+
+        let layout = graph.makeRule {
+            LayoutComputer.fixed(CGSize(width: 20, height: 20))
+        }
+        let displayList: Attribute<DisplayList> = graph.makeRule {
+            var list = DisplayList()
+            list.appendItem(bounds: CGRect(x: 0, y: 0, width: 20, height: 20)) { _ in }
+            return list
+        }
+        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+        outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+        return outputs
+    }
+}
+
 private struct StateAnimationLabModifierStackRoot: View {
     let probe: StateAnimatableTransactionProbe
     @State private var expanded = false
@@ -126,6 +148,65 @@ private struct StateAnimationLabModifierStackRoot: View {
             .rotationEffect(.degrees(expanded ? 8 : -8))
             .offset(x: expanded ? 42 : -42, y: expanded ? 8 : -8)
             .opacity(expanded ? 0.92 : 0.55)
+    }
+}
+
+private struct StateScaleEffectOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return AnimationLabItemLeaf()
+            .scaleEffect(expanded ? 1.08 : 0.78)
+    }
+}
+
+private struct StateAnimationLabPreMutationRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+    @State private var runCount = 0
+
+    var body: some View {
+        probe.toggle = {
+            runCount += 1
+            withAnimation(.spring(duration: 20.0, bounce: 0.35)) {
+                expanded.toggle()
+            }
+        }
+        let markerOffset = CGFloat(runCount) * 0
+        return AnimationLabItemLeaf()
+            .scaleEffect(expanded ? 1.08 : 0.78)
+            .offset(x: markerOffset, y: 0)
+    }
+}
+
+private struct StateAnimationLabCompletionRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+    @State private var runCount = 0
+    @State private var completionStatus = "idle"
+
+    var body: some View {
+        probe.toggle = {
+            let nextRun = runCount + 1
+            runCount = nextRun
+            completionStatus = "spring running"
+            withAnimation(
+                .spring(duration: 20.0, bounce: 0.35),
+                completionCriteria: .logicallyComplete
+            ) {
+                expanded.toggle()
+            } completion: {
+                completionStatus = "spring logical completion \(nextRun)"
+            }
+        }
+        let markerOffset = CGFloat(runCount + completionStatus.count) * 0
+        return AnimationLabItemLeaf()
+            .scaleEffect(expanded ? 1.08 : 0.78)
+            .offset(x: markerOffset, y: 0)
     }
 }
 
@@ -420,6 +501,263 @@ final class ViewObservationTransactionTests: XCTestCase {
                 XCTAssertLessThan(samples[1].bounds.minX, finalBounds.minX)
                 XCTAssertLessThan(samples[5].bounds.minX, finalBounds.minX)
                 XCTAssertGreaterThan(samples[5].bounds.minX, initialBounds.minX)
+            }
+        }
+    }
+
+    func testDefaultBodyStateActionSpringScaleEffectSamplesIntermediateTransform() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateScaleEffectOnlyRoot(probe: probe))
+                let outputs = StateScaleEffectOnlyRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                    )
+                )
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+                let initialTransform = try XCTUnwrap(
+                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                )
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                withAnimation(.spring(duration: 20.0, bounce: 0.35)) {
+                    toggle()
+                }
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                var sampledTransforms: [CGAffineTransform] = []
+                for frame in 1...1_800 {
+                    time.setValue(Time(seconds: Double(frame) / 60.0))
+                    host.data.rootSubgraph.update()
+                    sampledTransforms.append(try XCTUnwrap(
+                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    ))
+                }
+
+                let earlyTransform = sampledTransforms[60 - 1]
+                let finalTransform = try XCTUnwrap(sampledTransforms.last)
+                let intermediateTransform = try XCTUnwrap(
+                    sampledTransforms.first { transform in
+                        transform.a > initialTransform.a &&
+                            transform.a < finalTransform.a
+                    }
+                )
+
+                XCTAssertEqual(initialTransform.a, 0.78, accuracy: 0.000_001)
+                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
+                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
+                XCTAssertGreaterThan(finalTransform.a, earlyTransform.a)
+                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
+                XCTAssertEqual(finalTransform.d, 1.08, accuracy: 0.000_001)
+            }
+        }
+    }
+
+    func testStateActionPreMutationDoesNotStealSpringTransaction() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateAnimationLabPreMutationRoot(probe: probe))
+                let outputs = StateAnimationLabPreMutationRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                    )
+                )
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+                let initialTransform = try XCTUnwrap(
+                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                )
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                toggle()
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                XCTAssertTrue(host.hasScheduledViewUpdate)
+
+                var sampledTransforms: [CGAffineTransform] = []
+                for frame in 1...1_800 {
+                    time.setValue(Time(seconds: Double(frame) / 60.0))
+                    host.data.rootSubgraph.update()
+                    sampledTransforms.append(try XCTUnwrap(
+                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    ))
+                }
+
+                let finalTransform = try XCTUnwrap(sampledTransforms.last)
+                let intermediateTransform = try XCTUnwrap(
+                    sampledTransforms.first { transform in
+                        transform.a > initialTransform.a &&
+                            transform.a < finalTransform.a
+                    }
+                )
+
+                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
+                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
+                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
+            }
+        }
+    }
+
+    func testStateActionCompletionPreMutationsDoNotStealSpringTransaction() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateAnimationLabCompletionRoot(probe: probe))
+                let outputs = StateAnimationLabCompletionRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                    )
+                )
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+                let initialTransform = try XCTUnwrap(
+                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                )
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                toggle()
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                XCTAssertTrue(host.hasScheduledViewUpdate)
+
+                var sampledTransforms: [CGAffineTransform] = []
+                for frame in 1...1_800 {
+                    time.setValue(Time(seconds: Double(frame) / 60.0))
+                    host.data.rootSubgraph.update()
+                    sampledTransforms.append(try XCTUnwrap(
+                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    ))
+                }
+
+                let finalTransform = try XCTUnwrap(sampledTransforms.last)
+                let intermediateTransform = try XCTUnwrap(
+                    sampledTransforms.first { transform in
+                        transform.a > initialTransform.a &&
+                            transform.a < finalTransform.a
+                    }
+                )
+
+                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
+                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
+                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
+            }
+        }
+    }
+
+    func testStateActionCompletionSpringScaleEffectRetargetsWhileAnimating() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateAnimationLabCompletionRoot(probe: probe))
+                let outputs = StateAnimationLabCompletionRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                    )
+                )
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+                let initialTransform = try XCTUnwrap(
+                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                )
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                toggle()
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                for frame in 1...120 {
+                    time.setValue(Time(seconds: Double(frame) / 60.0))
+                    host.data.rootSubgraph.update()
+                    _ = Attribute<DisplayList>(displayID).value
+                }
+                let outboundTransform = try XCTUnwrap(
+                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                )
+                XCTAssertGreaterThan(outboundTransform.a, initialTransform.a)
+                XCTAssertLessThan(outboundTransform.a, 1.08)
+
+                toggle()
+                host.data.rootSubgraph.update()
+                _ = Attribute<DisplayList>(displayID).value
+
+                var retargetSamples: [CGAffineTransform] = []
+                for frame in 121...1_920 {
+                    time.setValue(Time(seconds: Double(frame) / 60.0))
+                    host.data.rootSubgraph.update()
+                    retargetSamples.append(try XCTUnwrap(
+                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    ))
+                }
+
+                let finalTransform = try XCTUnwrap(retargetSamples.last)
+                let intermediateTransform = try XCTUnwrap(
+                    retargetSamples.first { transform in
+                        transform.a < outboundTransform.a &&
+                            transform.a > finalTransform.a
+                    }
+                )
+
+                XCTAssertLessThan(intermediateTransform.a, outboundTransform.a)
+                XCTAssertGreaterThan(intermediateTransform.a, finalTransform.a)
+                XCTAssertEqual(finalTransform.a, 0.78, accuracy: 0.001)
             }
         }
     }
