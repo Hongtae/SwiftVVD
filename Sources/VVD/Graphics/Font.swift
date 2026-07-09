@@ -121,6 +121,12 @@ private extension CGPoint {
     init(_ vector: FT_Vector) {
         self.init(x: CGFloat(vector.x), y: CGFloat(vector.y))
     }
+    init(ft26d6: FT_Vector) {
+        self.init(x: ft26d6ToFloat(ft26d6.x), y: ft26d6ToFloat(ft26d6.y))
+    }
+    init(ft16d16: FT_Vector) {
+        self.init(x: ft16d16ToFloat(ft16d16.x), y: ft16d16ToFloat(ft16d16.y))
+    }
 }
 
 public class Font {
@@ -394,6 +400,28 @@ public class Font {
         }
     }
 
+    private func _glyphData(from face: FT_Face, index: UInt32) -> Glyph {
+        assert(face.pointee.glyph != nil)
+        let metrics = face.pointee.glyph.pointee.metrics
+        let advance = CGSize(width: ft26d6ToFloat(metrics.horiAdvance),
+                                height: ft26d6ToFloat(metrics.vertAdvance))
+        let bearing = CGPoint(x: ft26d6ToFloat(metrics.horiBearingX),
+                                y: ft26d6ToFloat(metrics.horiBearingY))
+        let size = CGSize(width: ft26d6ToFloat(metrics.width),
+                            height: ft26d6ToFloat(metrics.height))
+
+        let faceMetrics = face.pointee.size.pointee.metrics
+        let ascender = ft26d6ToFloat(faceMetrics.ascender)
+        let descender = ft26d6ToFloat(faceMetrics.descender)
+
+        return Glyph(index: index,
+                     advance: advance,
+                     bearing: bearing,
+                     size: size,
+                     ascender: ascender,
+                     descender: descender)
+    }
+
     public func glyph(for c: UnicodeScalar) -> Glyph? {
         if c.value == 0 { return nil }
         return self.face.withLock {
@@ -411,24 +439,7 @@ public class Font {
                 return nil
             }
 
-            let metrics = face.pointee.glyph.pointee.metrics
-            let advance = CGSize(width: ft26d6ToFloat(metrics.horiAdvance),
-                                 height: ft26d6ToFloat(metrics.vertAdvance))
-            let bearing = CGPoint(x: ft26d6ToFloat(metrics.horiBearingX),
-                                  y: ft26d6ToFloat(metrics.horiBearingY))
-            let size = CGSize(width: ft26d6ToFloat(metrics.width),
-                              height: ft26d6ToFloat(metrics.height))
-
-            let faceMetrics = face.pointee.size.pointee.metrics
-            let ascender = ft26d6ToFloat(faceMetrics.ascender)
-            let descender = ft26d6ToFloat(faceMetrics.descender)
-
-            return Glyph(index: UInt32(index),
-                         advance: advance,
-                         bearing: bearing,
-                         size: size,
-                         ascender: ascender,
-                         descender: descender)
+            return _glyphData(from: face, index: UInt32(index))
         }
     }
 
@@ -716,54 +727,80 @@ public class Font {
         case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
     }
 
-    @discardableResult
-    public func decompose(callback: (Path)->Void) -> Bool {
-        self.face.withLock {
+    /// Decomposes a glyph outline into path commands and returns its metrics.
+    /// Contours are implicitly closed. Coordinates are baseline-relative with +Y up.
+    public func decomposeGlyph(for c: UnicodeScalar,
+                               _ callback: (Path)->Void) -> Glyph? {
+        var paths: [Path] = []
+        let glyph: Glyph? = self.face.withLock {
             let face = $0.face
-            typealias Callback = (Path)->Void
+
+            let index = face.pointee.charmap != nil
+                ? FT_Get_Char_Index(face, FT_ULong(c.value)) : FT_UInt(c.value)
+
+            guard index != 0 else { return nil }
+
+            let loadFlags = FT_Int32(FT_LOAD_DEFAULT)
+            guard FT_Load_Glyph(face, index, loadFlags) == 0 else {
+                return nil
+            }
+            guard face.pointee.glyph.pointee.format == FT_GLYPH_FORMAT_OUTLINE else {
+                return nil
+            }
 
             var fn = FT_Outline_Funcs()
             fn.move_to = { (to: UnsafePointer<FT_Vector>?,
                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
+                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
                 let v = to!.pointee
-                cb(.move(to: CGPoint(v)))
+                paths.pointee.append(.move(to: CGPoint(ft26d6: v)))
                 return 0
             }
             fn.line_to = { (to: UnsafePointer<FT_Vector>?,
                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
+                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
                 let v = to!.pointee
-                cb(.line(to: CGPoint(v)))
+                paths.pointee.append(.line(to: CGPoint(ft26d6: v)))
                 return 0
             }
             fn.conic_to = { (ctl: UnsafePointer<FT_Vector>?,
                              to: UnsafePointer<FT_Vector>?,
                              ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
+                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
                 let v = to!.pointee
                 let c = ctl!.pointee
-                cb(.quadCurve(to: CGPoint(v), control: CGPoint(c)))
+                paths.pointee.append(.quadCurve(to: CGPoint(ft26d6: v),
+                                                control: CGPoint(ft26d6: c)))
                 return 0
             }
             fn.cubic_to = { (ctl1: UnsafePointer<FT_Vector>?,
                              ctl2: UnsafePointer<FT_Vector>?,
                              to: UnsafePointer<FT_Vector>?,
                              ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
+                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
                 let v = to!.pointee
                 let c1 = ctl1!.pointee
                 let c2 = ctl2!.pointee
-                cb(.curve(to: CGPoint(v), control1: CGPoint(c1), control2: CGPoint(c2)))
+                paths.pointee.append(.curve(to: CGPoint(ft26d6: v),
+                                            control1: CGPoint(ft26d6: c1),
+                                            control2: CGPoint(ft26d6: c2)))
                 return 0
             }
             fn.shift = 0
             fn.delta = 0
 
             var outline = face.pointee.glyph.pointee.outline
-            let ctxt = unsafeBitCast(callback as AnyObject, to: UnsafeMutableRawPointer.self)
-            let error = FT_Outline_Decompose(&outline, &fn, ctxt)
-            return error == 0
+            let error = withUnsafeMutablePointer(to: &paths) {
+                FT_Outline_Decompose(&outline, &fn, UnsafeMutableRawPointer($0))
+            }
+            if error == 0 {
+                return _glyphData(from: face, index: UInt32(index))
+            }
+            return nil
         }
+        guard let glyph else { return nil }
+
+        paths.forEach { callback($0) }
+        return glyph
     }
 }

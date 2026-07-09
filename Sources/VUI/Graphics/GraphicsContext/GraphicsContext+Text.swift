@@ -205,13 +205,22 @@ extension GraphicsContext {
                 var width: CGFloat = .zero
                 var face1 = prevFace
                 var char1 = prevChar
+
+                // Text rendering currently supports texture glyphs only.
+                func textureGlyph(_ face: any TypeFace, _ c: UnicodeScalar) -> TextureTypeFace.GlyphData? {
+                    if case let .texture(data) = face.glyph(for: c) {
+                        return data
+                    }
+                    return nil
+                }
+
                 for char2 in unicodeScalars {
                     let face2 = faces.first { $0.hasGlyph(for: char2) } ?? faces[0]
 
                     let makeGlyph = drawMissingGlyphs || face2.hasGlyph(for: char2) == true
 
                     var glyph = Glyph(scalar: char2, face: face2)
-                    if makeGlyph, let data = face2.glyphData(for: char2) {
+                    if makeGlyph, let data = textureGlyph(face2, char2) {
                         glyph.texture = data.texture
                         glyph.frame = data.frame
                         glyph.offset = data.offset

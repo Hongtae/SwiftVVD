@@ -33,18 +33,23 @@ var defaultFontURL: URL? {
 
 let defaultDPI = 72
 
-typealias GlyphData = TextureFont.GlyphData
+enum TypeFaceGlyph {
+    case texture(TextureTypeFace.GlyphData)
+    case vector(VectorTypeFace.GlyphData)
+}
 
 protocol TypeFace {
-    func glyphData(for c: UnicodeScalar) -> GlyphData?
+    func glyph(for c: UnicodeScalar) -> TypeFaceGlyph?
     func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
     func hasGlyph(for: UnicodeScalar) -> Bool
 
     var lineHeight: CGFloat { get }
     var ascender: CGFloat { get }
     var descender: CGFloat { get }
+    var identifier: String { get }
 
     func isEqual(to: any TypeFace) -> Bool
+    func hashIdentity(into hasher: inout Hasher)
     func purgeResources(reason: ResourcePurgeReason)
 }
 
@@ -52,28 +57,114 @@ extension TypeFace {
     func purgeResources(reason: ResourcePurgeReason) {}
 }
 
-extension TextureFont: TypeFace {
-    var lineHeight: CGFloat {
-        self.lineHeight()
-    }
+private protocol VVDFontBackedTypeFace: TypeFace {
+    var font: VVD.Font { get }
+}
+
+extension VVDFontBackedTypeFace {
+    var lineHeight: CGFloat { font.height }
+    var ascender: CGFloat { font.ascender }
+    var descender: CGFloat { font.descender }
 
     var identifier: String {
-        if let data = self.fontData {
-            return "\(self.familyName):\(unsafeBitCast(data.address, to: Int.self))"            
+        if let data = font.fontData {
+            return "\(font.familyName):\(unsafeBitCast(data.address, to: Int.self))"
         } else {
-            return "<\(self.filePath)>"
+            return "<\(font.filePath)>"
         }
     }
 
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        font.kernAdvance(left: left, right: right)
+    }
+
+    func hasGlyph(for c: UnicodeScalar) -> Bool {
+        font.hasGlyph(for: c)
+    }
+
     func isEqual(to: any TypeFace) -> Bool {
-        if let other = to as? TextureFont {
-            return self === other
+        if let other = to as? Self {
+            return font === other.font
         }
         return false
     }
 
+    func hashIdentity(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(Self.self))
+        hasher.combine(ObjectIdentifier(font))
+    }
+}
+
+struct TextureTypeFace: VVDFontBackedTypeFace {
+    let textureFont: VVD.TextureFont
+    typealias GlyphData = VVD.TextureFont.GlyphData
+
+    var font: VVD.Font { textureFont }
+
+    func glyph(for c: UnicodeScalar) -> TypeFaceGlyph? {
+        if let data = textureFont.glyphData(for: c) {
+            return .texture(data)
+        }
+        return nil
+    }
+
     func purgeResources(reason: ResourcePurgeReason) {
-        clearCache()
+        textureFont.clearCache()
+    }
+}
+
+final class VectorTypeFace: VVDFontBackedTypeFace {
+    let font: VVD.Font
+
+    struct GlyphData {
+        let glyph: VVD.Font.Glyph
+        let path: Path
+    }
+
+    private var cache: [UnicodeScalar: GlyphData] = [:]
+
+    init(font: VVD.Font) {
+        self.font = font
+    }
+
+    func glyph(for c: UnicodeScalar) -> TypeFaceGlyph? {
+        if let cached = cache[c] {
+            return .vector(cached)
+        }
+
+        var path = Path()
+        var hasOpenContour = false
+
+        let glyph = font.decomposeGlyph(for: c) { command in
+            switch command {
+            case .move(to: let p):
+                if hasOpenContour {
+                    path.closeSubpath()
+                }
+                path.move(to: p)
+                hasOpenContour = true
+            case .line(to: let p):
+                path.addLine(to: p)
+            case .quadCurve(to: let p, control: let c):
+                path.addQuadCurve(to: p, control: c)
+            case .curve(to: let p, control1: let c1, control2: let c2):
+                path.addCurve(to: p, control1: c1, control2: c2)
+            }
+        }
+        if hasOpenContour {
+            path.closeSubpath()
+        }
+        path = path.applying(CGAffineTransform(scaleX: 1, y: -1))
+        let result = glyph.map { GlyphData(glyph: $0, path: path) }
+        if let result = result {
+            cache[c] = result
+        }
+        return result.map { TypeFaceGlyph.vector($0) }
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+        font.clearCache()
+        cache.removeAll()
     }
 }
 
@@ -148,18 +239,20 @@ struct SystemFontProvider: TypeFaceProvider {
             }
             if let data, let device = context.graphicsDeviceContext {
                 let dpi = CGFloat(defaultDPI) * displayScale
-                let font = TextureFont(deviceContext: device, data: data)
+                guard let font = VVD.TextureFont(deviceContext: device, data: data) else {
+                    return nil
+                }
                 let emboldenFactor = 1.0
                 let embolden = { value in
                     ((value - 400.0) / 300.0) * emboldenFactor
                 }
-                font?.boldStrength = embolden(self.weight.value)
-                font?.outlineThickness = outlineThickness
-                font?.isBitmapPreferred = isBitmapPreferred
-                font?.isColorEnabled = isColorEnabled
-                font?.setStyle(pointSize: self.size,
-                               dpi: (UInt32(dpi), UInt32(dpi)))
-                return font
+                font.boldStrength = embolden(self.weight.value)
+                font.outlineThickness = outlineThickness
+                font.isBitmapPreferred = isBitmapPreferred
+                font.isColorEnabled = isColorEnabled
+                font.setStyle(pointSize: self.size,
+                              dpi: (UInt32(dpi), UInt32(dpi)))
+                return TextureTypeFace(textureFont: font)
             }
         }
         return nil
@@ -195,29 +288,29 @@ struct CustomFontProvider: TypeFaceProvider {
 }
 
 struct FixedFontProvider: TypeFaceProvider {
-    let font: TextureFont
+    let face: any TypeFace
 
-    init(_ font: TextureFont) {
-        self.font = font
+    init(_ face: any TypeFace) {
+        self.face = face
     }
 
     var identifier: String {
-        font.identifier        
+        face.identifier        
     }
 
     func isEqual(to: any TypeFaceProvider) -> Bool {
         if let other = to as? Self {
-            return ObjectIdentifier(self.font) == ObjectIdentifier(other.font)
+            return self.face.isEqual(to: other.face)
         }
         return false
     }
 
     func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(self.font))
+        face.hashIdentity(into: &hasher)
     }
 
     func makeTypeFace(_: AppContext,
-                      displayScale: CGFloat) -> TypeFace? { self.font }
+                      displayScale: CGFloat) -> TypeFace? { self.face }
 
     var isShareable: Bool { false }
 }
@@ -311,7 +404,7 @@ extension Font {
 extension Font {
 
     public init(_ font: TextureFont) {
-        let fontBox = FixedFontProvider(font)
+        let fontBox = FixedFontProvider(TextureTypeFace(textureFont: font))
         self.init(provider: AnyFontBox(fontBox), displayScale: 1)
     }
 
