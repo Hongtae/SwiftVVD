@@ -385,10 +385,16 @@ public extension TextureFont {
                         let invW = 1.0 / Float(textureWidth)
                         let invH = 1.0 / Float(textureHeight)
 
-                        let uvMinX = Float(glyph.frame.minX) * invW
-                        let uvMinY = Float(glyph.frame.minY) * invH
-                        let uvMaxX = Float(glyph.frame.maxX) * invW
-                        let uvMaxY = Float(glyph.frame.maxY) * invH
+                        // Include atlas padding in the sampled texture frame.
+                        let pad: CGFloat = 1
+                        let frame = glyph.frame.insetBy(dx: -pad, dy: -pad) 
+                        let posMin = posMin + Vector2(-pad, -pad)
+                        let posMax = posMax + Vector2(pad, pad)
+
+                        let uvMinX = Float(frame.minX) * invW
+                        let uvMinY = Float(frame.minY) * invH
+                        let uvMaxX = Float(frame.maxX) * invW
+                        let uvMaxY = Float(frame.maxY) * invH
 
                         let quad = Quad(lt: Vertex(position: Vector2(posMin.x, posMin.y),
                                                    texcoord: Vector2(uvMinX, uvMinY)),

@@ -699,15 +699,18 @@ extension GraphicsContext {
                 let invW = 1.0 / Float(texture.width)
                 let invH = 1.0 / Float(texture.height)
 
-                let uvMinX = Float(glyph.frame.minX) * invW
-                let uvMinY = Float(glyph.frame.minY) * invH
-                let uvMaxX = Float(glyph.frame.maxX) * invW
-                let uvMaxY = Float(glyph.frame.maxY) * invH
+                let pad: CGFloat = 1
+                let textureFrame = glyph.frame.insetBy(dx: -pad, dy: -pad)
+                let uvMinX = Float(textureFrame.minX) * invW
+                let uvMinY = Float(textureFrame.minY) * invH
+                let uvMaxX = Float(textureFrame.maxX) * invW
+                let uvMaxY = Float(textureFrame.maxY) * invH
 
                 let frame = CGRect(x: baseline.x,
                                    y: baseline.y - glyph.offset.y,
                                    width: glyph.frame.width,
                                    height: glyph.frame.height)
+                                   .insetBy(dx: -pad, dy: -pad)
 
                 let q = Quad(
                     lt: GlyphVertex(pos: Vector2(frame.minX, frame.minY),
