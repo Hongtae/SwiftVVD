@@ -446,9 +446,12 @@ final class VulkanInstance {
             debugUtilsMessengerCreateInfo.messageType = UInt32(
                 VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT.rawValue |
                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT.rawValue |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT.rawValue )
+                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue)
 
+            if enabledExtensions.contains(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME) {
+                debugUtilsMessengerCreateInfo.messageType |= UInt32(VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT.rawValue)
+            }
+            
             debugUtilsMessengerCreateInfo.pUserData = nil
             debugUtilsMessengerCreateInfo.pfnUserCallback = debugUtilsMessengerCallback
 
