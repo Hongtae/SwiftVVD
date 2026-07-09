@@ -16,7 +16,7 @@ public struct _DrawDebug: _SceneModifier {
             self.rawValue = rawValue
         }
         
-        public static let fps          = Info(rawValue: 1 << 0)
+        public static let frameInfo    = Info(rawValue: 1 << 0)
         public static let thread       = Info(rawValue: 1 << 1)
         public static let queue        = Info(rawValue: 1 << 2)
         public static let appState     = Info(rawValue: 1 << 4)

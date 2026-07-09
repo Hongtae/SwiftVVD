@@ -155,6 +155,8 @@ class WindowContext: @unchecked Sendable {
             var shouldDrawFrame = true
             var additionalDeltaTimes: Double = 0.0
 
+            var debugFrameCount: UInt64 = 1
+
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
@@ -260,9 +262,13 @@ class WindowContext: @unchecked Sendable {
                                     context.draw(resolvedText, at: offset, anchor: .topLeading)
                                     offset.y += resolvedText.measure().height
                                 }
-                                if debugDrawInfo.contains(.fps) {
-                                    let d = max(delta, 0.001001) // up to 999
-                                    drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
+                                if debugDrawInfo.contains(.frameInfo) {
+                                    if config.drawEveryFrames {
+                                        let d = max(delta, 0.001001) // up to 999
+                                        drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
+                                    } else {
+                                        drawText(Text(String(format: "frame: %llu", debugFrameCount)))
+                                    }
                                 }
                                 if debugDrawInfo.contains(.thread) {
                                     drawText(Text("thread: \(Platform.currentThreadID())"))
@@ -307,6 +313,7 @@ class WindowContext: @unchecked Sendable {
                                 _=swapChain.present()
 
                                 shouldDrawFrame = false
+                                debugFrameCount += 1
                             }
                         }
                     } else {
