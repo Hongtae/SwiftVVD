@@ -24,6 +24,11 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         }
         var animatedShape = view[\.shape]
         Content._makeAnimatable(value: &animatedShape, inputs: inputs.base)
+        let animatedColorStyle = Self.makeAnimatedColorStyle(
+            view: view,
+            inputs: inputs,
+            graph: graph
+        )
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
@@ -42,18 +47,36 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let strokeStyle = (shape as? ShapeStrokeStyleProviding)?.strokeStyle
-                list.appendShapeItem(
-                    role: Content.role,
-                    style: v.style,
-                    bounds: frame,
-                    fillStyle: v.fillStyle,
-                    strokeStyle: strokeStyle
-                ) { context in
-                    if let drawer = shape as? ShapeDrawer {
-                        drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
-                    } else {
-                        let path = shape.path(in: frame)
-                        context.fill(path, with: .style(v.style), style: v.fillStyle)
+                if let animatedColorStyle {
+                    let style = animatedColorStyle.value
+                    list.appendShapeItem(
+                        role: Content.role,
+                        style: style,
+                        bounds: frame,
+                        fillStyle: v.fillStyle,
+                        strokeStyle: strokeStyle
+                    ) { context in
+                        if let drawer = shape as? ShapeDrawer {
+                            drawer._draw(in: frame, style: style, fillStyle: v.fillStyle, context: context)
+                        } else {
+                            let path = shape.path(in: frame)
+                            context.fill(path, with: .style(style), style: v.fillStyle)
+                        }
+                    }
+                } else {
+                    list.appendShapeItem(
+                        role: Content.role,
+                        style: v.style,
+                        bounds: frame,
+                        fillStyle: v.fillStyle,
+                        strokeStyle: strokeStyle
+                    ) { context in
+                        if let drawer = shape as? ShapeDrawer {
+                            drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
+                        } else {
+                            let path = shape.path(in: frame)
+                            context.fill(path, with: .style(v.style), style: v.fillStyle)
+                        }
                     }
                 }
             }
@@ -62,6 +85,27 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         return outputs
+    }
+
+    private static func makeAnimatedColorStyle(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        graph: _AGGraph
+    ) -> Attribute<Color.Resolved>? {
+        guard Style.self == Color.self else {
+            return nil
+        }
+
+        let environment = inputs.base.cachedEnvironment.value.environment
+        let resolvedStyle: Attribute<Color.Resolved> = graph.makeRule {
+            guard let color = view._attribute.value.style as? Color else {
+                return Color.clear.resolve(in: environment.value)
+            }
+            return color.resolve(in: environment.value)
+        }
+        var animatedStyle = _GraphValue(_attribute: resolvedStyle)
+        Color.Resolved._makeAnimatable(value: &animatedStyle, inputs: inputs.base)
+        return animatedStyle._attribute
     }
 
     public typealias Body = Never

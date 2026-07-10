@@ -3765,7 +3765,11 @@ public func withAnimation<Result>(
     completion: @escaping () -> Void
 ) rethrows -> Result {
     var transaction = Transaction(animation: animation)
-    transaction.addAnimationCompletion(criteria: completionCriteria, completion)
+    transaction.addAnimationCompletion(
+        criteria: completionCriteria,
+        tracksStandalonePending: false,
+        completion
+    )
     return try withTransaction(
         transaction,
         immediateNoMutationCompletion: true,
@@ -3866,8 +3870,13 @@ extension Transaction {
         }
     }
 
-    mutating func addAnimationListener(_ listener: AnimationListener) {
-        Transaction.addPendingListener(listener)
+    mutating func addAnimationListener(
+        _ listener: AnimationListener,
+        tracksStandalonePending: Bool = true
+    ) {
+        if tracksStandalonePending {
+            Transaction.addPendingListener(listener)
+        }
         if let existing = animationListener {
             animationListener = ListenerPair(first: existing, second: listener)
         } else {
@@ -3875,8 +3884,13 @@ extension Transaction {
         }
     }
 
-    mutating func addAnimationLogicalListener(_ listener: AnimationListener) {
-        Transaction.addPendingListener(listener)
+    mutating func addAnimationLogicalListener(
+        _ listener: AnimationListener,
+        tracksStandalonePending: Bool = true
+    ) {
+        if tracksStandalonePending {
+            Transaction.addPendingListener(listener)
+        }
         if let existing = animationLogicalListener {
             animationLogicalListener = ListenerPair(first: existing, second: listener)
         } else {
@@ -3886,6 +3900,18 @@ extension Transaction {
 
     public mutating func addAnimationCompletion(
         criteria: AnimationCompletionCriteria = .logicallyComplete,
+        _ completion: @escaping () -> Void
+    ) {
+        addAnimationCompletion(
+            criteria: criteria,
+            tracksStandalonePending: true,
+            completion
+        )
+    }
+
+    mutating func addAnimationCompletion(
+        criteria: AnimationCompletionCriteria = .logicallyComplete,
+        tracksStandalonePending: Bool,
         _ completion: @escaping () -> Void
     ) {
         let observer: AnimationCompletionObserver
@@ -3904,9 +3930,15 @@ extension Transaction {
             criteria: criteria
         )
         if criteria == .removed {
-            addAnimationListener(listener)
+            addAnimationListener(
+                listener,
+                tracksStandalonePending: tracksStandalonePending
+            )
         } else {
-            addAnimationLogicalListener(listener)
+            addAnimationLogicalListener(
+                listener,
+                tracksStandalonePending: tracksStandalonePending
+            )
         }
     }
 }

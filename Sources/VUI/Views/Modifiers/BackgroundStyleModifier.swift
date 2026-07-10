@@ -29,7 +29,9 @@ extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
             env.backgroundStyle = AnyShapeStyle(m.style)
             return env
         }
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+        inputs.base.cachedEnvironment = MutableBox(
+            inputs.base.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
+        )
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {

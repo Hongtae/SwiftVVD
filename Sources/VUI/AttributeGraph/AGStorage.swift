@@ -291,7 +291,10 @@ extension _AGGraph {
 
     /// Notifies cross-graph observers of `sourceNodeID` by enqueueing a markNeedsEvaluation
     /// call into each target graph's inbox. Dead entries (target graph deallocated) are removed.
-    private func notifyCrossGraphObservers(for sourceNodeID: UInt32) {
+    private func notifyCrossGraphObservers(
+        for sourceNodeID: UInt32,
+        transaction: Transaction? = nil
+    ) {
         guard var entries = crossGraphObservers[sourceNodeID] else { return }
         var hasDeadEntries = false
         for entry in entries {
@@ -300,8 +303,14 @@ extension _AGGraph {
                 continue
             }
             let targetNodeID = entry.targetNodeID
-            targetGraph.inbox.enqueue { [weak targetGraph] in
-                targetGraph?.markNeedsEvaluation(AGAttribute(rawValue: targetNodeID))
+            let transactionBox = transaction.map(UnsafeBox.init)
+            targetGraph.inbox.enqueue(transaction: transaction) { [weak targetGraph] in
+                let transaction = transactionBox?.value
+                targetGraph?.markNeedsEvaluation(
+                    AGAttribute(rawValue: targetNodeID),
+                    transaction: transaction,
+                    propagateTransaction: transaction != nil
+                )
             }
         }
         if hasDeadEntries {
@@ -454,7 +463,10 @@ extension _AGGraph {
                 changedInput: attribute.identifier.rawValue
             )
         }
-        notifyCrossGraphObservers(for: attribute.identifier.rawValue)
+        notifyCrossGraphObservers(
+            for: attribute.identifier.rawValue,
+            transaction: transactionToPropagate
+        )
         _AGGraph.changeSet?.record(attribute.identifier)
     }
 
@@ -477,7 +489,10 @@ extension _AGGraph {
                 changedInput: attribute.identifier.rawValue
             )
         }
-        notifyCrossGraphObservers(for: attribute.identifier.rawValue)
+        notifyCrossGraphObservers(
+            for: attribute.identifier.rawValue,
+            transaction: transactionToPropagate
+        )
         _AGGraph.changeSet?.record(attribute.identifier)
     }
 
@@ -499,7 +514,7 @@ extension _AGGraph {
                     changedInput: id.rawValue
                 )
             }
-            notifyCrossGraphObservers(for: id.rawValue)
+            notifyCrossGraphObservers(for: id.rawValue, transaction: transaction)
         } else {
             markNeedsEvaluation(
                 id,
@@ -717,7 +732,10 @@ extension _AGGraph {
             // rules that may have been evaluated and cleared in the meantime.
             queue.append(contentsOf: node.outputs.map { ($0, UInt32(index)) })
             // Propagate to cross-graph mirror nodes watching this node.
-            notifyCrossGraphObservers(for: UInt32(index))
+            notifyCrossGraphObservers(
+                for: UInt32(index),
+                transaction: propagateTransaction ? transaction : nil
+            )
         }
         // Eagerly evaluate side-effect nodes in dependency order (parents before children).
         // Skipped when called from removeNode. Inputs may already be freed.

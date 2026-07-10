@@ -30,7 +30,12 @@ import Synchronization
 /// }
 /// ```
 final class AGInbox: @unchecked Sendable {
-    private let pendingWork: Mutex<[@Sendable () -> Void]> = Mutex([])
+    private struct WorkItem: Sendable {
+        var transaction: UnsafeBox<Transaction>?
+        var work: @Sendable () -> Void
+    }
+
+    private let pendingWork: Mutex<[WorkItem]> = Mutex([])
 
     var hasPendingWork: Bool {
         pendingWork.withLock { !$0.isEmpty }
@@ -38,20 +43,48 @@ final class AGInbox: @unchecked Sendable {
 
     /// Enqueues a work item.  Safe to call from any thread.
     /// The closure runs on the AG thread with `_AGGraph.current` already bound.
-    func enqueue(_ work: @escaping @Sendable () -> Void) {
-        pendingWork.withLock { $0.append(work) }
+    func enqueue(transaction: Transaction? = nil, _ work: @escaping @Sendable () -> Void) {
+        pendingWork.withLock {
+            $0.append(WorkItem(transaction: transaction.map(UnsafeBox.init), work: work))
+        }
     }
 
     /// Runs all pending work items.
     /// Must be called on the AG thread inside an active `_AGGraph` context.
-    func drain() {
+    @discardableResult
+    func drain() -> Transaction? {
         guard _AGGraph.current != nil else {
             fatalError("AGInbox.drain() called outside an active _AGGraph context.")
         }
-        let pending = pendingWork.withLock { work -> [@Sendable () -> Void] in
+        let pending = pendingWork.withLock { work -> [WorkItem] in
             defer { work.removeAll() }
             return work
         }
-        for work in pending { work() }
+        var transaction: Transaction?
+        for item in pending {
+            if let itemTransaction = item.transaction?.value,
+               !itemTransaction.isEmpty {
+                transaction = itemTransaction
+            }
+            item.work()
+        }
+        return transaction
+    }
+
+    /// Runs a single pending work item.
+    /// Must be called on the AG thread inside an active `_AGGraph` context.
+    @discardableResult
+    func drainOne() -> Transaction? {
+        guard _AGGraph.current != nil else {
+            fatalError("AGInbox.drainOne() called outside an active _AGGraph context.")
+        }
+        let item = pendingWork.withLock { work -> WorkItem? in
+            guard !work.isEmpty else { return nil }
+            return work.removeFirst()
+        }
+        guard let item else { return nil }
+        let transaction = item.transaction?.value
+        item.work()
+        return transaction?.isEmpty == false ? transaction : nil
     }
 }

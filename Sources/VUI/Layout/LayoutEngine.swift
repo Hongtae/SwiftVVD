@@ -177,11 +177,18 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
 /// and lets LayoutSubview.place write child geometries into that buffer.
 final class ViewLayoutEngine<L: Layout>: LayoutEngine {
     var layout: L
+    var layoutAttr: Attribute<L>?
     var children: [LayoutProxyAttributes]
     var _layoutDirection: LayoutDirection
 
-    init(layout: L, children: [LayoutProxyAttributes], layoutDirection: LayoutDirection) {
+    init(
+        layout: L,
+        layoutAttr: Attribute<L>? = nil,
+        children: [LayoutProxyAttributes],
+        layoutDirection: LayoutDirection
+    ) {
         self.layout = layout
+        self.layoutAttr = layoutAttr
         self.children = children
         self._layoutDirection = layoutDirection
     }
@@ -197,6 +204,26 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
             },
             layoutDirection: _layoutDirection
         )
+    }
+
+    private func placementTransaction() -> Transaction {
+        guard let graph = _AGGraph.current else {
+            return Transaction.current
+        }
+        if let layoutAttr,
+           let transaction = graph.transaction(for: layoutAttr.identifier),
+           !transaction.isEmpty {
+            return transaction
+        }
+        for child in children {
+            guard let attr = child.layoutComputer.attribute,
+                  let transaction = graph.transaction(for: attr.identifier),
+                  !transaction.isEmpty else {
+                continue
+            }
+            return transaction
+        }
+        return Transaction.current
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -242,12 +269,14 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
         )
         return withUnsafeMutablePointer(to: &placementData) { pointer in
             ThreadLayoutData.withPlacementData(pointer) {
-                layout.placeSubviews(
-                    in: CGRect(origin: origin, size: size.value),
-                    proposal: ProposedViewSize(size.value),
-                    subviews: subviews,
-                    cache: &cache
-                )
+                withTransaction(placementTransaction()) {
+                    layout.placeSubviews(
+                        in: CGRect(origin: origin, size: size.value),
+                        proposal: ProposedViewSize(size.value),
+                        subviews: subviews,
+                        cache: &cache
+                    )
+                }
             }
             return pointer.pointee.resolvedGeometries(children: children,
                                                       proposal: size.proposal)
@@ -263,12 +292,14 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
             y: position.y - size.height * anchor.y
         )
         var placeCache = layout.makeCache(subviews: subviews)
-        layout.placeSubviews(
-            in: CGRect(origin: origin, size: size),
-            proposal: proposal,
-            subviews: subviews,
-            cache: &placeCache
-        )
+        withTransaction(placementTransaction()) {
+            layout.placeSubviews(
+                in: CGRect(origin: origin, size: size),
+                proposal: proposal,
+                subviews: subviews,
+                cache: &placeCache
+            )
+        }
     }
 }
 

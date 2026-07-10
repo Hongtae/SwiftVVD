@@ -52,6 +52,10 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
             let m = modifier._attribute.value   // dep: alignment changes
             let mainLC = mainLCAttr.value       // dep: main content changes
             let ovLC = ovLCAttr.value           // dep: overlay changes
+            var pendingPlacementTransaction =
+                graph.transaction(for: modifier._attribute.identifier) ??
+                graph.transaction(for: mainLCAttr.identifier) ??
+                graph.transaction(for: ovLCAttr.identifier)
             return LayoutComputer(
                 sizeThatFits: { proposal in mainLC.sizeThatFits(proposal) },
                 spacing: mainLC.spacing,
@@ -101,9 +105,24 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
                     let ovOriginX = ovPosition.x - ovSize.width * ovAnchor.x
                     let ovOriginY = ovPosition.y - ovSize.height * ovAnchor.y
                     
-                    ovPosAttr.setValue(CGPoint(x: ovOriginX, y: ovOriginY))
-                    ovSizeAttr.setValue(ViewSize(ovSize))
-                    ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
+                    let placementTransaction =
+                        graph.transaction(for: modifier._attribute.identifier) ??
+                        graph.transaction(for: mainLCAttr.identifier) ??
+                        graph.transaction(for: ovLCAttr.identifier) ??
+                        pendingPlacementTransaction ??
+                        Transaction.current
+                    pendingPlacementTransaction = nil
+                    ovPosAttr.setValue(
+                        CGPoint(x: ovOriginX, y: ovOriginY),
+                        transaction: placementTransaction
+                    )
+                    ovSizeAttr.setValue(
+                        ViewSize(ovSize, proposal: ovProposal),
+                        transaction: placementTransaction
+                    )
+                    withTransaction(placementTransaction) {
+                        ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
+                    }
                 },
                 explicitAlignment: { mainLC.explicitAlignment($0, at: $1) }
             )

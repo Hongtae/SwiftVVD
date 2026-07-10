@@ -1408,6 +1408,37 @@ final class AnimationCompletionObserverTests: XCTestCase {
         XCTAssertEqual(events, [])
     }
 
+    func testWithAnimationCompletionIsNotDrainedByStandalonePendingDispatchDuringBody() {
+        Transaction.dispatchPendingListeners(
+            finalizingStandalonePending: true
+        ).forEach { $0() }
+
+        var events: [String] = []
+        withAnimation(
+            .linear(duration: 0.20),
+            completionCriteria: .logicallyComplete
+        ) {
+            events.append("body start")
+            Transaction.dispatchPendingListeners(
+                finalizingStandalonePending: true
+            ).forEach { $0() }
+            events.append("body after pending drain")
+        } completion: {
+            events.append("completion")
+        }
+        events.append("returned")
+
+        XCTAssertEqual(
+            events,
+            [
+                "body start",
+                "body after pending drain",
+                "completion",
+                "returned",
+            ]
+        )
+    }
+
     func testStandaloneTransactionCompletionScopeExitDrainsDroppedListeners() {
         var fired: [String] = []
         do {

@@ -52,6 +52,10 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
             let m = modifier._attribute.value   // dep: alignment changes
             let mainLC = mainLCAttr.value       // dep: main content changes
             let bgLC = bgLCAttr.value           // dep: background changes
+            var pendingPlacementTransaction =
+                graph.transaction(for: modifier._attribute.identifier) ??
+                graph.transaction(for: mainLCAttr.identifier) ??
+                graph.transaction(for: bgLCAttr.identifier)
             return LayoutComputer(
                 sizeThatFits: { proposal in mainLC.sizeThatFits(proposal) },
                 spacing: mainLC.spacing,
@@ -101,9 +105,24 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
                     let bgOriginX = bgPosition.x - bgSize.width * bgAnchor.x
                     let bgOriginY = bgPosition.y - bgSize.height * bgAnchor.y
                     
-                    bgPosAttr.setValue(CGPoint(x: bgOriginX, y: bgOriginY))
-                    bgSizeAttr.setValue(ViewSize(bgSize))
-                    bgLC.place(at: bgPosition, anchor: bgAnchor, proposal: bgProposal)
+                    let placementTransaction =
+                        graph.transaction(for: modifier._attribute.identifier) ??
+                        graph.transaction(for: mainLCAttr.identifier) ??
+                        graph.transaction(for: bgLCAttr.identifier) ??
+                        pendingPlacementTransaction ??
+                        Transaction.current
+                    pendingPlacementTransaction = nil
+                    bgPosAttr.setValue(
+                        CGPoint(x: bgOriginX, y: bgOriginY),
+                        transaction: placementTransaction
+                    )
+                    bgSizeAttr.setValue(
+                        ViewSize(bgSize, proposal: bgProposal),
+                        transaction: placementTransaction
+                    )
+                    withTransaction(placementTransaction) {
+                        bgLC.place(at: bgPosition, anchor: bgAnchor, proposal: bgProposal)
+                    }
                 },
                 explicitAlignment: { mainLC.explicitAlignment($0, at: $1) }
             )

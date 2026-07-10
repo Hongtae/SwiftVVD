@@ -9,6 +9,7 @@ import Foundation
 import VVD
 
 protocol ColorBox: Hashable {
+    var colorSpace: Color.RGBColorSpace { get }
     var red: Double     { get set }
     var green: Double   { get set }
     var blue: Double    { get set }
@@ -18,19 +19,21 @@ protocol ColorBox: Hashable {
 }
 
 struct LinearColor: ColorBox {
+    var colorSpace: Color.RGBColorSpace
     var red: Double
     var green: Double
     var blue: Double
     var alpha: Double
 
     func copy() -> Self {
-        Self(red: red, green: green, blue: blue, alpha: alpha)
+        Self(colorSpace: colorSpace, red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
 class AnyColorBox: ColorBox, @unchecked Sendable {
     static func == (lhs: AnyColorBox, rhs: AnyColorBox) -> Bool {
         return type(of: lhs.colorBox) == type(of: rhs.colorBox) &&
+        lhs.colorBox.colorSpace == rhs.colorBox.colorSpace &&
         lhs.colorBox.red == rhs.colorBox.red &&
         lhs.colorBox.green == rhs.colorBox.green &&
         lhs.colorBox.blue == rhs.colorBox.blue &&
@@ -47,6 +50,7 @@ class AnyColorBox: ColorBox, @unchecked Sendable {
         self.colorBox = colorBox
     }
 
+    var colorSpace: Color.RGBColorSpace { colorBox.colorSpace }
     var red: Double {
         get { colorBox.red }
         set(r) { colorBox.red = r }
@@ -69,7 +73,21 @@ class AnyColorBox: ColorBox, @unchecked Sendable {
     }
 
     var backendColor: VVD.Color {
-        .init(self.red, self.green, self.blue, self.alpha)
+        switch colorSpace {
+        case .sRGBLinear:
+            .init(Self.linearToSRGB(red),
+                  Self.linearToSRGB(green),
+                  Self.linearToSRGB(blue),
+                  alpha)
+        case .sRGB, .displayP3:
+            .init(red, green, blue, alpha)
+        }
+    }
+
+    private static func linearToSRGB(_ component: Double) -> Double {
+        component <= 0.0031308
+            ? component * 12.92
+            : 1.055 * pow(component, 1.0 / 2.4) - 0.055
     }
 }
 
@@ -84,12 +102,20 @@ public struct Color: Hashable {
     var backendColor: VVD.Color { provider.backendColor }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
-        let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
+        let colorBox = LinearColor(colorSpace: colorSpace,
+                                   red: red,
+                                   green: green,
+                                   blue: blue,
+                                   alpha: opacity)
         self.provider = AnyColorBox(colorBox)
     }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) {
-        let colorBox = LinearColor(red: white, green: white, blue: white, alpha: opacity)
+        let colorBox = LinearColor(colorSpace: colorSpace,
+                                   red: white,
+                                   green: white,
+                                   blue: white,
+                                   alpha: opacity)
         self.provider = AnyColorBox(colorBox)
     }
 
@@ -118,7 +144,11 @@ public struct Color: Hashable {
         let green = g + m
         let blue = b + m
 
-        let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
+        let colorBox = LinearColor(colorSpace: .sRGB,
+                                   red: red,
+                                   green: green,
+                                   blue: blue,
+                                   alpha: opacity)
         self.provider = AnyColorBox(colorBox)
     }
 
@@ -175,12 +205,11 @@ extension Color {
 
 extension Color: ShapeStyle {
     public func resolve(in environment: EnvironmentValues) -> Resolved {
-        let dk = provider.dkColor
-        return Resolved(colorSpace: .sRGBLinear,
-                        red: Float(dk.r),
-                        green: Float(dk.g),
-                        blue: Float(dk.b),
-                        opacity: Float(dk.a))
+        Resolved(colorSpace: provider.colorSpace,
+                 red: Float(provider.red),
+                 green: Float(provider.green),
+                 blue: Float(provider.blue),
+                 opacity: Float(provider.alpha))
     }
     
     public func _apply(to shape: inout _ShapeStyle_Shape) {

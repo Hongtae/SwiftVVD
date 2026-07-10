@@ -246,6 +246,49 @@ extension Animatable {
     }
 }
 
+private extension _AGGraph {
+    func transactionForAttributeOrKeyPathParent(_ id: AGAttribute) -> Transaction? {
+        var visited: Set<UInt32> = []
+        return transactionForAttributeOrInputs(id, visited: &visited, depth: 0)
+    }
+
+    func transactionForAttributeOrInputs(
+        _ id: AGAttribute,
+        visited: inout Set<UInt32>,
+        depth: Int
+    ) -> Transaction? {
+        guard visited.insert(id.rawValue).inserted else {
+            return nil
+        }
+        if let transaction = transaction(for: id) {
+            return transaction
+        }
+        if let parent = parent(of: id),
+           let transaction = transactionForAttributeOrInputs(parent, visited: &visited, depth: depth) {
+            return transaction
+        }
+        guard depth < 32 else {
+            return nil
+        }
+        let index = Int(id.rawValue)
+        guard slots.indices.contains(index),
+              let node = slots[index].node else {
+            return nil
+        }
+        for input in node.inputs.union(node.staticInputs) {
+            let inputID = AGAttribute(rawValue: input)
+            if let transaction = transactionForAttributeOrInputs(
+                inputID,
+                visited: &visited,
+                depth: depth + 1
+            ) {
+                return transaction
+            }
+        }
+        return nil
+    }
+}
+
 private func isSourceDefinedCustomAnimationBox(_ box: AnimationBoxBase) -> Bool {
     !box.duration.isFinite && box.preservesRetargetedCompletionDeadlines
 }
@@ -948,12 +991,14 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     func update(
         _ value: inout AnimatedValue.AnimatableData,
         at time: Time,
-        environment: Attribute<EnvironmentValues>?
+        environment: Attribute<EnvironmentValues>?,
+        advancesDelayedSecondSample: Bool = false
     ) -> Bool {
         guard let sample = sampleAnimationValue(
             value: &value,
             at: time,
-            environment: environment
+            environment: environment,
+            advancesDelayedSecondSample: advancesDelayedSecondSample
         ) else {
             return false
         }
@@ -1006,7 +1051,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     private func sampleAnimationValue(
         value: inout AnimatedValue.AnimatableData,
         at time: Time,
-        environment: Attribute<EnvironmentValues>?
+        environment: Attribute<EnvironmentValues>?,
+        advancesDelayedSecondSample: Bool = false
     ) -> (
         output: AnimatedValue.AnimatableData?,
         elapsed: Time,
@@ -1039,15 +1085,29 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             // aligning the next frame lane to the current graph time.
             phase = .second
             let elapsedFromPreviousBegin = nextTime.seconds - beginTime.seconds
-            nextTime = Time(seconds: time.seconds + elapsedFromPreviousBegin)
-            beginTime = time
-            let output = restorePreviousAnimationValue(value: &value)
-            return (
-                output: output,
-                elapsed: time,
-                isLogicallyComplete: isLogicallyComplete,
-                didRunAnimation: false
-            )
+            let frameInterval = max(quantizedFrameInterval, 1.0 / 60.0)
+            let minimumElapsed = frameInterval * 2.0
+            let elapsed = time.seconds - beginTime.seconds
+            if advancesDelayedSecondSample,
+               canAdvanceDelayedSecondSampleForFiniteCurve(),
+               listeners.isEmpty,
+               logicalListeners.isEmpty,
+               forks.isEmpty,
+               baseLayers.isEmpty,
+               completedBaseLayerValue == nil,
+               minimumElapsed <= elapsed {
+                phase = .running
+            } else {
+                nextTime = Time(seconds: time.seconds + elapsedFromPreviousBegin)
+                beginTime = time
+                let output = restorePreviousAnimationValue(value: &value)
+                return (
+                    output: output,
+                    elapsed: time,
+                    isLogicallyComplete: isLogicallyComplete,
+                    didRunAnimation: false
+                )
+            }
         case .second:
             // Avoid an early near-zero sample when the graph produces the first
             // real animation frame late. Clamp the clock to at least two display
@@ -1095,10 +1155,17 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
+    private func canAdvanceDelayedSecondSampleForFiniteCurve() -> Bool {
+        guard let animation else { return false }
+        return animation.box is BezierAnimationBox ||
+            animation.box is UnitCurveAnimationBox
+    }
+
     func update(
         value: inout AnimatedValue,
         at time: Time,
-        environment: Attribute<EnvironmentValues>?
+        environment: Attribute<EnvironmentValues>?,
+        advancesDelayedSecondSample: Bool = false
     ) -> Bool {
         let targetValue = value
         var targetData = value.animatableData
@@ -1113,7 +1180,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         let continues = update(
             &targetData,
             at: time,
-            environment: environment
+            environment: environment,
+            advancesDelayedSecondSample: advancesDelayedSecondSample
         )
 
         if continues {
@@ -1836,7 +1904,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             value: &updateValue,
             defaultAnimation: nil,
             transactionForChangedTarget: {
-                graph.transaction(for: sourceID)
+                graph.transactionForAttributeOrKeyPathParent(sourceID)
             }
         )
         let target = updateInputs.target
@@ -5109,7 +5177,8 @@ private struct AnimatableFrameAttribute: StatefulRule {
         guard helper.isAnimating else { return }
         helper.update(
             value: &value,
-            environment: _environment
+            environment: _environment,
+            advancesDelayedSecondSample: true
         )
         _AGGraph.setStatefulOutput(value.value)
     }
@@ -5228,7 +5297,8 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
             environment: _environment,
             sampleCollector: { data, time in
                 velocityFilter.addSample(data, time: time)
-            }
+            },
+            advancesDelayedSecondSample: true
         )
         _AGGraph.setStatefulOutput(value.value)
 
@@ -5649,7 +5719,8 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     mutating func update(
         value: inout (value: AnimatedValue, changed: Bool),
         environment: Attribute<EnvironmentValues>,
-        sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
+        sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void = { _, _ in },
+        advancesDelayedSecondSample: Bool = false
     ) {
         guard let animatorState else {
             return
@@ -5658,7 +5729,8 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         let continues = animatorState.update(
             value: &value.value,
             at: time,
-            environment: environment
+            environment: environment,
+            advancesDelayedSecondSample: advancesDelayedSecondSample
         )
         value.changed = true
         if continues {

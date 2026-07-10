@@ -1068,7 +1068,9 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
                 _resolvedBehavior: resolvedBehavior
             )
         )
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: environment))
+        inputs.base.cachedEnvironment = MutableBox(
+            inputs.base.cachedEnvironment.value.replacingEnvironment(environment)
+        )
     }
 
     private struct LayoutRoleFilter: Rule {

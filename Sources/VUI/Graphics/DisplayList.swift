@@ -646,6 +646,32 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendTransformedItem(
+        _ item: Item,
+        affineTransform: CGAffineTransform
+    ) {
+        let command = item.command.transformed(by: affineTransform)
+        items.append(Item(command: command) { context in
+            var context = context
+            context.concatenate(affineTransform)
+            item(context)
+        })
+        recordInterpolationBounds(command.bounds)
+    }
+
+    mutating func appendTransformedDebugItem(
+        _ item: Item,
+        affineTransform: CGAffineTransform
+    ) {
+        let command = item.command.transformed(by: affineTransform)
+        debugItems.append(Item(command: command) { context in
+            var context = context
+            context.concatenate(affineTransform)
+            item(context)
+        })
+        recordInterpolationBounds(command.bounds)
+    }
+
     mutating func appendCrossFadeItem(
         bounds: CGRect? = nil,
         sourceFraction: Float,
@@ -1024,6 +1050,51 @@ private extension DisplayList.Effect {
 extension DisplayList.Effect {
     func hasSameSurface(as other: Self) -> Bool {
         surfaceRecord == other.surfaceRecord
+    }
+}
+
+private extension DisplayList.ItemCommand {
+    func transformed(by transform: CGAffineTransform) -> Self {
+        let transformedBounds = bounds?.applying(transform).standardized
+        switch self {
+        case .closure:
+            return .closure(bounds: transformedBounds)
+        case let .shape(role, style, fillStyle, strokeStyle, _):
+            return .shape(
+                role: role,
+                style: style,
+                fillStyle: fillStyle,
+                strokeStyle: strokeStyle,
+                bounds: transformedBounds
+            )
+        case let .image(image, _):
+            return .image(image, bounds: transformedBounds)
+        case let .text(text, _):
+            return .text(text, bounds: transformedBounds)
+        case let .custom(custom, _):
+            return .custom(custom, bounds: transformedBounds)
+        case let .effect(effect, _):
+            return .effect(effect.transformed(by: transform), bounds: transformedBounds)
+        case .debug:
+            return .debug(bounds: transformedBounds)
+        }
+    }
+}
+
+private extension DisplayList.ItemCommand.EffectCommand {
+    func transformed(by transform: CGAffineTransform) -> Self {
+        switch self {
+        case let .geometry(affineTransform):
+            return .geometry(affineTransform.concatenating(transform))
+        case .generic,
+             .opacity,
+             .blur,
+             .crossFade,
+             .blendMode,
+             .shadow,
+             .colorFilter:
+            return self
+        }
     }
 }
 

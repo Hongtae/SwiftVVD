@@ -97,32 +97,20 @@ enum _GeometryEffectSupport {
         var result = DisplayList()
         let transformedBounds = source.interpolationBounds?.applying(affine).standardized
         result.recordInterpolationBounds(transformedBounds)
+        for style in source.styles {
+            result.styles.append(style)
+        }
         for effect in source.effects {
             result.appendEffect(
                 effect.effect,
                 contents: displayList(effect.contents, applying: transform, at: position)
             )
         }
-        if !items.isEmpty {
-            result.appendGeometryItem(
-                bounds: transformedBounds,
-                affineTransform: affine
-            ) { context in
-                var context = context
-                context.concatenate(affine)
-                for item in items {
-                    item(context)
-                }
-            }
+        for item in items {
+            result.appendTransformedItem(item, affineTransform: affine)
         }
-        if !debugItems.isEmpty {
-            result.appendDebugItem(bounds: transformedBounds) { context in
-                var context = context
-                context.concatenate(affine)
-                for item in debugItems {
-                    item(context)
-                }
-            }
+        for item in debugItems {
+            result.appendTransformedDebugItem(item, affineTransform: affine)
         }
         return result
     }
@@ -145,6 +133,39 @@ enum _GeometryEffectSupport {
         let tx = transform.m31 + position.x - position.x * a - position.y * c
         let ty = transform.m32 + position.y - position.x * b - position.y * d
         return CGAffineTransform(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+    }
+}
+
+private struct _ResolvedGeometryEffectModifier<Base: GeometryEffect>: ViewModifier {
+    var base: Base
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _GeometryEffectSupport.makeView(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        ) { modifier, size in
+            modifier.base.effectValue(size: size)
+        }
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
+        }
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
     }
 }
 
@@ -174,11 +195,19 @@ extension GeometryEffect {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard _AGGraph.current != nil else {
+        guard let graph = _AGGraph.current else {
             fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
+        var modifier = modifier
+        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+        let resolvedModifier: Attribute<_ResolvedGeometryEffectModifier<Self>> = graph.makeRule {
+            _ResolvedGeometryEffectModifier(base: modifier._attribute.value)
+        }
         var outputs = body(_Graph(), inputs)
-        outputs.multiModifier(modifier, inputs: inputs)
+        outputs.multiModifier(
+            _GraphValue(_attribute: resolvedModifier),
+            inputs: inputs
+        )
         return outputs
     }
 }

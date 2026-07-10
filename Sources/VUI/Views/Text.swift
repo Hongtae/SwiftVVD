@@ -380,9 +380,10 @@ extension Text: View {
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
+        let animatedFrame = cachedEnvironmentAttr.value.animatedFrame
         let inbox = graph.inbox
-        let sizeAttr = inputs.size
-        let positionAttr = inputs.position
+        let sizeAttr = animatedFrame?._animatedSize ?? inputs.size
+        let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
             cachedEnvironmentAttr.value.environment.value._debugLayout

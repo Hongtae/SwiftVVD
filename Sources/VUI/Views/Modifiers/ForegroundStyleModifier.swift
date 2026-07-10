@@ -42,7 +42,9 @@ public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
             env.foregroundStyleLevels = _ForegroundStyleLevels(primary: AnyShapeStyle(m.style))
             return env
         }
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+        inputs.base.cachedEnvironment = MutableBox(
+            inputs.base.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
+        )
     }
 
     public typealias Body = Never
@@ -73,7 +75,9 @@ public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeSty
                 secondary: AnyShapeStyle(m.secondary))
             return env
         }
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+        inputs.base.cachedEnvironment = MutableBox(
+            inputs.base.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
+        )
     }
 
     public typealias Body = Never
@@ -107,7 +111,9 @@ public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: Shap
                 tertiary: AnyShapeStyle(m.tertiary))
             return env
         }
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+        inputs.base.cachedEnvironment = MutableBox(
+            inputs.base.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
+        )
     }
     
     public typealias Body = Never

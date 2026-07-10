@@ -164,6 +164,62 @@ private struct StateScaleEffectOnlyRoot: View {
     }
 }
 
+private struct StateOffsetEffectOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return AnimationLabItemLeaf()
+            .offset(
+                x: expanded ? 42 : -42,
+                y: expanded ? 8 : -8
+            )
+    }
+}
+
+private struct StateRotationEffectOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return AnimationLabItemLeaf()
+            .rotationEffect(.degrees(expanded ? 8 : -8))
+    }
+}
+
+private struct StateOpacityEffectOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return AnimationLabItemLeaf()
+            .opacity(expanded ? 0.92 : 0.55)
+    }
+}
+
+private struct StateShapeFillColorOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            expanded.toggle()
+        }
+        return RoundedRectangle(cornerRadius: 10)
+            .fill(expanded ? Color.purple : Color.blue)
+            .frame(width: 72, height: 72)
+    }
+}
+
 private struct StateAnimationLabPreMutationRoot: View {
     let probe: StateAnimatableTransactionProbe
     @State private var expanded = false
@@ -569,6 +625,281 @@ final class ViewObservationTransactionTests: XCTestCase {
         }
     }
 
+    func testDefaultBodyStateActionRootScaleEffectSamplesIntermediateTransform() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateScaleEffectOnlyRoot.self,
+            content: StateScaleEffectOnlyRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+            let time = Time(seconds: seconds)
+            rendererHost.currentTimestamp = time
+            host.updateOutputs(at: time)
+            return try host.data.withCurrent {
+                try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                    let layout = try XCTUnwrap(host.rootLayoutComputer).value
+                    let proposalSize = CGSize(width: 200, height: 200)
+                    layout.place(
+                        at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
+                        anchor: .center,
+                        proposal: ProposedViewSize(proposalSize)
+                    )
+                    host.data.rootSubgraph.update()
+                    return try XCTUnwrap(
+                        host.rootDisplayList?.value.itemRecords.first?.affineTransform
+                    )
+                }
+            }
+        }
+
+        let initialTransform = try sampleTransform(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.spring(duration: 20.0, bounce: 0.35)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        for frame in 1...1_800 {
+            let sampleTime = Double(frame) / 60.0
+            let transform = try sampleTransform(at: sampleTime)
+            if frame.isMultiple(of: 6) {
+                samples.append((sampleTime, transform))
+            }
+        }
+
+        let finalTransform = try XCTUnwrap(samples.last?.transform)
+        let intermediateTransform = try XCTUnwrap(
+            samples.first { sample in
+                sample.transform.a > initialTransform.a &&
+                    sample.transform.a < finalTransform.a
+            }?.transform
+        )
+
+        XCTAssertEqual(initialTransform.a, 0.78, accuracy: 0.000_001)
+        XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
+        XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
+        XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.001)
+        XCTAssertEqual(finalTransform.d, 1.08, accuracy: 0.001)
+    }
+
+    func testDefaultBodyStateActionRootOffsetEffectSamplesIntermediateTransform() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateOffsetEffectOnlyRoot.self,
+            content: StateOffsetEffectOnlyRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+            let displayList = try sampleRootDisplayList(
+                host: host,
+                rendererHost: rendererHost,
+                at: seconds
+            )
+            return try XCTUnwrap(displayList.itemRecords.first?.affineTransform)
+        }
+
+        let initialTransform = try sampleTransform(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            samples.append((sampleTime, try sampleTransform(at: sampleTime)))
+        }
+
+        let finalTransform = try sampleTransform(at: 2.0)
+        let intermediateTransform = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.transform.tx > initialTransform.tx &&
+                    sample.transform.tx < finalTransform.tx
+            }?.transform
+        )
+
+        XCTAssertEqual(initialTransform.tx, -42, accuracy: 0.001)
+        XCTAssertGreaterThan(intermediateTransform.tx, initialTransform.tx)
+        XCTAssertLessThan(intermediateTransform.tx, finalTransform.tx)
+        XCTAssertEqual(finalTransform.tx, 42, accuracy: 0.001)
+    }
+
+    func testDefaultBodyStateActionRootRotationEffectSamplesIntermediateTransform() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateRotationEffectOnlyRoot.self,
+            content: StateRotationEffectOnlyRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+            let displayList = try sampleRootDisplayList(
+                host: host,
+                rendererHost: rendererHost,
+                at: seconds
+            )
+            return try XCTUnwrap(displayList.itemRecords.first?.affineTransform)
+        }
+
+        let initialTransform = try sampleTransform(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            samples.append((sampleTime, try sampleTransform(at: sampleTime)))
+        }
+
+        let finalTransform = try sampleTransform(at: 2.0)
+        let intermediateTransform = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.transform.b > initialTransform.b &&
+                    sample.transform.b < finalTransform.b
+            }?.transform
+        )
+
+        XCTAssertLessThan(initialTransform.b, 0)
+        XCTAssertGreaterThan(intermediateTransform.b, initialTransform.b)
+        XCTAssertLessThan(intermediateTransform.b, finalTransform.b)
+        XCTAssertGreaterThan(finalTransform.b, 0)
+    }
+
+    func testDefaultBodyStateActionRootOpacityEffectSamplesIntermediateOpacity() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateOpacityEffectOnlyRoot.self,
+            content: StateOpacityEffectOnlyRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleOpacity(at seconds: Double) throws -> Double {
+            let displayList = try sampleRootDisplayList(
+                host: host,
+                rendererHost: rendererHost,
+                at: seconds
+            )
+            return try XCTUnwrap(displayList.itemRecords.first?.opacity)
+        }
+
+        let initialOpacity = try sampleOpacity(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, opacity: Double)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            samples.append((sampleTime, try sampleOpacity(at: sampleTime)))
+        }
+
+        let finalOpacity = try sampleOpacity(at: 2.0)
+        let intermediateOpacity = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.opacity > initialOpacity &&
+                    sample.opacity < finalOpacity
+            }?.opacity
+        )
+
+        XCTAssertEqual(initialOpacity, 0.55, accuracy: 0.001)
+        XCTAssertGreaterThan(intermediateOpacity, initialOpacity)
+        XCTAssertLessThan(intermediateOpacity, finalOpacity)
+        XCTAssertEqual(finalOpacity, 0.92, accuracy: 0.001)
+    }
+
+    func testDefaultBodyStateActionRootShapeFillColorSamplesIntermediateColor() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(value: StateShapeFillColorOnlyRoot(probe: probe))
+                let outputs = StateShapeFillColorOnlyRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(
+                        graph: graph,
+                        time: time,
+                        size: graph.makeInput(value: ViewSize(width: 200, height: 200))
+                    )
+                )
+                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+
+                func sampleColor(at seconds: Double) throws -> Color {
+                    time.setValue(Time(seconds: seconds))
+                    let layout = layoutAttr.value
+                    layout.place(
+                        at: .zero,
+                        anchor: .topLeading,
+                        proposal: ProposedViewSize(CGSize(width: 200, height: 200))
+                    )
+                    host.data.rootSubgraph.update()
+                    let displayList = Attribute<DisplayList>(displayID).value
+                    guard let color = firstShapeFillColor(in: displayList) else {
+                        XCTFail("missing shape fill color at \(seconds): \(displayListSummary(displayList))")
+                        return .clear
+                    }
+                    return color
+                }
+
+                let initialColor = try sampleColor(at: 0)
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                withAnimation(.linear(duration: 1.0)) {
+                    toggle()
+                }
+
+                var samples: [(time: Double, color: Color)] = []
+                for step in 0...10 {
+                    let sampleTime = Double(step) / 10.0
+                    samples.append((sampleTime, try sampleColor(at: sampleTime)))
+                }
+
+                let finalColor = try sampleColor(at: 2.0)
+                let intermediateColor = try XCTUnwrap(
+                    samples.dropFirst().dropLast().first { sample in
+                        sample.color.backendColor.r > initialColor.backendColor.r &&
+                            sample.color.backendColor.r < finalColor.backendColor.r
+                    }?.color
+                )
+
+                XCTAssertEqual(initialColor.backendColor.r, Color.blue.backendColor.r, accuracy: 0.001)
+                XCTAssertEqual(initialColor.backendColor.b, Color.blue.backendColor.b, accuracy: 0.001)
+                XCTAssertGreaterThan(intermediateColor.backendColor.r, initialColor.backendColor.r)
+                XCTAssertLessThan(intermediateColor.backendColor.r, finalColor.backendColor.r)
+                XCTAssertEqual(finalColor.backendColor.r, Color.purple.backendColor.r, accuracy: 0.001)
+                XCTAssertEqual(finalColor.backendColor.b, Color.purple.backendColor.b, accuracy: 0.001)
+            }
+        }
+    }
+
     func testStateActionPreMutationDoesNotStealSpringTransaction() throws {
         let rendererHost = TestViewRendererHost()
         let host = ViewGraph(
@@ -858,11 +1189,96 @@ final class ViewObservationTransactionTests: XCTestCase {
 
         let finalBounds = try sampleBounds(at: 2.0)
 
+        let firstGrowingSample = try XCTUnwrap(
+            samples.dropFirst().first { $0.bounds.width > initialBounds.width }
+        )
+
         XCTAssertNotEqual(initialBounds, finalBounds)
-        XCTAssertGreaterThan(samples[1].bounds.width, initialBounds.width)
-        XCTAssertLessThan(samples[1].bounds.width, finalBounds.width)
+        XCTAssertEqual(samples[0].bounds.width, initialBounds.width, accuracy: 0.001)
+        XCTAssertLessThan(firstGrowingSample.bounds.width, finalBounds.width)
         XCTAssertGreaterThan(samples[5].bounds.width, samples[1].bounds.width)
         XCTAssertLessThan(samples[5].bounds.width, finalBounds.width)
+    }
+
+    func testDefaultBodyStateActionAnimationLabFullStackSamplesBoundsAndOpacityEveryTenthSecond() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
+        let host = ViewGraph(
+            rootViewType: StateAnimationLabShapeFrameRoot.self,
+            content: StateAnimationLabShapeFrameRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleDisplayList(at seconds: Double) throws -> DisplayList {
+            host.updateOutputs(at: Time(seconds: seconds))
+            return try host.data.withCurrent {
+                try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                    let layout = try XCTUnwrap(host.rootLayoutComputer).value
+                    let proposalSize = CGSize(width: 420, height: 240)
+                    layout.place(
+                        at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
+                        anchor: .center,
+                        proposal: ProposedViewSize(proposalSize)
+                    )
+                    host.data.rootSubgraph.update()
+                    return try XCTUnwrap(host.rootDisplayList?.value)
+                }
+            }
+        }
+
+        let initialDisplayList = try sampleDisplayList(at: 0)
+        let initialBounds = try XCTUnwrap(initialDisplayList.interpolationBounds)
+        let initialOpacity = try XCTUnwrap(firstOpacity(in: initialDisplayList))
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, bounds: CGRect, opacity: Double)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            let displayList = try sampleDisplayList(at: sampleTime)
+            samples.append((
+                sampleTime,
+                try XCTUnwrap(displayList.interpolationBounds),
+                try XCTUnwrap(firstOpacity(in: displayList))
+            ))
+        }
+
+        let finalDisplayList = try sampleDisplayList(at: 2.0)
+        let finalBounds = try XCTUnwrap(finalDisplayList.interpolationBounds)
+        let finalOpacity = try XCTUnwrap(firstOpacity(in: finalDisplayList))
+        let firstMovingSample = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.bounds.minX > initialBounds.minX &&
+                    sample.bounds.minX < finalBounds.minX
+            },
+            """
+            expected intermediate x movement:
+            initial=\(initialBounds)
+            final=\(finalBounds)
+            samples=\(samples)
+            """
+        )
+        let firstOpacitySample = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.opacity > initialOpacity &&
+                    sample.opacity < finalOpacity
+            },
+            """
+            expected intermediate opacity:
+            initial=\(initialOpacity)
+            final=\(finalOpacity)
+            samples=\(samples)
+            """
+        )
+
+        XCTAssertGreaterThan(firstMovingSample.bounds.minX, initialBounds.minX)
+        XCTAssertLessThan(firstMovingSample.bounds.minX, finalBounds.minX)
+        XCTAssertGreaterThan(firstOpacitySample.opacity, initialOpacity)
+        XCTAssertLessThan(firstOpacitySample.opacity, finalOpacity)
     }
 
     func testKeyPathThrowingBodyMutationPropagatesScopedTransaction() throws {
@@ -1020,6 +1436,67 @@ final class ViewObservationTransactionTests: XCTestCase {
                 return layoutAttr
             }
         }
+    }
+
+    private func sampleRootDisplayList(
+        host: ViewGraph,
+        rendererHost: TestViewRendererHost,
+        at seconds: Double
+    ) throws -> DisplayList {
+        let time = Time(seconds: seconds)
+        rendererHost.currentTimestamp = time
+        host.updateOutputs(at: time)
+        return try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let layout = try XCTUnwrap(host.rootLayoutComputer).value
+                let proposalSize = CGSize(width: 200, height: 200)
+                layout.place(
+                    at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
+                    anchor: .center,
+                    proposal: ProposedViewSize(proposalSize)
+                )
+                host.data.rootSubgraph.update()
+                return try XCTUnwrap(host.rootDisplayList?.value)
+            }
+        }
+    }
+
+    private func firstShapeFillColor(in displayList: DisplayList) -> Color? {
+        for record in displayList.itemRecords {
+            if case let .color(color)? = record.shapeStyle {
+                return color
+            }
+        }
+        for effect in displayList.effects {
+            if let color = firstShapeFillColor(in: effect.contents) {
+                return color
+            }
+        }
+        return nil
+    }
+
+    private func firstOpacity(in displayList: DisplayList) -> Double? {
+        for record in displayList.itemRecords {
+            if let opacity = record.opacity {
+                return opacity
+            }
+        }
+        for effect in displayList.effects {
+            if let opacity = firstOpacity(in: effect.contents) {
+                return opacity
+            }
+        }
+        return nil
+    }
+
+    private func displayListSummary(_ displayList: DisplayList, depth: Int = 0) -> String {
+        let records = displayList.itemRecords.map { record in
+            "kind=\(record.kind) effect=\(String(describing: record.effectKind)) style=\(String(describing: record.shapeStyle)) bounds=\(String(describing: record.bounds))"
+        }
+        let effects = displayList.effects.enumerated().map { index, effect in
+            "effect[\(index)]=\(effect.effect) contents={\(displayListSummary(effect.contents, depth: depth + 1))}"
+        }
+        return "items=\(records) effects=\(effects) bounds=\(String(describing: displayList.interpolationBounds))"
     }
 
     private func makeViewInputs(

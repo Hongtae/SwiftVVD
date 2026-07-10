@@ -834,7 +834,9 @@ struct ContentMarginModifier: ViewModifier, _GraphInputsModifier {
             values.setContentMargins(modifier.insets, in: modifier.edges, for: modifier.placement)
             return values
         }
-        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: environment))
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(environment)
+        )
     }
 }
 
@@ -961,7 +963,9 @@ struct ResetContentMarginModifier: ViewModifier, _GraphInputsModifier {
             }
             return values
         }
-        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: environment))
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(environment)
+        )
     }
 }
 
@@ -984,7 +988,9 @@ struct EnvironmentAxesModifier: ViewModifier, _GraphInputsModifier {
             values.allScrollableAxes.formUnion(axes)
             return values
         }
-        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: environment))
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(environment)
+        )
     }
 }
 
@@ -1026,7 +1032,9 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
         let environment: Attribute<EnvironmentValues> = graph.makeRule(
             UpdateEnvironment(_environment: transformedEnvironment)
         )
-        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: environment))
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(environment)
+        )
     }
 
     private struct TrackedEnvironment: StatefulRule {

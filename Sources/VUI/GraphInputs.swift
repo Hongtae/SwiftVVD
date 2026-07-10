@@ -218,6 +218,12 @@ struct CachedEnvironment {
         self.platformCache = nil
     }
 
+    func replacingEnvironment(_ environment: Attribute<EnvironmentValues>) -> CachedEnvironment {
+        var copy = CachedEnvironment(environment: environment)
+        copy.animatedFrame = animatedFrame
+        return copy
+    }
+
     mutating func attribute<Value>(
         id: ID,
         _ value: @escaping (EnvironmentValues) -> Value

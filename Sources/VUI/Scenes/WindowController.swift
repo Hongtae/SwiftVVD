@@ -621,8 +621,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let hadPendingWork = sourceGraph.inbox.hasPendingWork ||
             !sourceGraph.actionOutbox.isEmpty
         _AGGraph.withCurrent(sourceGraph) {
-            sourceGraph.inbox.drain()
-            sourceGraph.drainActions()
+            while sourceGraph.inbox.hasPendingWork {
+                _ = sourceGraph.inbox.drainOne()
+                sourceGraph.drainActions()
+            }
         }
         let drainedOutbox = drainActionOutbox(sourceGraph)
         return hadPendingWork || drainedOutbox
@@ -675,6 +677,51 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         var drainedViewOutbox = false
         var loadedResources = false
 
+        func runRootLayoutPass(
+            notifiesLayoutUpdate: Bool,
+            samplesDisplayList: Bool = false
+        ) -> Bool {
+            let layoutChangeSet = _AGChangeSet()
+            _AGGraph.withChangeSet(layoutChangeSet) {
+                // Layout pass: determine root view size/position after AG evaluation completes.
+                viewGraph.data.withCurrent {
+                    let lc = rootLayoutComputer.value
+                    let proposal = ProposedViewSize(width: cachedContentSize.width,
+                                                   height: cachedContentSize.height)
+                    let center = CGPoint(x: cachedContentSize.width / 2,
+                                         y: cachedContentSize.height / 2)
+                    lc.place(at: center, anchor: .center, proposal: proposal)
+
+                    if samplesDisplayList, let rootDisplayList = viewGraph.rootDisplayList {
+                        _ = rootDisplayList.value
+                    }
+
+                    guard notifiesLayoutUpdate else { return }
+                    let previousRootFittedSize = cachedRootFittedSize
+                    let rootFittedSize = observesRootFittedSizeForLayoutUpdates
+                        ? viewGraph.rootFittedSize?.value
+                        : nil
+                    if let rootFittedSize {
+                        cachedRootFittedSize = rootFittedSize
+                    }
+                    let rootFittedSizeChanged = rootFittedSize.map { $0 != previousRootFittedSize } ?? false
+
+                    if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
+                        hasDeliveredViewLayoutUpdate = true
+                        // Modal/presentation-child controllers use this hook to fit their platform
+                        // window after AG layout values are available. The hook is
+                        // driven by the root fitted-size rule rather than the host
+                        // window's proposed sizeAttr, because resource/content
+                        // changes can alter natural modal size without changing the
+                        // platform content size first.
+                        onViewLayoutUpdated()
+                    }
+                }
+                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
+            }
+            return !layoutChangeSet.isEmpty
+        }
+
         let updateChangeSet = _AGChangeSet()
         _AGGraph.withChangeSet(updateChangeSet) {
 
@@ -703,8 +750,25 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             // updateOutputs flushes dirty bits, async changes, then evaluates AG.
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
             flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()
+            var lastViewInboxTransaction: Transaction?
+            while viewGraph.data.graph.inbox.hasPendingWork {
+                viewGraph.beginNextUpdate(at: time)
+                viewGraph.data.withCurrent {
+                    lastViewInboxTransaction = viewGraph.data.graph.inbox.drainOne()
+                    viewGraph.data.graph.drainActions()
+                }
+                viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
+                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
+                if viewGraph.data.graph.inbox.hasPendingWork {
+                    _ = runRootLayoutPass(
+                        notifiesLayoutUpdate: false,
+                        samplesDisplayList: true
+                    )
+                }
+            }
+            viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
             viewGraph.updateOutputs(at: time)
-            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph)
+            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
             viewGraph.data.withCurrent {
@@ -716,8 +780,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                             task(context)
                         }
                     }
-                    viewGraph.data.graph.inbox.drain()
-                    viewGraph.data.graph.drainActions()
+                    var lastResourceTransaction: Transaction?
+                    while viewGraph.data.graph.inbox.hasPendingWork {
+                        viewGraph.beginNextUpdate(at: time)
+                        lastResourceTransaction = viewGraph.data.graph.inbox.drainOne()
+                        viewGraph.data.graph.drainActions()
+                        viewGraph.setCurrentUpdateTransaction(lastResourceTransaction)
+                    }
                     drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 }
             }
@@ -731,6 +800,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         if let timeID = viewGraph.timeAttr?.identifier {
             clockIDs.insert(timeID)
         }
+        if let transactionID = viewGraph.transactionAttr?.identifier {
+            clockIDs.insert(transactionID)
+        }
         let meaningfulUpdateChange = updateChangedIDs.contains { id in
             !clockIDs.contains(id)
         }
@@ -743,44 +815,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         var layoutChanged = false
         if needsLayoutPass {
-            let layoutChangeSet = _AGChangeSet()
-            _AGGraph.withChangeSet(layoutChangeSet) {
-                // Layout pass: determine root view size/position after AG evaluation completes.
-                viewGraph.data.withCurrent {
-                    let lc = rootLayoutComputer.value
-                    let proposal = ProposedViewSize(width: cachedContentSize.width,
-                                                   height: cachedContentSize.height)
-                    let center = CGPoint(x: cachedContentSize.width / 2,
-                                         y: cachedContentSize.height / 2)
-                    lc.place(at: center, anchor: .center, proposal: proposal)
-
-                    let previousRootFittedSize = cachedRootFittedSize
-                    let rootFittedSize = observesRootFittedSizeForLayoutUpdates
-                        ? viewGraph.rootFittedSize?.value
-                        : nil
-                    if let rootFittedSize {
-                        cachedRootFittedSize = rootFittedSize
-                    }
-                    let rootFittedSizeChanged = rootFittedSize.map { $0 != previousRootFittedSize } ?? false
-
-                    if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
-                        hasDeliveredViewLayoutUpdate = true
-                        // Modal/presentation-child controllers use this hook to fit their platform
-                        // window after AG layout values are available. The hook is
-                        // driven by the root fitted-size rule rather than the host
-                        // window's proposed sizeAttr, because resource/content
-                        // changes can alter natural modal size without changing the
-                        // platform content size first.
-                        onViewLayoutUpdated()
-                    }
-                }
-                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
-            }
-            layoutChanged = !layoutChangeSet.isEmpty
+            layoutChanged = runRootLayoutPass(notifiesLayoutUpdate: true)
         }
         // Preserve redraw requests raised earlier in this frame, including
         // child modal input handled during the parent event pass.
-        redraw = redraw ||
+        let shouldRedrawFrame = redraw ||
             hadScheduledViewUpdate ||
             meaningfulUpdateChange ||
             layoutChanged ||
@@ -789,6 +828,20 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             drainedViewOutbox ||
             loadedResources ||
             hadViewChangedWhileDrawing
+        if shouldRedrawFrame, let rootDisplayList = viewGraph.rootDisplayList {
+            var displayListChanged = false
+            viewGraph.data.withCurrent {
+                let displayListChangeSet = _AGChangeSet()
+                _AGGraph.withChangeSet(displayListChangeSet) {
+                    _ = rootDisplayList.value
+                }
+                displayListChanged = !displayListChangeSet.isEmpty
+            }
+            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
+            redraw = shouldRedrawFrame || displayListChanged || drainedViewOutbox
+        } else {
+            redraw = shouldRedrawFrame
+        }
         self.viewChangedWhileDrawing = false
 
         // Overlay presentation children: update after self.

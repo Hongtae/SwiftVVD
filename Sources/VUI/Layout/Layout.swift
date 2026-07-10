@@ -152,7 +152,12 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
     var layoutDirection: LayoutDirection
     mutating func updateValue() {
         let layout = layoutAttr.value
-        let engine = ViewLayoutEngine(layout: layout, children: children, layoutDirection: layoutDirection)
+        let engine = ViewLayoutEngine(
+            layout: layout,
+            layoutAttr: layoutAttr,
+            children: children,
+            layoutDirection: layoutDirection
+        )
         let box = LayoutEngineBox(engine: engine)
         _AGGraph.setStatefulOutput(LayoutComputer(box: box))
     }
@@ -872,6 +877,7 @@ struct DynamicContainerInfo: StatefulRule {
 
                 let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
                     let inner = lcAttr.value
+                    var pendingPlacementTransaction = graph.transaction(for: lcAttr.identifier)
                     return LayoutComputer(
                         sizeThatFits: { inner.sizeThatFits($0) },
                         spacing: inner.spacing,
@@ -881,8 +887,16 @@ struct DynamicContainerInfo: StatefulRule {
                                 x: pos.x - sz.width * anchor.x,
                                 y: pos.y - sz.height * anchor.y
                             )
-                            rawPosAttr.setValue(rawOrigin)
-                            rawSizeAttr.setValue(ViewSize(sz, proposal: proposal))
+                            let placementTransaction =
+                                graph.transaction(for: lcAttr.identifier) ??
+                                pendingPlacementTransaction ??
+                                Transaction.current
+                            pendingPlacementTransaction = nil
+                            rawPosAttr.setValue(rawOrigin, transaction: placementTransaction)
+                            rawSizeAttr.setValue(
+                                ViewSize(sz, proposal: proposal),
+                                transaction: placementTransaction
+                            )
                             if let scrollContext,
                                let scrollBasePosAttr,
                                let identifier = dynamicItem,
@@ -896,7 +910,9 @@ struct DynamicContainerInfo: StatefulRule {
                             } else {
                                 scrollBasePosAttr?.setValue(rawOrigin)
                             }
-                            inner.place(at: pos, anchor: anchor, proposal: proposal)
+                            withTransaction(placementTransaction) {
+                                inner.place(at: pos, anchor: anchor, proposal: proposal)
+                            }
                         },
                         explicitAlignment: { inner.explicitAlignment($0, at: $1) }
                     )
@@ -960,7 +976,12 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
         for child in children {
             _ = child.layoutComputer.attribute?.value
         }  // register AG deps on each child LC
-        let engine = ViewLayoutEngine(layout: layout, children: children, layoutDirection: .leftToRight)
+        let engine = ViewLayoutEngine(
+            layout: layout,
+            layoutAttr: layoutAttr,
+            children: children,
+            layoutDirection: .leftToRight
+        )
         _AGGraph.setStatefulOutput(LayoutComputer(box: LayoutEngineBox(engine: engine)))
     }
 }
@@ -1255,6 +1276,7 @@ extension Layout {
                 if let lcAttr = childOutputs._layoutComputer.attribute {
                     let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
                         let inner = lcAttr.value
+                        var pendingPlacementTransaction = graph.transaction(for: lcAttr.identifier)
                         return LayoutComputer(
                             sizeThatFits: { inner.sizeThatFits($0) },
                             spacing: inner.spacing,
@@ -1264,9 +1286,19 @@ extension Layout {
                                     x: position.x - resolvedSize.width * anchor.x,
                                     y: position.y - resolvedSize.height * anchor.y
                                 )
-                                rawPosAttr.setValue(origin)
-                                rawSizeAttr.setValue(ViewSize(resolvedSize, proposal: proposal))
-                                inner.place(at: position, anchor: anchor, proposal: proposal)
+                                let placementTransaction =
+                                    graph.transaction(for: lcAttr.identifier) ??
+                                    pendingPlacementTransaction ??
+                                    Transaction.current
+                                pendingPlacementTransaction = nil
+                                rawPosAttr.setValue(origin, transaction: placementTransaction)
+                                rawSizeAttr.setValue(
+                                    ViewSize(resolvedSize, proposal: proposal),
+                                    transaction: placementTransaction
+                                )
+                                withTransaction(placementTransaction) {
+                                    inner.place(at: position, anchor: anchor, proposal: proposal)
+                                }
                             },
                             priority: inner.priority,
                             explicitAlignment: { inner.explicitAlignment($0, at: $1) }

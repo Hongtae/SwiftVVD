@@ -441,7 +441,11 @@ class ViewGraph: ViewGraphHost {
     private(set) var sizeAttr: Attribute<ViewSize>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
+    private(set) var transactionAttr: Attribute<Transaction>?
     private(set) var phaseAttr: Attribute<Phase>?
+    private var currentUpdateTransaction = Transaction()
+    private var hasCurrentUpdateTransaction = false
+    private var transactionAttrNeedsClear = false
 
     // AG output attributes collected after V._makeView.
     private(set) var rootAnyViewContentInput: Attribute<AnyView>?
@@ -771,6 +775,7 @@ class ViewGraph: ViewGraphHost {
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
         var envAttrResult:   Attribute<EnvironmentValues>? = nil
         var timeAttrResult:  Attribute<Time>?              = nil
+        var transactionAttrResult: Attribute<Transaction>? = nil
         var phaseAttrResult: Attribute<Phase>?             = nil
         var rootLCResult:    Attribute<LayoutComputer>?    = nil
         var rootSizeResult:  Attribute<CGSize>?            = nil
@@ -933,12 +938,14 @@ class ViewGraph: ViewGraphHost {
             sizeAttrResult  = sizeAttr
             envAttrResult   = envAttr
             timeAttrResult  = timeAttr
+            transactionAttrResult = transactionAttr
             phaseAttrResult = phaseAttr
         }
 
         self.sizeAttr           = sizeAttrResult
         self.envAttr            = envAttrResult
         self.timeAttr           = timeAttrResult
+        self.transactionAttr    = transactionAttrResult
         self.phaseAttr          = phaseAttrResult
         self.rootLayoutComputer = rootLCResult
         self.rootFittedSize     = rootSizeResult
@@ -957,6 +964,16 @@ class ViewGraph: ViewGraphHost {
         updatePreferences()
     }
 
+    func setCurrentUpdateTransaction(_ transaction: Transaction?) {
+        if let transaction, !transaction.isEmpty {
+            currentUpdateTransaction = transaction
+            hasCurrentUpdateTransaction = true
+        } else {
+            currentUpdateTransaction = Transaction()
+            hasCurrentUpdateTransaction = false
+        }
+    }
+
     func beginNextUpdate(at time: Time) {
         data.withCurrent {
             guard let timeAttr else {
@@ -966,6 +983,15 @@ class ViewGraph: ViewGraphHost {
             if !(timeAttr.value == time) {
                 timeAttr.setValue(time)
                 nextUpdate = (NextUpdate(), NextUpdate())
+            }
+            if let transactionAttr {
+                if hasCurrentUpdateTransaction {
+                    transactionAttr.setValue(currentUpdateTransaction)
+                    transactionAttrNeedsClear = true
+                } else if transactionAttrNeedsClear {
+                    transactionAttr.setValue(Transaction())
+                    transactionAttrNeedsClear = false
+                }
             }
             data.incrementUpdateSeed()
         }

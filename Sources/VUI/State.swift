@@ -144,7 +144,7 @@ extension State {
                     cache.value = newValue
                     let box = UnsafeBox(newValue)
                     let transactionBox = UnsafeBox(transaction)
-                    inbox.enqueue {
+                    inbox.enqueue(transaction: transaction) {
                         attr.setValue(box.value, transaction: transactionBox.value)
                     }
                 }

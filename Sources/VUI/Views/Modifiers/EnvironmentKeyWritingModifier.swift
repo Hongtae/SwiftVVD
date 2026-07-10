@@ -27,7 +27,9 @@ public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsM
             env[keyPath: m.keyPath] = m.value
             return env
         }
-        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
+        )
     }
 }
 
