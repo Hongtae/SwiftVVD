@@ -1468,6 +1468,99 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testReinsertedAnimationLabChildTextMovesWithBackgroundDuringSpringMove() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingReinsertedAnimationLabChildRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingReinsertedAnimationLabChildRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Static Animation Lab sequence test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double) {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: 1.0 / 60.0,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+        }
+
+        update(time: 0)
+
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        for sampleTime in [0.001, 1.0 / 60.0, 2.0 / 60.0, 2.5, 5.1] {
+            update(time: sampleTime)
+        }
+
+        try XCTUnwrap(probe.insertChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        for sampleTime in [5.101, 5.1 + 1.0 / 60.0, 5.1 + 2.0 / 60.0, 7.6, 10.2] {
+            update(time: sampleTime)
+        }
+
+        let inserted = try displayList(in: controller)
+        let insertedText = try XCTUnwrap(
+            textBounds(in: inserted).first {
+                $0.width > 80 && $0.width < 140 && $0.height > 14
+            }
+        )
+        let insertedBackground = try XCTUnwrap(
+            translucentGreenShapeBounds(in: inserted)
+        )
+        let insertedCenterOffset = insertedText.midX - insertedBackground.midX
+
+        try XCTUnwrap(probe.springMove)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var centerOffsets: [(time: Double, offset: CGFloat)] = []
+        for sampleTime in [10.3, 10.7, 11.2, 12.2, 15.3] {
+            update(time: sampleTime)
+            let list = try displayList(in: controller)
+            let text = try XCTUnwrap(
+                textBounds(in: list).first {
+                    $0.width > 80 && $0.width < 140 && $0.height > 14
+                },
+                "missing Animation Lab child text at \(sampleTime): \(textBounds(in: list))"
+            )
+            let background = try XCTUnwrap(
+                translucentShapeFillRecords(in: list).first { record in
+                    record.color.provider.alpha < 0.8 &&
+                        record.bounds.width > 120 &&
+                        record.bounds.height > 40
+                }?.bounds,
+                "missing Animation Lab child background at \(sampleTime): \(translucentShapeFillRecords(in: list))"
+            )
+            centerOffsets.append((sampleTime, text.midX - background.midX))
+        }
+
+        for sample in centerOffsets {
+            XCTAssertEqual(
+                sample.offset,
+                insertedCenterOffset,
+                accuracy: 0.75,
+                "reinserted child text moved relative to its background: \(centerOffsets)"
+            )
+        }
+    }
+
+    @MainActor
     func testModalTextLikeSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -1887,6 +1980,13 @@ private final class LayoutSchedulingAnimationProbe {
     var insertionSize: Attribute<ViewSize>?
     var resourceTransactions: [(value: Bool, duration: Double?)] = []
     var resourceEvents: [LayoutSchedulingResourceEvent] = []
+}
+
+private final class LayoutSchedulingAnimationLabProbe {
+    var removeChild: (() -> Void)?
+    var insertChild: (() -> Void)?
+    var springMove: (() -> Void)?
+    let text = LayoutSchedulingAnimationProbe()
 }
 
 private enum LayoutSchedulingResourceEvent: Equatable {
@@ -2453,6 +2553,88 @@ private struct LayoutSchedulingEnvironmentTextSiblingPlacementRoot: View {
             }
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct LayoutSchedulingReinsertedAnimationLabChildRoot: View {
+    let counter: LayoutSchedulingCounter
+    let probe: LayoutSchedulingAnimationLabProbe
+    @State private var expanded = false
+    @State private var showRetainedChild = true
+
+    var body: some View {
+        probe.removeChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .removed
+            ) {
+                showRetainedChild = false
+            } completion: {
+            }
+        }
+        probe.insertChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .logicallyComplete
+            ) {
+                showRetainedChild = true
+            } completion: {
+            }
+        }
+        probe.springMove = {
+            withAnimation(.spring(duration: 5, bounce: 0.35)) {
+                expanded.toggle()
+            }
+        }
+        return LayoutSchedulingPassThroughLayout(counter: counter) {
+            HStack(spacing: 28) {
+                RoundedRectangle(cornerRadius: expanded ? 28 : 10)
+                    .fill(expanded ? Color.purple : Color.blue)
+                    .frame(
+                        width: expanded ? 180 : 72,
+                        height: expanded ? 96 : 72
+                    )
+
+                VStack(spacing: 8) {
+                    LayoutSchedulingRawTextMarker(size: CGSize(width: 160, height: 20))
+                    if showRetainedChild {
+                        VStack(spacing: 6) {
+                            LayoutSchedulingTransitionTextMarker(
+                                size: CGSize(width: 120, height: 20),
+                                probe: probe.text
+                            )
+                            LayoutSchedulingEnvironmentTextMarker(
+                                content: LayoutSchedulingTextContent(
+                                    value: expanded ? "expanded" : "compact"
+                                ),
+                                size: CGSize(width: expanded ? 35 : 31, height: 10)
+                            )
+                        }
+                        .padding(18)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(
+                                    expanded
+                                        ? Color.orange.opacity(0.35)
+                                        : Color.green.opacity(0.35)
+                                )
+                        }
+                        .scaleEffect(expanded ? 1.0 : 0.82)
+                        .offset(y: expanded ? -8 : 8)
+                        .transition(
+                            .scale(scale: 0.72)
+                                .combined(with: .opacity)
+                                .animation(.easeInOut(duration: 5))
+                        )
+                    } else {
+                        LayoutSchedulingRawTextMarker(size: CGSize(width: 80, height: 10))
+                            .padding(18)
+                    }
+                }
+                .frame(width: 190, height: 150)
+            }
+        }
+        .frame(width: 560, height: 360)
     }
 }
 

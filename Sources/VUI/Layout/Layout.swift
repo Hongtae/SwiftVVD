@@ -916,10 +916,12 @@ struct DynamicContainerInfo: StatefulRule {
                                 x: pos.x - sz.width * anchor.x,
                                 y: pos.y - sz.height * anchor.y
                             )
+                            // The transaction captured when the child layout computer
+                            // refreshed applies to its next placement only. Reading the
+                            // graph transaction again here would revive stale resource
+                            // publication keys during later parent animations.
                             let placementTransaction =
-                                graph.transaction(for: lcAttr.identifier) ??
-                                pendingPlacementTransaction ??
-                                Transaction.current
+                                pendingPlacementTransaction ?? Transaction.current
                             pendingPlacementTransaction = nil
                             rawPosAttr.setValue(rawOrigin, transaction: placementTransaction)
                             rawSizeAttr.setValue(
@@ -1328,10 +1330,10 @@ extension Layout {
                                     x: position.x - resolvedSize.width * anchor.x,
                                     y: position.y - resolvedSize.height * anchor.y
                                 )
+                                // Consume the child refresh transaction once. Later
+                                // placements inherit the active layout transaction.
                                 let placementTransaction =
-                                    graph.transaction(for: lcAttr.identifier) ??
-                                    pendingPlacementTransaction ??
-                                    Transaction.current
+                                    pendingPlacementTransaction ?? Transaction.current
                                 pendingPlacementTransaction = nil
                                 rawPosAttr.setValue(origin, transaction: placementTransaction)
                                 rawSizeAttr.setValue(
