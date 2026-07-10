@@ -118,7 +118,7 @@ public struct GraphicsContext {
     }
 
     public mutating func concatenate(_ matrix: CGAffineTransform) {
-        self.transform = self.transform.concatenating(matrix)
+        self.transform = matrix.concatenating(self.transform)
     }
 
     public internal(set) var clipBoundingRect: CGRect = .zero

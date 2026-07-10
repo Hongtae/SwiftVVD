@@ -149,7 +149,7 @@ extension CGRect {
             CGPoint(x: self.minX, y: self.minY).applying(t),
             CGPoint(x: self.minX, y: self.maxY).applying(t),
             CGPoint(x: self.maxX, y: self.minY).applying(t),
-            CGPoint(x: self.maxX, y: self.maxX).applying(t),
+            CGPoint(x: self.maxX, y: self.maxY).applying(t),
         ]
         let minX = pts.min { a, b in a.x < b.x }!.x
         let maxX = pts.max { a, b in a.x < b.x }!.x
