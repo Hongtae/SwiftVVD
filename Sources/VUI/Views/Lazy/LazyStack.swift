@@ -2114,7 +2114,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
         guard state.phase != .willAppear else { return }
         if let listener = item.removalListener {
             listener.readSeed()
-            guard listener.isComplete else { return }
+            guard listener.isCompletionPublished else { return }
             item.removalListener = nil
         }
         if state.isRemoved {

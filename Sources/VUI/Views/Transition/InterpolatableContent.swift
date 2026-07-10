@@ -145,6 +145,11 @@ extension DisplayList {
                 contentsScale: contents.contentsScale,
                 version: version
             )
+            if state == nil {
+                for index in removed.indices where removed[index].phase == .animating {
+                    removed[index].interpolator?.setTo(list)
+                }
+            }
             maxDuration = .infinity
             needsUpdate = true
         }
@@ -174,9 +179,13 @@ extension DisplayList {
                         to: contents.displayList,
                         options: options
                     )
+                    let interpolatorDuration = removed[index].interpolator?.activeDuration ?? 0
+                    let contentDuration = interpolatorDuration > 0
+                        ? interpolatorDuration
+                        : removed[index].interpolator?.animation?.activeDuration ?? 0
                     removed[index].activeDuration = min(
                         maxDuration,
-                        removed[index].interpolator?.activeDuration ?? 0
+                        contentDuration
                     )
                     removed[index].startTime = currentTime
                     removed[index].phase = .animating
@@ -249,6 +258,14 @@ extension DisplayList {
     class InterpolatorGroup {
         var maxDuration: Double
 
+        var hasActiveInterpolators: Bool {
+            false
+        }
+
+        var activeSourceBounds: CGRect? {
+            nil
+        }
+
         init(maxDuration: Double = .infinity) {
             self.maxDuration = maxDuration
         }
@@ -258,6 +275,9 @@ extension DisplayList {
         }
 
         func updateTime(_ time: Time) {
+        }
+
+        func discardActiveInterpolators() {
         }
 
         func apply(to list: DisplayList) -> DisplayList {
@@ -304,6 +324,18 @@ extension DisplayList {
 
         override init(maxDuration: Double = .infinity) {
             super.init(maxDuration: maxDuration)
+        }
+
+        override var hasActiveInterpolators: Bool {
+            layer.removedCount > 0
+        }
+
+        override var activeSourceBounds: CGRect? {
+            layer.removed.first?.interpolator?.from.interpolationBounds
+        }
+
+        override func discardActiveInterpolators() {
+            layer.remove(prefix: layer.removedCount)
         }
 
         override func nextUpdate(after time: Time) -> Time {
@@ -386,7 +418,7 @@ extension DisplayList {
             )
             scheduleNextUpdate(after: time)
 
-            return super.update(
+            _ = super.update(
                 contentSeed: contentSeed,
                 current: current,
                 target: target,
@@ -396,21 +428,22 @@ extension DisplayList {
                 defersRender: defersRender,
                 supportsVFD: supportsVFD
             )
+            return apply(to: target)
         }
 
         func apply(to list: inout DisplayList.Item) {
         }
 
         override func apply(to list: DisplayList) -> DisplayList {
-            var output = list
-            _ = layer.updateOutput(
+            var output = DisplayList()
+            let replacedCurrent = layer.updateOutput(
                 list: &output,
                 frame: .zero,
                 contentOffset: .zero,
                 version: DisplayList.Version(value: 0),
                 rasterizationOptions: rasterizationOptions
             )
-            return output
+            return replacedCurrent ? output : list
         }
 
         private func scheduleNextUpdate(after time: Time) {
@@ -466,6 +499,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
     private var previousSize: CGSize?
     private var previousDisplayList: DisplayList?
     private var contentSeed = DisplayList.Seed()
+    private var activeTransitionChangedContent = false
 
     init(
         group: DisplayList.InterpolatorGroup,
@@ -529,7 +563,11 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         if let previousContent {
             contentChanged = previousContent.requiresTransition(to: targetContent)
             sizeChanged = previousSize.map { $0 != currentSize } ?? false
+            let retargetsActiveSizeTransition = !contentChanged &&
+                sizeChanged &&
+                group.hasActiveInterpolators
             let shouldTransition = !currentTransaction.disablesContentTransitions
+                && !retargetsActiveSizeTransition
                 && (contentChanged || (sizeChanged && previousContent.appliesTransitionsForSizeChanges))
 
             if shouldTransition {
@@ -542,7 +580,8 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                     modifiedState.options.insert(.addsDrawingGroup)
                 }
                 state = modifiedState
-                appliesTransition = !modifiedState.transition.isIdentity
+                appliesTransition = !modifiedState.transition.isIdentity &&
+                    modifiedState.animation != nil
             }
         }
 
@@ -556,6 +595,11 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
 
         let output: DisplayList
         if appliesTransition {
+            if contentChanged &&
+                group.hasActiveInterpolators &&
+                !activeTransitionChangedContent {
+                group.discardActiveInterpolators()
+            }
             output = group.update(
                 contentSeed: contentSeed,
                 current: previousList ?? targetList,
@@ -566,6 +610,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 defersRender: defersRender,
                 supportsVFD: supportsVFD
             )
+            activeTransitionChangedContent = contentChanged
         } else {
             group.setCurrentContents(
                 contentSeed: contentSeed,

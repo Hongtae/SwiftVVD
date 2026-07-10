@@ -120,7 +120,7 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
                         ViewSize(bgSize, proposal: bgProposal),
                         transaction: placementTransaction
                     )
-                    withTransaction(placementTransaction) {
+                    Transaction.withScopedThreadTransaction(placementTransaction) {
                         bgLC.place(at: bgPosition, anchor: bgAnchor, proposal: bgProposal)
                     }
                 },

@@ -120,7 +120,7 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
                         ViewSize(ovSize, proposal: ovProposal),
                         transaction: placementTransaction
                     )
-                    withTransaction(placementTransaction) {
+                    Transaction.withScopedThreadTransaction(placementTransaction) {
                         ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
                     }
                 },

@@ -988,7 +988,9 @@ struct _ViewList_SubgraphElements: _ViewList_Elements {
     /// Item-subgraph link behavior is not fully wired.
     mutating func wrap(subgraph: _ViewList_Subgraph) {
         if subgraphs == nil { subgraphs = _ViewList_SublistSubgraphStorage() }
-        subgraphs?.subgraphs.append(subgraph)
+        if subgraphs?.subgraphs.contains(where: { $0 === subgraph }) == false {
+            subgraphs?.subgraphs.append(subgraph)
+        }
     }
 
     @discardableResult

@@ -79,8 +79,14 @@ extension PrimitiveButtonStyleConfiguration.Label {
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
         let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
         var innerInputs = inputs
-        innerInputs.position = innerPosAttr
-        innerInputs.size = innerSizeAttr
+        let animatedFrame = makeAnimatableFrameAttributes(
+            in: &innerInputs.base,
+            position: innerPosAttr,
+            size: innerSizeAttr,
+            supportsVFD: innerInputs.supportsVFD
+        )
+        innerInputs.position = animatedFrame.position
+        innerInputs.size = animatedFrame.size
         let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
@@ -94,9 +100,12 @@ extension PrimitiveButtonStyleConfiguration.Label {
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
                                          y: position.y - size.height * anchor.y)
-                    innerPosAttr.setValue(origin)
-                    innerSizeAttr.setValue(ViewSize(size))
-                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                    let placementTransaction = Transaction.current
+                    innerPosAttr.setValue(origin, transaction: placementTransaction)
+                    innerSizeAttr.setValue(ViewSize(size), transaction: placementTransaction)
+                    Transaction.withScopedThreadTransaction(placementTransaction) {
+                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                    }
                 },
                 explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )
@@ -325,8 +334,14 @@ extension ButtonStyleConfiguration.Label {
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
         let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
         var innerInputs = inputs
-        innerInputs.position = innerPosAttr
-        innerInputs.size = innerSizeAttr
+        let animatedFrame = makeAnimatableFrameAttributes(
+            in: &innerInputs.base,
+            position: innerPosAttr,
+            size: innerSizeAttr,
+            supportsVFD: innerInputs.supportsVFD
+        )
+        innerInputs.position = animatedFrame.position
+        innerInputs.size = animatedFrame.size
         let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
@@ -340,9 +355,12 @@ extension ButtonStyleConfiguration.Label {
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
                                          y: position.y - size.height * anchor.y)
-                    innerPosAttr.setValue(origin)
-                    innerSizeAttr.setValue(ViewSize(size))
-                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                    let placementTransaction = Transaction.current
+                    innerPosAttr.setValue(origin, transaction: placementTransaction)
+                    innerSizeAttr.setValue(ViewSize(size), transaction: placementTransaction)
+                    Transaction.withScopedThreadTransaction(placementTransaction) {
+                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                    }
                 },
                 explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )

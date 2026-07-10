@@ -27,7 +27,7 @@ struct RBDisplayListInterpolatorOptionKey: RawRepresentable, Hashable {
 // The current implementation uses local bounds and closure replay until typed command storage exists.
 final class RBDisplayListInterpolator: NSObject, NSCopying {
     var from: DisplayList
-    let to: DisplayList
+    private(set) var to: DisplayList
     let options: [RBDisplayListInterpolatorOptionKey: Any]
 
     init(
@@ -84,6 +84,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     func setFrom(_ displayList: DisplayList) {
         from = displayList
+    }
+
+    func setTo(_ displayList: DisplayList) {
+        to = displayList
     }
 
     func boundingRect(withProgress progress: Float) -> CGRect {
@@ -245,6 +249,40 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 )
                 let fromItem = fromItems[index]
                 let toItem = toItems[index]
+                if isTextItemPair(fromCommands[index], toCommands[index]) {
+                    let center = CGPoint(x: targetBounds.midX, y: targetBounds.midY)
+                    let sourceOutputBounds = centeredBounds(size: sourceBounds.size, at: center)
+                    let targetOutputBounds = centeredBounds(size: targetBounds.size, at: center)
+                    let crossFadeBounds: CGRect
+                    if progress <= 0 {
+                        crossFadeBounds = sourceOutputBounds
+                    } else if progress >= 1 {
+                        crossFadeBounds = targetOutputBounds
+                    } else {
+                        crossFadeBounds = sourceOutputBounds.union(targetOutputBounds)
+                    }
+                    contents.appendCrossFadeItem(
+                        bounds: crossFadeBounds,
+                        sourceFraction: Float(progress),
+                        targetFraction: Float(progress)
+                    ) { context in
+                        drawInterpolatedItems(
+                            [fromItem],
+                            sourceBounds: sourceBounds,
+                            outputBounds: sourceOutputBounds,
+                            opacity: 1 - Double(progress),
+                            in: context
+                        )
+                        drawInterpolatedItems(
+                            [toItem],
+                            sourceBounds: targetBounds,
+                            outputBounds: targetOutputBounds,
+                            opacity: Double(progress),
+                            in: context
+                        )
+                    }
+                    continue
+                }
                 contents.appendCrossFadeItem(
                     bounds: outputBounds,
                     sourceFraction: Float(progress),
@@ -302,6 +340,23 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 in: context
             )
         }
+    }
+
+    private static func isTextItemPair(
+        _ source: DisplayList.ItemCommand,
+        _ target: DisplayList.ItemCommand
+    ) -> Bool {
+        guard case .text = source, case .text = target else { return false }
+        return true
+    }
+
+    private static func centeredBounds(size: CGSize, at center: CGPoint) -> CGRect {
+        CGRect(
+            x: center.x - size.width * 0.5,
+            y: center.y - size.height * 0.5,
+            width: size.width,
+            height: size.height
+        )
     }
 
     private static func appendInterpolatedDebugItems(

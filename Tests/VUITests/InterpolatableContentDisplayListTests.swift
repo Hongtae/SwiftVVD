@@ -46,6 +46,14 @@ private struct VersionedTransitionContent: Equatable, InterpolatableContent {
     static var defaultTransition: ContentTransition { .opacity }
 
     var value: Int
+
+    func modifyTransition(state: inout ContentTransition.State, to target: Self) {
+        state.transition = .opacity
+    }
+
+    func defaultAnimation(to target: Self) -> Animation? {
+        return .linear(duration: 0.25)
+    }
 }
 
 final class InterpolatableContentDisplayListTests: XCTestCase {
@@ -1535,6 +1543,30 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(targetExtraEnd.itemRecords.map(\.sourceFraction), [1, 0])
         XCTAssertEqual(targetExtraEnd.itemRecords.map(\.targetFraction), [1, 1])
         XCTAssertEqual(targetExtraEnd.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
+    }
+
+    func testRBDisplayListInterpolatorKeepsTextCrossFadeCenteredOnLiveTarget() throws {
+        var source = DisplayList()
+        source.appendTextItem(
+            foreground: .color(.red),
+            bounds: CGRect(x: 0, y: 0, width: 30, height: 10)
+        ) { _ in }
+        var target = DisplayList()
+        target.appendTextItem(
+            foreground: .color(.red),
+            bounds: CGRect(x: 100, y: 50, width: 50, height: 10)
+        ) { _ in }
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.text.rbTransition]
+        )
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        let record = try XCTUnwrap(midpoint.itemRecords.first)
+
+        XCTAssertEqual(record.effectKind, .crossFade)
+        XCTAssertEqual(record.bounds, CGRect(x: 100, y: 50, width: 50, height: 10))
     }
 
     func testRBDisplayListInterpolatorKeepsDebugCountMismatchOnFallbackBounds() {
@@ -3274,6 +3306,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(unary.layer.removed.first?.interpolator?.contents(withProgress: 0.2).debugItems.count, 2)
         XCTAssertFalse(unary.layer.needsUpdate)
         XCTAssertEqual(output.effects.count, 1)
+        XCTAssertEqual(output.effects.first?.contents.debugItems.count, 1)
 
         unary.updateTime(Time(seconds: 2.1))
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.2, accuracy: 0.000_001)
@@ -3354,13 +3387,14 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let displayList = graph.makeInput(value: firstList)
             let content = graph.makeInput(value: VersionedTransitionContent(value: 0))
             let group = DisplayList.UnaryInterpolatorGroup()
+            let inputs = makeViewInputs(graph: graph)
             var outputs = _ViewOutputs()
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
             outputs.applyInterpolatorGroup(
                 group,
                 content: content,
-                inputs: makeViewInputs(graph: graph),
+                inputs: inputs,
                 animatesSize: false,
                 defersRender: false
             )
@@ -3383,6 +3417,185 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(group.layer.removed.first?.interpolator?.from.debugItems.count, 1)
             XCTAssertEqual(group.layer.removed.first?.interpolator?.to.debugItems.count, 1)
         }
+    }
+
+    func testResolvedStyledTextTransitionRetargetsGeometryWithoutAccumulatingRemovedLayers() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let initialList = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 10, y: 10, width: 86, height: 17)
+            )
+            let firstTarget = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 10, y: 10, width: 70, height: 17)
+            )
+            let retargeted = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 9, y: 10, width: 69, height: 17)
+            )
+            let displayList = graph.makeInput(value: initialList)
+            let content = graph.makeInput(
+                value: ResolvedStyledText(version: 1, transitionText: "Remove Child")
+            )
+            let group = DisplayList.UnaryInterpolatorGroup()
+            let inputs = makeViewInputs(graph: graph)
+            var transaction = Transaction()
+            transaction.animation = .easeInOut(duration: 5)
+            inputs.base.transaction.setValue(transaction)
+            inputs.size.setValue(ViewSize(width: 86, height: 17))
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                group,
+                content: content,
+                inputs: inputs,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(output.value.effects.count, 0)
+
+            displayList.setValue(firstTarget, transaction: transaction)
+            inputs.size.setValue(ViewSize(width: 70, height: 17), transaction: transaction)
+            content.setValue(
+                ResolvedStyledText(version: 2, transitionText: "Insert Child"),
+                transaction: transaction
+            )
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(
+                group.layer.removed.first?.interpolator?.to.interpolationBounds,
+                firstTarget.interpolationBounds
+            )
+
+            displayList.setValue(retargeted, transaction: transaction)
+            inputs.size.setValue(ViewSize(width: 69, height: 17), transaction: transaction)
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(
+                group.layer.removed.first?.interpolator?.to.interpolationBounds,
+                retargeted.interpolationBounds
+            )
+        }
+    }
+
+    func testResolvedStyledTextContentChangeReplacesActiveSizeOnlyTransition() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let compactList = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 319, y: 249, width: 31, height: 10)
+            )
+            let expandedList = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 372, y: 249, width: 35, height: 10)
+            )
+            let residualList = makeDisplayList(
+                debugItemCount: 1,
+                bounds: CGRect(x: 372, y: 249, width: 35.1, height: 10)
+            )
+            let displayList = graph.makeInput(value: compactList)
+            let content = graph.makeInput(
+                value: ResolvedStyledText(version: 1, transitionText: "compact")
+            )
+            let group = DisplayList.UnaryInterpolatorGroup()
+            let inputs = makeViewInputs(graph: graph)
+            var transaction = Transaction()
+            transaction.animation = .linear(duration: 0.2)
+            inputs.base.transaction.setValue(transaction)
+            inputs.size.setValue(ViewSize(width: 31, height: 10))
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                group,
+                content: content,
+                inputs: inputs,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(output.value.effects.count, 0)
+
+            displayList.setValue(compactList, transaction: transaction)
+            content.setValue(
+                ResolvedStyledText(version: 2, transitionText: "expanded"),
+                transaction: transaction
+            )
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layer.removedCount, 1)
+
+            inputs.base.time.setValue(Time(seconds: 0.21))
+            displayList.setValue(expandedList, transaction: transaction)
+            inputs.size.setValue(ViewSize(width: 35, height: 10), transaction: transaction)
+            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(group.layer.removedCount, 0)
+
+            inputs.base.time.setValue(Time(seconds: 0.22))
+            displayList.setValue(residualList, transaction: transaction)
+            inputs.size.setValue(ViewSize(width: 35.1, height: 10), transaction: transaction)
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layer.removedCount, 1)
+
+            content.setValue(
+                ResolvedStyledText(version: 3, transitionText: "compact"),
+                transaction: transaction
+            )
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layer.removedCount, 1)
+        }
+    }
+
+    func testTextTransitionRenderFrameUsesIdealWidthWhileUnconstrainedWidthExpands() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 55, height: 17),
+            idealSize: CGSize(width: 70, height: 17),
+            activeSourceBounds: CGRect(x: 100, y: 40, width: 50, height: 17)
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 92.5, y: 40, width: 70, height: 17))
+    }
+
+    func testTextTransitionRenderFrameKeepsFixedConstrainedWidth() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 100, height: 17),
+            idealSize: CGSize(width: 180, height: 17),
+            activeSourceBounds: CGRect(x: 100, y: 40, width: 100, height: 17)
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 100, y: 40, width: 100, height: 17))
+    }
+
+    func testTextTransitionRenderFrameKeepsIdealWidthNearExpansionEndpoint() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 34, height: 17),
+            idealSize: CGSize(width: 34.5, height: 17),
+            activeSourceBounds: CGRect(x: 100, y: 40, width: 31, height: 17)
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 99.75, y: 40, width: 34.5, height: 17))
+    }
+
+    func testTextTransitionRenderFrameKeepsIdealWidthDuringContractionUndershoot() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 30.5, height: 17),
+            idealSize: CGSize(width: 31, height: 17),
+            activeSourceBounds: CGRect(x: 100, y: 40, width: 35, height: 17)
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 99.75, y: 40, width: 31, height: 17))
     }
 
     func testInterpolatedDisplayListIdentityTransitionSyncsCurrentWithoutRemoval() throws {
@@ -3608,13 +3821,17 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let sourceList = makeDisplayList(debugItemCount: 1)
             let displayList = graph.makeInput(value: sourceList)
             let content = graph.makeInput(value: ResolvedStyledText(version: 0))
+            let inputs = makeViewInputs(graph: graph)
+            var transaction = Transaction()
+            transaction.animation = .linear(duration: 0.25)
+            inputs.base.transaction.setValue(transaction)
             var outputs = _ViewOutputs()
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
             outputs.applyInterpolatorGroup(
                 DisplayList.InterpolatorGroup(),
                 content: content,
-                inputs: makeViewInputs(graph: graph),
+                inputs: inputs,
                 animatesSize: false,
                 defersRender: false
             )
@@ -3642,6 +3859,95 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 XCTFail("unexpected content-transition effect")
             }
         }
+    }
+
+    func testResolvedStyledTextInterpolatorUsesItsDedicatedTransactionAttribute() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let sourceList = makeDisplayList(debugItemCount: 1)
+            let displayList = graph.makeInput(value: sourceList)
+            let content = graph.makeInput(value: ResolvedStyledText(version: 0))
+            let transaction = graph.makeInput(value: Transaction())
+            var inputs = makeViewInputs(graph: graph)
+            inputs.base.transaction = transaction
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                DisplayList.InterpolatorGroup(),
+                content: content,
+                inputs: inputs,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(output.value.effects.count, 0)
+
+            var animatedTransaction = Transaction()
+            animatedTransaction.animation = .linear(duration: 5)
+            transaction.setValue(animatedTransaction)
+            content.setValue(ResolvedStyledText(version: 1), transaction: animatedTransaction)
+
+            let animated = output.value
+            guard case let .some(.contentTransition(animatedState)) = animated.effects.first?.effect else {
+                return XCTFail("missing animated text content transition")
+            }
+            XCTAssertEqual(
+                try XCTUnwrap(animatedState.animation).box.duration,
+                5,
+                accuracy: 0.000_001
+            )
+
+            transaction.setValue(Transaction())
+            content.setValue(ResolvedStyledText(version: 2))
+
+            let immediate = output.value
+            XCTAssertEqual(immediate.effects.count, 0)
+            XCTAssertEqual(immediate.debugItems.count, 1)
+        }
+    }
+
+    func testTextResourceResolutionKeepsFirstTransactionForPendingVersion() throws {
+        let state = _TextResourceResolutionState()
+        let immediate = Transaction()
+        var animated = Transaction()
+        animated.animation = .linear(duration: 5)
+
+        XCTAssertNil(state.transaction(for: 1, candidate: immediate).animation)
+        XCTAssertNil(state.transaction(for: 1, candidate: animated).animation)
+
+        state.didResolve(version: 1)
+        XCTAssertEqual(
+            try XCTUnwrap(state.transaction(for: 2, candidate: animated).animation).box.duration,
+            5,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testTextInitialResourcePublicationDoesNotAdoptInsertionAnimation() throws {
+        var animated = Transaction()
+        animated.animation = .linear(duration: 5)
+
+        let initial = _TextResourceResolutionState.publicationTransaction(
+            candidate: animated,
+            hasResolvedContent: false
+        )
+        XCTAssertNil(initial.animation)
+        XCTAssertTrue(initial.disablesAnimations)
+
+        let replacement = _TextResourceResolutionState.publicationTransaction(
+            candidate: animated,
+            hasResolvedContent: true
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(replacement.animation).box.duration,
+            5,
+            accuracy: 0.000_001
+        )
+        XCTAssertFalse(replacement.disablesAnimations)
     }
 
     func testInterpolatedDisplayListReadsContentTransitionFallbackPath() throws {

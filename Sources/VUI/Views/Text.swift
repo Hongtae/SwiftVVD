@@ -8,6 +8,59 @@
 import Foundation
 import VVD
 
+final class _TextResourceResolutionState {
+    private(set) var pendingVersion: Int?
+    private var pendingTransaction = Transaction()
+
+    func transaction(for version: Int, candidate: Transaction) -> Transaction {
+        guard pendingVersion != version else {
+            return pendingTransaction
+        }
+        pendingVersion = version
+        pendingTransaction = candidate
+        return candidate
+    }
+
+    func didResolve(version: Int) {
+        guard pendingVersion == version else { return }
+        pendingVersion = nil
+        pendingTransaction = Transaction()
+    }
+
+    static func publicationTransaction(
+        candidate: Transaction,
+        hasResolvedContent: Bool
+    ) -> Transaction {
+        guard !hasResolvedContent else { return candidate }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        return transaction
+    }
+}
+
+func _textTransitionRenderFrame(
+    position: CGPoint,
+    viewSize: CGSize,
+    idealSize: CGSize,
+    activeSourceBounds: CGRect?
+) -> CGRect {
+    var renderSize = viewSize
+    if let activeSourceBounds {
+        let sourceWidth = activeSourceBounds.width
+        let isExpanding = idealSize.width > sourceWidth && viewSize.width > sourceWidth
+        let isContracting = idealSize.width < sourceWidth && viewSize.width < sourceWidth
+        if isExpanding || isContracting {
+            renderSize.width = max(viewSize.width, idealSize.width)
+        }
+    }
+    return CGRect(
+        x: position.x + (viewSize.width - renderSize.width) * 0.5,
+        y: position.y,
+        width: renderSize.width,
+        height: renderSize.height
+    )
+}
+
 // TextAlignment: horizontal alignment for multi-line text.
 public enum TextAlignment: Hashable {
     case leading
@@ -378,6 +431,8 @@ extension Text: View {
         // 1. Internal state nodes for communication between the resource and layout passes.
         // Caches the fully resolved styled text object (including glyphs/metrics).
         let resolvedStyledTextAttr = graph.makeInput(value: ResolvedStyledText())
+        let resolvedStyledTextTransactionAttr = graph.makeInput(value: Transaction())
+        let resourceResolutionState = _TextResourceResolutionState()
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
@@ -408,8 +463,20 @@ extension Text: View {
             // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
             let resolvedStyledText = resolvedStyledTextAttr.value
             if resolvedStyledText.version == currentVersion, resolvedStyledText.resolvedText != nil {
+                resourceResolutionState.didResolve(version: currentVersion)
                 return ResourceList()
             }
+
+            let candidateTransaction = _AGGraph.currentRuleContextAttribute
+                .flatMap { graph.transaction(for: $0) } ?? Transaction()
+            let resourceTransaction = resourceResolutionState.transaction(
+                for: currentVersion,
+                candidate: candidateTransaction
+            )
+            let publicationTransaction = _TextResourceResolutionState.publicationTransaction(
+                candidate: resourceTransaction,
+                hasResolvedContent: resolvedStyledText.resolvedText != nil
+            )
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
             var list = ResourceList()
@@ -418,16 +485,24 @@ extension Text: View {
                 // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
                 let resolved = text._resolve(context: context)
                 let boxedResolved = UnsafeBox(resolved)
+                let boxedTransaction = UnsafeBox(publicationTransaction)
 
                 // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
-                inbox.enqueue {
+                let publish: @Sendable () -> Void = {
+                    resolvedStyledTextTransactionAttr.setValue(boxedTransaction.value)
                     resolvedStyledTextAttr.setValue(
                         ResolvedStyledText(
                             resolvedText: boxedResolved.value,
                             version: currentVersion,
                             transitionText: transitionText
-                        )
+                        ),
+                        transaction: boxedTransaction.value
                     )
+                }
+                if _AGGraph.current === graph {
+                    publish()
+                } else {
+                    inbox.enqueue(transaction: publicationTransaction, publish)
                 }
             }
 
@@ -473,19 +548,27 @@ extension Text: View {
             )
         }
 
+        let interpolatorGroup = DisplayList.UnaryInterpolatorGroup()
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let text = view._attribute.value // Dependency: text modifiers/colors
             let environment = cachedEnvironmentAttr.value.environment.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
-            let resolved = resolvedStyledTextAttr.value.resolvedText
+            let styledText = resolvedStyledTextAttr.value
+            let resolved = styledText.resolvedText
             let debugLayout = debugLayoutAttr.value
             let foreground = text.foregroundShading(in: environment)
 
             var list = DisplayList()
 
             if let resolved = resolved {
-                var frame = CGRect(origin: position, size: viewSize)
+                let idealSize = resolved.measure()
+                var frame = _textTransitionRenderFrame(
+                    position: position,
+                    viewSize: viewSize,
+                    idealSize: idealSize,
+                    activeSourceBounds: interpolatorGroup.activeSourceBounds
+                )
                 let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
 
                 if measuredSize.height < frame.height {
@@ -512,10 +595,13 @@ extension Text: View {
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        var interpolatorInputs = inputs
+        interpolatorInputs.base.transaction = resolvedStyledTextTransactionAttr
+        interpolatorInputs.size = animatedFrame?.size ?? inputs.size
         outputs.applyInterpolatorGroup(
-            DisplayList.InterpolatorGroup(),
+            interpolatorGroup,
             content: resolvedStyledTextAttr,
-            inputs: inputs,
+            inputs: interpolatorInputs,
             animatesSize: false,
             defersRender: false
         )

@@ -24,7 +24,83 @@ private final class _ConditionalListBranchState {
     var lastTrueContent: Any? = nil
     var lastFalseContent: Any? = nil
     var activeSubgraph: AGSubgraph? = nil
+    var activeManagedSubgraph: _ViewList_Subgraph? = nil
     var activeListOutputs: _ViewListOutputs? = nil
+    var activeID = UniqueID()
+}
+
+private struct _ConditionalIdentityViewList: ViewList {
+    var base: any ViewList
+    var id: UniqueID
+    var owner: AGAttribute
+    var isUnary: Bool
+    var reuseID: Int
+    var subgraph: _ViewList_Subgraph
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        base.count(style: style)
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        base.estimatedCount(style: style)
+    }
+
+    var traitKeys: ViewTraitKeys? { base.traitKeys }
+    var traits: ViewTraitCollection { base.traits }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        base.applyNodes(
+            from: &from,
+            style: style,
+            list: list,
+            transform: transform.withPushedItem(
+                _ConditionalIdentityTransform(
+                    id: id,
+                    owner: owner,
+                    isUnary: isUnary,
+                    reuseID: reuseID,
+                    subgraph: subgraph
+                )
+            ),
+            to: to
+        )
+    }
+}
+
+private struct _ConditionalIdentityTransform: _ViewList_SublistTransform_Item {
+    var id: UniqueID
+    var owner: AGAttribute
+    var isUnary: Bool
+    var reuseID: Int
+    var subgraph: _ViewList_Subgraph
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        bindID(&sublist.id)
+        sublist.traits[CanTransitionTraitKey.self] = true
+        if var elements = sublist.elements as? _ViewList_SubgraphElements {
+            elements.wrap(subgraph: subgraph)
+            sublist.elements = elements
+        } else {
+            var elements = _ViewList_SubgraphElements(base: sublist.elements)
+            elements.wrap(subgraph: subgraph)
+            sublist.elements = elements
+        }
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        id.bind(
+            explicitID: self.id,
+            owner: owner,
+            isUnary: isUnary,
+            reuseID: reuseID
+        )
+    }
 }
 
 extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
@@ -193,7 +269,9 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         let state = _ConditionalListBranchState()
-        state.activeSubgraph = AGSubgraph()
+        let initialSubgraph = AGSubgraph()
+        state.activeSubgraph = initialSubgraph
+        state.activeManagedSubgraph = _ViewList_Subgraph(subgraph: initialSubgraph)
 
         func trueBranchValue() -> TrueContent {
             if case let .trueContent(content) = view._attribute.value.storage {
@@ -261,7 +339,11 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             guard !state.isUpdating else { return }
             state.isUpdating = true
             state.activeListOutputs = nil
-            state.activeSubgraph?.invalidate()
+            state.activeManagedSubgraph?.release()
+            let nextSubgraph = AGSubgraph()
+            state.activeSubgraph = nextSubgraph
+            state.activeManagedSubgraph = _ViewList_Subgraph(subgraph: nextSubgraph)
+            state.activeID = UniqueID()
             state.activeListOutputs = makeBranchOutputs(isTrue: nowTrue)
             state.isTrue = nowTrue
             state.isUpdating = false
@@ -286,7 +368,18 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             guard let outputs = state.activeListOutputs else {
                 return EmptyViewList()
             }
-            return resolvedList(from: outputs)
+            guard let activeManagedSubgraph = state.activeManagedSubgraph else {
+                fatalError("_ConditionalContent lost its active list subgraph.")
+            }
+            let activeType: Any.Type = nowTrue ? TrueContent.self : FalseContent.self
+            return _ConditionalIdentityViewList(
+                base: resolvedList(from: outputs),
+                id: state.activeID,
+                owner: view._attribute.identifier,
+                isUnary: outputs.staticCount == 1,
+                reuseID: Int(bitPattern: ObjectIdentifier(activeType)),
+                subgraph: activeManagedSubgraph
+            )
         }
 
         return _ViewListOutputs(

@@ -269,7 +269,7 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
         )
         return withUnsafeMutablePointer(to: &placementData) { pointer in
             ThreadLayoutData.withPlacementData(pointer) {
-                withTransaction(placementTransaction()) {
+                Transaction.withScopedThreadTransaction(placementTransaction()) {
                     layout.placeSubviews(
                         in: CGRect(origin: origin, size: size.value),
                         proposal: ProposedViewSize(size.value),
@@ -292,7 +292,7 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
             y: position.y - size.height * anchor.y
         )
         var placeCache = layout.makeCache(subviews: subviews)
-        withTransaction(placementTransaction()) {
+        Transaction.withScopedThreadTransaction(placementTransaction()) {
             layout.placeSubviews(
                 in: CGRect(origin: origin, size: size),
                 proposal: proposal,

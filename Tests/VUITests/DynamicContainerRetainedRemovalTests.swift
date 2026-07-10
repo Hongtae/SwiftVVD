@@ -53,9 +53,16 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
+        XCTAssertFalse(try XCTUnwrap(retainedItem.listener).isCompletionPublished)
 
         ref.withCurrent {
+            graph.invalidateAttribute(infoAttr.identifier)
+            let pendingPublication = infoAttr.value
+            XCTAssertEqual(pendingPublication.removedCount, 1)
+            XCTAssertTrue(pendingPublication.items.first === retainedItem)
+
             graph.inbox.drain()
+            XCTAssertEqual(retainedItem.listener?.isCompletionPublished, true)
             let finalized = infoAttr.value
             XCTAssertEqual(finalized.activeItems.count, 0)
             XCTAssertEqual(finalized.removedCount, 0)
@@ -876,6 +883,209 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     EmptyView()
                 }
             }
+        }
+    }
+
+    func testPublicConditionalStaticBranchRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+            VStack {
+                if let row = rows.first {
+                    DynamicContainerLifecycleRow(row: row, recorder: recorder)
+                        .transition(.opacity)
+                } else {
+                    Text("empty")
+                }
+            }
+        }
+    }
+
+    func testPublicConditionalStaticBranchInsertionAppliesWillAppearThenIdentity() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let lifecycleRecorder = DynamicContainerLifecycleRecorder()
+        let phaseRecorder = DynamicContainerTransitionPhaseRecorder()
+        var source: Attribute<DynamicContainerConditionalTransitionRoot>!
+        var layoutAttr: Attribute<LayoutComputer>!
+
+        func root(showChild: Bool) -> DynamicContainerConditionalTransitionRoot {
+            DynamicContainerConditionalTransitionRoot(
+                showChild: showChild,
+                lifecycleRecorder: lifecycleRecorder,
+                phaseRecorder: phaseRecorder
+            )
+        }
+
+        func sampleLayout() {
+            _ = layoutAttr.value.sizeThatFits(.unspecified)
+        }
+
+        try viewGraph.data.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(value: root(showChild: false))
+            let outputs = DynamicContainerConditionalTransitionRoot._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewInputs(graph: graph, base: inputs)
+            )
+            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            sampleLayout()
+            XCTAssertEqual(phaseRecorder.events, [])
+            XCTAssertEqual(lifecycleRecorder.events, [])
+        }
+
+        viewGraph.data.withCurrent {
+            var insertion = Transaction(animation: .linear(duration: 0.02))
+            insertion.animationFrameInterval = 1.0 / 120.0
+            source.setValue(root(showChild: true), transaction: insertion)
+            sampleLayout()
+            graph.inbox.drain()
+            sampleLayout()
+
+            XCTAssertEqual(phaseRecorder.events, ["willAppear", "identity"])
+            XCTAssertEqual(lifecycleRecorder.events, ["row appear"])
+        }
+    }
+
+    func testPublicConditionalReplacementAppliesDefaultTransitionToUnmodifiedBranch() throws {
+        typealias Root = _ConditionalContent<Text, Text>
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var source: Attribute<Root>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+
+        func root(showChild: Bool) -> Root {
+            if showChild {
+                return ViewBuilder.buildEither(first: Text("child"))
+            } else {
+                return ViewBuilder.buildEither(second: Text("empty"))
+            }
+        }
+
+        ref.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: inputs)
+            source = graph.makeInput(value: root(showChild: true))
+            let outputs = Root._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+            guard case .dynamicList(let viewListAttr, _) = outputs.views else {
+                XCTFail("conditional replacement should produce a dynamic list")
+                return
+            }
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: viewListAttr,
+                    inputs: viewInputs
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.activeItems.first?.phase, 1)
+        }
+
+        try ref.withCurrent {
+            let replacement = Transaction(animation: .linear(duration: 1))
+            source.setValue(root(showChild: false), transaction: replacement)
+
+            let updated = infoAttr.value
+            XCTAssertEqual(updated.activeItems.count, 1)
+            XCTAssertEqual(updated.removedCount, 1)
+            let inserted = try XCTUnwrap(updated.activeItems.first)
+            XCTAssertTrue(inserted.needsTransitions)
+            XCTAssertEqual(inserted.phase, 0)
+            XCTAssertFalse(inserted.transitionPhaseSetters.isEmpty)
+        }
+    }
+
+    func testPublicConditionalStaticBranchRemovalInterpolatesTransitionValue() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        let capture = DynamicContainerTransitionValueCapture()
+        var graphInputs: _GraphInputs!
+        var source: Attribute<DynamicContainerConditionalValueTransitionRoot>!
+        var layoutAttr: Attribute<LayoutComputer>!
+        var displayOutput: Attribute<DisplayList>!
+        var initialSourceID: AGAttribute!
+        var initialAnimatedID: AGAttribute!
+
+        func root(showChild: Bool) -> DynamicContainerConditionalValueTransitionRoot {
+            DynamicContainerConditionalValueTransitionRoot(
+                showChild: showChild,
+                capture: capture
+            )
+        }
+
+        func sampleLayout() {
+            _ = layoutAttr.value.sizeThatFits(.unspecified)
+        }
+
+        try viewGraph.data.withCurrent {
+            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            source = graph.makeInput(value: root(showChild: true))
+            var keys = PreferenceKeys()
+            keys.insert(DisplayList.Key.self)
+            let outputs = DynamicContainerConditionalValueTransitionRoot._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: makeViewInputs(
+                    graph: graph,
+                    base: graphInputs,
+                    preferenceKeys: keys
+                )
+            )
+            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            displayOutput = Attribute<DisplayList>(
+                try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            )
+            sampleLayout()
+            _ = displayOutput.value
+            let initialSource = try XCTUnwrap(capture.source)
+            let initialAnimated = try XCTUnwrap(capture.animated)
+            initialSourceID = initialSource.identifier
+            initialAnimatedID = initialAnimated.identifier
+            XCTAssertEqual(initialSource.value.value, 1, accuracy: 0.000_001)
+            XCTAssertEqual(initialAnimated.value.value, 1, accuracy: 0.000_001)
+        }
+
+        try viewGraph.data.withCurrent {
+            var removal = Transaction(animation: .linear(duration: 1))
+            removal.animationFrameInterval = 1.0 / 120.0
+            source.setValue(root(showChild: false), transaction: removal)
+            sampleLayout()
+            _ = displayOutput.value
+            let retainedSource = try XCTUnwrap(capture.source)
+            XCTAssertEqual(retainedSource.identifier, initialSourceID)
+            XCTAssertEqual(retainedSource.value.value, 0, accuracy: 0.000_001)
+            XCTAssertNotNil(
+                graph.transaction(for: retainedSource.identifier)?.effectiveAnimation
+            )
+            let retainedValue = try XCTUnwrap(capture.animated)
+            XCTAssertEqual(retainedValue.identifier, initialAnimatedID)
+            XCTAssertEqual(retainedValue.value.value, 1, accuracy: 0.000_001)
+
+            graphInputs.time.setValue(Time(seconds: 1.0 / 60.0))
+            _ = displayOutput.value
+            _ = retainedValue.value
+            graphInputs.time.setValue(Time(seconds: 2.0 / 60.0))
+            _ = displayOutput.value
+            _ = retainedValue.value
+            graphInputs.time.setValue(Time(seconds: 0.5))
+            sampleLayout()
+            _ = displayOutput.value
+            XCTAssertEqual(retainedSource.value.value, 0, accuracy: 0.000_001)
+            XCTAssertEqual(retainedValue.value.value, 0.53, accuracy: 0.06)
         }
     }
 
@@ -3395,6 +3605,95 @@ private struct DynamicContainerConditionalForEachRoot: View {
                 }
             } else {
                 EmptyView()
+            }
+        }
+    }
+}
+
+private struct DynamicContainerConditionalTransitionRoot: View {
+    var showChild: Bool
+    var lifecycleRecorder: DynamicContainerLifecycleRecorder
+    var phaseRecorder: DynamicContainerTransitionPhaseRecorder
+
+    var body: some View {
+        VStack {
+            if showChild {
+                DynamicContainerLifecycleRow(row: "row", recorder: lifecycleRecorder)
+                    .transition(
+                        AnyTransition(
+                            DynamicContainerPhaseRecordingTransition(recorder: phaseRecorder)
+                        )
+                    )
+            } else {
+                Text("empty")
+            }
+        }
+    }
+}
+
+private final class DynamicContainerTransitionValueCapture {
+    var source: Attribute<DynamicContainerTransitionValueModifier>?
+    var animated: Attribute<DynamicContainerTransitionValueModifier>?
+}
+
+private struct DynamicContainerTransitionValueTransition: Transition {
+    var capture: DynamicContainerTransitionValueCapture
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.modifier(
+            DynamicContainerTransitionValueModifier(
+                value: phase.isIdentity ? 1 : 0,
+                capture: capture
+            )
+        )
+    }
+}
+
+private struct DynamicContainerTransitionValueModifier: ViewModifier, Animatable {
+    var value: Double
+    var capture: DynamicContainerTransitionValueCapture
+
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        var animated = modifier
+        Self._makeAnimatable(value: &animated, inputs: inputs.base)
+        let capture = modifier[\.capture]._attribute.value
+        capture.source = modifier._attribute
+        capture.animated = animated._attribute
+        return _OpacityEffectSupport.makeView(
+            modifier: animated,
+            opacity: animated[\.value],
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
+private struct DynamicContainerConditionalValueTransitionRoot: View {
+    var showChild: Bool
+    var capture: DynamicContainerTransitionValueCapture
+
+    var body: some View {
+        VStack {
+            if showChild {
+                Text("child")
+                    .transition(
+                        AnyTransition(
+                            DynamicContainerTransitionValueTransition(capture: capture)
+                        )
+                    )
+            } else {
+                Text("empty")
             }
         }
     }

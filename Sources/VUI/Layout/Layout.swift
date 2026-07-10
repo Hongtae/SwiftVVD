@@ -170,6 +170,7 @@ enum DynamicContainer {
             var seedValue: UInt32 = 0
             var completionInstalled = false
             var completed = false
+            var completionPublished = false
         }
 
         private let seed: Attribute<UInt32>
@@ -183,6 +184,10 @@ enum DynamicContainer {
 
         var isComplete: Bool {
             state.withLock { $0.completed }
+        }
+
+        var isCompletionPublished: Bool {
+            state.withLock { $0.completionPublished }
         }
 
         func readSeed() {
@@ -201,7 +206,10 @@ enum DynamicContainer {
                 return transaction.animationCompletionObserver
             }
 
-            transaction.addAnimationCompletion(criteria: .removed) { [weak self] in
+            transaction.addAnimationCompletion(
+                criteria: .removed,
+                tracksStandalonePending: false
+            ) { [weak self] in
                 self?.complete()
             }
             return transaction.animationCompletionObserver
@@ -220,7 +228,10 @@ enum DynamicContainer {
             }
 
             let seed = self.seed
-            inbox.enqueue {
+            inbox.enqueue { [weak self] in
+                self?.state.withLock { state in
+                    state.completionPublished = true
+                }
                 seed.setValue(nextSeed)
             }
         }
@@ -526,6 +537,7 @@ struct DynamicContainerInfo: StatefulRule {
     var inputs: _ViewInputs
     var info = DynamicContainer.Info()
     var retainedElements: [_ViewList_ID.Canonical: _ViewList_SubgraphRelease] = [:]
+    var hasValue = false
 
     mutating func updateValue() {
         guard let graph = _AGGraph.current else {
@@ -540,6 +552,7 @@ struct DynamicContainerInfo: StatefulRule {
         var liveIDs = Set<_ViewList_ID.Canonical>()
         var orderedItems: [DynamicContainer.ItemInfo] = []
         var precedingViewCount = 0
+        var needsInsertionPhaseUpdate = false
 
         _ = _applySublists(in: currentList, from: &from, listAttribute: viewListAttr) { sublist in
             for offset in 0..<sublist.count {
@@ -563,6 +576,10 @@ struct DynamicContainerInfo: StatefulRule {
                 let reusableItem = info.item(for: id).flatMap { existing in
                     existing.viewCount == viewCount && existing.needsTransitions == needsTransitions ? existing : nil
                 }
+                let transition = needsTransitions ? sublist.traits[TransitionTraitKey.self] : nil
+                let insertionTransaction = reusableItem == nil && hasValue
+                    ? transition?.positiveInsertionTransaction(from: listTransaction)
+                    : nil
                 let item: DynamicContainer.ItemInfo?
                 if let reusableItem {
                     item = reusableItem
@@ -572,7 +589,8 @@ struct DynamicContainerInfo: StatefulRule {
                         viewCount: viewCount,
                         sublist: sublist,
                         offset: offset,
-                        transition: needsTransitions ? sublist.traits[TransitionTraitKey.self] : nil,
+                        transition: transition,
+                        initialTransitionPhase: insertionTransaction == nil ? .identity : .willAppear,
                         capturedInputs: capturedInputs,
                         graph: graph
                     )
@@ -585,13 +603,16 @@ struct DynamicContainerInfo: StatefulRule {
                     if item.phase == 3 {
                         item.subgraph.didReinsert()
                     }
-                    if item.phase != 1 {
+                    if insertionTransaction != nil {
+                        item.phase = 0
+                        needsInsertionPhaseUpdate = true
+                    } else if item.phase != 1 {
                         item.listener = nil
                         item.removalLifecycleStarted = false
                         item.retainAfterRemovalCompletion = false
                         item.setTransitionPhase(.identity, transaction: listTransaction)
+                        item.phase = 1
                     }
-                    item.phase = 1
                     item.precedingViewCount = precedingViewCount
                     precedingViewCount += item.viewCount
                     orderedItems.append(item)
@@ -610,7 +631,14 @@ struct DynamicContainerInfo: StatefulRule {
             removed: retention.removed,
             unused: retention.unused
         )
+        hasValue = true
         _AGGraph.setStatefulOutput(info)
+        if needsInsertionPhaseUpdate,
+           let currentAttribute = _AGGraph.currentRuleContextAttribute {
+            graph.inbox.enqueue {
+                graph.invalidateAttribute(currentAttribute)
+            }
+        }
     }
 
     private mutating func retainedInactiveItems(
@@ -648,7 +676,7 @@ struct DynamicContainerInfo: StatefulRule {
                     continue
                 }
                 listener.readSeed()
-                if listener.isComplete {
+                if listener.isCompletionPublished {
                     if item.retainAfterRemovalCompletion {
                         item.listener = nil
                         item.retainAfterRemovalCompletion = false
@@ -768,6 +796,7 @@ struct DynamicContainerInfo: StatefulRule {
         sublist: _ViewList_Sublist,
         offset: Int,
         transition: AnyTransition?,
+        initialTransitionPhase: TransitionPhase,
         capturedInputs: _ViewInputs,
         graph: _AGGraph
     ) -> DynamicContainer.ItemInfo? {
@@ -853,7 +882,7 @@ struct DynamicContainerInfo: StatefulRule {
                     childInputs.stackOrientation = capturedInputs.stackOrientation
                     if let transition {
                         return transition._makeView(
-                            phase: .identity,
+                            phase: initialTransitionPhase,
                             inputs: childInputs,
                             phaseSetters: &transitionPhaseSetters
                         ) { _, transitionInputs in
@@ -910,7 +939,7 @@ struct DynamicContainerInfo: StatefulRule {
                             } else {
                                 scrollBasePosAttr?.setValue(rawOrigin)
                             }
-                            withTransaction(placementTransaction) {
+                            Transaction.withScopedThreadTransaction(placementTransaction) {
                                 inner.place(at: pos, anchor: anchor, proposal: proposal)
                             }
                         },
@@ -940,6 +969,7 @@ struct DynamicContainerInfo: StatefulRule {
                 preferenceOutputs: preferenceOutputs,
                 transitionPhaseSetters: transitionPhaseSetters,
                 needsTransitions: transition != nil,
+                phase: initialTransitionPhase == .willAppear ? 0 : 1,
                 item: dynamicItem,
                 transitionCompletionSeed: transitionCompletionSeed,
                 transitionTransactions: transition.map { transition in
@@ -957,6 +987,18 @@ struct DynamicContainerInfo: StatefulRule {
             retainedElements[uniqueId] = release
         }
         return item
+    }
+}
+
+private extension AnyTransition {
+    func positiveInsertionTransaction(from transaction: Transaction) -> Transaction? {
+        _filteredTransactions(from: transaction, phase: .willAppear).first { candidate in
+            guard !candidate.disablesAnimations,
+                  let animation = candidate.effectiveAnimation else {
+                return false
+            }
+            return animation.box.duration > 0
+        }
     }
 }
 
@@ -1296,7 +1338,7 @@ extension Layout {
                                     ViewSize(resolvedSize, proposal: proposal),
                                     transaction: placementTransaction
                                 )
-                                withTransaction(placementTransaction) {
+                                Transaction.withScopedThreadTransaction(placementTransaction) {
                                     inner.place(at: position, anchor: anchor, proposal: proposal)
                                 }
                             },

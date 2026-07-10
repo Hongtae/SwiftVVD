@@ -695,6 +695,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     if samplesDisplayList, let rootDisplayList = viewGraph.rootDisplayList {
                         _ = rootDisplayList.value
                     }
+                    if samplesDisplayList, let rootResourceList = viewGraph.rootResourceList {
+                        _ = rootResourceList.value
+                    }
 
                     guard notifiesLayoutUpdate else { return }
                     let previousRootFittedSize = cachedRootFittedSize
@@ -720,6 +723,23 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
             }
             return !layoutChangeSet.isEmpty
+        }
+
+        func loadRootResourcesIfNeeded() -> Bool {
+            var didLoadResources = false
+            viewGraph.data.withCurrent {
+                guard let resourceList = viewGraph.rootResourceList?.value,
+                      !resourceList.items.isEmpty else {
+                    return
+                }
+                didLoadResources = true
+                withGC(false) { context in
+                    for task in resourceList.items {
+                        task(context)
+                    }
+                }
+            }
+            return didLoadResources
         }
 
         let updateChangeSet = _AGChangeSet()
@@ -764,6 +784,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         notifiesLayoutUpdate: false,
                         samplesDisplayList: true
                     )
+                    if loadRootResourcesIfNeeded() {
+                        loadedResources = true
+                        _ = runRootLayoutPass(
+                            notifiesLayoutUpdate: false,
+                            samplesDisplayList: true
+                        )
+                    }
                 }
             }
             viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
@@ -771,15 +798,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
-            viewGraph.data.withCurrent {
-                if let resourceList = viewGraph.rootResourceList?.value,
-                   !resourceList.items.isEmpty {
-                    loadedResources = true
-                    withGC(false) { context in
-                        for task in resourceList.items {
-                            task(context)
-                        }
-                    }
+            if loadRootResourcesIfNeeded() {
+                loadedResources = true
+                viewGraph.data.withCurrent {
                     var lastResourceTransaction: Transaction?
                     while viewGraph.data.graph.inbox.hasPendingWork {
                         viewGraph.beginNextUpdate(at: time)
