@@ -68,7 +68,7 @@ class AnyColorBox: ColorBox, @unchecked Sendable {
         Self(self.colorBox.copy())
     }
 
-    var dkColor: VVD.Color {
+    var backendColor: VVD.Color {
         .init(self.red, self.green, self.blue, self.alpha)
     }
 }
@@ -81,7 +81,7 @@ public struct Color: Hashable {
     }
 
     let provider: AnyColorBox
-    var dkColor: VVD.Color { provider.dkColor }
+    var backendColor: VVD.Color { provider.backendColor }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
         let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)

@@ -8,6 +8,15 @@
 import Foundation
 import VVD
 
+@inline(__always)
+private func _premultipliedVertexColor(_ color: VVD.Color) -> Float4 {
+    let alpha = Float32(color.a)
+    return (Float32(color.r) * alpha,
+            Float32(color.g) * alpha,
+            Float32(color.b) * alpha,
+            alpha)
+}
+
 extension GraphicsContext {
     public struct Shading {
         enum Property {
@@ -793,7 +802,7 @@ extension GraphicsContext {
                 let makeVertex = { (x: Scalar, y: Scalar) in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
-                            color: c.dkColor.float4)
+                            color: _premultipliedVertexColor(c.backendColor))
                 }
                 vertices = [
                     makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
@@ -841,16 +850,16 @@ extension GraphicsContext {
                 let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: VVD.Color, c2: VVD.Color) in
                     let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
-                                         color: c1.float4),
+                                         color: _premultipliedVertexColor(c1)),
                                  _Vertex(position: Vector2(x1, minY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
-                                         color: c1.float4),
+                                         color: _premultipliedVertexColor(c1)),
                                  _Vertex(position: Vector2(x2, maxY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
-                                         color: c2.float4),
+                                         color: _premultipliedVertexColor(c2)),
                                  _Vertex(position: Vector2(x2, minY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
-                                         color: c2.float4)]
+                                         color: _premultipliedVertexColor(c2))]
                     vertices.append(contentsOf: [verts[0], verts[1], verts[2]])
                     vertices.append(contentsOf: [verts[2], verts[1], verts[3]])
                 }
@@ -869,8 +878,8 @@ extension GraphicsContext {
                                 if loc2 + pos < minX { continue }
                                 addGradientBox(loc1 + pos,
                                                loc2 + pos,
-                                               s1.color.dkColor,
-                                               s2.color.dkColor)
+                                               s1.color.backendColor,
+                                               s2.color.backendColor)
                             }
                         } else {
                             for i in 0..<(stops.count-1) {
@@ -881,8 +890,8 @@ extension GraphicsContext {
                                 if s2.location + pos < minX { continue }
                                 addGradientBox(s1.location + pos,
                                                s2.location + pos,
-                                               s1.color.dkColor,
-                                               s2.color.dkColor)
+                                               s1.color.backendColor,
+                                               s2.color.backendColor)
                             }
                         }
                         pos += 1
@@ -898,8 +907,8 @@ extension GraphicsContext {
                             if s2.location + pos < minX { continue }
                             addGradientBox(s1.location + pos,
                                            s2.location + pos,
-                                           s1.color.dkColor,
-                                           s2.color.dkColor)
+                                           s1.color.backendColor,
+                                           s2.color.backendColor)
                         }
                         pos += 1
                     }
@@ -909,15 +918,15 @@ extension GraphicsContext {
                         let s2 = stops[i+1]
 
                         addGradientBox(s1.location, s2.location,
-                                       s1.color.dkColor, s2.color.dkColor)
+                                       s1.color.backendColor, s2.color.backendColor)
                     }
                     if let first = stops.first, first.location > minX {
                         addGradientBox(minX, first.location,
-                                       first.color.dkColor, first.color.dkColor)
+                                       first.color.backendColor, first.color.backendColor)
                     }
                     if let last = stops.last, last.location < maxX {
                         addGradientBox(last.location, maxX,
-                                       last.color.dkColor, last.color.dkColor)
+                                       last.color.backendColor, last.color.backendColor)
                     }
                 }
             case let .radialGradient(gradient, center, startRadius, endRadius, options):
@@ -998,7 +1007,7 @@ extension GraphicsContext {
                         for (i, p) in verts.enumerated() {
                             vertices.append(_Vertex(position: p.rotated(by: progress).applying(transform).float2,
                                                     texcoord: texCoord,
-                                                    color: colors[i].dkColor.float4))
+                                                    color: _premultipliedVertexColor(colors[i].backendColor)))
                         }
                         progress += step
                     }
@@ -1120,13 +1129,13 @@ extension GraphicsContext {
 
                     vertices.append(_Vertex(position: center.float2,
                                             texcoord: texCoord,
-                                            color: color1.dkColor.float4))
+                                            color: _premultipliedVertexColor(color1.backendColor)))
                     vertices.append(_Vertex(position: p0.float2,
                                             texcoord: texCoord,
-                                            color: color1.dkColor.float4))
+                                            color: _premultipliedVertexColor(color1.backendColor)))
                     vertices.append(_Vertex(position: p1.float2,
                                             texcoord: texCoord,
-                                            color: color2.dkColor.float4))
+                                            color: _premultipliedVertexColor(color2.backendColor)))
 
                     progress += step
                 }

@@ -36,7 +36,7 @@ extension GraphicsContext {
         }
 
         public static func colorMultiply(_ color: Color) -> Filter {
-            let cc = color.dkColor
+            let cc = color.backendColor
             var cm = ColorMatrix.identity
             cm.r1 = Float(cc.r)
             cm.g2 = Float(cc.g)
@@ -284,7 +284,7 @@ extension GraphicsContext {
             }
         case let .shadow(color, radius, offset, blendMode, options):
             var colorMatrix = ColorMatrix.zero
-            let color = color.dkColor
+            let color = color.backendColor
             colorMatrix.a4 = Float(color.a) // alpha factor (multiply)
             colorMatrix.r5 = Float(color.r) // constant
             colorMatrix.g5 = Float(color.g) // constant
