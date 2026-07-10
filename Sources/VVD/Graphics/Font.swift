@@ -180,7 +180,7 @@ public class Font {
     private var _size26d6: FT_F26Dot6
     private var _dpi: DPI
 
-    public struct Glyph: Sendable {
+    public struct GlyphMetrics: Sendable {
         public let index: UInt32        // glyph index (FT_UInt)
         public let advance: CGSize      // distance to next glyph
         public let bearing: CGPoint     // offset from baseline (left, top)
@@ -313,21 +313,24 @@ public class Font {
     }
 
     /// text pixel-width from baseline. not includes outline.
-    public func lineWidth(of text: String) -> CGFloat {
+    public func lineWidth(of text: String,
+                          embolden: CGFloat = 0) -> CGFloat {
         var length: CGFloat = 0.0
         if self.isKerningEnabled {
             var c1 = UnicodeScalar(UInt8(0))
             for c2 in text.unicodeScalars {
-                if let glyph = self.glyph(for: c2) {
-                    length += glyph.advance.width
+                if let metrics = self.glyphMetrics(for: c2,
+                                                   embolden: embolden) {
+                    length += metrics.advance.width
                     length += self.kernAdvance(left: c1, right: c2).x
                 }
                 c1 = c2
             }
         } else {
             text.unicodeScalars.forEach {
-                if let glyph = self.glyph(for: $0) {
-                    length += glyph.advance.width
+                if let metrics = self.glyphMetrics(for: $0,
+                                                   embolden: embolden) {
+                    length += metrics.advance.width
                 }
             }
         }
@@ -400,29 +403,36 @@ public class Font {
         }
     }
 
-    private func _glyphData(from face: FT_Face, index: UInt32) -> Glyph {
+    private func _glyphMetrics(from face: FT_Face,
+                               index: UInt32,
+                               embolden: CGFloat = 0) -> GlyphMetrics {
         assert(face.pointee.glyph != nil)
         let metrics = face.pointee.glyph.pointee.metrics
-        let advance = CGSize(width: ft26d6ToFloat(metrics.horiAdvance),
-                                height: ft26d6ToFloat(metrics.vertAdvance))
-        let bearing = CGPoint(x: ft26d6ToFloat(metrics.horiBearingX),
-                                y: ft26d6ToFloat(metrics.horiBearingY))
-        let size = CGSize(width: ft26d6ToFloat(metrics.width),
-                            height: ft26d6ToFloat(metrics.height))
+        let strength = ft26d6ToFloat(ft26d6(embolden))
+        let advance = CGSize(
+            width: ft26d6ToFloat(metrics.horiAdvance) + strength,
+            height: ft26d6ToFloat(metrics.vertAdvance) + strength)
+        let bearing = CGPoint(
+            x: ft26d6ToFloat(metrics.horiBearingX),
+            y: ft26d6ToFloat(metrics.horiBearingY) + strength)
+        let size = CGSize(
+            width: ft26d6ToFloat(metrics.width) + strength,
+            height: ft26d6ToFloat(metrics.height) + strength)
 
         let faceMetrics = face.pointee.size.pointee.metrics
         let ascender = ft26d6ToFloat(faceMetrics.ascender)
         let descender = ft26d6ToFloat(faceMetrics.descender)
 
-        return Glyph(index: index,
-                     advance: advance,
-                     bearing: bearing,
-                     size: size,
-                     ascender: ascender,
-                     descender: descender)
+        return GlyphMetrics(index: index,
+                            advance: advance,
+                            bearing: bearing,
+                            size: size,
+                            ascender: ascender,
+                            descender: descender)
     }
 
-    public func glyph(for c: UnicodeScalar) -> Glyph? {
+    public func glyphMetrics(for c: UnicodeScalar,
+                             embolden: CGFloat = 0) -> GlyphMetrics? {
         if c.value == 0 { return nil }
         return self.face.withLock {
             let face = $0.face
@@ -439,7 +449,9 @@ public class Font {
                 return nil
             }
 
-            return _glyphData(from: face, index: UInt32(index))
+            return _glyphMetrics(from: face,
+                                 index: UInt32(index),
+                                 embolden: embolden)
         }
     }
 
@@ -456,13 +468,54 @@ public class Font {
         public var pixelMode: BitmapPixelMode
     }
 
-    public func loadBitmap(for c: UnicodeScalar,
-                           embolden: CGFloat,
-                           outline: CGFloat,
-                           callback: (UnsafePointer<UInt8>,
-                                      Glyph,
-                                      BitmapInfo,
-                                      SizeMetrics)->Void) -> Bool {
+    private func _makeStrokedOutline(
+        from source: inout FT_Outline,
+        radius: CGFloat) -> FT_Outline? {
+        guard radius > .ulpOfOne else { return nil }
+
+        var stroker: FT_Stroker? = nil
+        guard FT_Stroker_New(library.library, &stroker) == 0,
+              let stroker else {
+            return nil
+        }
+        defer { FT_Stroker_Done(stroker) }
+
+        FT_Stroker_Set(stroker,
+                       ft26d6(radius),
+                       FT_STROKER_LINECAP_ROUND,
+                       FT_STROKER_LINEJOIN_ROUND,
+                       0)
+        guard FT_Stroker_ParseOutline(stroker, &source, 0) == 0 else {
+            return nil
+        }
+
+        var points: FT_UInt = 0
+        var contours: FT_UInt = 0
+        guard FT_Stroker_GetCounts(stroker, &points, &contours) == 0 else {
+            return nil
+        }
+
+        var outline = FT_Outline()
+        guard FT_Outline_New(library.library,
+                             points,
+                             FT_Int(contours),
+                             &outline) == 0 else {
+            return nil
+        }
+        outline.n_contours = 0
+        outline.n_points = 0
+        FT_Stroker_Export(stroker, &outline)
+        return outline
+    }
+
+    public func withGlyphBitmap(
+        for c: UnicodeScalar,
+        embolden: CGFloat,
+        outline: CGFloat,
+        _ body: (UnsafePointer<UInt8>,
+                 GlyphMetrics,
+                 BitmapInfo,
+                 SizeMetrics)->Void) -> Bool {
         if c.value == 0 { return false }
         return self.face.withLock {
             let face = $0.face
@@ -560,22 +613,17 @@ public class Font {
 
             if face.pointee.glyph.pointee.format == FT_GLYPH_FORMAT_OUTLINE {
                 face.pointee.glyph.pointee.outline.flags |= FT_OUTLINE_HIGH_PRECISION
-                if outline > 0.0 {
+                if outline > .ulpOfOne {
                     // create outline stroker, drawing outline as bitmap.
                     FT_Outline_Embolden(&face.pointee.glyph.pointee.outline, boldStrength)
-                    var stroker: FT_Stroker? = nil
-                    FT_Stroker_New(library.library, &stroker)
-                    FT_Stroker_Set(stroker, ft26d6(outline), FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0)
-                    FT_Stroker_ParseOutline(stroker, &face.pointee.glyph.pointee.outline, 0)
-                    var ftOutline = FT_Outline()
-                    var points: FT_UInt = 0
-                    var contours: FT_UInt = 0
-                    FT_Stroker_GetCounts(stroker, &points, &contours)
-                    FT_Outline_New(library.library, points, FT_Int(contours), &ftOutline)
-                    ftOutline.n_contours = 0
-                    ftOutline.n_points = 0
-                    FT_Stroker_Export(stroker, &ftOutline)
-                    FT_Stroker_Done(stroker)
+                    guard var ftOutline = _makeStrokedOutline(
+                        from: &face.pointee.glyph.pointee.outline,
+                        radius: outline) else {
+                        return false
+                    }
+                    defer {
+                        FT_Outline_Done(library.library, &ftOutline)
+                    }
 
                     var ftBitmap = FT_Bitmap()
                     FT_Bitmap_Init(&ftBitmap)
@@ -614,7 +662,6 @@ public class Font {
                     ftBitmap.buffer.deallocate()
                     ftBitmap.buffer = nil
                     FT_Bitmap_Done(library.library, &ftBitmap)
-                    FT_Outline_Done(library.library, &ftOutline)
                 } else {
                     FT_Outline_Embolden(&face.pointee.glyph.pointee.outline, boldStrength)
 
@@ -679,16 +726,19 @@ public class Font {
             }
 
             let metrics = baseMetrics(for: face)
-            let glyphMetrics = face.pointee.glyph.pointee.metrics
-            let glyph = Glyph(index: UInt32(index),
-                              advance: advance,
-                              bearing: CGPoint(x: ft26d6ToFloat(glyphMetrics.horiBearingX),
-                                               y: ft26d6ToFloat(glyphMetrics.horiBearingY)),
-                              size: CGSize(width: ft26d6ToFloat(glyphMetrics.width),
-                                           height: ft26d6ToFloat(glyphMetrics.height)),
-                              ascender: metrics.ascender,
-                              descender: metrics.descender)
-            callback(bitmapData, glyph, bitmapInfo, metrics)
+            let slotMetrics = face.pointee.glyph.pointee.metrics
+            let glyphMetrics = GlyphMetrics(
+                index: UInt32(index),
+                advance: advance,
+                bearing: CGPoint(
+                    x: ft26d6ToFloat(slotMetrics.horiBearingX),
+                    y: ft26d6ToFloat(slotMetrics.horiBearingY)),
+                size: CGSize(
+                    width: ft26d6ToFloat(slotMetrics.width),
+                    height: ft26d6ToFloat(slotMetrics.height)),
+                ascender: metrics.ascender,
+                descender: metrics.descender)
+            body(bitmapData, glyphMetrics, bitmapInfo, metrics)
             return true
         }
     }
@@ -720,19 +770,23 @@ public class Font {
                            maxAdvance: ft26d6ToFloat(metrics.max_advance))
     }
 
-    public enum Path {
+    public enum OutlineCommand: Sendable {
         case move(to: CGPoint)
         case line(to: CGPoint)
         case quadCurve(to: CGPoint, control: CGPoint)
         case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
     }
 
-    /// Decomposes a glyph outline into path commands and returns its metrics.
+    /// Decomposes an optionally emboldened or stroked glyph outline into path
+    /// commands and returns its metrics.
     /// Contours are implicitly closed. Coordinates are baseline-relative with +Y up.
-    public func decomposeGlyph(for c: UnicodeScalar,
-                               _ callback: (Path)->Void) -> Glyph? {
-        var paths: [Path] = []
-        let glyph: Glyph? = self.face.withLock {
+    public func decomposeGlyphOutline(
+        for c: UnicodeScalar,
+        embolden: CGFloat = 0,
+        outline: CGFloat = 0,
+        _ body: (OutlineCommand) -> Void) -> GlyphMetrics? {
+        var commands: [OutlineCommand] = []
+        let metrics: GlyphMetrics? = self.face.withLock {
             let face = $0.face
 
             let index = face.pointee.charmap != nil
@@ -740,7 +794,8 @@ public class Font {
 
             guard index != 0 else { return nil }
 
-            let loadFlags = FT_Int32(FT_LOAD_DEFAULT)
+            let loadFlags = FT_Int32(FT_LOAD_DEFAULT) |
+                            FT_Int32(FT_LOAD_NO_BITMAP)
             guard FT_Load_Glyph(face, index, loadFlags) == 0 else {
                 return nil
             }
@@ -748,59 +803,91 @@ public class Font {
                 return nil
             }
 
+            let strength = ft26d6(embolden)
+            if strength != 0 {
+                guard FT_Outline_Embolden(
+                    &face.pointee.glyph.pointee.outline,
+                    strength) == 0 else {
+                    return nil
+                }
+            }
+
+            var sourceOutline = face.pointee.glyph.pointee.outline
+            var decomposedOutline = sourceOutline
+            var ownsDecomposedOutline = false
+            if outline > .ulpOfOne {
+                guard let strokedOutline = _makeStrokedOutline(
+                    from: &sourceOutline,
+                    radius: outline) else {
+                    return nil
+                }
+                decomposedOutline = strokedOutline
+                ownsDecomposedOutline = true
+            }
+            defer {
+                if ownsDecomposedOutline {
+                    FT_Outline_Done(library.library, &decomposedOutline)
+                }
+            }
+
             var fn = FT_Outline_Funcs()
             fn.move_to = { (to: UnsafePointer<FT_Vector>?,
                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
+                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
                 let v = to!.pointee
-                paths.pointee.append(.move(to: CGPoint(ft26d6: v)))
+                commands.pointee.append(.move(to: CGPoint(ft26d6: v)))
                 return 0
             }
             fn.line_to = { (to: UnsafePointer<FT_Vector>?,
                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
+                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
                 let v = to!.pointee
-                paths.pointee.append(.line(to: CGPoint(ft26d6: v)))
+                commands.pointee.append(.line(to: CGPoint(ft26d6: v)))
                 return 0
             }
             fn.conic_to = { (ctl: UnsafePointer<FT_Vector>?,
                              to: UnsafePointer<FT_Vector>?,
                              ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
+                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
                 let v = to!.pointee
                 let c = ctl!.pointee
-                paths.pointee.append(.quadCurve(to: CGPoint(ft26d6: v),
-                                                control: CGPoint(ft26d6: c)))
+                commands.pointee.append(
+                    .quadCurve(to: CGPoint(ft26d6: v),
+                               control: CGPoint(ft26d6: c)))
                 return 0
             }
             fn.cubic_to = { (ctl1: UnsafePointer<FT_Vector>?,
                              ctl2: UnsafePointer<FT_Vector>?,
                              to: UnsafePointer<FT_Vector>?,
                              ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let paths = ctxt!.assumingMemoryBound(to: [Path].self)
+                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
                 let v = to!.pointee
                 let c1 = ctl1!.pointee
                 let c2 = ctl2!.pointee
-                paths.pointee.append(.curve(to: CGPoint(ft26d6: v),
-                                            control1: CGPoint(ft26d6: c1),
-                                            control2: CGPoint(ft26d6: c2)))
+                commands.pointee.append(
+                    .curve(to: CGPoint(ft26d6: v),
+                           control1: CGPoint(ft26d6: c1),
+                           control2: CGPoint(ft26d6: c2)))
                 return 0
             }
             fn.shift = 0
             fn.delta = 0
 
-            var outline = face.pointee.glyph.pointee.outline
-            let error = withUnsafeMutablePointer(to: &paths) {
-                FT_Outline_Decompose(&outline, &fn, UnsafeMutableRawPointer($0))
+            let error = withUnsafeMutablePointer(to: &commands) {
+                FT_Outline_Decompose(&decomposedOutline,
+                                     &fn,
+                                     UnsafeMutableRawPointer($0))
             }
             if error == 0 {
-                return _glyphData(from: face, index: UInt32(index))
+                return _glyphMetrics(from: face,
+                                     index: UInt32(index),
+                                     embolden: embolden)
             }
             return nil
         }
-        guard let glyph else { return nil }
+        guard let metrics else { return nil }
 
-        paths.forEach { callback($0) }
-        return glyph
+        commands.forEach(body)
+        return metrics
     }
 }

@@ -34,7 +34,7 @@ extension View {
 
 
 class AnyTextStorage {
-    func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         fatalError("This method should be overridden by subclasses.")
     }
     func resolveText(in environment: EnvironmentValues) -> String {
@@ -62,10 +62,10 @@ class LocalizedTextStorage: AnyTextStorage {
         self.bundle = bundle
     }
 
-    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         //let text = String(localized: self.key)
         let text = self.key
-        return .init(runs: [.text(typeFaces, text)], scaleFactor: context.contentScaleFactor)
+        return .init(runs: [.text(typefaces, text)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -89,7 +89,7 @@ class ConcatenatedTextStorage: AnyTextStorage {
         self.second = second
     }
 
-    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         let first = first._resolve(context: context)
         let second = second._resolve(context: context)
         return .init(runs: first.runs + second.runs, scaleFactor: context.contentScaleFactor)
@@ -121,9 +121,9 @@ class AttachmentTextStorage: AnyTextStorage {
         self.image = image
     }
 
-    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         let image = context.resolve(self.image)
-        return .init(runs: [.attachment(typeFaces, image)], scaleFactor: context.contentScaleFactor)
+        return .init(runs: [.attachment(typefaces, image)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -260,9 +260,10 @@ public struct Text: Equatable {
         if font == nil {
             font = .system(.body)
         }
+        font = font?.resolved(in: context.environment)
         font = font?.displayScale(displayScale)
-        let defaultFace = font?.typeFace(forContext: context.sceneResources)
-        let fallbackFaces = font?.fallbackTypeFaces ?? []
+        let defaultFace = font?.typeface(forContext: context.sceneResources)
+        let fallbackFaces = font?.fallbackTypefaces ?? []
         let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
 
         if faces.isEmpty == false {
@@ -272,7 +273,7 @@ public struct Text: Equatable {
                 return GraphicsContext.ResolvedText(runs: runs, scaleFactor: context.contentScaleFactor)
             }
             else if case let .anyTextStorage(text) = self.storage {
-                return text.resolve(typeFaces: faces, context: context)
+                return text.resolve(typefaces: faces, context: context)
             }
         }
         return .init(runs: [], scaleFactor: context.contentScaleFactor)
@@ -400,6 +401,7 @@ extension Text: View {
             var hasher = Hasher()
             hasher.combine(text._resolveText(in: environment))
             hasher.combine(environment.font?.hashValue ?? 0)
+            hasher.combine(environment.defaultFontRenderingMode)
             hasher.combine(environment.displayScale)
             let currentVersion = hasher.finalize()
 

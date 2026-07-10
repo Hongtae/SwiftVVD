@@ -12,11 +12,11 @@ import Foundation
 // Aux/modal windows under the same WindowController share the same instance.
 final class SceneResources: AppLifetimeResource, @unchecked Sendable {
     var contentScaleFactor: CGFloat = 1.0
-    var cachedTypeFaces: [Font: TypeFace] = [:]
+    var cachedTypefaces: [Font: Typeface] = [:]
     var cachedTextures: [String: AnyObject] = [:]
     
     override func purgeResources(reason: ResourcePurgeReason) {
-        cachedTypeFaces.values.forEach {
+        cachedTypefaces.values.forEach {
             $0.purgeResources(reason: reason)
         }
 
@@ -25,7 +25,7 @@ final class SceneResources: AppLifetimeResource, @unchecked Sendable {
             cachedTextures.removeAll()
             
         case .appTermination:
-            cachedTypeFaces.removeAll()
+            cachedTypefaces.removeAll()
             cachedTextures.removeAll()
         }
     }

@@ -12,8 +12,8 @@ import VVD
 extension GraphicsContext {
     public struct ResolvedText {
         enum Run {
-            case text([TypeFace], String)
-            case attachment([TypeFace], ResolvedImage)
+            case text([Typeface], String)
+            case attachment([Typeface], ResolvedImage)
         }
 
         final class Storage: AppLifetimeResource, @unchecked Sendable {
@@ -158,15 +158,47 @@ extension GraphicsContext {
         }
 
         struct Glyph {  // glyph that baseline aligned. (baseline is 0)
+            struct TextureContent {
+                var texture: Texture?
+                var frame: CGRect       // texture uv-coords
+                var offset: CGPoint     // texture origin position from baseline
+            }
+
+            struct VectorContent {
+                var path: Path
+            }
+
+            struct AttachmentContent {
+                var texture: Texture?
+                var frame: CGRect       // texture uv-coords
+                var offset: CGPoint     // texture origin position from baseline
+            }
+
+            enum Content {
+                case texture(TextureContent)
+                case vector(VectorContent)
+                case attachment(AttachmentContent)
+                case missing
+            }
+
             var scalar: UnicodeScalar
-            var face: TypeFace
-            var texture: Texture?
-            var frame: CGRect = .zero       // texture uv-coords
+            var face: Typeface
+            var content: Content = .missing
             var advance: CGSize = .zero     // distance to next glyph
-            var offset: CGPoint = .zero     // texture origin position from baseline
             var ascender: CGFloat = .zero   // distance from the baseline to the highest or upper grid coordinate
             var descender: CGFloat = .zero  // distance from the baseline to the lowest
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
+
+            var contentOffset: CGPoint {
+                switch content {
+                case .texture(let data):
+                    return data.offset
+                case .attachment(let data):
+                    return data.offset
+                case .vector, .missing:
+                    return .zero
+                }
+            }
         }
 
         struct LineGlyphs {
@@ -191,12 +223,12 @@ extension GraphicsContext {
             var height: CGFloat { ascender - descender }
             let ascender: CGFloat
             let descender: CGFloat
-            let lastFace: TypeFace?
+            let lastFace: Typeface?
             let lastCharacter: UnicodeScalar
             static func from(unicodeScalars: String.UnicodeScalarView,
-                             with faces: [TypeFace],
+                             with faces: [Typeface],
                              drawMissingGlyphs: Bool,
-                             prevFace: TypeFace?,
+                             prevFace: Typeface?,
                              prevChar: UnicodeScalar) -> Self {
                 assert(faces.isEmpty == false)
                 var glyphs: [Glyph] = []
@@ -207,7 +239,7 @@ extension GraphicsContext {
                 var char1 = prevChar
 
                 // Text rendering currently supports texture glyphs only.
-                func textureGlyph(_ face: any TypeFace, _ c: UnicodeScalar) -> TextureTypeFace.GlyphData? {
+                func textureGlyph(_ face: any Typeface, _ c: UnicodeScalar) -> TextureTypeface.GlyphData? {
                     if case let .texture(data) = face.glyph(for: c) {
                         return data
                     }
@@ -221,9 +253,9 @@ extension GraphicsContext {
 
                     var glyph = Glyph(scalar: char2, face: face2)
                     if makeGlyph, let data = textureGlyph(face2, char2) {
-                        glyph.texture = data.texture
-                        glyph.frame = data.frame
-                        glyph.offset = data.offset
+                        glyph.content = .texture(.init(texture: data.texture,
+                                                       frame: data.frame,
+                                                       offset: data.offset))
                         glyph.advance = data.advance
                         glyph.ascender = data.ascender
                         glyph.descender = data.descender
@@ -381,7 +413,7 @@ extension GraphicsContext {
                 if Int(ceil(offset.y + line.height + nextLineHeight)) > maxHeight || Int(ceil(line.width)) > maxWidth {
                     // this is the last line, should ends with '...'
                     var glyphs = line.glyphs[...]
-                    // Since a valid TypeFace is required, at least one glyph must exist.
+                    // Since a valid Typeface is required, at least one glyph must exist.
                     if var face = glyphs.last?.face {
                         while true {
                             let prevFace = glyphs.last?.face
@@ -404,7 +436,7 @@ extension GraphicsContext {
                                 line.width = getGlyphsWidth(line.glyphs[...])
                                 break
                             }
-                            // Use the TypeFace of the last removed glyph to generate the ellipsis glyphs.
+                            // Use the Typeface of the last removed glyph to generate the ellipsis glyphs.
                             if let last = glyphs.last {
                                 face = last.face
                             } else {
@@ -436,7 +468,7 @@ extension GraphicsContext {
             var ascender: CGFloat = .zero
             var descender: CGFloat = .zero
             var char1: UnicodeScalar = UnicodeScalar(0) // previous char
-            var face1: TypeFace? = nil   // previous face
+            var face1: Typeface? = nil   // previous face
 
             let addLine = {
                 lines.append(LineGlyphs(glyphs: glyphs,
@@ -491,11 +523,13 @@ extension GraphicsContext {
                     let width = size.width * scaleFactor
 
                     var glyph = Glyph(scalar: UnicodeScalar(0), face: face)
-                    glyph.texture = image.texture
-                    glyph.offset = CGPoint(x: 0, y: baseline)
+                    var frame: CGRect = .zero
                     if let texture = image.texture {
-                        glyph.frame = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
+                        frame = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
                     }
+                    glyph.content = .attachment(.init(texture: image.texture,
+                                                       frame: frame,
+                                                       offset: CGPoint(x: 0, y: baseline)))
                     glyph.ascender = baseline
                     glyph.descender = min(0, baseline - height)
                     glyph.advance.width = width
@@ -614,16 +648,18 @@ extension GraphicsContext {
                                        colorGlyphs: true)
             // draw attachments (scalar = 0)
             forEachGlyph(in: lineGlyphs) { glyph, baseline in
-                if glyph.scalar == UnicodeScalar(0), let texture = glyph.texture {
+                if glyph.scalar == UnicodeScalar(0),
+                   case let .attachment(data) = glyph.content,
+                   let texture = data.texture {
                     let frame = CGRect(x: baseline.x,
-                                       y: baseline.y - glyph.offset.y,
+                                       y: baseline.y - data.offset.y,
                                        width: glyph.advance.width,
                                        height: glyph.advance.height)
                     self.encodeDrawTextureCommand(renderPass: renderPass,
                                                   texture: texture,
                                                   frame: frame,
                                                   transform: transform,
-                                                  textureFrame: glyph.frame,
+                                                  textureFrame: data.frame,
                                                   textureTransform: .identity,
                                                   blendState: .opaque,
                                                   color: .white)
@@ -667,7 +703,7 @@ extension GraphicsContext {
         for line in lineGlyphs {
             offset.x = 0
             for glyph in line.glyphs {
-                let baseline = CGPoint(x: glyph.offset.x + offset.x,
+                let baseline = CGPoint(x: glyph.contentOffset.x + offset.x,
                                        y: line.ascender + offset.y)
                 callback(glyph, baseline)
 
@@ -701,7 +737,9 @@ extension GraphicsContext {
         var quads: [Quad] = []
 
         forEachGlyph(in: lineGlyphs) { glyph, baseline in
-            if glyph.scalar != UnicodeScalar(0), let texture = glyph.texture {
+            if glyph.scalar != UnicodeScalar(0),
+               case let .texture(data) = glyph.content,
+               let texture = data.texture {
                 let isColorGlyph: Bool
                 switch texture.pixelFormat {
                 case .r8Unorm:
@@ -718,16 +756,16 @@ extension GraphicsContext {
                 let invH = 1.0 / Float(texture.height)
 
                 let pad: CGFloat = 1
-                let textureFrame = glyph.frame.insetBy(dx: -pad, dy: -pad)
+                let textureFrame = data.frame.insetBy(dx: -pad, dy: -pad)
                 let uvMinX = Float(textureFrame.minX) * invW
                 let uvMinY = Float(textureFrame.minY) * invH
                 let uvMaxX = Float(textureFrame.maxX) * invW
                 let uvMaxY = Float(textureFrame.maxY) * invH
 
                 let frame = CGRect(x: baseline.x,
-                                   y: baseline.y - glyph.offset.y,
-                                   width: glyph.frame.width,
-                                   height: glyph.frame.height)
+                                   y: baseline.y - data.offset.y,
+                                   width: data.frame.width,
+                                   height: data.frame.height)
                                    .insetBy(dx: -pad, dy: -pad)
 
                 let q = Quad(

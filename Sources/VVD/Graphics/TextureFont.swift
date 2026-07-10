@@ -121,9 +121,11 @@ public class TextureFont: Font {
             return cachedData
         }
 
-        let loaded = self.loadBitmap(for: c,
-                                     embolden: self.boldStrength,
-                                     outline: self.outlineThickness) { data, glyph, bmp, metrics in
+        let loaded = self.withGlyphBitmap(
+            for: c,
+            embolden: self.boldStrength,
+            outline: self.outlineThickness
+        ) { data, glyphMetrics, bmp, metrics in
             var frame: CGRect = .zero
             let offset = CGPoint(x: bmp.left, y: bmp.top)
             let texture = self.cacheGlyphTexture(width: bmp.width,
@@ -134,10 +136,10 @@ public class TextureFont: Font {
                                                  frame: &frame)
             self.glyphMap[c] = GlyphData(texture: texture,
                                          offset: offset,
-                                         advance: glyph.advance,
+                                         advance: glyphMetrics.advance,
                                          frame: frame,
-                                         ascender: glyph.ascender,
-                                         descender: glyph.descender)
+                                         ascender: glyphMetrics.ascender,
+                                         descender: glyphMetrics.descender)
             cachedData = self.glyphMap[c]
         }
         if loaded {
