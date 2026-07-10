@@ -528,7 +528,7 @@ extension GraphicsContext {
     }
 
     func draw(_ text: ResolvedText, in rect: CGRect, shading: Shading) {
-        let rect = rect.standardized
+        var rect = rect.standardized
         if rect.isEmpty { return }
         if rect.isNull { return }
 
@@ -539,49 +539,58 @@ extension GraphicsContext {
             fatalError("Invalid shading property!")
         }
 
+        let lineGlyphs = text.makeGlyphs(maxWidth: width, maxHeight: height)
+        if lineGlyphs.isEmpty { return }
+
+        var scissorRect: ScissorRect? = nil
+        let snapOrigin = true
+        let clipBounds = true
+        if snapOrigin || clipBounds {
+            let transform = self.transform
+                .concatenating(CGAffineTransform(
+                    translationX: self.contentOffset.x,
+                    y: self.contentOffset.y))
+                .concatenating(CGAffineTransform(
+                    scaleX: self.contentScaleFactor,
+                    y: self.contentScaleFactor))
+
+            if snapOrigin {
+                var origin = rect.origin.applying(transform)
+                origin.x.round()
+                origin.y.round()
+                rect.origin = origin.applying(transform.inverted())
+            }
+            if clipBounds {
+                let tl = CGPoint(x: rect.minX, y: rect.minY).applying(transform)
+                let tr = CGPoint(x: rect.maxX, y: rect.minY).applying(transform)
+                let bl = CGPoint(x: rect.minX, y: rect.maxY).applying(transform)
+                let br = CGPoint(x: rect.maxX, y: rect.maxY).applying(transform)
+                let minX = min(tl.x, tr.x, bl.x, br.x)
+                let maxX = max(tl.x, tr.x, bl.x, br.x)
+                let minY = min(tl.y, tr.y, bl.y, br.y)
+                let maxY = max(tl.y, tr.y, bl.y, br.y)
+                
+                if minX >= self.viewport.maxX { return }
+                if minY >= self.viewport.maxY { return }
+                if maxX <= self.viewport.minX { return }
+                if maxY <= self.viewport.minY { return }
+                
+                let x1 = max(Int(floor(minX)), Int(self.viewport.minX))
+                let y1 = max(Int(floor(minY)), Int(self.viewport.minY))
+                let x2 = min(Int(ceil(maxX)), Int(self.viewport.maxX))
+                let y2 = min(Int(ceil(maxY)), Int(self.viewport.maxY))
+                if x1 >= x2 || y1 >= y2 { return }
+                
+                scissorRect = ScissorRect(x: x1, y: y1,
+                                          width: x2 - x1, height: y2 - y1)
+            }
+        }
+
         let scale = 1.0 / text.scaleFactor
         let offset = rect.origin
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
 
-        //let measure = text.measure(in: rect.size)
-
-        let lineGlyphs = text.makeGlyphs(maxWidth: width, maxHeight: height)
-        if lineGlyphs.isEmpty { return }
-
-        var scissorRect: ScissorRect? = nil
-        let clipBounds = true
-        if clipBounds {
-            let transform = self.transform
-                .concatenating(CGAffineTransform(translationX: self.contentOffset.x,
-                                                 y: self.contentOffset.y))
-                .concatenating(CGAffineTransform(scaleX: self.contentScaleFactor,
-                                                 y: self.contentScaleFactor))
-            
-            let tl = CGPoint(x: rect.minX, y: rect.minY).applying(transform)
-            let tr = CGPoint(x: rect.maxX, y: rect.minY).applying(transform)
-            let bl = CGPoint(x: rect.minX, y: rect.maxY).applying(transform)
-            let br = CGPoint(x: rect.maxX, y: rect.maxY).applying(transform)
-            let minX = min(tl.x, tr.x, bl.x, br.x)
-            let maxX = max(tl.x, tr.x, bl.x, br.x)
-            let minY = min(tl.y, tr.y, bl.y, br.y)
-            let maxY = max(tl.y, tr.y, bl.y, br.y)
-            
-            if minX >= self.viewport.maxX { return }
-            if minY >= self.viewport.maxY { return }
-            if maxX <= self.viewport.minX { return }
-            if maxY <= self.viewport.minY { return }
-            
-            let x1 = max(Int(floor(minX)), Int(self.viewport.minX))
-            let y1 = max(Int(floor(minY)), Int(self.viewport.minY))
-            let x2 = min(Int(ceil(maxX)), Int(self.viewport.maxX))
-            let y2 = min(Int(ceil(maxY)), Int(self.viewport.maxY))
-            if x1 >= x2 || y1 >= y2 { return }
-            
-            scissorRect = ScissorRect(x: x1, y: y1,
-                                      width: x2 - x1, height: y2 - y1)
-        }
-        
         if let renderPass = self.beginRenderPass(enableStencil: false) {
             if let scissorRect {
                 renderPass.encoder.setScissorRect(scissorRect)
