@@ -3627,7 +3627,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let frame = _textTransitionRenderFrame(
             position: CGPoint(x: 100, y: 40),
             viewSize: CGSize(width: 55, height: 17),
+            targetSize: CGSize(width: 70, height: 17),
             idealSize: CGSize(width: 70, height: 17),
+            pixelLength: 0.5,
             activeSourceBounds: CGRect(x: 100, y: 40, width: 50, height: 17)
         )
 
@@ -3638,7 +3640,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let frame = _textTransitionRenderFrame(
             position: CGPoint(x: 100, y: 40),
             viewSize: CGSize(width: 100, height: 17),
+            targetSize: CGSize(width: 100, height: 17),
             idealSize: CGSize(width: 180, height: 17),
+            pixelLength: 0.5,
             activeSourceBounds: CGRect(x: 100, y: 40, width: 100, height: 17)
         )
 
@@ -3649,7 +3653,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let frame = _textTransitionRenderFrame(
             position: CGPoint(x: 100, y: 40),
             viewSize: CGSize(width: 34, height: 17),
+            targetSize: CGSize(width: 34.5, height: 17),
             idealSize: CGSize(width: 34.5, height: 17),
+            pixelLength: 0.5,
             activeSourceBounds: CGRect(x: 100, y: 40, width: 31, height: 17)
         )
 
@@ -3660,11 +3666,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let frame = _textTransitionRenderFrame(
             position: CGPoint(x: 100, y: 40),
             viewSize: CGSize(width: 30.5, height: 17),
+            targetSize: CGSize(width: 31, height: 17),
             idealSize: CGSize(width: 31, height: 17),
+            pixelLength: 0.5,
             activeSourceBounds: CGRect(x: 100, y: 40, width: 35, height: 17)
         )
 
         XCTAssertEqual(frame, CGRect(x: 99.75, y: 40, width: 31, height: 17))
+    }
+
+    func testTextTransitionRenderFrameUsesIdealWidthWhileUnconstrainedTargetReappears() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 70, height: 17),
+            targetSize: CGSize(width: 98, height: 17),
+            idealSize: CGSize(width: 98, height: 17),
+            pixelLength: 0.5,
+            activeSourceBounds: nil
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 86, y: 40, width: 98, height: 17))
+    }
+
+    func testTextTransitionRenderFrameAllowsOnePixelOfTargetRounding() {
+        let frame = _textTransitionRenderFrame(
+            position: CGPoint(x: 100, y: 40),
+            viewSize: CGSize(width: 70, height: 17),
+            targetSize: CGSize(width: 97.5, height: 17),
+            idealSize: CGSize(width: 98, height: 17),
+            pixelLength: 0.5,
+            activeSourceBounds: nil
+        )
+
+        XCTAssertEqual(frame, CGRect(x: 86, y: 40, width: 98, height: 17))
     }
 
     func testInterpolatedDisplayListIdentityTransitionSyncsCurrentWithoutRemoval() throws {

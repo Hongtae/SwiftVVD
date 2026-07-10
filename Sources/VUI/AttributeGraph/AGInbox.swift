@@ -41,6 +41,18 @@ final class AGInbox: @unchecked Sendable {
         pendingWork.withLock { !$0.isEmpty }
     }
 
+    /// Returns the transaction attached to the next queued item without
+    /// removing or executing it.
+    var nextTransaction: Transaction? {
+        pendingWork.withLock { work in
+            guard let transaction = work.first?.transaction?.value,
+                  !transaction.isEmpty else {
+                return nil
+            }
+            return transaction
+        }
+    }
+
     /// Enqueues a work item.  Safe to call from any thread.
     /// The closure runs on the AG thread with `_AGGraph.current` already bound.
     func enqueue(transaction: Transaction? = nil, _ work: @escaping @Sendable () -> Void) {

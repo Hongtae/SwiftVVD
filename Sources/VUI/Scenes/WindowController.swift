@@ -779,7 +779,21 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 }
                 viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
                 drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
-                if viewGraph.data.graph.inbox.hasPendingWork {
+                let currentRequiresPresentation =
+                    lastViewInboxTransaction?.effectiveAnimation != nil ||
+                    lastViewInboxTransaction?.hasLocalAnimationCompletionState == true
+                let nextTransaction = viewGraph.data.graph.inbox.nextTransaction
+                let nextRequiresPresentation =
+                    nextTransaction?.effectiveAnimation != nil ||
+                    nextTransaction?.hasLocalAnimationCompletionState == true
+                // Plain writes queued in the same frame do not own an observable
+                // presentation boundary. Animated and completion-owning writes
+                // still sample the current outputs before the next transaction.
+                let coalescesPlainWrites =
+                    !currentRequiresPresentation &&
+                    !nextRequiresPresentation
+                if viewGraph.data.graph.inbox.hasPendingWork,
+                   !coalescesPlainWrites {
                     _ = runRootLayoutPass(
                         notifiesLayoutUpdate: false,
                         samplesDisplayList: true

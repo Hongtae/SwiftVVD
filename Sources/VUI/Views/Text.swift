@@ -41,10 +41,17 @@ final class _TextResourceResolutionState {
 func _textTransitionRenderFrame(
     position: CGPoint,
     viewSize: CGSize,
+    targetSize: CGSize,
     idealSize: CGSize,
+    pixelLength: CGFloat,
     activeSourceBounds: CGRect?
 ) -> CGRect {
     var renderSize = viewSize
+    let targetAccommodatesIdealWidth =
+        targetSize.width + max(pixelLength, 0) >= idealSize.width
+    if targetAccommodatesIdealWidth, viewSize.width < idealSize.width {
+        renderSize.width = idealSize.width
+    }
     if let activeSourceBounds {
         let sourceWidth = activeSourceBounds.width
         let isExpanding = idealSize.width > sourceWidth && viewSize.width > sourceWidth
@@ -439,6 +446,8 @@ extension Text: View {
         let animatedFrame = cachedEnvironmentAttr.value.animatedFrame
         let inbox = graph.inbox
         let sizeAttr = animatedFrame?._animatedSize ?? inputs.size
+        let targetSizeAttr = animatedFrame?.size ?? inputs.size
+        let pixelLengthAttr = animatedFrame?.pixelLength
         let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
@@ -553,6 +562,7 @@ extension Text: View {
             let text = view._attribute.value // Dependency: text modifiers/colors
             let environment = cachedEnvironmentAttr.value.environment.value
             let viewSize = sizeAttr.value.value
+            let targetSize = targetSizeAttr.value.value
             let position = positionAttr.value
             let styledText = resolvedStyledTextAttr.value
             let resolved = styledText.resolvedText
@@ -566,7 +576,9 @@ extension Text: View {
                 var frame = _textTransitionRenderFrame(
                     position: position,
                     viewSize: viewSize,
+                    targetSize: targetSize,
                     idealSize: idealSize,
+                    pixelLength: pixelLengthAttr?.value ?? environment.animationPixelLength,
                     activeSourceBounds: interpolatorGroup.activeSourceBounds
                 )
                 let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)

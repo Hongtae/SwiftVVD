@@ -52,6 +52,48 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testConsecutivePlainInboxWritesUseOneRootLayoutPass() {
+        let counter = LayoutSchedulingCounter()
+        let controller = WindowController(
+            content: LayoutSchedulingRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Plain inbox batching test should not request graphics resources.")
+        }
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 1.0 / 60.0,
+            date: controller.date,
+            contentSize: CGSize(width: 120, height: 80),
+            redraw: &redraw,
+            withGC
+        )
+        let initialPlacements = counter.placements
+
+        for _ in 0..<4 {
+            controller.viewGraph.data.graph.inbox.enqueue {}
+        }
+
+        redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 120, height: 80),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertEqual(counter.placements - initialPlacements, 1)
+    }
+
+    @MainActor
     func testScheduledAnimationUpdateDoesNotRepeatRootLayoutPlacement() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -1561,6 +1603,212 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testRapidAnimationLabRetargetKeepsChildTextInsideBackground() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingReinsertedAnimationLabChildRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingReinsertedAnimationLabChildRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Static Animation Lab retarget test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: 1.0 / 60.0,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+
+            let childFrameSize = controller.viewGraph.data.withCurrent {
+                probe.text.insertionSize?.value.value
+            }
+            if let childFrameSize {
+                XCTAssertEqual(
+                    childFrameSize,
+                    CGSize(width: 120, height: 20),
+                    "child text layout frame changed at \(time)"
+                )
+            }
+
+            let list = try displayList(in: controller)
+            let childTexts = textBounds(in: list).filter {
+                $0.width >= 50 && $0.width < 150 && $0.height >= 8 && $0.height < 25
+            }
+            let backgrounds: [CGRect] = translucentShapeFillRecords(in: list).compactMap { record in
+                guard record.bounds.width >= 60, record.bounds.height >= 25 else {
+                    return nil
+                }
+                return record.bounds
+            }
+
+            if let firstBackground = backgrounds.first {
+                for background in backgrounds.dropFirst() {
+                    XCTAssertEqual(
+                        background.midX,
+                        firstBackground.midX,
+                        accuracy: 0.75,
+                        "retained and inserted child backgrounds split horizontally at \(time): \(backgrounds)"
+                    )
+                }
+            }
+
+            for text in childTexts {
+                let containingBackground = backgrounds.first { background in
+                    background.insetBy(dx: -0.75, dy: -0.75).contains(text)
+                }
+                if containingBackground == nil {
+                    XCTFail(
+                        "child text escaped its background at \(time): text=\(text) backgrounds=\(backgrounds) allText=\(textBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                    )
+                }
+            }
+        }
+
+        var currentTime = 0.0
+        try update(time: currentTime)
+
+        func advance(to targetTime: Double) throws {
+            let interval = 1.0 / 30.0
+            while currentTime + interval < targetTime {
+                currentTime += interval
+                try update(time: currentTime)
+            }
+            currentTime = targetTime
+            try update(time: currentTime)
+        }
+
+        for cycle in 0..<8 {
+            let base = Double(cycle) * 1.2
+
+            try advance(to: base + 0.10)
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            try advance(to: base + 0.40)
+            try XCTUnwrap(probe.insertChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            try advance(to: base + 0.70)
+            try XCTUnwrap(probe.springMove)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            try advance(to: base + 1.20)
+        }
+
+        try advance(to: 16.0)
+    }
+
+    @MainActor
+    func testRepeatedAnimationLabRemovalKeepsTitleInsideBoxAndSettlesCentered() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingReinsertedAnimationLabChildRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingReinsertedAnimationLabChildRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Static Animation Lab centering test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double, expectsSettledCenter: Bool = false) throws {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: 1.0 / 60.0,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+
+            let list = try displayList(in: controller)
+            let titles = textBounds(in: list).filter {
+                    abs($0.width - 160) <= 0.5 && abs($0.height - 20) <= 0.5
+                }
+            XCTAssertFalse(
+                titles.isEmpty,
+                "missing retained-removal title at \(time): \(textBounds(in: list))"
+            )
+            let box = try XCTUnwrap(
+                shapeStrokeBounds(in: list).first {
+                    abs($0.width - 190) <= 0.5 && abs($0.height - 150) <= 0.5
+                },
+                "missing retained-removal box at \(time): \(shapeStrokeBounds(in: list))"
+            )
+            for title in titles {
+                XCTAssertGreaterThanOrEqual(
+                    title.minX,
+                    box.minX - 0.75,
+                    "retained-removal title escaped the left edge at \(time): titles=\(titles) box=\(box) allText=\(textBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                )
+                XCTAssertLessThanOrEqual(
+                    title.maxX,
+                    box.maxX + 0.75,
+                    "retained-removal title escaped the right edge at \(time): titles=\(titles) box=\(box) allText=\(textBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                )
+                if expectsSettledCenter {
+                    XCTAssertEqual(
+                        title.midX,
+                        box.midX,
+                        accuracy: 0.75,
+                        "retained-removal title did not settle back to center at \(time): titles=\(titles) box=\(box)"
+                    )
+                }
+            }
+        }
+
+        try update(time: 0)
+        for cycle in 0..<20 {
+            let base = Double(cycle) * 1.2
+
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
+            try update(time: base + 0.10)
+
+            try XCTUnwrap(probe.insertChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
+            try update(time: base + 0.40)
+
+            try XCTUnwrap(probe.springMove)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
+            try update(time: base + 0.70)
+
+            // Deliberately skip frames to model a stalled render loop.
+            try update(time: base + 1.20)
+        }
+
+        for sampleTime in [24.5, 25.5, 27.0] {
+            try update(time: sampleTime)
+        }
+        try update(time: 30.0, expectsSettledCenter: true)
+    }
+
+    @MainActor
     func testModalTextLikeSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -1845,6 +2093,17 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         return bounds
     }
 
+    private func shapeStrokeBounds(in displayList: DisplayList) -> [CGRect] {
+        var bounds = displayList.itemRecords.compactMap { record -> CGRect? in
+            guard record.kind == .shapeStroke else { return nil }
+            return record.bounds
+        }
+        for effect in displayList.effects {
+            bounds.append(contentsOf: shapeStrokeBounds(in: effect.contents))
+        }
+        return bounds
+    }
+
     private func opaqueGreenShapeBounds(in displayList: DisplayList) -> [CGRect] {
         var bounds = shapeFillRecords(in: displayList).compactMap { record -> CGRect? in
             guard record.color.provider.alpha >= 0.8,
@@ -1869,6 +2128,34 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             bounds.append(contentsOf: textBounds(in: effect.contents))
         }
         return bounds
+    }
+
+    private func displayListTreeDescription(
+        _ displayList: DisplayList,
+        depth: Int = 0
+    ) -> String {
+        let prefix = String(repeating: "  ", count: depth)
+        var lines = displayList.itemRecords.map { record in
+            "\(prefix)item kind=\(record.kind) effect=\(String(describing: record.effectKind)) bounds=\(String(describing: record.bounds))"
+        }
+        for effect in displayList.effects {
+            let label: String
+            switch effect.effect {
+            case .state:
+                label = "state"
+            case .contentTransition:
+                label = "contentTransition"
+            case .interpolatorRoot:
+                label = "interpolatorRoot"
+            case .interpolatorLayer:
+                label = "interpolatorLayer"
+            case .interpolatorAnimation:
+                label = "interpolatorAnimation"
+            }
+            lines.append("\(prefix)effect \(label)")
+            lines.append(displayListTreeDescription(effect.contents, depth: depth + 1))
+        }
+        return lines.joined(separator: " | ")
     }
 
     private func translucentShapeFillRecords(in displayList: DisplayList) -> [(bounds: CGRect, color: VUI.Color)] {
@@ -2476,6 +2763,7 @@ private struct LayoutSchedulingConditionalDefaultTransitionRoot: View {
                         .frame(width: 120, height: 48)
                 } else {
                     LayoutSchedulingTransitionTextMarker(
+                        content: LayoutSchedulingTextContent(value: "inserted"),
                         size: CGSize(width: 80, height: 20),
                         probe: probe
                     )
@@ -2596,10 +2884,15 @@ private struct LayoutSchedulingReinsertedAnimationLabChildRoot: View {
                     )
 
                 VStack(spacing: 8) {
-                    LayoutSchedulingRawTextMarker(size: CGSize(width: 160, height: 20))
+                    LayoutSchedulingEnvironmentTextMarker(
+                        content: LayoutSchedulingTextContent(value: "Retained removal"),
+                        size: CGSize(width: 160, height: 20)
+                    )
+                    .font(.system(.headline))
                     if showRetainedChild {
                         VStack(spacing: 6) {
                             LayoutSchedulingTransitionTextMarker(
+                                content: LayoutSchedulingTextContent(value: "Animated child"),
                                 size: CGSize(width: 120, height: 20),
                                 probe: probe.text
                             )
@@ -2632,6 +2925,7 @@ private struct LayoutSchedulingReinsertedAnimationLabChildRoot: View {
                     }
                 }
                 .frame(width: 190, height: 150)
+                .border(.gray, width: 1)
             }
         }
         .frame(width: 560, height: 360)
@@ -2722,6 +3016,7 @@ private struct LayoutSchedulingTextContent: Equatable, InterpolatableContent {
 }
 
 private struct LayoutSchedulingTransitionTextMarker: View {
+    var content: LayoutSchedulingTextContent
     var size: CGSize
     var probe: LayoutSchedulingAnimationProbe
 
@@ -2760,6 +3055,13 @@ private struct LayoutSchedulingTransitionTextMarker: View {
 
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layoutComputer))
         outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+        outputs.applyInterpolatorGroup(
+            DisplayList.UnaryInterpolatorGroup(),
+            content: view[\.content]._attribute,
+            inputs: inputs,
+            animatesSize: false,
+            defersRender: false
+        )
         return outputs
     }
 }
