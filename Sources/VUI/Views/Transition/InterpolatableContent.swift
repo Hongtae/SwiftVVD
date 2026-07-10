@@ -166,6 +166,8 @@ extension DisplayList {
             guard needsUpdate else { return }
             needsUpdate = false
 
+            foldActivePresentationIntoPendingRemoval()
+
             for index in removed.indices {
                 if removed[index].phase == .pending {
                     var options: [RBDisplayListInterpolatorOptionKey: Any] = [
@@ -217,7 +219,9 @@ extension DisplayList {
                 return false
             }
 
-            for removal in removed where !removal.state.transition.isIdentity && !removal.rbTransition.effects.isEmpty {
+            if let removal = removed.last,
+               !removal.state.transition.isIdentity,
+               !removal.rbTransition.effects.isEmpty {
                 let elapsed = Float(max(currentTime.seconds - removal.startTime.seconds, 0))
                 let contents = removal.interpolator?.copyContents(withProgress: elapsed)
                     ?? removal.contents.displayList
@@ -251,6 +255,23 @@ extension DisplayList {
                 }
             }
             nextUpdateTime = nextTime
+        }
+
+        private mutating func foldActivePresentationIntoPendingRemoval() {
+            guard removed.count > 1,
+                  let pendingIndex = removed.lastIndex(where: { $0.phase == .pending }),
+                  pendingIndex > 0 else {
+                return
+            }
+
+            // The renderer composes earlier removals before advancing to the
+            // next entry. Materialize that presentation for the closure-backed
+            // display-list carrier so the new interpolation starts without a jump.
+            let previous = removed[pendingIndex - 1]
+            let elapsed = Float(max(currentTime.seconds - previous.startTime.seconds, 0))
+            removed[pendingIndex].contents.displayList = previous.interpolator?
+                .copyContents(withProgress: elapsed) ?? previous.contents.displayList
+            removed.removeFirst(pendingIndex)
         }
     }
 
@@ -499,7 +520,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
     private var previousSize: CGSize?
     private var previousDisplayList: DisplayList?
     private var contentSeed = DisplayList.Seed()
-    private var activeTransitionChangedContent = false
 
     init(
         group: DisplayList.InterpolatorGroup,
@@ -595,11 +615,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
 
         let output: DisplayList
         if appliesTransition {
-            if contentChanged &&
-                group.hasActiveInterpolators &&
-                !activeTransitionChangedContent {
-                group.discardActiveInterpolators()
-            }
             output = group.update(
                 contentSeed: contentSeed,
                 current: previousList ?? targetList,
@@ -610,7 +625,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 defersRender: defersRender,
                 supportsVFD: supportsVFD
             )
-            activeTransitionChangedContent = contentChanged
         } else {
             group.setCurrentContents(
                 contentSeed: contentSeed,

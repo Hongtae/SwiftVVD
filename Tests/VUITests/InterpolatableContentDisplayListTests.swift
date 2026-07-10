@@ -3323,6 +3323,70 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertFalse(unary.supportsVariableFrameDuration)
     }
 
+    func testUnaryInterpolatorGroupFoldsActivePresentationIntoNextContentRetarget() throws {
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 0, y: 0, width: 20, height: 20)
+        )
+        let firstTarget = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 100, y: 0, width: 20, height: 20)
+        )
+        let secondTarget = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: CGRect(x: 200, y: 0, width: 20, height: 20)
+        )
+        var state = ContentTransition.State(transition: .interpolate)
+        state.animation = .linear(duration: 2)
+
+        _ = unary.update(
+            contentSeed: DisplayList.Seed(decodedValue: 1),
+            current: source,
+            target: firstTarget,
+            state: state,
+            time: .zero,
+            animatesSize: false,
+            defersRender: false,
+            supportsVFD: false
+        )
+        unary.updateTime(Time(seconds: 1))
+
+        let firstPresentation = try XCTUnwrap(
+            unary.layer.removed.last?.interpolator?.copyContents(withProgress: 1)
+        )
+        let firstPresentationBounds = try XCTUnwrap(firstPresentation.interpolationBounds)
+        XCTAssertEqual(firstPresentationBounds.minX, 50, accuracy: 0.001)
+
+        let output = unary.update(
+            contentSeed: DisplayList.Seed(decodedValue: 2),
+            current: firstTarget,
+            target: secondTarget,
+            state: state,
+            time: Time(seconds: 1),
+            animatesSize: false,
+            defersRender: false,
+            supportsVFD: false
+        )
+
+        XCTAssertEqual(unary.layer.removedCount, 1)
+        XCTAssertEqual(output.effects.count, 1)
+        let retargeted = try XCTUnwrap(unary.layer.removed.last?.interpolator)
+        XCTAssertEqual(
+            try XCTUnwrap(retargeted.from.interpolationBounds).minX,
+            firstPresentationBounds.minX,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(retargeted.to.interpolationBounds).minX,
+            200,
+            accuracy: 0.001
+        )
+    }
+
     func testUnaryInterpolatorGroupSetCurrentContentsSynchronizesLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
         let target = makeDisplayList(debugItemCount: 2)
@@ -3551,6 +3615,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             )
             XCTAssertEqual(output.value.effects.count, 1)
             XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(
+                try XCTUnwrap(group.layer.removed.last?.interpolator?.from.interpolationBounds).width,
+                try XCTUnwrap(expandedList.interpolationBounds).width,
+                accuracy: 0.001
+            )
         }
     }
 
