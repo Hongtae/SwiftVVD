@@ -405,6 +405,11 @@ final class ModalPresentationContext: @unchecked Sendable {
         return parentLocation - windowOffset
     }
 
+    func parentLocation(for controller: WindowController, localLocation: CGPoint) -> CGPoint {
+        guard controller.window == nil else { return localLocation }
+        return localLocation + windowOffset
+    }
+
     func beginPresentAnimation(controller: WindowController,
                                transaction: Transaction) {
         pendingDismissal = nil
@@ -660,17 +665,12 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     override func handleMouseEvent(event: MouseEvent) -> Bool {
         presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
-        var event = event
-        event.location = presentationContext.localLocation(for: self,
-                                                           parentLocation: event.location)
         return super.handleMouseEvent(event: event)
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
-        let location = presentationContext.localLocation(for: self,
-                                                         parentLocation: location)
         return super.handleMouseWheel(at: location, delta: delta)
     }
 
@@ -679,11 +679,18 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
                                    isTopMost: Bool) -> Bool {
         presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
-        let location = presentationContext.localLocation(for: self,
-                                                         parentLocation: location)
         return super.handleMouseHover(at: location,
                                       deviceID: deviceID,
                                       isTopMost: isTopMost)
+    }
+
+    override func presentationPointInParent(forLocalPoint point: CGPoint) -> CGPoint {
+        presentationContext.parentLocation(for: self, localLocation: point)
+    }
+
+    override func presentationPointInLocal(fromParentPoint point: CGPoint) -> CGPoint {
+        presentationContext.prepareForInput(controller: self)
+        return presentationContext.localLocation(for: self, parentLocation: point)
     }
 
     func requestModalDismissal(reason: ModalDismissReason,

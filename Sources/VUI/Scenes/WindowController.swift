@@ -1037,17 +1037,13 @@ class WindowController: WindowDelegate,
         let topModal = self.modalChildren.withLock { $0.first }
         if let topModal, topModal.isOverlay, topModal.initiated {
             let modalController = topModal.controller
-            let event = event
-            if event.type == .wheel {
-                _ = modalController.handleMouseWheel(at: event.location, delta: event.delta)
-            } else {
-                _ = modalController.handleMouseEvent(event: event)
-                if event.type == .move || event.type == .buttonUp {
-                    _ = modalController.handleMouseHover(at: event.location,
-                                                         deviceID: event.deviceID,
-                                                         isTopMost: true)
-                }
-            }
+            var event = event
+            event.location = modalController.presentationPointInLocal(
+                fromParentPoint: event.location
+            )
+            // Re-enter the child's dispatch boundary so another overlay modal
+            // can repeat the same conversion and routing at any nesting depth.
+            modalController.onMouseEvent(event: event)
             return
         }
 
@@ -1223,10 +1219,12 @@ class WindowController: WindowDelegate,
         var handlers = self.presentationChildren.withLock {
             $0.reversed().compactMap { entry -> (target: AnyObject, action: (MouseEvent) -> Bool)? in
                 guard entry.isOverlay, entry.initiated else { return nil }
-                guard let frame = entry.frame else { return nil }
+                guard entry.frame != nil else { return nil }
                 let child = entry.controller
                 return (target: child, action: { event in
-                    let loc = event.location - frame.origin
+                    let loc = child.presentationPointInLocal(
+                        fromParentPoint: event.location
+                    )
                     if child.overlayHitTest(loc) {
                         var e = event
                         e.location = loc
@@ -1300,9 +1298,9 @@ class WindowController: WindowDelegate,
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         for entry in self.presentationChildren.withLock({ $0.reversed() }) {
             guard entry.isOverlay, entry.initiated else { continue }
-            guard let frame = entry.frame else { continue }
+            guard entry.frame != nil else { continue }
             let child = entry.controller
-            let loc = location - frame.origin
+            let loc = child.presentationPointInLocal(fromParentPoint: location)
             if child.overlayHitTest(loc) {
                 child.handleMouseWheel(at: loc, delta: delta)
                 return true
@@ -1420,13 +1418,15 @@ class WindowController: WindowDelegate,
         self.presentationChildren.withLock({ $0.reversed() }).forEach { entry in
             guard entry.isOverlay, entry.initiated else { return }
             let child = entry.controller
-            if let offset = entry.frame?.origin {
-                let loc = location - offset
+            if entry.frame != nil {
+                let loc = child.presentationPointInLocal(fromParentPoint: location)
                 if child.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
                     topMost = false
                 }
             }
-            if topMost && child.overlayHitTest(location - (entry.frame?.origin ?? .zero)) {
+            if topMost && child.overlayHitTest(
+                child.presentationPointInLocal(fromParentPoint: location)
+            ) {
                 topMost = false
             }
         }
@@ -1617,6 +1617,18 @@ class WindowController: WindowDelegate,
 
     // Parent that opened this window (nil = root window).
     weak var parentWindow: WindowController?
+
+    // Overlay descendants use this hook while converting their local placement
+    // into the nearest platform host's coordinate space. Root/platform
+    // controllers keep the same point; overlay controller subclasses add their
+    // own parent-relative origin.
+    func presentationPointInParent(forLocalPoint point: CGPoint) -> CGPoint {
+        point
+    }
+
+    func presentationPointInLocal(fromParentPoint point: CGPoint) -> CGPoint {
+        point
+    }
 
     private struct PresentationChildEntry: @unchecked Sendable {
         let controller: PresentationChildWindowController   // strong: WindowController owns presentation children

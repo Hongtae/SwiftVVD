@@ -56,50 +56,59 @@ private func presentationHostVisibleFrame(for controller: WindowController) -> C
 
 @MainActor
 private func presentationHostWindow(for controller: WindowController) -> (any PlatformWindow)? {
-    if let child = controller as? PresentationChildWindowController {
-        if let platformWindow = child.window {
-            return platformWindow
-        }
-        if let parent = child.parentWindow {
-            return presentationHostWindow(for: parent)
-        }
-        return nil
+    if let platformWindow = controller.window {
+        return platformWindow
     }
-    return controller.window
+    if let parent = controller.parentWindow {
+        return presentationHostWindow(for: parent)
+    }
+    return nil
 }
 
 @MainActor
 private func presentationHostSurfaceFrame(for controller: WindowController) -> CGRect? {
-    if let child = controller as? PresentationChildWindowController {
-        if let platformWindow = child.window {
-            return presentationContentSurfaceFrame(for: platformWindow,
-                                                   preferredSize: child.cachedContentSize)
-        }
-        if let parent = child.parentWindow {
-            return presentationHostSurfaceFrame(for: parent)
-        }
-        return nil
+    if let platformWindow = controller.window {
+        return presentationContentSurfaceFrame(for: platformWindow,
+                                               preferredSize: controller.cachedContentSize)
     }
-    guard let platformWindow = controller.window else { return nil }
-    return presentationContentSurfaceFrame(for: platformWindow,
-                                           preferredSize: controller.cachedContentSize)
+    if let parent = controller.parentWindow {
+        return presentationHostSurfaceFrame(for: parent)
+    }
+    return nil
 }
 
 @MainActor
 private func presentationHostScreenFrame(for controller: WindowController) -> CGRect? {
-    if let child = controller as? PresentationChildWindowController {
-        if let platformWindow = child.window {
-            return presentationContentScreenFrame(for: platformWindow,
-                                                  preferredSize: child.cachedContentSize)
-        }
-        if let parent = child.parentWindow {
-            return presentationHostScreenFrame(for: parent)
-        }
-        return nil
+    if let platformWindow = controller.window {
+        return presentationContentScreenFrame(for: platformWindow,
+                                              preferredSize: controller.cachedContentSize)
     }
-    guard let platformWindow = controller.window else { return nil }
-    return presentationContentScreenFrame(for: platformWindow,
-                                          preferredSize: controller.cachedContentSize)
+    if let parent = controller.parentWindow {
+        return presentationHostScreenFrame(for: parent)
+    }
+    return nil
+}
+
+@MainActor
+private func presentationHostSurfacePoint(for controller: WindowController,
+                                          localPoint: CGPoint) -> CGPoint? {
+    if controller.window != nil {
+        return localPoint
+    }
+    guard let parent = controller.parentWindow else { return nil }
+    let pointInParent = controller.presentationPointInParent(forLocalPoint: localPoint)
+    return presentationHostSurfacePoint(for: parent, localPoint: pointInParent)
+}
+
+@MainActor
+private func presentationScreenPoint(for controller: WindowController,
+                                     localPoint: CGPoint) -> CGPoint? {
+    if let platformWindow = controller.window {
+        return platformWindow.convertPointToScreen(localPoint)
+    }
+    guard let parent = controller.parentWindow else { return nil }
+    let pointInParent = controller.presentationPointInParent(forLocalPoint: localPoint)
+    return presentationScreenPoint(for: parent, localPoint: pointInParent)
 }
 
 @MainActor
@@ -200,7 +209,9 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     }
 
     var presentationAvailableFrameSpace: PresentationAvailableFrameSpace {
-        usesPlatformWindow ? .platformVisibleScreen : .hostSurface
+        runOnMainQueueSync {
+            window != nil ? .platformVisibleScreen : .hostSurface
+        }
     }
 
     func availableFrameForPresentationPlacement(in space: PresentationAvailableFrameSpace? = nil) -> CGRect? {
@@ -261,26 +272,31 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     private func hostSurfaceRectInParentCoordinates(_ rect: CGRect) -> CGRect? {
         runOnMainQueueSync {
-            if let parentChild = parentWindow as? PresentationChildWindowController {
-                return parentChild.hostSurfaceRect(forLocalRect: rect)
-            }
-            guard parentWindow?.window != nil else {
-                return nil
-            }
-            return rect
+            guard let parentWindow else { return nil }
+            let p0 = presentationHostSurfacePoint(for: parentWindow,
+                                                  localPoint: rect.origin)
+            let p1 = presentationHostSurfacePoint(
+                for: parentWindow,
+                localPoint: CGPoint(x: rect.maxX, y: rect.maxY)
+            )
+            guard let p0, let p1 else { return nil }
+            return CGRect(x: min(p0.x, p1.x),
+                          y: min(p0.y, p1.y),
+                          width: abs(p1.x - p0.x),
+                          height: abs(p1.y - p0.y))
         }
     }
 
     private func screenRectInParentCoordinates(_ rect: CGRect) -> CGRect? {
         runOnMainQueueSync {
-            if let parentChild = parentWindow as? PresentationChildWindowController {
-                return parentChild.screenRect(forLocalRect: rect)
-            }
-            guard let parentWindow = parentWindow?.window else {
-                return nil
-            }
-            let p0 = parentWindow.convertPointToScreen(rect.origin)
-            let p1 = parentWindow.convertPointToScreen(CGPoint(x: rect.maxX, y: rect.maxY))
+            guard let parentWindow else { return nil }
+            let p0 = presentationScreenPoint(for: parentWindow,
+                                             localPoint: rect.origin)
+            let p1 = presentationScreenPoint(
+                for: parentWindow,
+                localPoint: CGPoint(x: rect.maxX, y: rect.maxY)
+            )
+            guard let p0, let p1 else { return nil }
             return CGRect(x: min(p0.x, p1.x),
                           y: min(p0.y, p1.y),
                           width: abs(p1.x - p0.x),
@@ -324,17 +340,8 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     func screenPoint(forLocalPoint point: CGPoint) -> CGPoint {
         runOnMainQueueSync {
-            if let platformWindow = window {
-                return platformWindow.convertPointToScreen(point)
-            }
-            let pointInParent = point + frameInParent.origin
-            if let parentChild = parentWindow as? PresentationChildWindowController {
-                return parentChild.screenPoint(forLocalPoint: pointInParent)
-            }
-            if let parentWindow = parentWindow?.window {
-                return parentWindow.convertPointToScreen(pointInParent)
-            }
-            return pointInParent
+            presentationScreenPoint(for: self, localPoint: point) ??
+                presentationPointInParent(forLocalPoint: point)
         }
     }
 
@@ -349,15 +356,19 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     func hostSurfacePoint(forLocalPoint point: CGPoint) -> CGPoint {
         runOnMainQueueSync {
-            if window != nil {
-                return point
-            }
-            let pointInParent = point + frameInParent.origin
-            if let parentChild = parentWindow as? PresentationChildWindowController {
-                return parentChild.hostSurfacePoint(forLocalPoint: pointInParent)
-            }
-            return pointInParent
+            presentationHostSurfacePoint(for: self, localPoint: point) ??
+                presentationPointInParent(forLocalPoint: point)
         }
+    }
+
+    override func presentationPointInParent(forLocalPoint point: CGPoint) -> CGPoint {
+        guard window == nil else { return point }
+        return point + frameInParent.origin
+    }
+
+    override func presentationPointInLocal(fromParentPoint point: CGPoint) -> CGPoint {
+        guard window == nil else { return point }
+        return point - frameInParent.origin
     }
 
     func hostSurfaceRect(forLocalRect rect: CGRect) -> CGRect {
