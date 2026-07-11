@@ -42,7 +42,7 @@ public struct LazyHGrid<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension LazyHGrid: _PrimitiveView {
+extension LazyHGrid: PrimitiveView, UnaryView {
 }
 
 struct LazyHGridLayout: HVGrid {

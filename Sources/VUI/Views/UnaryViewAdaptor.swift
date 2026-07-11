@@ -16,8 +16,6 @@ public struct _UnaryViewAdaptor<Content>: View where Content: View {
 
     public typealias Body = Never
 
-    public var body: Never { neverBody() }
-
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Content._makeView(view: view[\.content], inputs: inputs)
     }
@@ -32,4 +30,7 @@ public struct _UnaryViewAdaptor<Content>: View where Content: View {
             return Self._makeView(view: view, inputs: viewInputs)
         }
     }
+}
+
+extension _UnaryViewAdaptor: PrimitiveView, UnaryView {
 }

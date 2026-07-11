@@ -186,7 +186,7 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
     }
 }
 
-extension ToolbarItem: _PrimitiveView {}
+extension ToolbarItem: PrimitiveView {}
 
 extension ToolbarItem where ID == _ToolbarItemDefaultID {
     public init(placement: ToolbarItemPlacement = .automatic,
@@ -289,7 +289,7 @@ public struct TupleToolbarContent<C>: View, ToolbarContent {
     }
 }
 
-extension TupleToolbarContent: _PrimitiveView {}
+extension TupleToolbarContent: PrimitiveView {}
 
 // MARK: - ToolbarContentBuilder
 
@@ -401,7 +401,7 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
     }
 }
 
-extension ToolbarItemGroup: _PrimitiveView {}
+extension ToolbarItemGroup: PrimitiveView {}
 
 // MARK: - EmptyToolbarContent
 
@@ -421,7 +421,7 @@ public struct EmptyToolbarContent: View, ToolbarContent {
     }
 }
 
-extension EmptyToolbarContent: _PrimitiveView {}
+extension EmptyToolbarContent: PrimitiveView {}
 
 // MARK: - ToolbarModifier
 
@@ -592,7 +592,7 @@ struct ToolbarReader<Edges, Content: View>: View {
     }
 }
 
-extension ToolbarReader: _PrimitiveView {}
+extension ToolbarReader: PrimitiveView {}
 
 struct AllToolbarEdges {}
 
@@ -1111,4 +1111,4 @@ struct ToolbarStoredItemView: View {
     }
 }
 
-extension ToolbarStoredItemView: _PrimitiveView {}
+extension ToolbarStoredItemView: PrimitiveView {}

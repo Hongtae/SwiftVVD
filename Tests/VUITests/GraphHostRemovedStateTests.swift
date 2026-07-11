@@ -337,4 +337,4 @@ private struct FeatureDispatchRootView: View {
     }
 }
 
-extension FeatureDispatchRootView: _PrimitiveView {}
+extension FeatureDispatchRootView: TestPrimitiveView {}

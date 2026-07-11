@@ -24,7 +24,7 @@ private struct ObservationTransactionRoot: View {
     }
 }
 
-private struct ObservationTransactionLeaf: View, _PrimitiveView {
+private struct ObservationTransactionLeaf: View, TestPrimitiveView {
     var width: CGFloat
 
     typealias Body = Never
@@ -50,7 +50,7 @@ private struct ObservationAnimatableTransactionRoot: View {
     }
 }
 
-private struct ObservationAnimatableTransactionLeaf: View, _PrimitiveView, Animatable {
+private struct ObservationAnimatableTransactionLeaf: View, TestPrimitiveView, Animatable {
     var width: CGFloat
 
     typealias Body = Never
@@ -73,6 +73,13 @@ private struct ObservationAnimatableTransactionLeaf: View, _PrimitiveView, Anima
         }
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
     }
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
 }
 
 private final class StateAnimatableTransactionProbe {
@@ -91,7 +98,7 @@ private struct StateAnimatableTransactionRoot: View {
     }
 }
 
-private struct AnimationLabDisplayLeaf: View, _PrimitiveView {
+private struct AnimationLabDisplayLeaf: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -113,7 +120,7 @@ private struct AnimationLabDisplayLeaf: View, _PrimitiveView {
     }
 }
 
-private struct AnimationLabItemLeaf: View, _PrimitiveView {
+private struct AnimationLabItemLeaf: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {

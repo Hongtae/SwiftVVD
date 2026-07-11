@@ -14,7 +14,7 @@ private struct TransactionModifierReportingViewList: ViewList {
     }
 }
 
-private struct TransactionModifierReportingContent: View, _PrimitiveView {
+private struct TransactionModifierReportingContent: View, TestPrimitiveView {
     var width: CGFloat
 
     typealias Body = Never

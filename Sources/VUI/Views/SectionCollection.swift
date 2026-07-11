@@ -163,7 +163,7 @@ public struct Subview: View, Identifiable {
     public typealias Body = Never
 }
 
-extension Subview: _PrimitiveView {
+extension Subview: PrimitiveView, UnaryView {
 }
 
 public struct SubviewsCollection: RandomAccessCollection, View {
@@ -298,7 +298,7 @@ public struct SubviewsCollection: RandomAccessCollection, View {
     }
 }
 
-extension SubviewsCollection: _PrimitiveView {
+extension SubviewsCollection: PrimitiveView {
 }
 
 public struct SubviewsCollectionSlice: RandomAccessCollection, View {
@@ -351,7 +351,7 @@ public struct SubviewsCollectionSlice: RandomAccessCollection, View {
     }
 }
 
-extension SubviewsCollectionSlice: _PrimitiveView {
+extension SubviewsCollectionSlice: PrimitiveView {
 }
 
 public struct ForEachSectionCollection<Content: View>: RandomAccessCollection {

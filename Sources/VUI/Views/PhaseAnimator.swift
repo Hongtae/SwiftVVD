@@ -544,10 +544,10 @@ extension PhaseAnimator.StateTransitioningContainer {
     }
 }
 
-extension PhaseAnimator.EmptyPhasesView: _PrimitiveView {
+extension PhaseAnimator.EmptyPhasesView: PrimitiveView {
 }
 
-extension PhaseAnimator.StateTransitioningContainer: _PrimitiveView {
+extension PhaseAnimator.StateTransitioningContainer: PrimitiveView, UnaryView {
 }
 
 @available(*, unavailable)

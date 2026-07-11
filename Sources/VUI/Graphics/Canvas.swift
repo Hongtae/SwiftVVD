@@ -89,5 +89,5 @@ extension Canvas {
     }
 }
 
-extension Canvas: _PrimitiveView {
+extension Canvas: PrimitiveView, UnaryView {
 }

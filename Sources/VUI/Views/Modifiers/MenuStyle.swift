@@ -35,8 +35,8 @@ public struct MenuStyleConfiguration {
     }
 }
 
-extension MenuStyleConfiguration.Label: _PrimitiveView {}
-extension MenuStyleConfiguration.Content: _PrimitiveView {}
+extension MenuStyleConfiguration.Label: PrimitiveView {}
+extension MenuStyleConfiguration.Content: PrimitiveView {}
 
 struct _MenuStyleKey: GraphInput {
     static var defaultValue: (any MenuStyle)? { nil }

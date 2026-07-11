@@ -39,5 +39,5 @@ public struct LazyVStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension LazyVStack: _PrimitiveView {
+extension LazyVStack: PrimitiveView, UnaryView {
 }

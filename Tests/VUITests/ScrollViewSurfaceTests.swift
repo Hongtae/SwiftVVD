@@ -12,7 +12,7 @@ private final class ScrollViewInputRecorder {
     var safeAreaInsets: Attribute<SafeAreaInsets>?
 }
 
-private struct ScrollViewRecordingContent: View, _PrimitiveView {
+private struct ScrollViewRecordingContent: View, TestPrimitiveView {
     var recorder: ScrollViewInputRecorder
     var size = CGSize(width: 17, height: 23)
 
@@ -40,7 +40,7 @@ private struct ScrollViewRecordingContent: View, _PrimitiveView {
     }
 }
 
-private struct ScrollViewChildScrollableContent: View, _PrimitiveView {
+private struct ScrollViewChildScrollableContent: View, TestPrimitiveView {
     var recorder: ScrollViewInputRecorder
     var child: ScrollViewChildCollectionScrollable
 
@@ -253,7 +253,7 @@ private final class ScrollViewTargetSubgraphRecorder {
     var itemSubgraphs: [Int: AGSubgraph] = [:]
 }
 
-private struct ScrollViewTargetRow: View, _PrimitiveView {
+private struct ScrollViewTargetRow: View, TestPrimitiveView {
     var id: Int
     var subgraphRecorder: ScrollViewTargetSubgraphRecorder?
     var childScrollable: ScrollViewChildCollectionScrollable?
@@ -384,7 +384,7 @@ private final class ScrollBehaviorEnvironmentRecorder {
     var environment: Attribute<EnvironmentValues>?
 }
 
-private struct ScrollBehaviorEnvironmentContent: View, _PrimitiveView {
+private struct ScrollBehaviorEnvironmentContent: View, TestPrimitiveView {
     var recorder: ScrollBehaviorEnvironmentRecorder
     var size = CGSize(width: 11, height: 13)
 
@@ -407,7 +407,7 @@ private struct ScrollBehaviorEnvironmentContent: View, _PrimitiveView {
     }
 }
 
-private struct ScrollBehaviorRoleContent: View, _PrimitiveView {
+private struct ScrollBehaviorRoleContent: View, TestPrimitiveView {
     var recorder: ScrollBehaviorEnvironmentRecorder
     var rows: [ScrollViewTargetRow]
 

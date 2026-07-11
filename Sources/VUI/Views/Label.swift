@@ -135,7 +135,7 @@ struct ResolvedLabelStyle: View {
     }
 }
 
-extension ResolvedLabelStyle: _PrimitiveView {}
+extension ResolvedLabelStyle: PrimitiveView {}
 
 extension ResolvedLabelStyle: StyleableView {
     typealias DefaultStyleModifier = LabelStyleModifier<DefaultLabelStyle>

@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import VUI
 
-private struct FixedRelaySource: View, _PrimitiveView {
+private struct FixedRelaySource: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {

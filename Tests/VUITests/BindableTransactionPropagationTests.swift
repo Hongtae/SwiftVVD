@@ -35,7 +35,7 @@ private struct BindableAmbientTransactionRoot: View {
     }
 }
 
-private struct BindableTransactionLeaf: View, _PrimitiveView {
+private struct BindableTransactionLeaf: View, TestPrimitiveView {
     var width: CGFloat
 
     typealias Body = Never

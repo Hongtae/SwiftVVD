@@ -61,7 +61,7 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
     public typealias Body = Never
 }
 
-extension _AnimationView: _PrimitiveView {
+extension _AnimationView: PrimitiveView {
 }
 
 @available(*, unavailable)

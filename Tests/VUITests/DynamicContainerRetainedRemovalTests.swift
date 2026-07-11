@@ -3495,7 +3495,7 @@ private struct DynamicContainerForkRetargetRow: View {
     typealias Body = Never
 }
 
-extension DynamicContainerForkRetargetRow: _PrimitiveView {}
+extension DynamicContainerForkRetargetRow: TestPrimitiveView {}
 
 private struct DynamicContainerLifecycleRow: View {
     var row: String
@@ -3531,7 +3531,7 @@ private struct DynamicContainerLifecycleRow: View {
     typealias Body = Never
 }
 
-extension DynamicContainerLifecycleRow: _PrimitiveView {}
+extension DynamicContainerLifecycleRow: TestPrimitiveView {}
 
 private struct DynamicContainerLifecycleSizedRow: View {
     var row: String
@@ -3569,7 +3569,7 @@ private struct DynamicContainerLifecycleSizedRow: View {
     typealias Body = Never
 }
 
-extension DynamicContainerLifecycleSizedRow: _PrimitiveView {}
+extension DynamicContainerLifecycleSizedRow: TestPrimitiveView {}
 
 private struct DynamicContainerViewThatFitsFallbackRoot: View {
     var primaryWidth: CGFloat

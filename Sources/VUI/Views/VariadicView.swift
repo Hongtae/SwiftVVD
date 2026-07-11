@@ -198,10 +198,10 @@ extension _VariadicView_Children: RandomAccessCollection {
     public typealias Indices = Range<Int>
 }
 
-extension _VariadicView_Children: _PrimitiveView {
+extension _VariadicView_Children: PrimitiveView {
 }
 
-extension _VariadicView_Children.Element: _PrimitiveView {
+extension _VariadicView_Children.Element: PrimitiveView, UnaryView {
 }
 
 public protocol _VariadicView_ViewRoot: _VariadicView_Root {
@@ -436,5 +436,5 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     }
 }
 
-extension _VariadicView.Tree: _PrimitiveView where Self: View {
+extension _VariadicView.Tree: PrimitiveView, UnaryView where Self: View {
 }

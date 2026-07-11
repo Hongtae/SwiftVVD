@@ -137,10 +137,6 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
 
         public typealias Body = Never
 
-        public var body: Never {
-            neverBody()
-        }
-
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
             guard let graph = _AGGraph.current else {
                 fatalError("_ScrollView.Main._makeView called outside an active _AGGraph context.")
@@ -261,7 +257,7 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
     }
 }
 
-extension _ScrollView.Main: _PrimitiveView {
+extension _ScrollView.Main: PrimitiveView, UnaryView {
 }
 
 struct _ContainingScrollView {
@@ -1937,10 +1933,6 @@ public struct _ScrollableLayoutView<Data, Layout>: View
 
     public typealias Body = Never
 
-    public var body: Never {
-        neverBody()
-    }
-
     public static func _makeView(
         view: _GraphValue<_ScrollableLayoutView<Data, Layout>>,
         inputs: _ViewInputs
@@ -2109,7 +2101,7 @@ public struct _ScrollableLayoutView<Data, Layout>: View
     }
 }
 
-extension _ScrollableLayoutView: _PrimitiveView {
+extension _ScrollableLayoutView: PrimitiveView, UnaryView {
 }
 
 extension _ScrollableLayoutView: _ScrollableContentProvider {

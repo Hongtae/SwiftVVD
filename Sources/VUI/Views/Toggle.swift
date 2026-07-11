@@ -178,7 +178,7 @@ extension ToggleStyleConfiguration.Label {
     }
 }
 
-extension ToggleStyleConfiguration.Label: _PrimitiveView {}
+extension ToggleStyleConfiguration.Label: PrimitiveView {}
 
 public protocol ToggleStyle {
     associatedtype Body: View

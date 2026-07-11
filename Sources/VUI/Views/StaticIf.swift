@@ -50,7 +50,7 @@ extension StaticIf: View
     }
 }
 
-extension StaticIf: _PrimitiveView
+extension StaticIf: PrimitiveView
     where Predicate: ViewInputPredicate, TrueContent: View, FalseContent: View {}
 
 // ViewModifier conformance when both TrueContent and FalseContent are ViewModifiers.

@@ -24,10 +24,7 @@ extension View {
 }
 
 extension View {
-    /// Default implementation for Body = Never primitive views that are not yet AG-implemented:
-    /// returns a stub 10x10 LayoutComputer so the layout tree wires correctly.
-    ///
-    /// For Body != Never: creates a reactive body rule that
+    /// Creates a reactive body rule that
     ///   1. reads the live `EnvironmentValues` AG node (registers dependency), and
     ///   2. tracks `@Observable` property accesses via `withObservationTracking`.
     /// Both environment changes and @Observable mutations invalidate the body rule
@@ -39,8 +36,6 @@ extension View {
     /// Default implementation: produces a reactive body rule (same as `_makeView`)
     /// then delegates list construction to `Body._makeViewList`.
     ///
-    /// For Body = Never, returns a single-proxy static list so the parent layout
-    /// can call `_makeView` via the proxy.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         _makeDefaultViewList(view: view, inputs: inputs)
     }
@@ -51,13 +46,6 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
         fatalError("\(V.self)._makeView called outside an active _AGGraph context.")
     }
 
-    if V.self is any _PrimitiveView.Type {
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            LayoutComputer.fixed(CGSize(width: 10, height: 10))
-        }
-        return _ViewOutputs(preferences: PreferencesOutputs(),
-                            layoutComputer: OptionalAttribute(lcAttr))
-    }
     if V.Body.self is Never.Type {
         fatalError("\(V.self) may not have Body == Never")
     }
@@ -101,9 +89,6 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
 }
 
 func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs) -> _ViewListOutputs {
-    if V.self is any _PrimitiveView.Type {
-        return _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
     if V.Body.self is Never.Type {
         fatalError("\(V.self) may not have Body == Never")
     }
@@ -145,23 +130,6 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
     var childInputs = inputs
     childInputs.base = graphInputs
     return V.Body._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
-}
-
-// _PrimitiveView is a View type that does not have a body. Body = Never.
-protocol _PrimitiveView {
-}
-
-// Category markers used while primitive view families are split by role.
-protocol PrimitiveSpacer: View where Body == Never {
-}
-
-protocol LeafViewLayout {
-}
-
-extension _PrimitiveView {
-    public var body: Never {
-        fatalError("\(Self.self) may not have Body == Never")
-    }
 }
 
 extension Never: View {
@@ -345,7 +313,7 @@ extension Optional: View where Wrapped: View {
     }
 }
 
-extension Optional: _PrimitiveView where Self: View {
+extension Optional: PrimitiveView where Self: View {
 }
 
 struct IDView<Content, ID>: View where Content: View, ID: Hashable {
@@ -358,7 +326,9 @@ struct IDView<Content, ID>: View where Content: View, ID: Hashable {
     }
 
     typealias Body = Never
-    var body: Never { neverBody() }
+    var body: Never {
+        fatalError("body() should not be called on \(Self.self).")
+    }
 }
 
 extension View {

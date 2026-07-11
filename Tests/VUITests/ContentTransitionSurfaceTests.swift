@@ -5,7 +5,7 @@ private final class ContentTransitionEnvironmentRecorder {
     var environment: Attribute<EnvironmentValues>?
 }
 
-private struct ContentTransitionEnvironmentContent: View, _PrimitiveView {
+private struct ContentTransitionEnvironmentContent: View, TestPrimitiveView {
     var recorder: ContentTransitionEnvironmentRecorder
 
     typealias Body = Never

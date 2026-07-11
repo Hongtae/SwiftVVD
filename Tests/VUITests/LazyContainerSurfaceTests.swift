@@ -7,7 +7,7 @@ private final class LazyRootInputRecorder {
     var maxUnusedItems = 0
 }
 
-private struct LazyRootInputCaptureView: View, _PrimitiveView {
+private struct LazyRootInputCaptureView: View, TestPrimitiveView {
     var recorder: LazyRootInputRecorder
 
     typealias Body = Never
@@ -12302,7 +12302,7 @@ private final class ViewListOptionsRecorder {
     var options: UInt32 = 0
 }
 
-private struct ViewListOptionsCaptureView: View, _PrimitiveView {
+private struct ViewListOptionsCaptureView: View, TestPrimitiveView {
     var recorder: ViewListOptionsRecorder
 
     static func _makeViewList(
@@ -12320,7 +12320,7 @@ private struct ViewListOptionsCaptureView: View, _PrimitiveView {
     typealias Body = Never
 }
 
-private struct SectionCollectionCaptureView: View, _PrimitiveView {
+private struct SectionCollectionCaptureView: View, TestPrimitiveView {
     var recorder: SectionCollectionRecorder
     var collection: SectionCollection
 
@@ -12347,7 +12347,7 @@ private struct SectionCollectionCaptureView: View, _PrimitiveView {
     typealias Body = Never
 }
 
-private struct SectionContainerValuesCaptureView: View, _PrimitiveView {
+private struct SectionContainerValuesCaptureView: View, TestPrimitiveView {
     var recorder: SectionContainerValuesRecorder
     var collection: SectionCollection
 
@@ -12383,7 +12383,7 @@ private struct SectionContainerValuesCaptureView: View, _PrimitiveView {
     typealias Body = Never
 }
 
-private struct SectionIDCaptureView: View, _PrimitiveView {
+private struct SectionIDCaptureView: View, TestPrimitiveView {
     var recorder: SectionIDRecorder
     var collection: SectionCollection
 
@@ -12429,7 +12429,7 @@ private struct SectionIDCaptureView: View, _PrimitiveView {
     }
 }
 
-private struct SectionConfigurationCaptureView: View, _PrimitiveView {
+private struct SectionConfigurationCaptureView: View, TestPrimitiveView {
     var recorder: SectionCollectionRecorder
     var section: SectionConfiguration
 
@@ -12456,7 +12456,7 @@ private struct SectionConfigurationCaptureView: View, _PrimitiveView {
     typealias Body = Never
 }
 
-private struct SectionConfigurationIDCaptureView: View, _PrimitiveView {
+private struct SectionConfigurationIDCaptureView: View, TestPrimitiveView {
     var recorder: SectionIDRecorder
     var section: SectionConfiguration
 
@@ -12500,7 +12500,7 @@ private struct SectionConfigurationIDCaptureView: View, _PrimitiveView {
     }
 }
 
-private struct SectionConfigurationValuesCaptureView: View, _PrimitiveView {
+private struct SectionConfigurationValuesCaptureView: View, TestPrimitiveView {
     var recorder: SectionContainerValuesRecorder
     var section: SectionConfiguration
 

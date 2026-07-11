@@ -239,7 +239,7 @@ struct ForEachList<Data, ID, Content>: ViewList
     }
 }
 
-extension ForEach: _PrimitiveView where ForEach: View {
+extension ForEach: PrimitiveView where ForEach: View {
 }
 
 extension ForEach where ID == Data.Element.ID, Content: View, Data.Element: Identifiable {

@@ -485,7 +485,7 @@ extension Color: View {
     public typealias Body = Never
 }
 
-extension Color: _PrimitiveView {
+extension Color: PrimitiveView, UnaryView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")

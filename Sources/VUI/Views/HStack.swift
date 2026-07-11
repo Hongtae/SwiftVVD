@@ -22,5 +22,5 @@ public struct HStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension HStack: _PrimitiveView {
+extension HStack: PrimitiveView, UnaryView {
 }

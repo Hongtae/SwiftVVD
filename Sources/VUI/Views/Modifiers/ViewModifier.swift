@@ -108,9 +108,7 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 }
 
-extension _ViewModifier_Content: View {
-    public var body: Never { neverBody() }
-
+extension _ViewModifier_Content: PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Self.providerMakeView(view: view, inputs: inputs)
     }

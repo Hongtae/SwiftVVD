@@ -37,7 +37,7 @@ struct ResettableLazyLayoutRoot<Content>: View where Content: View {
     typealias Body = Never
 }
 
-extension ResettableLazyLayoutRoot: _PrimitiveView {
+extension ResettableLazyLayoutRoot: PrimitiveView {
 }
 
 extension View {

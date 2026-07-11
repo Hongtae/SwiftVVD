@@ -111,5 +111,5 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     public typealias Body = Never
 }
 
-extension _ShapeView: _PrimitiveView, LeafViewLayout {
+extension _ShapeView: PrimitiveView, UnaryView, LeafViewLayout {
 }

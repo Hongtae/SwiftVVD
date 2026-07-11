@@ -24,8 +24,8 @@ public struct LabelStyleConfiguration {
 
 extension LabelStyleConfiguration.Title: View {}
 extension LabelStyleConfiguration.Icon: View {}
-extension LabelStyleConfiguration.Title: _PrimitiveView {}
-extension LabelStyleConfiguration.Icon: _PrimitiveView {}
+extension LabelStyleConfiguration.Title: PrimitiveView {}
+extension LabelStyleConfiguration.Icon: PrimitiveView {}
 
 
 extension LabelStyleConfiguration.Title {

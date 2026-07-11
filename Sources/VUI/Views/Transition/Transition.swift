@@ -16,7 +16,7 @@ public protocol Transition {
 }
 
 public struct PlaceholderContentView<Value>: View {
-    public var body: Never { neverBody() }
+    public typealias Body = Never
 
     // Transition bodies are built around a placeholder. The real content builder
     // is pushed through inputs so a transition can wrap either a unary view or a
@@ -73,11 +73,9 @@ public struct PlaceholderContentView<Value>: View {
     public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
         body(inputs)
     }
-
-    public typealias Body = Never
 }
 
-extension PlaceholderContentView: _PrimitiveView {
+extension PlaceholderContentView: PrimitiveView {
 }
 
 // Query payload used by Transition implementations to expose renderer content-transition effects.

@@ -8,6 +8,9 @@
 import Foundation
 import Synchronization
 
+protocol LeafViewLayout {
+}
+
 // MARK: - Layout AG rules
 
 /// AG Rule: computes child geometries for a layout container.

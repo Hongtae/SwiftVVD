@@ -164,7 +164,7 @@ private final class ScrollableLayoutGraphDelegateRecorder: GraphDelegate {
     }
 }
 
-private struct ScrollableRecordingRow: View, _PrimitiveView {
+private struct ScrollableRecordingRow: View, TestPrimitiveView {
     var id: Int
     var recorder: ScrollableLayoutRecorder
 
@@ -201,7 +201,7 @@ private struct ScrollableRecordingRow: View, _PrimitiveView {
     }
 }
 
-private struct ScrollableLifecycleRow: View, _PrimitiveView {
+private struct ScrollableLifecycleRow: View, TestPrimitiveView {
     var id: Int
     var recorder: ScrollableLayoutRecorder
 
@@ -256,7 +256,7 @@ private final class ScrollableForkRetargetCapture {
     var animated: Attribute<_OpacityEffect>?
 }
 
-private struct ScrollableForkRetargetRow: View, _PrimitiveView {
+private struct ScrollableForkRetargetRow: View, TestPrimitiveView {
     var id: Int
     var effect: _OpacityEffect
     var recorder: AnimationCompletionRecorder
@@ -345,7 +345,7 @@ private struct ScrollableOrdinaryPreferenceKey: PreferenceKey {
     }
 }
 
-private struct ScrollableOrdinaryPreferenceRow: View, _PrimitiveView {
+private struct ScrollableOrdinaryPreferenceRow: View, TestPrimitiveView {
     var id: Int
     var recorder: ScrollableLayoutRecorder
 
@@ -376,7 +376,7 @@ private struct ScrollableOrdinaryPreferenceRow: View, _PrimitiveView {
     }
 }
 
-private struct ScrollViewInputRecordingContent: View, _PrimitiveView {
+private struct ScrollViewInputRecordingContent: View, TestPrimitiveView {
     var recorder: ScrollableLayoutRecorder
     var fixedContentSize: CGSize?
 
@@ -560,7 +560,7 @@ private struct RecordingPreferenceLayoutGesture: LayoutGesture, LayoutGestureRes
     }
 }
 
-private struct ScrollViewResponderContent: View, _PrimitiveView {
+private struct ScrollViewResponderContent: View, TestPrimitiveView {
     var responder: ScrollViewTestResponder
 
     typealias Body = Never
@@ -590,7 +590,7 @@ private struct ScrollViewResponderProvider: _ScrollableContentProvider {
     }
 }
 
-private struct FixedSizeRecordingRow: View, _PrimitiveView {
+private struct FixedSizeRecordingRow: View, TestPrimitiveView {
     var id: Int
     var size: CGSize
     var recorder: ScrollableLayoutRecorder
@@ -621,7 +621,7 @@ private struct FixedSizeRecordingRow: View, _PrimitiveView {
     }
 }
 
-private struct ScrollableMeasuringRow: View, _PrimitiveView {
+private struct ScrollableMeasuringRow: View, TestPrimitiveView {
     var id: Int
     var recorder: ScrollableLayoutRecorder?
 
@@ -721,7 +721,7 @@ private final class ScrollableLayoutParentScrollable: Scrollable {
     }
 }
 
-private struct ScrollablePreferenceRow: View, _PrimitiveView {
+private struct ScrollablePreferenceRow: View, TestPrimitiveView {
     var id: Int
     var child: ScrollableLayoutChildScrollable?
 

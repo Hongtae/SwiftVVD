@@ -128,7 +128,7 @@ private struct ImageRendererFeatureRoot: View {
     }
 }
 
-extension ImageRendererFeatureRoot: _PrimitiveView {}
+extension ImageRendererFeatureRoot: TestPrimitiveView {}
 
 private struct ImageRendererFixedRoot: View {
     var size: CGSize
@@ -150,7 +150,7 @@ private struct ImageRendererFixedRoot: View {
     }
 }
 
-extension ImageRendererFixedRoot: _PrimitiveView {}
+extension ImageRendererFixedRoot: TestPrimitiveView {}
 
 private func makeBitmapContext(width: Int, height: Int) -> CGContext {
     #if canImport(CoreGraphics)

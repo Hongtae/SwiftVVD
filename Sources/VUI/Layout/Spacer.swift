@@ -7,6 +7,9 @@
 
 import Foundation
 
+protocol PrimitiveSpacer: View where Body == Never {
+}
+
 struct DefaultPixelLengthKey: EnvironmentKey {
     static var defaultValue: CGFloat? { nil }
 }
@@ -39,7 +42,7 @@ public struct Spacer: View {
 extension Spacer: Sendable {
 }
 
-extension Spacer: _PrimitiveView, PrimitiveSpacer {
+extension Spacer: PrimitiveView, UnaryView, PrimitiveSpacer {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
@@ -215,7 +218,7 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
     }
 }
 
-extension Divider: _PrimitiveView {
+extension Divider: PrimitiveView, UnaryView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")

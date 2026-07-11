@@ -161,7 +161,7 @@ struct ResolvedMenuStyle: View {
     }
 }
 
-extension ResolvedMenuStyle: _PrimitiveView {}
+extension ResolvedMenuStyle: PrimitiveView {}
 
 struct MenuDropdownModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
     typealias Body = Never

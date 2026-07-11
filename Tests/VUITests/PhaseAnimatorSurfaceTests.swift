@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import VUI
 
-private struct PhaseSizedView: View, _PrimitiveView {
+private struct PhaseSizedView: View, TestPrimitiveView {
     var width: CGFloat
 
     typealias Body = Never
@@ -19,7 +19,7 @@ private struct PhaseSizedView: View, _PrimitiveView {
     }
 }
 
-private struct PhaseAnimatorRelaySource: View, _PrimitiveView {
+private struct PhaseAnimatorRelaySource: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -49,7 +49,7 @@ private final class PhasePublicationRecorder {
     }
 }
 
-private struct TransactionSizedPhaseView: View, _PrimitiveView {
+private struct TransactionSizedPhaseView: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {

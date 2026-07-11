@@ -1,7 +1,7 @@
 import XCTest
 @testable import VUI
 
-private struct CountedAnimationContent: View, Equatable, _PrimitiveView {
+private struct CountedAnimationContent: View, Equatable, TestPrimitiveView {
     typealias Body = Never
 
     static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
@@ -21,7 +21,7 @@ private struct TransactionReportingAnimationViewList: ViewList {
     }
 }
 
-private struct TransactionReportingAnimationContent: View, Equatable, _PrimitiveView {
+private struct TransactionReportingAnimationContent: View, Equatable, TestPrimitiveView {
     var equalityKey: Int
     var width: CGFloat
 

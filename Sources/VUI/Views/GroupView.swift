@@ -28,5 +28,5 @@ extension Group {
     }
 }
 
-extension Group: _PrimitiveView where Content: View {
+extension Group: PrimitiveView where Content: View {
 }

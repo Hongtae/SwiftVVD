@@ -2505,7 +2505,7 @@ private struct LayoutSchedulingResourceTransactionProbe: View {
     typealias Body = Never
 }
 
-extension LayoutSchedulingResourceTransactionProbe: _PrimitiveView {
+extension LayoutSchedulingResourceTransactionProbe: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingCompletionStatusRoot: View {
@@ -3074,7 +3074,7 @@ private struct LayoutSchedulingTransitionTextMarker: View {
     }
 }
 
-extension LayoutSchedulingTransitionTextMarker: _PrimitiveView {
+extension LayoutSchedulingTransitionTextMarker: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingDeferredIntrinsicSizeMarker: View {
@@ -3100,7 +3100,7 @@ private struct LayoutSchedulingDeferredIntrinsicSizeMarker: View {
     }
 }
 
-extension LayoutSchedulingDeferredIntrinsicSizeMarker: _PrimitiveView {
+extension LayoutSchedulingDeferredIntrinsicSizeMarker: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingTextMarker: View {
@@ -3144,7 +3144,7 @@ private struct LayoutSchedulingTextMarker: View {
     }
 }
 
-extension LayoutSchedulingTextMarker: _PrimitiveView {
+extension LayoutSchedulingTextMarker: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingRawTextMarker: View {
@@ -3180,7 +3180,7 @@ private struct LayoutSchedulingRawTextMarker: View {
     }
 }
 
-extension LayoutSchedulingRawTextMarker: _PrimitiveView {
+extension LayoutSchedulingRawTextMarker: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingEnvironmentTextMarker: View {
@@ -3227,7 +3227,7 @@ private struct LayoutSchedulingEnvironmentTextMarker: View {
     }
 }
 
-extension LayoutSchedulingEnvironmentTextMarker: _PrimitiveView {
+extension LayoutSchedulingEnvironmentTextMarker: TestPrimitiveView {
 }
 
 private struct LayoutSchedulingAnimatedFrame: View {

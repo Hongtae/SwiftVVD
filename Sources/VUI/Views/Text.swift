@@ -735,7 +735,18 @@ extension Text: View {
 
         return outputs
     }
+
+    public static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        1
+    }
 }
 
-extension Text: _PrimitiveView {
+extension Text: PrimitiveView {
 }

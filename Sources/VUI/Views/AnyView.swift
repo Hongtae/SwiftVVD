@@ -127,5 +127,5 @@ extension AnyView {
     var _view: any View { storage.view }
 }
 
-extension AnyView: _PrimitiveView {
+extension AnyView: PrimitiveView {
 }

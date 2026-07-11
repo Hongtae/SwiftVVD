@@ -343,6 +343,17 @@ extension Image: View {
         return outputs
     }
 
+    public static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        1
+    }
+
     public typealias Body = Never
 }
 
@@ -350,5 +361,5 @@ extension Image {
     static let _mainNamedBundle: Bundle? = .main
 }
 
-extension Image: _PrimitiveView {
+extension Image: PrimitiveView {
 }

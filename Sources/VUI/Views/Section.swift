@@ -27,10 +27,6 @@ public struct Section<Parent, Content, Footer> {
 extension Section: View where Parent: View, Content: View, Footer: View {
     public typealias Body = Never
 
-    public var body: Never {
-        fatalError("\(Self.self) may not have Body == Never")
-    }
-
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
@@ -94,6 +90,9 @@ extension Section: View where Parent: View, Content: View, Footer: View {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
+}
+
+extension Section: PrimitiveView where Parent: View, Content: View, Footer: View {
 }
 
 extension Section where Parent: View, Content: View, Footer: View {

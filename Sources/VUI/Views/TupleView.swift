@@ -169,5 +169,5 @@ extension TupleView {
     }
 }
 
-extension TupleView: _PrimitiveView {
+extension TupleView: PrimitiveView {
 }

@@ -118,7 +118,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 }
 
-extension PrimitiveButtonStyleConfiguration.Label: _PrimitiveView {}
+extension PrimitiveButtonStyleConfiguration.Label: PrimitiveView {}
 
 // PrimitiveButtonStyle built-in implementations
 
@@ -372,7 +372,7 @@ extension ButtonStyleConfiguration.Label {
     }
 }
 
-extension ButtonStyleConfiguration.Label: _PrimitiveView {}
+extension ButtonStyleConfiguration.Label: PrimitiveView {}
 
 // WrappedButtonStyle: ButtonStyle-to-PrimitiveButtonStyle adapter
 
