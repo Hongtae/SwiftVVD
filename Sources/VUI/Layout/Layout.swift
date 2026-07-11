@@ -9,6 +9,55 @@ import Foundation
 import Synchronization
 
 protocol LeafViewLayout {
+    func spacing() -> ViewSpacing
+    func sizeThatFits(in proposal: _ProposedSize) -> CGSize
+}
+
+extension LeafViewLayout {
+    func spacing() -> ViewSpacing {
+        ViewSpacing()
+    }
+
+    static func makeLeafLayout(
+        _ outputs: inout _ViewOutputs,
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) {
+        guard inputs.requestsLayoutComputer else { return }
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self).makeLeafLayout called outside an active _AGGraph context.")
+        }
+
+        let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+            LeafLayoutComputer(view: view._attribute)
+        )
+        outputs._layoutComputer = OptionalAttribute(layoutComputer)
+    }
+}
+
+private struct LeafLayoutComputer<Leaf: LeafViewLayout>: StatefulRule {
+    typealias Value = LayoutComputer
+
+    var view: Attribute<Leaf>
+
+    mutating func updateValue() {
+        let engine = LeafLayoutEngine(view: view.value)
+        _AGGraph.setStatefulOutput(
+            LayoutComputer(box: LayoutEngineBox(engine: engine))
+        )
+    }
+}
+
+struct LeafLayoutEngine<Leaf: LeafViewLayout>: LayoutEngine {
+    var view: Leaf
+
+    func spacing() -> ViewSpacing {
+        view.spacing()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        view.sizeThatFits(in: proposal)
+    }
 }
 
 // MARK: - Layout AG rules

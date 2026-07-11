@@ -7,6 +7,26 @@
 
 import Foundation
 
+struct AnimatedShape<Content: Shape>: LeafViewLayout {
+    var shape: Content
+    var fillStyle: FillStyle
+
+    struct Init: Rule {
+        typealias Value = AnimatedShape<Content>
+
+        var shape: Attribute<Content>
+        var fillStyle: Attribute<FillStyle>
+
+        func updateValue() -> Value {
+            AnimatedShape(shape: shape.value, fillStyle: fillStyle.value)
+        }
+    }
+
+    func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
+        shape.sizeThatFits(proposal)
+    }
+}
+
 public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
     public var shape: Content
     public var style: Style
@@ -22,7 +42,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        var animatedShape = view[\.shape]
+        let sourceShape = view[\.shape]
+        var animatedShape = sourceShape
         Content._makeAnimatable(value: &animatedShape, inputs: inputs.base)
         let animatedColorStyle = Self.makeAnimatedColorStyle(
             view: view,
@@ -31,12 +52,6 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         )
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let shape = animatedShape._attribute.value
-            return LayoutComputer(
-                sizeThatFits: { proposal in shape.sizeThatFits(proposal) }
-            )
-        }
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let v = view._attribute.value   // dep: style/fillStyle changes
             let shape = animatedShape._attribute.value
@@ -82,7 +97,22 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
             }
             return list
         }
-        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        var outputs = _ViewOutputs()
+        if MemoryLayout<Content.AnimatableData>.size == 0 {
+            makeLeafLayout(&outputs, view: view, inputs: inputs)
+        } else {
+            let layoutShape: Attribute<AnimatedShape<Content>> = graph.makeRule(
+                AnimatedShape.Init(
+                    shape: animatedShape._attribute,
+                    fillStyle: view[\.fillStyle]._attribute
+                )
+            )
+            AnimatedShape<Content>.makeLeafLayout(
+                &outputs,
+                view: _GraphValue(_attribute: layoutShape),
+                inputs: inputs
+            )
+        }
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         return outputs
     }
@@ -112,4 +142,7 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
 }
 
 extension _ShapeView: PrimitiveView, UnaryView, LeafViewLayout {
+    func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
+        shape.sizeThatFits(proposal)
+    }
 }

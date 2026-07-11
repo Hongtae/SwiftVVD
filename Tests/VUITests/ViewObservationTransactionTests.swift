@@ -848,13 +848,15 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateShapeFillColorOnlyRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 200, height: 200))
+                )
+                inputs.requestsLayoutComputer = true
                 let outputs = StateShapeFillColorOnlyRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 200, height: 200))
-                    )
+                    inputs: inputs
                 )
                 let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
@@ -1116,9 +1118,11 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateShapeAnimatableRoot(probe: probe))
+                var inputs = makeViewInputs(graph: graph, time: time)
+                inputs.requestsLayoutComputer = true
                 let outputs = StateShapeAnimatableRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(graph: graph, time: time)
+                    inputs: inputs
                 )
                 let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
                 let initialWidth = layoutAttr.value.sizeThatFits(.unspecified).width

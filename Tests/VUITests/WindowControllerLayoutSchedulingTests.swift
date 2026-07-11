@@ -1635,8 +1635,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             tick += 1
 
-            let childFrameSize = controller.viewGraph.data.withCurrent {
-                probe.text.insertionSize?.value.value
+            let childFrameSize: CGSize? = controller.viewGraph.data.withCurrent {
+                let graph = controller.viewGraph.data.graph
+                guard let insertionSize = probe.text.insertionSize,
+                      let weakSize = graph.weakAttributeIfValid(for: insertionSize.identifier),
+                      weakSize.isValid(in: graph) else {
+                    return nil
+                }
+                return Attribute<ViewSize>(weakSize.toStrong()).value.value
             }
             if let childFrameSize {
                 XCTAssertEqual(

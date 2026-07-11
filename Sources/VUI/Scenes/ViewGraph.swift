@@ -828,6 +828,7 @@ class ViewGraph: ViewGraphHost {
                 containerSize: OptionalAttribute(),
                 stackOrientation: nil
             )
+            viewInputs.requestsLayoutComputer = true
             featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
 
             // GestureResponder.init reads the shared gesture graph from ViewGraph.
