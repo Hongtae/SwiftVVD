@@ -2,6 +2,114 @@ import XCTest
 @testable import VUI
 
 final class DisplayListGraphicsRendererTests: XCTestCase {
+    func testTextRendererCarrierShapesAndLayoutCollectionsMatchObservedSurface() throws {
+        XCTAssertEqual(MemoryLayout<TextProxy>.size, 8)
+        XCTAssertEqual(MemoryLayout<Text.Layout>.size, 24)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Line>.size, 44)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Run>.size, 48)
+        XCTAssertEqual(MemoryLayout<Text.Layout.RunSlice>.size, 64)
+        XCTAssertEqual(MemoryLayout<Text.Layout.CharacterIndex>.size, 8)
+        XCTAssertEqual(MemoryLayout<Text.Layout.TypographicBounds>.size, 48)
+        XCTAssertEqual(MemoryLayout<Text.Layout.DrawingOptions>.size, 4)
+        XCTAssertEqual(Text.Layout.DrawingOptions.disablesSubpixelQuantization.rawValue, 1)
+
+        let face = TextRendererTestTypeface()
+        var first = GraphicsContext.ResolvedText.Glyph(
+            scalar: "A".unicodeScalars.first!,
+            face: face
+        )
+        first.advance.width = 10
+        first.ascender = 8
+        first.descender = -2
+        var attributes = _TextAttributeValues()
+        attributes.set(_AnyTextAttribute(TextRendererTestAttribute(value: 7)))
+        first.attributes = attributes
+
+        var second = GraphicsContext.ResolvedText.Glyph(
+            scalar: "B".unicodeScalars.first!,
+            face: face
+        )
+        second.advance.width = 10
+        second.ascender = 8
+        second.descender = -2
+        second.attributes = attributes
+
+        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 2)
+        let layout = resolved.makeLayout(
+            lineGlyphs: [GraphicsContext.ResolvedText.LineGlyphs(
+                glyphs: [first, second],
+                ascender: 8,
+                descender: -2,
+                width: 20
+            )],
+            layoutDirection: .leftToRight
+        )
+
+        XCTAssertEqual(layout.count, 1)
+        XCTAssertFalse(layout.isTruncated)
+        let line = try XCTUnwrap(layout.first)
+        XCTAssertEqual(line.origin, CGPoint(x: 0, y: 4))
+        XCTAssertEqual(line.typographicBounds.width, 10)
+        XCTAssertEqual(line.count, 1)
+        let run = try XCTUnwrap(line.first)
+        XCTAssertEqual(run.count, 2)
+        XCTAssertEqual(run.characterIndices.count, 2)
+        XCTAssertEqual(run[TextRendererTestAttribute.self]?.value, 7)
+        XCTAssertEqual(run.layoutDirection, .leftToRight)
+        XCTAssertEqual(run.typographicBounds.width, 10)
+        let slice = run[0..<1]
+        XCTAssertEqual(slice.characterIndices.count, 1)
+        XCTAssertEqual(slice[TextRendererTestAttribute.self]?.value, 7)
+        XCTAssertEqual(slice.typographicBounds.width, 5)
+
+        XCTAssertEqual(
+            Mirror(reflecting: layout).children.compactMap(\.label),
+            ["lines", "isTruncated", "numberOfLines"]
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: line).children.compactMap(\.label),
+            ["_line", "origin", "drawingOptions"]
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: run).children.compactMap(\.label),
+            ["line", "index", "lineOrigin", "baseDrawingOptions", "layoutRenderer"]
+        )
+    }
+
+    func testCustomRendererTextUsesDisplayPaddingAndBypassesStaticDrawingCache() throws {
+        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let box = TextRendererTestBox()
+        let view = StyledTextContentView(text: styledText, renderer: box)
+        let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+        let frame = CGRect(x: 20, y: 30, width: 40, height: 15)
+        let displayBounds = CGRect(x: 13, y: 25, width: 58, height: 27)
+        var list = DisplayList()
+        list.appendTextItem(
+            view,
+            size: frame.size,
+            foreground: .color(.red),
+            bounds: frame,
+            displayBounds: displayBounds,
+            seed: seed
+        )
+
+        let item = try XCTUnwrap(list.items.first)
+        guard case let .content(content) = item.value,
+              case let .text(text) = content.value else {
+            return XCTFail("missing typed text content")
+        }
+        XCTAssertEqual(text.frame, frame)
+        XCTAssertEqual(text.command.bounds, displayBounds)
+        XCTAssertNil(text.makeDrawing())
+
+        let renderer = DisplayList.GraphicsRenderer()
+        renderer.beginPass(at: .zero)
+        XCTAssertNil(renderer.resolveTextCallback(text, seed: seed, scale: 1))
+        renderer.endPass()
+        XCTAssertEqual(renderer.textCallbackCount, 0)
+    }
+
     func testDisplayListVersionAllocatesMonotonicUpdateTokens() {
         let first = DisplayList.Version(forUpdate: ())
         let second = DisplayList.Version(forUpdate: ())
@@ -156,6 +264,70 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertEqual(renderer.textCallbackCount, 0)
     }
 
+    func testTextCallbackReplaysThroughCurrentStateWithinRoundedScaleBucket() throws {
+        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let view = StyledTextContentView(text: styledText, renderer: nil)
+        let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+        var list = DisplayList()
+        list.appendTextItem(
+            view,
+            size: CGSize(width: 40, height: 20),
+            foreground: .color(.red),
+            bounds: CGRect(x: 0, y: 0, width: 40, height: 20),
+            seed: seed
+        )
+        let item = try XCTUnwrap(list.items.first)
+        guard case let .content(content) = item.value,
+              case let .text(text) = content.value else {
+            return XCTFail("missing typed text content")
+        }
+
+        var replayState = text
+        replayState.frame.origin = CGPoint(x: 80, y: 30)
+        replayState.shading = .color(.blue)
+        replayState.transform = CGAffineTransform(
+            translationX: 11,
+            y: 13
+        ).scaledBy(x: 1.2, y: 0.8)
+
+        let renderer = DisplayList.GraphicsRenderer()
+        renderer.beginPass(at: .zero)
+        let firstBucket = try XCTUnwrap(renderer.resolveTextCallback(
+            text,
+            seed: seed,
+            scale: 1.49
+        ))
+        renderer.endPass()
+
+        renderer.beginPass(at: Time(seconds: 1))
+        let replayedWithCurrentState = try XCTUnwrap(renderer.resolveTextCallback(
+            replayState,
+            seed: seed,
+            scale: 0.2
+        ))
+        renderer.endPass()
+        XCTAssertTrue(firstBucket === replayedWithCurrentState)
+
+        renderer.beginPass(at: Time(seconds: 2))
+        let secondBucket = try XCTUnwrap(renderer.resolveTextCallback(
+            replayState,
+            seed: seed,
+            scale: 1.5
+        ))
+        renderer.endPass()
+        XCTAssertFalse(replayedWithCurrentState === secondBucket)
+
+        renderer.beginPass(at: Time(seconds: 3))
+        let reusedSecondBucket = try XCTUnwrap(renderer.resolveTextCallback(
+            text,
+            seed: seed,
+            scale: 2.49
+        ))
+        renderer.endPass()
+        XCTAssertTrue(secondBucket === reusedSecondBucket)
+    }
+
     func testTransformedContentPreservesCacheIdentityAndChangeTokens() {
         let identity = _DisplayList_Identity(decodedValue: 37)
         let version = DisplayList.Version(value: 0x12345)
@@ -305,5 +477,36 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
             return .nan
         }
         return value
+    }
+}
+
+private struct TextRendererTestAttribute: TextAttribute {
+    var value: Int
+}
+
+private final class TextRendererTestTypeface: Typeface {
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? { nil }
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint { .zero }
+    func hasGlyph(for: UnicodeScalar) -> Bool { true }
+    var lineHeight: CGFloat { 10 }
+    var ascender: CGFloat { 8 }
+    var descender: CGFloat { -2 }
+    var identifier: String { "text-renderer-test" }
+    func isEqual(to other: any Typeface) -> Bool { self === (other as AnyObject) }
+    func hashIdentity(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+    func purgeResources(reason: ResourcePurgeReason) {}
+}
+
+private final class TextRendererTestBox: TextRendererBoxBase {
+    override var environment: EnvironmentValues { EnvironmentValues() }
+    override func draw(layout: Text.Layout, in context: inout GraphicsContext) {}
+    override func textLayoutBounds(size: CGSize, text: TextProxy) -> CGRect {
+        CGRect(origin: .zero, size: size)
+    }
+    override func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize {
+        text.sizeThatFits(proposal)
+    }
+    override var displayPadding: EdgeInsets {
+        EdgeInsets(top: 5, leading: 7, bottom: 7, trailing: 11)
     }
 }

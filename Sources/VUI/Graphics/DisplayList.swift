@@ -795,7 +795,8 @@ struct DisplayList {
             var command: ItemCommand
 
             func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
-                view.text.resolvedText?.makeDrawing(in: size)
+                guard view.renderer == nil else { return nil }
+                return view.text.resolvedText?.makeDrawing(in: size)
             }
 
             func draw(in context: GraphicsContext) {
@@ -804,7 +805,20 @@ struct DisplayList {
                 if !transform.isIdentity {
                     context.concatenate(transform)
                 }
-                context.draw(resolvedText, in: frame, shading: shading)
+                if let renderer = view.renderer {
+                    context.environment = renderer.environment
+                    context.translateBy(x: frame.minX, y: frame.minY)
+                    var source = resolvedText
+                    source.shading = shading
+                    let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(source))
+                    let layout = source.makeLayout(
+                        in: bounds.size,
+                        layoutDirection: context.environment.layoutDirection
+                    )
+                    renderer.draw(layout: layout, in: &context)
+                } else {
+                    context.draw(resolvedText, in: frame, shading: shading)
+                }
             }
 
             func draw(
@@ -1142,14 +1156,16 @@ struct DisplayList {
         size: CGSize,
         foreground: GraphicsContext.Shading,
         bounds: CGRect,
+        displayBounds: CGRect? = nil,
         seed: Seed
     ) {
         guard let bounds = Self.itemRecordBounds(bounds) else { return }
+        let commandBounds = Self.itemRecordBounds(displayBounds ?? bounds) ?? bounds
         let command = ItemCommand.text(
             ItemRecord.TextRecord(
                 foreground: Self.shadingRecord(for: foreground)
             ),
-            bounds: bounds
+            bounds: commandBounds
         )
         items.append(Item(
             text: text,
@@ -1159,7 +1175,7 @@ struct DisplayList {
             command: command,
             seed: seed
         ))
-        recordInterpolationBounds(bounds)
+        recordInterpolationBounds(commandBounds)
     }
 
     mutating func appendCustomItem(
@@ -1658,6 +1674,10 @@ struct DisplayList {
                 case .backend:
                     content.draw(in: context)
                 case let .text(text):
+                    if text.view.renderer != nil {
+                        text.draw(in: context)
+                        break
+                    }
                     guard let drawing = resolveTextCallback(
                         text,
                         seed: content.seed,

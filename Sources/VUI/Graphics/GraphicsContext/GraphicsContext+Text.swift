@@ -14,6 +14,26 @@ extension GraphicsContext {
         enum Run {
             case text([Typeface], String)
             case attachment([Typeface], ResolvedImage)
+            case attributedText([Typeface], String, _TextAttributeValues)
+            case attributedAttachment([Typeface], ResolvedImage, _TextAttributeValues)
+
+            func applying(_ attributes: _TextAttributeValues) -> Run {
+                guard !attributes.isEmpty else { return self }
+                switch self {
+                case let .text(faces, text):
+                    return .attributedText(faces, text, attributes)
+                case let .attributedText(faces, text, existing):
+                    var merged = existing
+                    merged.merge(attributes)
+                    return .attributedText(faces, text, merged)
+                case let .attachment(faces, image):
+                    return .attributedAttachment(faces, image, attributes)
+                case let .attributedAttachment(faces, image, existing):
+                    var merged = existing
+                    merged.merge(attributes)
+                    return .attributedAttachment(faces, image, merged)
+                }
+            }
         }
 
         final class Storage: AppLifetimeResource, @unchecked Sendable {
@@ -102,7 +122,7 @@ extension GraphicsContext {
         }
 
         var runs: [Run] { storage.runs }
-        fileprivate var scaleFactor: CGFloat { storage.scaleFactor }
+        var scaleFactor: CGFloat { storage.scaleFactor }
         fileprivate var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
         public var shading: Shading = .foreground
@@ -188,6 +208,7 @@ extension GraphicsContext {
             var ascender: CGFloat = .zero   // distance from the baseline to the highest or upper grid coordinate
             var descender: CGFloat = .zero  // distance from the baseline to the lowest
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
+            var attributes = _TextAttributeValues()
 
             var contentOffset: CGPoint {
                 switch content {
@@ -348,6 +369,10 @@ extension GraphicsContext {
             let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            return makeDrawing(lineGlyphs: lineGlyphs)
+        }
+
+        func makeDrawing(lineGlyphs: [LineGlyphs]) -> Drawing {
 
             struct Quad {
                 var vertices: [Drawing.Vertex]
@@ -666,7 +691,16 @@ extension GraphicsContext {
             }
 
             for s in runs {
-                if case let .text(faces, text) = s {
+                let textRun: ([Typeface], String, _TextAttributeValues)?
+                switch s {
+                case let .text(faces, text):
+                    textRun = (faces, text, _TextAttributeValues())
+                case let .attributedText(faces, text, attributes):
+                    textRun = (faces, text, attributes)
+                case .attachment, .attributedAttachment:
+                    textRun = nil
+                }
+                if let (faces, text, attributes) = textRun {
                     if faces.isEmpty || text.isEmpty { continue }
 
                     var components = text.components(separatedBy: newlines).map {
@@ -682,7 +716,11 @@ extension GraphicsContext {
                         face1 = textGlyphs.lastFace
                         char1 = textGlyphs.lastCharacter
 
-                        glyphs.append(contentsOf: textGlyphs.glyphs)
+                        glyphs.append(contentsOf: textGlyphs.glyphs.map { glyph in
+                            var glyph = glyph
+                            glyph.attributes = attributes
+                            return glyph
+                        })
                         ascender = max(ascender, textGlyphs.ascender)
                         descender = min(descender, textGlyphs.descender)
                         offset.x += textGlyphs.width
@@ -696,7 +734,17 @@ extension GraphicsContext {
                         addLine()
                     }
                 }
-                if case let .attachment(faces, image) = s {
+                let attachmentRun: ([Typeface], ResolvedImage, _TextAttributeValues)?
+                switch s {
+                case let .attachment(faces, image):
+                    attachmentRun = (faces, image, _TextAttributeValues())
+                case let .attributedAttachment(faces, image, attributes):
+                    attachmentRun = (faces, image, attributes)
+                case .text, .attributedText:
+                    attachmentRun = nil
+                }
+                if let (faces, image, attributes) = attachmentRun {
+                    guard !faces.isEmpty else { continue }
                     let face = faces.first { $0.hasGlyph(for: ".") } ?? faces[0]
                     let size = image.size
                     let baseline = image.baseline * scaleFactor
@@ -715,6 +763,7 @@ extension GraphicsContext {
                     glyph.descender = min(0, baseline - height)
                     glyph.advance.width = width
                     glyph.advance.height = height
+                    glyph.attributes = attributes
                     glyphs.append(glyph)
 
                     offset.x += glyph.advance.width
@@ -752,7 +801,12 @@ extension GraphicsContext {
         draw(drawing, in: rect, shading: shading)
     }
 
-    func draw(_ drawing: ResolvedText.Drawing, in rect: CGRect, shading: Shading) {
+    func draw(
+        _ drawing: ResolvedText.Drawing,
+        in rect: CGRect,
+        shading: Shading,
+        snapOrigin: Bool = true
+    ) {
         var rect = rect.standardized
         if rect.isEmpty { return }
         if rect.isNull { return }
@@ -763,7 +817,6 @@ extension GraphicsContext {
         if drawing.isEmpty { return }
 
         var scissorRect: ScissorRect? = nil
-        let snapOrigin = true
         let clipBounds = true
         if snapOrigin || clipBounds {
             let transform = self.transform

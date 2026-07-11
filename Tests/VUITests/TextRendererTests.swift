@@ -1,0 +1,133 @@
+import XCTest
+@testable import VUI
+
+private struct TextRendererMarker: TextAttribute {
+    var value: Int
+}
+
+private struct TextRendererSecondaryMarker: TextAttribute {
+    var value: String
+}
+
+private struct TextRendererProbe: TextRenderer {
+    var animatableData: Double = 0
+
+    func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize {
+        CGSize(width: proposal.width ?? 11, height: proposal.height ?? 7)
+    }
+
+    var displayPadding: EdgeInsets {
+        EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
+    }
+}
+
+final class TextRendererTests: XCTestCase {
+    func testTextLayoutCarrierMatchesObservedMemoryAndCollectionSurface() {
+        XCTAssertEqual(MemoryLayout<TextProxy>.size, 8)
+        XCTAssertEqual(MemoryLayout<Text.Layout>.size, 24)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Line>.size, 44)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Run>.size, 48)
+        XCTAssertEqual(MemoryLayout<Text.Layout.RunSlice>.size, 64)
+        XCTAssertEqual(MemoryLayout<Text.Layout.CharacterIndex>.size, 8)
+        XCTAssertEqual(MemoryLayout<Text.Layout.TypographicBounds>.size, 48)
+        XCTAssertEqual(MemoryLayout<Text.Layout.DrawingOptions>.size, 4)
+        XCTAssertEqual(Text.Layout.DrawingOptions.disablesSubpixelQuantization.rawValue, 1)
+
+        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let layout = resolved.makeLayout(in: .zero, layoutDirection: .leftToRight)
+        XCTAssertEqual(layout.startIndex, 0)
+        XCTAssertEqual(layout.endIndex, 0)
+        XCTAssertFalse(layout.isTruncated)
+        XCTAssertEqual(
+            Mirror(reflecting: layout).children.map { $0.label ?? "_" },
+            ["lines", "isTruncated", "numberOfLines"]
+        )
+
+        let bounds = Text.Layout.TypographicBounds()
+        XCTAssertEqual(bounds.origin, .zero)
+        XCTAssertEqual(bounds.rect, .zero)
+    }
+
+    func testCustomTextAttributeReplacesSameTypeAndPreservesOtherTypes() {
+        let text = Text(verbatim: "value")
+            .customAttribute(TextRendererMarker(value: 1))
+            .customAttribute(TextRendererSecondaryMarker(value: "kept"))
+            .customAttribute(TextRendererMarker(value: 2))
+
+        XCTAssertEqual(
+            text.customAttributes.value(for: TextRendererMarker.self),
+            TextRendererMarker(value: 2)
+        )
+        XCTAssertEqual(
+            text.customAttributes.value(for: TextRendererSecondaryMarker.self),
+            TextRendererSecondaryMarker(value: "kept")
+        )
+    }
+
+    func testTextRendererModifierInstallsStatefulBoxInput() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let modifier = _TextRendererViewModifier(
+                renderer: TextRendererProbe(animatableData: 0.25)
+            )
+            let modifierAttribute = graph.makeInput(value: modifier)
+            var inputs = makeViewInputs(graph: graph)
+
+            type(of: modifier)._makeViewInputs(
+                modifier: _GraphValue(_attribute: modifierAttribute),
+                inputs: &inputs
+            )
+
+            let rendererAttribute = try XCTUnwrap(inputs[TextRendererInput.self])
+            let box = rendererAttribute.value
+            let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+            XCTAssertEqual(
+                box.sizeThatFits(proposal: .unspecified, text: TextProxy(resolved)),
+                CGSize(width: 11, height: 7)
+            )
+            XCTAssertEqual(
+                box.displayPadding,
+                EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
+            )
+            XCTAssertEqual(
+                box.textLayoutBounds(
+                    size: CGSize(width: 20, height: 10),
+                    text: TextProxy(resolved)
+                ),
+                CGRect(x: 0, y: 0, width: 20, height: 10)
+            )
+        }
+    }
+
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
+        let environment = graph.makeInput(value: EnvironmentValues())
+        return _ViewInputs(
+            base: _GraphInputs(
+                customInputs: PropertyList(),
+                time: graph.makeInput(value: Time(seconds: 0)),
+                cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
+                phase: graph.makeInput(value: Phase()),
+                transaction: graph.makeInput(value: Transaction()),
+                changedDebugProperties: 0,
+                options: [],
+                mergedInputs: []
+            ),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
+    }
+}

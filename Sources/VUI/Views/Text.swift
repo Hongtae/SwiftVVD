@@ -42,21 +42,26 @@ final class _TextDisplayListContentState {
     private var resolvedVersion: Int?
     private var size: CGSize?
     private var needsDrawingGroup: Bool?
+    private var rendererID: ObjectIdentifier?
     private var seed = DisplayList.Seed()
 
     func contentSeed(
         resolvedVersion: Int,
         size: CGSize,
-        needsDrawingGroup: Bool
+        needsDrawingGroup: Bool,
+        renderer: TextRendererBoxBase? = nil
     ) -> DisplayList.Seed {
+        let rendererID = renderer.map(ObjectIdentifier.init)
         if seed.value == 0 ||
             self.resolvedVersion != resolvedVersion ||
             self.size != size ||
-            self.needsDrawingGroup != needsDrawingGroup {
+            self.needsDrawingGroup != needsDrawingGroup ||
+            self.rendererID != rendererID {
             seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
             self.resolvedVersion = resolvedVersion
             self.size = size
             self.needsDrawingGroup = needsDrawingGroup
+            self.rendererID = rendererID
         }
         return seed
     }
@@ -293,6 +298,7 @@ public struct Text: Equatable {
         case tracking(CGFloat)
         case baselineOffset(CGFloat)
         case textCase(Case)
+        case customAttribute(_AnyTextAttribute)
     }
 
     let modifiers: [Modifier]
@@ -354,10 +360,18 @@ public struct Text: Equatable {
             var runs: [GraphicsContext.ResolvedText.Run] = []
             if case let .verbatim(text) = self.storage {
                 runs = [.text(faces, text)]
-                return GraphicsContext.ResolvedText(runs: runs, scaleFactor: context.contentScaleFactor)
+                return GraphicsContext.ResolvedText(
+                    runs: runs.map { $0.applying(customAttributes) },
+                    scaleFactor: context.contentScaleFactor
+                )
             }
             else if case let .anyTextStorage(text) = self.storage {
-                return text.resolve(typefaces: faces, context: context)
+                let resolved = text.resolve(typefaces: faces, context: context)
+                guard !customAttributes.isEmpty else { return resolved }
+                return GraphicsContext.ResolvedText(
+                    runs: resolved.runs.map { $0.applying(customAttributes) },
+                    scaleFactor: context.contentScaleFactor
+                )
             }
         }
         return .init(runs: [], scaleFactor: context.contentScaleFactor)
@@ -446,6 +460,25 @@ extension Text {
 }
 
 extension Text {
+    public func customAttribute<T>(_ value: T) -> Text where T: TextAttribute {
+        let attribute = _AnyTextAttribute(value)
+        var modifiers = modifiers.filter {
+            guard case let .customAttribute(existing) = $0 else { return true }
+            return existing.type != attribute.type
+        }
+        modifiers.append(.customAttribute(attribute))
+        return Text(storage: storage, modifiers: modifiers)
+    }
+
+    var customAttributes: _TextAttributeValues {
+        var attributes = _TextAttributeValues()
+        for modifier in modifiers {
+            guard case let .customAttribute(attribute) = modifier else { continue }
+            attributes.set(attribute)
+        }
+        return attributes
+    }
+
     public static func + (lhs: Text, rhs: Text) -> Text {
         .init(storage: .anyTextStorage(ConcatenatedTextStorage(first: lhs,
                                                                second: rhs)),
@@ -474,6 +507,7 @@ extension Text: View {
         let targetSizeAttr = animatedFrame?.size ?? inputs.size
         let pixelLengthAttr = animatedFrame?.pixelLength
         let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
+        let textRendererAttr = inputs[TextRendererInput.self]
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
             cachedEnvironmentAttr.value.environment.value._debugLayout
@@ -492,6 +526,7 @@ extension Text: View {
             hasher.combine(environment.font?.hashValue ?? 0)
             hasher.combine(environment.defaultFontRenderingMode)
             hasher.combine(environment.displayScale)
+            text.customAttributes.hash(into: &hasher)
             let currentVersion = hasher.finalize()
 
             // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
@@ -547,9 +582,13 @@ extension Text: View {
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
             let resolved = resolvedStyledTextAttr.value.resolvedText
+            let renderer = textRendererAttr?.value
 
             func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
                 guard let r = resolved else { return .zero } // Return zero size before loading completes
+                if let renderer {
+                    return renderer.sizeThatFits(proposal: proposal, text: TextProxy(r))
+                }
                 if proposal == .zero {
                     return .zero
                 }
@@ -593,11 +632,15 @@ extension Text: View {
             let resolved = styledText.resolvedText
             let debugLayout = debugLayoutAttr.value
             let foreground = text.foregroundShading(in: environment)
+            let renderer = textRendererAttr?.value
 
             var list = DisplayList()
 
             if let resolved = resolved {
-                let idealSize = resolved.measure()
+                let idealSize = renderer?.sizeThatFits(
+                    proposal: .unspecified,
+                    text: TextProxy(resolved)
+                ) ?? resolved.measure()
                 var frame = _textTransitionRenderFrame(
                     position: position,
                     viewSize: viewSize,
@@ -606,7 +649,10 @@ extension Text: View {
                     pixelLength: pixelLengthAttr?.value ?? environment.animationPixelLength,
                     activeSourceBounds: interpolatorGroup.activeSourceBounds
                 )
-                let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
+                let measuredSize = renderer?.sizeThatFits(
+                    proposal: ProposedViewSize(frame.size),
+                    text: TextProxy(resolved)
+                ) ?? resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
 
                 if measuredSize.height < frame.height {
                     let offset = frame.height - measuredSize.height
@@ -615,19 +661,28 @@ extension Text: View {
                 }
                 let styledTextContent = StyledTextContentView(
                     text: styledText,
-                    renderer: nil,
+                    renderer: renderer,
                     needsDrawingGroup: styledText.needsDrawingGroup
                 )
                 let contentSeed = displayListContentState.contentSeed(
                     resolvedVersion: styledText.version,
                     size: frame.size,
-                    needsDrawingGroup: styledText.needsDrawingGroup
+                    needsDrawingGroup: styledText.needsDrawingGroup,
+                    renderer: renderer
+                )
+                let padding = renderer?.displayPadding ?? EdgeInsets()
+                let displayBounds = CGRect(
+                    x: frame.minX - padding.leading,
+                    y: frame.minY - padding.top,
+                    width: frame.width + padding.leading + padding.trailing,
+                    height: frame.height + padding.top + padding.bottom
                 )
                 list.appendTextItem(
                     styledTextContent,
                     size: frame.size,
                     foreground: foreground,
                     bounds: frame,
+                    displayBounds: displayBounds,
                     seed: contentSeed
                 )
             }
