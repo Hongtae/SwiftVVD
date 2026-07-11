@@ -56,6 +56,17 @@ private struct VersionedTransitionContent: Equatable, InterpolatableContent {
     }
 }
 
+private struct CanvasEnvironmentProbeKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+private extension EnvironmentValues {
+    var canvasEnvironmentProbe: Int {
+        get { self[CanvasEnvironmentProbeKey.self] }
+        set { self[CanvasEnvironmentProbeKey.self] = newValue }
+    }
+}
+
 final class InterpolatableContentDisplayListTests: XCTestCase {
     func testInterpolatorLayerPhaseCaseOrderMatchesRuntimeSurface() {
         typealias LayerPhase = DisplayList.InterpolatorLayer.Phase
@@ -663,6 +674,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let graph = _AGGraph()
 
         try _AGGraph.withCurrent(graph) {
+            var environment = EnvironmentValues.tracking()
+            environment.canvasEnvironmentProbe = 41
             let canvas = Canvas(
                 opaque: true,
                 colorMode: .extendedLinear,
@@ -672,7 +685,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let canvasAttr = graph.makeInput(value: canvas)
             let outputs = Canvas<EmptyView>._makeView(
                 view: _GraphValue(_attribute: canvasAttr),
-                inputs: makeViewInputs(graph: graph)
+                inputs: makeViewInputs(graph: graph, environment: environment)
             )
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
@@ -685,6 +698,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(list.itemRecords.first?.custom?.colorMode, .extendedLinear)
             XCTAssertEqual(list.itemRecords.first?.custom?.rendersAsynchronously, true)
             XCTAssertEqual(list.interpolationBounds, CGRect(x: 0, y: 0, width: 10, height: 10))
+            guard case let .content(content) = list.items[0].value else {
+                return XCTFail("Canvas should emit display-list content")
+            }
+            XCTAssertEqual(content.environment?.canvasEnvironmentProbe, 41)
+            XCTAssertNil(content.environment?.tracker)
         }
     }
 
@@ -4264,8 +4282,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
-        let environment = graph.makeInput(value: EnvironmentValues())
+    private func makeViewInputs(
+        graph: _AGGraph,
+        environment values: EnvironmentValues = EnvironmentValues()
+    ) -> _ViewInputs {
+        let environment = graph.makeInput(value: values)
         let base = _GraphInputs(
             customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),

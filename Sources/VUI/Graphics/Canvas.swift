@@ -62,10 +62,12 @@ extension Canvas {
         }
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let canvas = view._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
@@ -73,7 +75,8 @@ extension Canvas {
                     bounds: frame,
                     isOpaque: canvas.isOpaque,
                     colorMode: canvas.colorMode,
-                    rendersAsynchronously: canvas.rendersAsynchronously
+                    rendersAsynchronously: canvas.rendersAsynchronously,
+                    environment: environment
                 ) { context in
                     context.drawLayer(in: frame) { layerContext, size in
                         canvas.renderer(&layerContext, size)

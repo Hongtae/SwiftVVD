@@ -283,10 +283,14 @@ extension Image: View {
             }
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
-            let bundle = envAttr.value.resourceBundle  // Register AG dependency and capture for closure.
+            let environment = envAttr.value
+            let bundle = environment.resourceBundle  // Register AG dependency and capture for closure.
+            let renderEnvironment = environment.untrackedCopy()
             var list = ResourceList()
 
             list.items.append { context in
+                var context = context
+                context.environment = renderEnvironment
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
                     let resolved = context.resolve(image)
@@ -318,12 +322,17 @@ extension Image: View {
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
             let resolved = resolvedImageAttr.value
+            let environment = envAttr.value.untrackedCopy()
 
             var list = DisplayList()
 
             if let resolved = resolved {
                 let frame = CGRect(origin: position, size: viewSize)
-                list.appendImageItem(resolved, bounds: frame) { context in
+                list.appendImageItem(
+                    resolved,
+                    bounds: frame,
+                    environment: environment
+                ) { context in
                     // 1. Local rendering frame (origin is the position assigned by the parent)
                     if frame.width > 0 && frame.height > 0 {
                         context.draw(resolved, in: frame)

@@ -158,10 +158,12 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let m = modifier._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
@@ -170,7 +172,8 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
                     role: .fill,
                     style: m.style,
                     bounds: frame,
-                    fillStyle: FillStyle()
+                    fillStyle: FillStyle(),
+                    environment: environment
                 ) { context in
                     context.fill(path, with: .style(m.style))
                 }
@@ -209,10 +212,12 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let m = modifier._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
@@ -221,7 +226,8 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
                     role: .fill,
                     style: m.style,
                     bounds: frame,
-                    fillStyle: m.fillStyle
+                    fillStyle: m.fillStyle,
+                    environment: environment
                 ) { context in
                     context.fill(path, with: .style(m.style), style: m.fillStyle)
                 }
@@ -260,10 +266,12 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let m = modifier._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
@@ -272,7 +280,8 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
                     role: .fill,
                     style: m.style,
                     bounds: frame,
-                    fillStyle: m.fillStyle
+                    fillStyle: m.fillStyle,
+                    environment: environment
                 ) { context in
                     context.fill(path, with: .style(m.style), style: m.fillStyle)
                 }

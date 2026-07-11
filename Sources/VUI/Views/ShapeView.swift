@@ -52,11 +52,13 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         )
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let v = view._attribute.value   // dep: style/fillStyle changes
             let shape = animatedShape._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             //Log.debug("ShapeView: size=\(viewSize), position=\(position)")
             if viewSize.width > 0 && viewSize.height > 0 {
@@ -69,7 +71,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
                         style: style,
                         bounds: frame,
                         fillStyle: v.fillStyle,
-                        strokeStyle: strokeStyle
+                        strokeStyle: strokeStyle,
+                        environment: environment
                     ) { context in
                         if let drawer = shape as? ShapeDrawer {
                             drawer._draw(in: frame, style: style, fillStyle: v.fillStyle, context: context)
@@ -84,7 +87,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
                         style: v.style,
                         bounds: frame,
                         fillStyle: v.fillStyle,
-                        strokeStyle: strokeStyle
+                        strokeStyle: strokeStyle,
+                        environment: environment
                     ) { context in
                         if let drawer = shape as? ShapeDrawer {
                             drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)

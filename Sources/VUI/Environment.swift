@@ -92,6 +92,14 @@ extension EnvironmentValues {
         EnvironmentValues.tracking(_plist)
     }
 
+    // Render callbacks run outside AG evaluation. Keep the property-list snapshot
+    // while detaching the dependency tracker owned by the graph-side environment.
+    func untrackedCopy() -> EnvironmentValues {
+        var copy = self
+        copy.tracker = nil
+        return copy
+    }
+
     subscript<K: DerivedPropertyKey>(_ key: K.Type) -> K.Value {
         if let tracker {
             return tracker.derivedValue(_plist, for: key)

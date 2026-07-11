@@ -1,6 +1,17 @@
 import XCTest
 @testable import VUI
 
+private struct DisplayListEnvironmentProbeKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+private extension EnvironmentValues {
+    var displayListEnvironmentProbe: Int {
+        get { self[DisplayListEnvironmentProbeKey.self] }
+        set { self[DisplayListEnvironmentProbeKey.self] = newValue }
+    }
+}
+
 final class DisplayListGraphicsRendererTests: XCTestCase {
     func testTextRendererCarrierShapesAndLayoutCollectionsMatchObservedSurface() throws {
         XCTAssertEqual(MemoryLayout<TextProxy>.size, 8)
@@ -358,6 +369,39 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
                 CGRect(x: 13, y: 16, width: 4, height: 5)
             )
         }
+    }
+
+    func testTransformedContentPreservesDetachedRenderEnvironment() throws {
+        var trackedEnvironment = EnvironmentValues.tracking()
+        trackedEnvironment.displayListEnvironmentProbe = 37
+        let renderEnvironment = trackedEnvironment.untrackedCopy()
+        let bounds = CGRect(x: 2, y: 3, width: 4, height: 5)
+
+        var source = DisplayList()
+        source.appendItem(
+            bounds: bounds,
+            environment: renderEnvironment
+        ) { _ in }
+
+        let sourceItem = try XCTUnwrap(source.items.first)
+        guard case let .content(sourceContent) = sourceItem.value else {
+            return XCTFail("source item should carry content")
+        }
+        XCTAssertEqual(sourceContent.environment?.displayListEnvironmentProbe, 37)
+        XCTAssertNil(sourceContent.environment?.tracker)
+
+        var transformed = DisplayList()
+        transformed.appendTransformedItem(
+            sourceItem,
+            affineTransform: CGAffineTransform(translationX: 11, y: 13)
+        )
+
+        let transformedItem = try XCTUnwrap(transformed.items.first)
+        guard case let .content(transformedContent) = transformedItem.value else {
+            return XCTFail("transformed item should carry content")
+        }
+        XCTAssertEqual(transformedContent.environment?.displayListEnvironmentProbe, 37)
+        XCTAssertNil(transformedContent.environment?.tracker)
     }
 
     func testDisplayListPreservesUnifiedContentAndEffectOrder() {

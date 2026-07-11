@@ -519,6 +519,7 @@ extension Text: View {
         let resourceAttr: Attribute<ResourceList> = graph.makeRule {
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
+            let renderEnvironment = environment.untrackedCopy()
             let transitionText = text._resolveTransitionText(in: environment)
             let layoutProperties = TextLayoutProperties(environment)
 
@@ -553,6 +554,8 @@ extension Text: View {
             var list = ResourceList()
 
             list.items.append { context in
+                var context = context
+                context.environment = renderEnvironment
                 // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
                 let resolved = text._resolve(context: context)
                 let boxedResolved = UnsafeBox(resolved)
@@ -689,7 +692,8 @@ extension Text: View {
                     foreground: foreground,
                     bounds: frame,
                     displayBounds: displayBounds,
-                    seed: contentSeed
+                    seed: contentSeed,
+                    environment: environment.untrackedCopy()
                 )
             }
             if debugLayout {

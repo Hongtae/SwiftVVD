@@ -850,14 +850,19 @@ struct DisplayList {
 
         var value: Value
         var seed: Seed
+        // Backend-local snapshot used when replaying flattened view content.
+        // Nil means that synthetic content inherits the enclosing context.
+        var environment: EnvironmentValues?
 
         init(
             command: ItemCommand,
             seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil,
             body: @escaping (GraphicsContext) -> Void
         ) {
             self.value = .backend(command, body)
             self.seed = seed
+            self.environment = environment
         }
 
         init(
@@ -866,7 +871,8 @@ struct DisplayList {
             frame: CGRect,
             shading: GraphicsContext.Shading,
             command: ItemCommand,
-            seed: Seed
+            seed: Seed,
+            environment: EnvironmentValues? = nil
         ) {
             self.value = .text(TextValue(
                 view: text,
@@ -877,6 +883,7 @@ struct DisplayList {
                 command: command
             ))
             self.seed = seed
+            self.environment = environment
         }
 
         var command: ItemCommand {
@@ -888,7 +895,15 @@ struct DisplayList {
             }
         }
 
+        func renderContext(from context: GraphicsContext) -> GraphicsContext {
+            guard let environment else { return context }
+            var context = context
+            context.environment = environment
+            return context
+        }
+
         func draw(in context: GraphicsContext) {
+            let context = renderContext(from: context)
             switch value {
             case let .backend(_, body):
                 body(context)
@@ -901,7 +916,11 @@ struct DisplayList {
             let transformedCommand = command.transformed(by: affineTransform)
             switch value {
             case .backend:
-                return Content(command: transformedCommand, seed: seed) { context in
+                return Content(
+                    command: transformedCommand,
+                    seed: seed,
+                    environment: environment
+                ) { context in
                     var context = context
                     context.concatenate(affineTransform)
                     self.draw(in: context)
@@ -935,11 +954,17 @@ struct DisplayList {
             identity: _DisplayList_Identity = .none,
             version: Version = Version(value: 0),
             seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil,
             _ body: @escaping (GraphicsContext) -> Void
         ) {
             self.frame = command.bounds ?? .zero
             self.version = version
-            self.value = .content(Content(command: command, seed: seed, body: body))
+            self.value = .content(Content(
+                command: command,
+                seed: seed,
+                environment: environment,
+                body: body
+            ))
             self.identity = identity
         }
 
@@ -963,6 +988,7 @@ struct DisplayList {
             shading: GraphicsContext.Shading,
             command: ItemCommand,
             seed: Seed,
+            environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
             version: Version = Version()
         ) {
@@ -974,7 +1000,8 @@ struct DisplayList {
                 frame: frame,
                 shading: shading,
                 command: command,
-                seed: seed
+                seed: seed,
+                environment: environment
             ))
             self.identity = identity
         }
@@ -1065,6 +1092,7 @@ struct DisplayList {
         kind: ItemRecord.Kind = .closure,
         bounds: CGRect? = nil,
         effectKind: ItemRecord.EffectKind? = nil,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1073,7 +1101,7 @@ struct DisplayList {
             bounds: bounds,
             effectKind: effectKind
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1082,6 +1110,7 @@ struct DisplayList {
         bounds: CGRect? = nil,
         fillStyle: FillStyle? = nil,
         strokeStyle: StrokeStyle? = nil,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1093,7 +1122,7 @@ struct DisplayList {
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1103,6 +1132,7 @@ struct DisplayList {
         bounds: CGRect? = nil,
         fillStyle: FillStyle? = nil,
         strokeStyle: StrokeStyle? = nil,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1114,13 +1144,14 @@ struct DisplayList {
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
     mutating func appendImageItem(
         _ image: GraphicsContext.ResolvedImage,
         bounds: CGRect? = nil,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1131,13 +1162,14 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
     mutating func appendTextItem(
         foreground: GraphicsContext.Shading,
         bounds: CGRect? = nil,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1147,7 +1179,7 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1157,7 +1189,8 @@ struct DisplayList {
         foreground: GraphicsContext.Shading,
         bounds: CGRect,
         displayBounds: CGRect? = nil,
-        seed: Seed
+        seed: Seed,
+        environment: EnvironmentValues? = nil
     ) {
         guard let bounds = Self.itemRecordBounds(bounds) else { return }
         let commandBounds = Self.itemRecordBounds(displayBounds ?? bounds) ?? bounds
@@ -1173,7 +1206,8 @@ struct DisplayList {
             frame: bounds,
             shading: foreground,
             command: command,
-            seed: seed
+            seed: seed,
+            environment: environment
         ))
         recordInterpolationBounds(commandBounds)
     }
@@ -1183,6 +1217,7 @@ struct DisplayList {
         isOpaque: Bool,
         colorMode: ColorRenderingMode,
         rendersAsynchronously: Bool,
+        environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
@@ -1194,7 +1229,7 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1674,6 +1709,7 @@ struct DisplayList {
                 case .backend:
                     content.draw(in: context)
                 case let .text(text):
+                    let context = content.renderContext(from: context)
                     if text.view.renderer != nil {
                         text.draw(in: context)
                         break
