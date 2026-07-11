@@ -508,6 +508,7 @@ extension Text: View {
         let pixelLengthAttr = animatedFrame?.pixelLength
         let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
         let textRendererAttr = inputs[TextRendererInput.self]
+        let archiveOptions = inputs[ArchivedViewInput.self]
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
             cachedEnvironmentAttr.value.environment.value._debugLayout
@@ -519,6 +520,7 @@ extension Text: View {
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
             let transitionText = text._resolveTransitionText(in: environment)
+            let layoutProperties = TextLayoutProperties(environment)
 
             // Generate a unique hash (version) combining text content and environment factors.
             var hasher = Hasher()
@@ -555,12 +557,16 @@ extension Text: View {
                 let resolved = text._resolve(context: context)
                 let boxedResolved = UnsafeBox(resolved)
                 let boxedTransaction = UnsafeBox(publicationTransaction)
+                let boxedLayoutProperties = UnsafeBox(layoutProperties)
 
                 // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                 let publish: @Sendable () -> Void = {
                     resolvedStyledTextTransactionAttr.setValue(boxedTransaction.value)
                     resolvedStyledTextAttr.setValue(
                         ResolvedStyledText(
+                            layoutProperties: boxedLayoutProperties.value,
+                            archiveOptions: archiveOptions,
+                            features: boxedResolved.value.resolvedFeatures,
                             resolvedText: boxedResolved.value,
                             version: currentVersion,
                             transitionText: transitionText

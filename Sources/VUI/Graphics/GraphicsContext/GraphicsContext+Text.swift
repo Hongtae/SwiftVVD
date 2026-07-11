@@ -125,6 +125,57 @@ extension GraphicsContext {
         var scaleFactor: CGFloat { storage.scaleFactor }
         fileprivate var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
+        var attributedStorage: NSAttributedString {
+            let result = NSMutableAttributedString(string: "")
+            for run in runs {
+                switch run {
+                case let .text(_, text), let .attributedText(_, text, _):
+                    result.append(NSAttributedString(string: text))
+                case .attachment, .attributedAttachment:
+                    result.append(NSAttributedString(
+                        string: "\u{fffc}",
+                        attributes: [.resolvedTextAttachment: true]
+                    ))
+                }
+            }
+            return result
+        }
+
+        var hasAttachments: Bool {
+            runs.contains { run in
+                switch run {
+                case .attachment, .attributedAttachment: true
+                case .text, .attributedText: false
+                }
+            }
+        }
+
+        var resolvedFeatures: Text.ResolvedProperties.Features {
+            hasAttachments ? .attachments : []
+        }
+
+        var maximumFontMetrics: ResolvedFontMetrics? {
+            var result: ResolvedFontMetrics?
+            for run in runs {
+                let faces: [Typeface]
+                switch run {
+                case let .text(runFaces, _),
+                     let .attachment(runFaces, _),
+                     let .attributedText(runFaces, _, _),
+                     let .attributedAttachment(runFaces, _, _):
+                    faces = runFaces
+                }
+                guard let face = faces.first else { continue }
+                let metrics = face.resolvedMetrics.scaled(by: scaleFactor)
+                if result == nil {
+                    result = metrics
+                } else {
+                    result?.formUnion(metrics)
+                }
+            }
+            return result
+        }
+
         public var shading: Shading = .foreground
 
         public func measure(in size: CGSize) -> CGSize {

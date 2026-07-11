@@ -56,6 +56,7 @@ protocol Typeface {
     var lineHeight: CGFloat { get }
     var ascender: CGFloat { get }
     var descender: CGFloat { get }
+    var resolvedMetrics: ResolvedFontMetrics { get }
     var identifier: String { get }
 
     func isEqual(to: any Typeface) -> Bool
@@ -64,7 +65,65 @@ protocol Typeface {
 }
 
 extension Typeface {
+    var resolvedMetrics: ResolvedFontMetrics {
+        ResolvedFontMetrics(
+            capHeight: ascender,
+            ascender: ascender,
+            descender: descender,
+            leading: max(lineHeight - (ascender - descender), 0)
+        )
+    }
+
     func purgeResources(reason: ResourcePurgeReason) {}
+}
+
+struct ResolvedFontMetrics: Equatable, Sendable {
+    var capHeight: CGFloat
+    var ascender: CGFloat
+    var descender: CGFloat
+    var leading: CGFloat
+    var outsets: EdgeInsets
+
+    init(
+        capHeight: CGFloat,
+        ascender: CGFloat,
+        descender: CGFloat,
+        leading: CGFloat,
+        outsets: EdgeInsets = EdgeInsets()
+    ) {
+        self.capHeight = capHeight
+        self.ascender = ascender
+        self.descender = descender
+        self.leading = leading
+        self.outsets = outsets
+    }
+
+    func scaled(by scale: CGFloat) -> ResolvedFontMetrics {
+        guard scale != 0, scale != 1 else { return self }
+        return ResolvedFontMetrics(
+            capHeight: capHeight / scale,
+            ascender: ascender / scale,
+            descender: descender / scale,
+            leading: leading / scale,
+            outsets: EdgeInsets(
+                top: outsets.top / scale,
+                leading: outsets.leading / scale,
+                bottom: outsets.bottom / scale,
+                trailing: outsets.trailing / scale
+            )
+        )
+    }
+
+    mutating func formUnion(_ other: ResolvedFontMetrics) {
+        capHeight = max(capHeight, other.capHeight)
+        ascender = max(ascender, other.ascender)
+        descender = min(descender, other.descender)
+        leading = max(leading, other.leading)
+        outsets.top = max(outsets.top, other.outsets.top)
+        outsets.leading = max(outsets.leading, other.outsets.leading)
+        outsets.bottom = max(outsets.bottom, other.outsets.bottom)
+        outsets.trailing = max(outsets.trailing, other.outsets.trailing)
+    }
 }
 
 private protocol VVDFontBackedTypeface: Typeface {
@@ -75,6 +134,18 @@ extension VVDFontBackedTypeface {
     var lineHeight: CGFloat { font.height }
     var ascender: CGFloat { font.ascender }
     var descender: CGFloat { font.descender }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        let metrics = font.baseMetrics
+        let capHeight = font.glyphMetrics(for: UnicodeScalar("H"))?.bearing.y
+            ?? metrics.ascender
+        return ResolvedFontMetrics(
+            capHeight: capHeight,
+            ascender: metrics.ascender,
+            descender: metrics.descender,
+            leading: max(metrics.height - (metrics.ascender - metrics.descender), 0)
+        )
+    }
 
     var identifier: String {
         if let data = font.fontData {
