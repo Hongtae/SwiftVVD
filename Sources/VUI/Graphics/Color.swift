@@ -91,7 +91,7 @@ class AnyColorBox: ColorBox, @unchecked Sendable {
     }
 }
 
-public struct Color: Hashable {
+public struct Color: Hashable, Sendable {
     public enum RGBColorSpace: Equatable, Hashable {
         case sRGB
         case sRGBLinear
@@ -286,6 +286,198 @@ extension Color: ShapeStyle {
                                    opacity: Double(opacity))
         }
         public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
+    }
+}
+
+extension Color {
+    public struct ResolvedHDR: Hashable, Sendable, Animatable, ShapeStyle, CustomStringConvertible, Codable {
+        var base: Color.Resolved
+        var _headroom: Float
+
+        public init(_ color: Color.Resolved, headroom: Float? = nil) {
+            self.base = color
+            self._headroom = headroom ?? .nan
+        }
+
+        public var linearRed: Float {
+            get { base.linearRed }
+            set { base.linearRed = newValue }
+        }
+
+        public var linearGreen: Float {
+            get { base.linearGreen }
+            set { base.linearGreen = newValue }
+        }
+
+        public var linearBlue: Float {
+            get { base.linearBlue }
+            set { base.linearBlue = newValue }
+        }
+
+        public var red: Float {
+            get { base.red }
+            set { base.red = newValue }
+        }
+
+        public var green: Float {
+            get { base.green }
+            set { base.green = newValue }
+        }
+
+        public var blue: Float {
+            get { base.blue }
+            set { base.blue = newValue }
+        }
+
+        public var opacity: Float {
+            get { base.opacity }
+            set { base.opacity = newValue }
+        }
+
+        public var headroom: Float? {
+            get { _headroom.isNaN ? nil : _headroom }
+            set { _headroom = newValue ?? .nan }
+        }
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.base == rhs.base && lhs.headroom == rhs.headroom
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            hasher.combine(base)
+            hasher.combine(headroom)
+        }
+
+        public struct _Animatable: VectorArithmetic, Sendable {
+            var red: Float
+            var green: Float
+            var blue: Float
+            var opacity: Float
+
+            public static var zero: Self {
+                Self(red: 0, green: 0, blue: 0, opacity: 0)
+            }
+
+            public static func += (lhs: inout Self, rhs: Self) {
+                lhs.red += rhs.red
+                lhs.green += rhs.green
+                lhs.blue += rhs.blue
+                lhs.opacity += rhs.opacity
+            }
+
+            public static func -= (lhs: inout Self, rhs: Self) {
+                lhs.red -= rhs.red
+                lhs.green -= rhs.green
+                lhs.blue -= rhs.blue
+                lhs.opacity -= rhs.opacity
+            }
+
+            public static func + (lhs: Self, rhs: Self) -> Self {
+                var result = lhs
+                result += rhs
+                return result
+            }
+
+            public static func - (lhs: Self, rhs: Self) -> Self {
+                var result = lhs
+                result -= rhs
+                return result
+            }
+
+            public mutating func scale(by rhs: Double) {
+                red.scale(by: rhs)
+                green.scale(by: rhs)
+                blue.scale(by: rhs)
+                opacity.scale(by: rhs)
+            }
+
+            public var magnitudeSquared: Double {
+                red.magnitudeSquared + green.magnitudeSquared +
+                    blue.magnitudeSquared + opacity.magnitudeSquared
+            }
+        }
+
+        public typealias AnimatableData = _Animatable
+
+        public var animatableData: AnimatableData {
+            get {
+                AnimatableData(
+                    red: linearRed,
+                    green: linearGreen,
+                    blue: linearBlue,
+                    opacity: opacity
+                )
+            }
+            set {
+                linearRed = newValue.red
+                linearGreen = newValue.green
+                linearBlue = newValue.blue
+                opacity = newValue.opacity
+            }
+        }
+
+        public var description: String {
+            let value = String(
+                format: "#%02X%02X%02X%02X",
+                Self.descriptionByte(red),
+                Self.descriptionByte(green),
+                Self.descriptionByte(blue),
+                Self.descriptionByte(opacity)
+            )
+            if let headroom {
+                return "\(value)^\(headroom)"
+            }
+            return value
+        }
+
+        private static func descriptionByte(_ component: Float) -> UInt8 {
+            UInt8((component.clamp(min: 0, max: 1) * 255).rounded())
+        }
+
+        public typealias Resolved = Never
+
+        public func _apply(to shape: inout _ShapeStyle_Shape) {
+            base._apply(to: &shape)
+        }
+
+        public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+            Color.Resolved._apply(to: &type)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case color
+            case headroom
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let components = try container.decode([Float].self, forKey: .color)
+            guard components.count == 4 else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .color,
+                    in: container,
+                    debugDescription: "Expected four resolved color components."
+                )
+            }
+            self.base = Color.Resolved(
+                colorSpace: .sRGB,
+                red: components[0],
+                green: components[1],
+                blue: components[2],
+                opacity: components[3]
+            )
+            self._headroom = try container.decodeIfPresent(Float.self, forKey: .headroom) ?? .nan
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode([red, green, blue, opacity], forKey: .color)
+            try container.encodeIfPresent(headroom, forKey: .headroom)
+        }
+    }
+
+    public init(_ resolved: Color.ResolvedHDR) {
+        self.init(resolved.base)
     }
 }
 

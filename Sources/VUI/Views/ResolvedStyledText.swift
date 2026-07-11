@@ -51,7 +51,15 @@ struct _ShapeStyle_Pack {
         case color(Color.Resolved)
     }
 
-    enum Effect: Equatable, Sendable {
+    struct Effect: Equatable, Sendable {
+        enum Kind: Equatable, Sendable {
+            case shadow(ResolvedShadowStyle)
+            case none
+        }
+
+        var kind: Kind
+        var opacity: Float
+        var _blend: GraphicsContext.BlendMode?
     }
 
     struct Style: Equatable, Sendable {

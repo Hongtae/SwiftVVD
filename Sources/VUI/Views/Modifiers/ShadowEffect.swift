@@ -10,9 +10,7 @@ import Foundation
 private enum _ShadowEffectSupport {
     static func makeView<Modifier>(
         modifier: _GraphValue<Modifier>,
-        color: _GraphValue<Color.Resolved>,
-        radius: _GraphValue<CGFloat>,
-        offset: _GraphValue<CGSize>,
+        style: _GraphValue<ResolvedShadowStyle>,
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs where Modifier: ViewModifier {
@@ -22,9 +20,7 @@ private enum _ShadowEffectSupport {
         var outputs = body(_Graph(), inputs)
         applyShadow(
             to: &outputs.preferences,
-            color: color,
-            radius: radius,
-            offset: offset,
+            style: style,
             graph: graph
         )
         return outputs
@@ -45,18 +41,14 @@ private enum _ShadowEffectSupport {
 
     private static func applyShadow(
         to preferences: inout PreferencesOutputs,
-        color: _GraphValue<Color.Resolved>,
-        radius: _GraphValue<CGFloat>,
-        offset: _GraphValue<CGSize>,
+        style: _GraphValue<ResolvedShadowStyle>,
         graph: _AGGraph
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }
 
         let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-        let colorAttr = color._attribute
-        let radiusAttr = radius._attribute
-        let offsetAttr = offset._attribute
+        let styleAttr = style._attribute
         let transformedAttr: Attribute<DisplayList> = graph.makeRule {
             var combined = DisplayList.Key.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -65,9 +57,7 @@ private enum _ShadowEffectSupport {
             }
             return displayList(
                 combined,
-                applyingShadowColor: colorAttr.value,
-                radius: radiusAttr.value,
-                offset: offsetAttr.value
+                applying: styleAttr.value
             )
         }
 
@@ -80,11 +70,9 @@ private enum _ShadowEffectSupport {
 
     private static func displayList(
         _ source: DisplayList,
-        applyingShadowColor color: Color.Resolved,
-        radius: CGFloat,
-        offset: CGSize
+        applying style: ResolvedShadowStyle
     ) -> DisplayList {
-        guard color.opacity > 0 else { return source }
+        guard style.color.opacity > 0 else { return source }
 
         var result = DisplayList()
         result.debugItems.append(contentsOf: source.debugItems)
@@ -94,9 +82,7 @@ private enum _ShadowEffectSupport {
                 effect.effect,
                 contents: displayList(
                     effect.contents,
-                    applyingShadowColor: color,
-                    radius: radius,
-                    offset: offset
+                    applying: style
                 )
             )
         }
@@ -106,17 +92,17 @@ private enum _ShadowEffectSupport {
         let items = source.renderItems
         result.appendShadowItem(
             bounds: source.interpolationBounds,
-            color: color,
-            radius: radius,
-            offset: offset
+            color: style.color.base,
+            radius: style.radius,
+            offset: style.offset
         ) { context in
             context.drawLayer { layerContext in
                 layerContext.addFilter(
                     .shadow(
-                        color: Color(color),
-                        radius: radius,
-                        x: offset.width,
-                        y: offset.height
+                        color: Color(style.color),
+                        radius: style.radius,
+                        x: style.offset.width,
+                        y: style.offset.height
                     )
                 )
                 for item in items {
@@ -141,21 +127,19 @@ public struct _ShadowEffect: EnvironmentalModifier, Equatable {
 
     public func resolve(in environment: EnvironmentValues) -> _Resolved {
         _Resolved(
-            color: color.resolve(in: environment),
-            radius: radius,
-            offset: offset
+            style: ResolvedShadowStyle(
+                color: Color.ResolvedHDR(color.resolve(in: environment)),
+                radius: radius,
+                offset: offset
+            )
         )
     }
 
     public struct _Resolved: ViewModifier, Animatable {
-        public var color: Color.Resolved
-        public var radius: CGFloat
-        public var offset: CGSize
+        var style: ResolvedShadowStyle
 
-        init(color: Color.Resolved, radius: CGFloat, offset: CGSize) {
-            self.color = color
-            self.radius = radius
-            self.offset = offset
+        init(style: ResolvedShadowStyle) {
+            self.style = style
         }
 
         public typealias AnimatableData = AnimatablePair<
@@ -164,17 +148,8 @@ public struct _ShadowEffect: EnvironmentalModifier, Equatable {
         >
 
         public var animatableData: AnimatableData {
-            get {
-                AnimatableData(
-                    color.animatableData,
-                    AnimatablePair(radius, offset.animatableData)
-                )
-            }
-            set {
-                color.animatableData = newValue.first
-                radius = newValue.second.first
-                offset.animatableData = newValue.second.second
-            }
+            get { style.animatableData }
+            set { style.animatableData = newValue }
         }
 
         public typealias Body = Never
@@ -188,9 +163,7 @@ public struct _ShadowEffect: EnvironmentalModifier, Equatable {
             Self._makeAnimatable(value: &modifier, inputs: inputs.base)
             return _ShadowEffectSupport.makeView(
                 modifier: modifier,
-                color: modifier[\.color],
-                radius: modifier[\.radius],
-                offset: modifier[\.offset],
+                style: modifier[\.style],
                 inputs: inputs,
                 body: body
             )
@@ -212,9 +185,7 @@ public struct _ShadowEffect: EnvironmentalModifier, Equatable {
 
 extension _ShadowEffect._Resolved {
     public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.color == rhs.color &&
-            lhs.radius == rhs.radius &&
-            lhs.offset == rhs.offset
+        lhs.style == rhs.style
     }
 }
 
