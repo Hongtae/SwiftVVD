@@ -14,6 +14,32 @@ public enum Edge: Int8, CaseIterable, Equatable, Hashable, RawRepresentable {
     case trailing
 }
 
+public enum HorizontalEdge: Int8, CaseIterable, Codable, Equatable, Hashable, RawRepresentable {
+    case leading
+    case trailing
+
+    public struct Set: OptionSet, Sendable {
+        public let rawValue: Int8
+
+        public init(rawValue: Int8) {
+            self.rawValue = rawValue
+        }
+
+        public static let leading = Set(rawValue: 1)
+        public static let trailing = Set(rawValue: 2)
+        public static let all: Set = [.leading, .trailing]
+
+        public init(_ edge: HorizontalEdge) {
+            switch edge {
+            case .leading:
+                self = .leading
+            case .trailing:
+                self = .trailing
+            }
+        }
+    }
+}
+
 extension Edge {
     public struct Set: OptionSet, Sendable {
         public let rawValue: Int8

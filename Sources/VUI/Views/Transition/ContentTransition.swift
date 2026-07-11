@@ -448,6 +448,50 @@ public struct ContentTransition: Equatable, Sendable {
     }
 }
 
+extension ContentTransition.Style: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        let fieldNumber: UInt
+        switch storage {
+        case .default:
+            return
+        case .sessionWidget:
+            fieldNumber = 1
+        case .animatedWidget:
+            fieldNumber = 2
+        }
+
+        encoder.encodeVarint((fieldNumber << 3) | 2)
+        encoder.startLengthDelimited()
+        encoder.endLengthDelimited()
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self = .default
+
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+
+            switch fieldNumber {
+            case 1, 2:
+                guard wireType == 2 else {
+                    throw ProtobufDecoder.DecodingError.failed
+                }
+                try decoder.decodeLengthDelimited { nested in
+                    while !nested.isAtEnd {
+                        let nestedTag = try nested.decodeVarint()
+                        try nested.skipField(wireType: nestedTag & 0x7)
+                    }
+                }
+                self = fieldNumber == 1 ? .sessionWidget : .animatedWidget
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+    }
+}
+
 private struct ContentTransitionKey: EnvironmentKey {
     static let defaultValue = ContentTransition.defaultTransition
 }

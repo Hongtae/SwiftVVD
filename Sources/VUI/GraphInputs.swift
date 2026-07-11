@@ -65,6 +65,79 @@ struct UsingGraphicsRenderer: ViewInput {
     static var defaultValue: Bool { false }
 }
 
+struct ArchivedViewInput: ViewInput {
+    struct Flags: OptionSet {
+        var rawValue: UInt8
+
+        init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        static let isArchived = Flags(rawValue: 1 << 0)
+        static let stableIDs = Flags(rawValue: 1 << 1)
+        static let customFontURLs = Flags(rawValue: 1 << 2)
+        static let assetCatalogRefences = Flags(rawValue: 1 << 3)
+        static let preciseTextLayout = Flags(rawValue: 1 << 4)
+        static let intelligenceContent = Flags(rawValue: 1 << 5)
+        static let publicArchive = Flags(rawValue: 1 << 6)
+    }
+
+    struct DeploymentVersion: RawRepresentable, Hashable, Comparable, Codable {
+        var rawValue: Int8
+
+        init(rawValue: Int8) {
+            self.rawValue = rawValue
+        }
+
+        static let v5 = DeploymentVersion(rawValue: 1)
+        static let v6 = DeploymentVersion(rawValue: 2)
+        static let v7 = DeploymentVersion(rawValue: 3)
+        static let v7_4 = DeploymentVersion(rawValue: 4)
+
+        static var current: DeploymentVersion { .v7_4 }
+        static var oldest: DeploymentVersion { .v5 }
+
+        static func < (lhs: DeploymentVersion, rhs: DeploymentVersion) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            rawValue = try container.decode(Int8.self)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+    }
+
+    struct Value: Equatable {
+        var flags: Flags
+        var deploymentVersion: DeploymentVersion
+
+        init(
+            flags: Flags = [],
+            deploymentVersion: DeploymentVersion = .current
+        ) {
+            self.flags = flags
+            self.deploymentVersion = deploymentVersion
+        }
+
+        var isArchived: Bool { flags.contains(.isArchived) }
+        var stableIDs: Bool { flags.contains(.stableIDs) }
+        var customFontURLs: Bool { flags.contains(.customFontURLs) }
+        var assetCatalogRefences: Bool { flags.contains(.assetCatalogRefences) }
+        var preciseTextLayout: Bool { flags.contains(.preciseTextLayout) }
+
+        static var isArchived: Value {
+            Value(flags: .isArchived)
+        }
+    }
+
+    static var defaultValue: Value { Value() }
+}
+
 /// A generic single-owner reference box.
 /// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
 /// (a struct) still shares the same `CachedEnvironment` instance across
