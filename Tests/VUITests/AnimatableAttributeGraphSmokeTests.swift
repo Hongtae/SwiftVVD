@@ -437,6 +437,83 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentSize().width, 50, accuracy: 0.000_001)
     }
 
+    func testAnimatableFrameAttributeOrthogonalRetargetKeepsSpringTrajectoryAndReverseContinuity() {
+        let control = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 190, height: 150)
+        )
+        let retargeted = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 190, height: 150)
+        )
+        let spring = Transaction(animation: .spring(duration: 5, bounce: 0.35))
+
+        for harness in [control, retargeted] {
+            _ = harness.currentFrame()
+            harness.setFrame(
+                position: CGPoint(x: 100, y: 0),
+                size: ViewSize(width: 190, height: 150),
+                transaction: spring
+            )
+            _ = harness.currentFrame()
+        }
+
+        for step in 1...60 {
+            let time = Double(step) / 60.0
+            control.setTime(time)
+            retargeted.setTime(time)
+            _ = control.currentFrame()
+            _ = retargeted.currentFrame()
+        }
+
+        let xBeforeRetarget = retargeted.currentPosition().x
+        XCTAssertEqual(xBeforeRetarget, control.currentPosition().x, accuracy: 0.000_001)
+        XCTAssertGreaterThan(xBeforeRetarget, 0)
+        XCTAssertLessThan(xBeforeRetarget, 100)
+
+        retargeted.setFrame(
+            position: CGPoint(x: 100, y: 20),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .easeInOut(duration: 5))
+        )
+        _ = retargeted.currentFrame()
+
+        var maximumXDrift = CGFloat.zero
+        for step in 61...120 {
+            let time = Double(step) / 60.0
+            control.setTime(time)
+            retargeted.setTime(time)
+            let controlFrame = control.currentFrame()
+            let retargetedFrame = retargeted.currentFrame()
+            maximumXDrift = max(
+                maximumXDrift,
+                abs(retargetedFrame.origin.x - controlFrame.origin.x)
+            )
+        }
+
+        XCTAssertLessThanOrEqual(maximumXDrift, 1)
+        let finalRetargetedFrame = retargeted.currentFrame()
+        XCTAssertGreaterThan(finalRetargetedFrame.origin.y, 0)
+        XCTAssertLessThan(finalRetargetedFrame.origin.y, 20)
+
+        retargeted.setFrame(
+            position: CGPoint(x: 0, y: 20),
+            size: ViewSize(width: 190, height: 150),
+            transaction: spring
+        )
+        let reverseActivationFrame = retargeted.currentFrame()
+        XCTAssertEqual(
+            reverseActivationFrame.origin.x,
+            finalRetargetedFrame.origin.x,
+            accuracy: 1
+        )
+        XCTAssertEqual(
+            reverseActivationFrame.origin.y,
+            finalRetargetedFrame.origin.y,
+            accuracy: 1
+        )
+    }
+
     func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
         assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
             supportsVFD: false

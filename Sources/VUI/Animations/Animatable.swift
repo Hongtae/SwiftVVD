@@ -866,6 +866,10 @@ final class AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
+    var isPending: Bool {
+        phase == .pending
+    }
+
     func combine(
         newAnimation: Animation,
         newInterval: AnimatedValue.AnimatableData,
@@ -5160,12 +5164,13 @@ private struct AnimatableFrameAttribute: StatefulRule {
                 // Frame rules do not maintain an outer completion-record list.
                 // Let the helper install state listeners through the direct
                 // state-owned path and only keep the sampled frame output here.
-                helper.activateStandaloneAnimation(
+                helper.retargetStandaloneAnimation(
                     animation: animation,
                     start: previousOutput ?? update.target,
                     target: update.target,
                     transaction: transaction,
-                    time: time
+                    time: time,
+                    environment: _environment
                 )
                 value.value = update.target
             case .noAnimation:
@@ -5277,12 +5282,13 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
                 // The VFD lane follows the same standalone listener ownership as
                 // the plain frame lane; velocity sampling remains a local add-on
                 // after the helper has updated the frame value.
-                helper.activateStandaloneAnimation(
+                helper.retargetStandaloneAnimation(
                     animation: animation,
                     start: previousOutput ?? update.target,
                     target: update.target,
                     transaction: transaction,
-                    time: time
+                    time: time,
+                    environment: _environment
                 )
                 value.value = update.target
             case .noAnimation:
@@ -5545,16 +5551,34 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         return addListenersForCompletionRecords(transaction: transaction)
     }
 
-    mutating func activateStandaloneAnimation(
+    mutating func retargetStandaloneAnimation(
         animation: Animation,
         start: AnimatedValue,
         target: AnimatedValue,
         transaction: Transaction,
-        time: Time
+        time: Time,
+        environment: Attribute<EnvironmentValues>
     ) {
         // Standalone frame-style callers have no copied completion records to
         // update after activation, so listener registration must finish inside
         // AnimatorState before control returns to the rule.
+        if let previousModelData,
+           let animatorState,
+           !animatorState.isPending {
+            var newInterval = target.animatableData
+            newInterval -= previousModelData
+            updatePreviousModelData(target.animatableData)
+            _ = animatorState.combine(
+                newAnimation: animation,
+                newInterval: newInterval,
+                at: time,
+                in: transaction,
+                environment: environment
+            )
+            animatorState.addListeners(transaction: transaction)
+            return
+        }
+
         updatePreviousModelData(target.animatableData)
         animatorState?.forkLogicalListenersForRetargetIfNeeded()
         activate(

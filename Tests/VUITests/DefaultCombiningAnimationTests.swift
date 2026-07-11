@@ -2,6 +2,25 @@ import XCTest
 @testable import VUI
 
 final class DefaultCombiningAnimationTests: XCTestCase {
+    func testCombineAnimationMovesPreviousStateIntoChildAndFreshensOuterState() throws {
+        var animation = Animation(UnitLinearAnimation(duration: 1.0))
+        var state = AnimationState<Double>()
+        state[CombinedOuterStateMarker.self] = 42
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(UnitLinearAnimation(duration: 1.0)),
+            newValue: 5.0
+        )
+
+        XCTAssertEqual(state[CombinedOuterStateMarker.self], -1)
+        let firstChildState = try XCTUnwrap(state.combinedState.entries.first?.state)
+        XCTAssertEqual(firstChildState[CombinedOuterStateMarker.self], 42)
+    }
+
     func testCombineAnimationUsesReplacementNewValueAsAccumulatedTarget() throws {
         var animation = Animation(UnitLinearAnimation(duration: 1.0))
         var state = AnimationState<Double>()
@@ -231,6 +250,10 @@ final class DefaultCombiningAnimationTests: XCTestCase {
             }
         )
     }
+}
+
+private struct CombinedOuterStateMarker: AnimationStateKey {
+    static let defaultValue = -1
 }
 
 private struct LogicalFlagAnimation: CustomAnimation {

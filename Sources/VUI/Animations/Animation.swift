@@ -1153,7 +1153,8 @@ func combineAnimation<Value>(
     newAnimation: Animation,
     newValue: Value
 ) where Value: VectorArithmetic {
-    var combinedState = state.combinedState
+    let previousState = state
+    var combinedState = previousState.combinedState
     var replacementValue = value
     replacementValue += newValue
 
@@ -1168,7 +1169,7 @@ func combineAnimation<Value>(
         combinedState.entries.append(
             CombinedAnimationState<Value>.Entry(
                 value: value,
-                state: state
+                state: previousState
             )
         )
         combinedState.entries.append(
@@ -1179,6 +1180,10 @@ func combineAnimation<Value>(
         )
     }
 
+    // The previous animation state moves into the first child entry. Keep the
+    // outer combined state fresh so child keys cannot be reused by a later
+    // replacement animation.
+    state = AnimationState()
     state.combinedState = combinedState
     animation = Animation(
         DefaultCombiningAnimation(
