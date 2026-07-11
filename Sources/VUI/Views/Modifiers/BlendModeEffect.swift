@@ -78,13 +78,13 @@ private enum _BlendModeEffectSupport {
             )
         }
 
-        guard !source.items.isEmpty else { return result }
+        guard !source.renderItems.isEmpty else { return result }
         guard blendMode != .normal else {
-            result.items.append(contentsOf: source.items)
+            result.items.append(contentsOf: source.renderItems)
             return result
         }
 
-        let items = source.items
+        let items = source.renderItems
         result.appendBlendModeItem(
             bounds: source.interpolationBounds,
             blendMode: blendMode

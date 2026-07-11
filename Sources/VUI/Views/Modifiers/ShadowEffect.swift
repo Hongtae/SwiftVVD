@@ -101,9 +101,9 @@ private enum _ShadowEffectSupport {
             )
         }
 
-        guard !source.items.isEmpty else { return result }
+        guard !source.renderItems.isEmpty else { return result }
 
-        let items = source.items
+        let items = source.renderItems
         result.appendShadowItem(
             bounds: source.interpolationBounds,
             color: color,

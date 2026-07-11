@@ -51,10 +51,11 @@ extension DisplayList {
     // Stateful layer that retains removed contents and drives their display-list interpolators.
     struct InterpolatorLayer {
         // Lifecycle of a retained removed display-list entry.
-        enum Phase: Equatable {
+        enum Phase: Hashable {
             case pending
-            case animating
-            case removed
+            case first
+            case second
+            case running
         }
 
         // Current display-list payload tracked by an interpolation layer.
@@ -146,7 +147,7 @@ extension DisplayList {
                 version: version
             )
             if state == nil {
-                for index in removed.indices where removed[index].phase == .animating {
+                for index in removed.indices where removed[index].phase == .running {
                     removed[index].interpolator?.setTo(list)
                 }
             }
@@ -159,9 +160,14 @@ extension DisplayList {
             maxDuration: Double,
             time: Time = .zero
         ) {
+            let timeChanged = currentTime.seconds != time.seconds
             self.contents.contentsScale = contentsScale
             self.maxDuration = maxDuration
             self.currentTime = time
+
+            if timeChanged && !removed.isEmpty {
+                needsUpdate = true
+            }
 
             guard needsUpdate else { return }
             needsUpdate = false
@@ -169,7 +175,24 @@ extension DisplayList {
             foldActivePresentationIntoPendingRemoval()
 
             for index in removed.indices {
-                if removed[index].phase == .pending {
+                switch removed[index].phase {
+                case .pending:
+                    removed[index].phase = .first
+                    removed[index].startTime = currentTime
+                case .first:
+                    removed[index].phase = .second
+                    removed[index].startTime = currentTime
+                case .second:
+                    removed[index].phase = .running
+                    let preparationDuration = currentTime.seconds - removed[index].startTime.seconds
+                    if preparationDuration > 1.0 / 30.0 {
+                        removed[index].startTime = currentTime
+                    }
+                case .running:
+                    break
+                }
+
+                if removed[index].interpolator == nil {
                     var options: [RBDisplayListInterpolatorOptionKey: Any] = [
                         .transition: removed[index].rbTransition,
                     ]
@@ -189,8 +212,6 @@ extension DisplayList {
                         maxDuration,
                         contentDuration
                     )
-                    removed[index].startTime = currentTime
-                    removed[index].phase = .animating
                 }
             }
             updateNextUpdateTime()
@@ -248,7 +269,7 @@ extension DisplayList {
             }
 
             var nextTime = Time.infinity
-            for removal in removed where removal.phase == .animating && removal.activeDuration >= 0 {
+            for removal in removed where removal.activeDuration >= 0 {
                 let candidate = Time(seconds: removal.startTime.seconds + removal.activeDuration)
                 if candidate < nextTime {
                     nextTime = candidate

@@ -72,14 +72,14 @@ enum _OpacityEffectSupport {
             )
         }
 
-        guard !source.items.isEmpty else { return result }
+        guard !source.renderItems.isEmpty else { return result }
         guard opacity > 0 else { return result }
         guard opacity != 1 else {
-            result.items.append(contentsOf: source.items)
+            result.items.append(contentsOf: source.renderItems)
             return result
         }
 
-        let items = source.items
+        let items = source.renderItems
         result.appendOpacityItem(
             bounds: source.interpolationBounds,
             opacity: opacity
@@ -128,6 +128,30 @@ public struct _OpacityEffect: Equatable, Animatable, ViewModifier, Sendable {
             inputs: inputs,
             body: body
         )
+    }
+}
+
+extension _OpacityEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        let value = Float(opacity)
+        if value != 1 {
+            encoder.encodeFloatFieldAlways(1, value)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var opacity = 1.0
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            if fieldNumber == 1 {
+                opacity = Double(try decoder.decodeFloatField(wireType: wireType))
+            } else {
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(opacity: opacity)
     }
 }
 

@@ -7,6 +7,31 @@
 
 import Foundation
 
+// Type-erased renderer ownership is kept separate from resolved text content.
+// Concrete TextRenderer lowering will subclass this carrier when that public surface is added.
+class TextRendererBoxBase {
+}
+
+struct StyledTextContentView {
+    var text: ResolvedStyledText
+    var renderer: TextRendererBoxBase?
+    var needsDrawingGroup: Bool
+
+    init(
+        text: ResolvedStyledText,
+        renderer: TextRendererBoxBase?,
+        needsDrawingGroup: Bool = false
+    ) {
+        self.text = text
+        self.renderer = renderer
+        self.needsDrawingGroup = needsDrawingGroup
+    }
+
+    static var animatesSize: Bool {
+        false
+    }
+}
+
 final class ResolvedStyledText: InterpolatableContent {
     var resolvedText: GraphicsContext.ResolvedText?
     var version: Int

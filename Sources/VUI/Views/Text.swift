@@ -38,6 +38,30 @@ final class _TextResourceResolutionState {
     }
 }
 
+final class _TextDisplayListContentState {
+    private var resolvedVersion: Int?
+    private var size: CGSize?
+    private var needsDrawingGroup: Bool?
+    private var seed = DisplayList.Seed()
+
+    func contentSeed(
+        resolvedVersion: Int,
+        size: CGSize,
+        needsDrawingGroup: Bool
+    ) -> DisplayList.Seed {
+        if seed.value == 0 ||
+            self.resolvedVersion != resolvedVersion ||
+            self.size != size ||
+            self.needsDrawingGroup != needsDrawingGroup {
+            seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+            self.resolvedVersion = resolvedVersion
+            self.size = size
+            self.needsDrawingGroup = needsDrawingGroup
+        }
+        return seed
+    }
+}
+
 func _textTransitionRenderFrame(
     position: CGPoint,
     viewSize: CGSize,
@@ -440,6 +464,7 @@ extension Text: View {
         let resolvedStyledTextAttr = graph.makeInput(value: ResolvedStyledText())
         let resolvedStyledTextTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _TextResourceResolutionState()
+        let displayListContentState = _TextDisplayListContentState()
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
@@ -588,11 +613,23 @@ extension Text: View {
                     frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
                     frame.size.height = measuredSize.height
                 }
-                list.appendTextItem(foreground: foreground, bounds: frame) { context in
-                    if frame.width > 0 && frame.height > 0 {
-                        context.draw(resolved, in: frame, shading: foreground)
-                    }
-                }
+                let styledTextContent = StyledTextContentView(
+                    text: styledText,
+                    renderer: nil,
+                    needsDrawingGroup: styledText.needsDrawingGroup
+                )
+                let contentSeed = displayListContentState.contentSeed(
+                    resolvedVersion: styledText.version,
+                    size: frame.size,
+                    needsDrawingGroup: styledText.needsDrawingGroup
+                )
+                list.appendTextItem(
+                    styledTextContent,
+                    size: frame.size,
+                    foreground: foreground,
+                    bounds: frame,
+                    seed: contentSeed
+                )
             }
             if debugLayout {
                 appendDebugOverlay(to: &list, frame: CGRect(origin: position, size: viewSize),

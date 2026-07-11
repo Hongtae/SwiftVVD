@@ -7,12 +7,237 @@
 
 import Foundation
 
+nonisolated(unsafe) private var _displayListIdentityCounter: UInt32 = 0
+
+struct _DisplayList_Identity: Codable, Hashable, CustomStringConvertible {
+    private(set) var value: UInt32
+
+    init() {
+        _displayListIdentityCounter &+= 1
+        self.value = _displayListIdentityCounter
+    }
+
+    init(decodedValue: UInt32) {
+        self.value = decodedValue
+    }
+
+    static var none: Self {
+        Self(decodedValue: 0)
+    }
+
+    var description: String {
+        "#\(value)"
+    }
+}
+
+struct _DisplayList_StableIdentity: Codable, Hashable {
+    var hash: StrongHash
+    var serial: UInt32
+
+    init(hash: StrongHash, serial: UInt32) {
+        self.hash = hash
+        self.serial = serial
+    }
+}
+
+struct _DisplayList_StableIdentityMap {
+    private var map: [_DisplayList_Identity: _DisplayList_StableIdentity]
+
+    init() {
+        self.map = [:]
+    }
+
+    var isEmpty: Bool {
+        map.isEmpty
+    }
+
+    subscript(identity: _DisplayList_Identity) -> _DisplayList_StableIdentity? {
+        get { map[identity] }
+        set { map[identity] = newValue }
+    }
+
+    mutating func formUnion(_ other: Self) {
+        map.merge(other.map) { current, _ in current }
+    }
+}
+
+extension _DisplayList_StableIdentity: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        encoder.encodeVarint(0x0a)
+        try encoder.encodeMessage(hash)
+        if serial != 0 {
+            encoder.encodeVarint(0x10)
+            encoder.encodeVarint(UInt(serial))
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var hash = StrongHash(words: (0, 0, 0, 0, 0))
+        var serial: UInt32 = 0
+
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 0x08 else {
+                throw ProtobufDecoder.DecodingError.failed
+            }
+
+            let field = tag >> 3
+            let wireType = tag & 0x07
+            switch field {
+            case 1:
+                guard wireType == 2 else {
+                    throw ProtobufDecoder.DecodingError.failed
+                }
+                hash = try decoder.decodeMessage(StrongHash.self)
+            case 2:
+                switch wireType {
+                case 0:
+                    serial = UInt32(truncatingIfNeeded: try decoder.decodeVarint())
+                case 2:
+                    serial = try decoder.decodeLengthDelimited { packedDecoder in
+                        var value: UInt32?
+                        while !packedDecoder.isAtEnd {
+                            value = UInt32(truncatingIfNeeded: try packedDecoder.decodeVarint())
+                        }
+                        guard let value else {
+                            throw ProtobufDecoder.DecodingError.failed
+                        }
+                        return value
+                    }
+                default:
+                    throw ProtobufDecoder.DecodingError.failed
+                }
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+
+        self.init(hash: hash, serial: serial)
+    }
+}
+
+extension _DisplayList_StableIdentityMap: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        for (identity, stableIdentity) in map {
+            encoder.encodeVarint(0x0a)
+            encoder.startLengthDelimited()
+            if identity.value != 0 {
+                encoder.encodeVarint(0x08)
+                encoder.encodeVarint(UInt(identity.value))
+            }
+            encoder.encodeVarint(0x12)
+            try encoder.encodeMessage(stableIdentity)
+            encoder.endLengthDelimited()
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var map: [_DisplayList_Identity: _DisplayList_StableIdentity] = [:]
+
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 0x08 else {
+                throw ProtobufDecoder.DecodingError.failed
+            }
+
+            let field = tag >> 3
+            let wireType = tag & 0x07
+            if field == 1 {
+                guard wireType == 2 else {
+                    throw ProtobufDecoder.DecodingError.failed
+                }
+                let entry = try decoder.decodeLengthDelimited { entryDecoder in
+                    var identity: _DisplayList_Identity?
+                    var stableIdentity: _DisplayList_StableIdentity?
+
+                    while !entryDecoder.isAtEnd {
+                        let entryTag = try entryDecoder.decodeVarint()
+                        guard entryTag >= 0x08 else {
+                            throw ProtobufDecoder.DecodingError.failed
+                        }
+
+                        let entryField = entryTag >> 3
+                        let entryWireType = entryTag & 0x07
+                        switch entryField {
+                        case 1:
+                            switch entryWireType {
+                            case 0:
+                                identity = _DisplayList_Identity(
+                                    decodedValue: UInt32(truncatingIfNeeded: try entryDecoder.decodeVarint())
+                                )
+                            case 2:
+                                identity = try entryDecoder.decodeLengthDelimited { packedDecoder in
+                                    var value: UInt32?
+                                    while !packedDecoder.isAtEnd {
+                                        value = UInt32(truncatingIfNeeded: try packedDecoder.decodeVarint())
+                                    }
+                                    guard let value else {
+                                        throw ProtobufDecoder.DecodingError.failed
+                                    }
+                                    return _DisplayList_Identity(decodedValue: value)
+                                }
+                            default:
+                                throw ProtobufDecoder.DecodingError.failed
+                            }
+                        case 2:
+                            guard entryWireType == 2 else {
+                                throw ProtobufDecoder.DecodingError.failed
+                            }
+                            stableIdentity = try entryDecoder.decodeMessage(_DisplayList_StableIdentity.self)
+                        default:
+                            try entryDecoder.skipField(wireType: entryWireType)
+                        }
+                    }
+
+                    guard let identity, let stableIdentity else {
+                        throw ProtobufDecoder.DecodingError.failed
+                    }
+                    return (identity, stableIdentity)
+                }
+                map[entry.0] = entry.1
+            } else {
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+
+        self.map = map
+    }
+}
+
 // Ordered collection of rendering commands produced by the view tree.
 // Propagated to the scene root via the DisplayList.Key preference.
 // TODO: Replace closure-backed draw bodies with backend commands as typed coverage is proven.
 struct DisplayList {
     struct Version {
         let value: Int
+
+        nonisolated(unsafe) private static var lastValue: Int = 0
+
+        init() {
+            self.value = 0
+        }
+
+        init(value: Int) {
+            self.value = value
+        }
+
+        init(decodedValue: Int) {
+            self.value = decodedValue
+            if decodedValue > Self.lastValue {
+                Self.lastValue = decodedValue
+            }
+        }
+
+        init(forUpdate: ()) {
+            Self.lastValue &+= 1
+            self.value = Self.lastValue
+        }
+
+        mutating func combine(with other: Self) {
+            if other.value > value {
+                self = other
+            }
+        }
     }
 
     // Compact change token used by interpolation groups to detect display-list content updates.
@@ -50,9 +275,119 @@ struct DisplayList {
         }
     }
 
+    struct Index {
+        private struct RestoreOptions: OptionSet {
+            var rawValue: UInt8
+
+            static let identity = RestoreOptions(rawValue: 1 << 0)
+            static let archiveIdentity = RestoreOptions(rawValue: 1 << 1)
+            static let swapIdentityToArchive = RestoreOptions(rawValue: 1 << 2)
+            static let swapArchiveToIdentity = RestoreOptions(rawValue: 1 << 3)
+        }
+
+        private(set) var identity: _DisplayList_Identity
+        private(set) var serial: UInt32
+        private(set) var archiveIdentity: _DisplayList_Identity
+        private(set) var archiveSerial: UInt32
+        private var restored: RestoreOptions
+
+        init() {
+            identity = .none
+            serial = 0
+            archiveIdentity = .none
+            archiveSerial = 0
+            restored = []
+        }
+
+        mutating func enter(identity: _DisplayList_Identity) -> Self {
+            if identity != .none {
+                let previous = self
+                self.identity = identity
+                serial = 0
+                restored = .identity
+                return previous
+            }
+
+            serial &+= 1
+            let entered = self
+            restored = []
+            return entered
+        }
+
+        mutating func leave(index: Self) {
+            let currentIdentity = identity
+            let currentSerial = serial
+            if restored.contains(.swapIdentityToArchive) {
+                identity = archiveIdentity
+                serial = archiveSerial
+            }
+            if restored.contains(.swapArchiveToIdentity) {
+                archiveIdentity = currentIdentity
+                archiveSerial = currentSerial
+            }
+            if restored.contains(.identity) {
+                identity = index.identity
+                serial = index.serial
+            }
+            if restored.contains(.archiveIdentity) {
+                archiveIdentity = index.archiveIdentity
+                archiveSerial = index.archiveSerial
+            }
+            restored = index.restored
+        }
+
+        mutating func updateArchive(entering: Bool) {
+            if entering {
+                archiveIdentity = identity
+                archiveSerial = serial
+                identity = .none
+                serial = 0
+                restored.formUnion([.archiveIdentity, .swapIdentityToArchive])
+            } else {
+                identity = archiveIdentity
+                serial = archiveSerial
+                archiveIdentity = .none
+                archiveSerial = 0
+                restored.formUnion([.identity, .swapArchiveToIdentity])
+            }
+        }
+
+        var id: ID {
+            ID(
+                identity: identity,
+                serial: serial,
+                archiveIdentity: archiveIdentity,
+                archiveSerial: archiveSerial
+            )
+        }
+
+        struct ID: Hashable {
+            private var identity: _DisplayList_Identity
+            private var serial: UInt32
+            private var archiveIdentity: _DisplayList_Identity
+            private var archiveSerial: UInt32
+
+            fileprivate init(
+                identity: _DisplayList_Identity,
+                serial: UInt32,
+                archiveIdentity: _DisplayList_Identity,
+                archiveSerial: UInt32
+            ) {
+                self.identity = identity
+                self.serial = serial
+                self.archiveIdentity = archiveIdentity
+                self.archiveSerial = archiveSerial
+            }
+        }
+    }
+
     // Renderer-side metadata attached to a display list for state, content transitions, and
     // interpolator group routing.
     enum Effect {
+        case identity
+        case opacity(Float)
+        case transform(ProjectionTransform)
+        case animation(any _DisplayList_AnyEffectAnimation)
         case state(StrongHash)
         case contentTransition(ContentTransition.State)
         case interpolatorRoot(InterpolatorGroup, CGPoint, CGSize)
@@ -450,33 +785,236 @@ struct DisplayList {
         }
     }
 
-    struct Item {
-        var command: ItemCommand
-        private let body: (GraphicsContext) -> Void
+    struct Content {
+        struct TextValue {
+            var view: StyledTextContentView
+            var size: CGSize
+            var frame: CGRect
+            var shading: GraphicsContext.Shading
+            var transform: CGAffineTransform
+            var command: ItemCommand
 
-        init(command: ItemCommand, _ body: @escaping (GraphicsContext) -> Void) {
-            self.command = command
-            self.body = body
+            func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
+                view.text.resolvedText?.makeDrawing(in: size)
+            }
+
+            func draw(in context: GraphicsContext) {
+                guard let resolvedText = view.text.resolvedText else { return }
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                context.draw(resolvedText, in: frame, shading: shading)
+            }
+
+            func draw(
+                _ drawing: GraphicsContext.ResolvedText.Drawing,
+                in context: GraphicsContext
+            ) {
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                context.draw(drawing, in: frame, shading: shading)
+            }
+
+            func transformed(
+                command: ItemCommand,
+                by affineTransform: CGAffineTransform
+            ) -> Self {
+                var copy = self
+                copy.command = command
+                copy.transform = transform.concatenating(affineTransform)
+                return copy
+            }
+        }
+
+        enum Value {
+            case backend(ItemCommand, (GraphicsContext) -> Void)
+            case text(TextValue)
+        }
+
+        var value: Value
+        var seed: Seed
+
+        init(
+            command: ItemCommand,
+            seed: Seed = Seed(),
+            body: @escaping (GraphicsContext) -> Void
+        ) {
+            self.value = .backend(command, body)
+            self.seed = seed
+        }
+
+        init(
+            text: StyledTextContentView,
+            size: CGSize,
+            frame: CGRect,
+            shading: GraphicsContext.Shading,
+            command: ItemCommand,
+            seed: Seed
+        ) {
+            self.value = .text(TextValue(
+                view: text,
+                size: size,
+                frame: frame,
+                shading: shading,
+                transform: .identity,
+                command: command
+            ))
+            self.seed = seed
+        }
+
+        var command: ItemCommand {
+            switch value {
+            case let .backend(command, _):
+                return command
+            case let .text(text):
+                return text.command
+            }
+        }
+
+        func draw(in context: GraphicsContext) {
+            switch value {
+            case let .backend(_, body):
+                body(context)
+            case let .text(text):
+                text.draw(in: context)
+            }
+        }
+
+        func transformed(by affineTransform: CGAffineTransform) -> Content {
+            let transformedCommand = command.transformed(by: affineTransform)
+            switch value {
+            case .backend:
+                return Content(command: transformedCommand, seed: seed) { context in
+                    var context = context
+                    context.concatenate(affineTransform)
+                    self.draw(in: context)
+                }
+            case let .text(text):
+                var copy = self
+                copy.value = .text(text.transformed(
+                    command: transformedCommand,
+                    by: affineTransform
+                ))
+                return copy
+            }
+        }
+    }
+
+    struct Item {
+        enum Value {
+            case content(Content)
+            case effect(Effect, DisplayList)
+            case states([(StrongHash, DisplayList)])
+            case empty
+        }
+
+        var frame: CGRect
+        var version: Version
+        var value: Value
+        var identity: _DisplayList_Identity
+
+        init(
+            command: ItemCommand,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0),
+            seed: Seed = Seed(),
+            _ body: @escaping (GraphicsContext) -> Void
+        ) {
+            self.frame = command.bounds ?? .zero
+            self.version = version
+            self.value = .content(Content(command: command, seed: seed, body: body))
+            self.identity = identity
+        }
+
+        init(
+            effect: Effect,
+            contents: DisplayList,
+            frame: CGRect? = nil,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0)
+        ) {
+            self.frame = frame ?? contents.interpolationBounds ?? .zero
+            self.version = version
+            self.value = .effect(effect, contents)
+            self.identity = identity
+        }
+
+        init(
+            text: StyledTextContentView,
+            size: CGSize,
+            frame: CGRect,
+            shading: GraphicsContext.Shading,
+            command: ItemCommand,
+            seed: Seed,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version()
+        ) {
+            self.frame = command.bounds ?? frame
+            self.version = version
+            self.value = .content(Content(
+                text: text,
+                size: size,
+                frame: frame,
+                shading: shading,
+                command: command,
+                seed: seed
+            ))
+            self.identity = identity
+        }
+
+        init(
+            content: Content,
+            frame: CGRect,
+            identity: _DisplayList_Identity,
+            version: Version
+        ) {
+            self.frame = frame
+            self.version = version
+            self.value = .content(content)
+            self.identity = identity
+        }
+
+        var command: ItemCommand {
+            guard case let .content(content) = value else {
+                preconditionFailure("DisplayList.Item.command requires content")
+            }
+            return content.command
         }
 
         var record: ItemRecord {
             command.record
         }
 
+        var effectItem: EffectItem? {
+            guard case let .effect(effect, contents) = value else { return nil }
+            return EffectItem(effect: effect, contents: contents)
+        }
+
         func callAsFunction(_ context: GraphicsContext) {
-            body(context)
+            switch value {
+            case let .content(content):
+                content.draw(in: context)
+            case let .effect(_, contents):
+                contents.draw(in: context)
+            case let .states(states):
+                states.last?.1.draw(in: context)
+            case .empty:
+                break
+            }
         }
     }
 
     var items: [Item] = []
     var debugItems: [Item] = []
-    var effects: [EffectItem] = []
     var styles: [StyleCommand] = []
     // Backend-local bounds used by display-list interpolation before exact private command storage exists.
     var interpolationBounds: CGRect?
 
     var itemRecords: [ItemRecord] {
-        items.map(\.record)
+        renderItems.map(\.record)
     }
 
     var debugItemRecords: [ItemRecord] {
@@ -484,17 +1022,27 @@ struct DisplayList {
     }
 
     var itemCommands: [ItemCommand] {
-        items.map(\.command)
+        renderItems.map(\.command)
     }
 
     var debugItemCommands: [ItemCommand] {
         debugItems.map(\.command)
     }
 
+    var renderItems: [Item] {
+        items.filter {
+            if case .content = $0.value { return true }
+            return false
+        }
+    }
+
+    var effects: [EffectItem] {
+        items.compactMap(\.effectItem)
+    }
+
     mutating func append(contentsOf other: Self) {
         self.items.append(contentsOf: other.items)
         self.debugItems.append(contentsOf: other.debugItems)
-        self.effects.append(contentsOf: other.effects)
         self.styles.append(contentsOf: other.styles)
         self.recordInterpolationBounds(other.interpolationBounds)
     }
@@ -589,6 +1137,31 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendTextItem(
+        _ text: StyledTextContentView,
+        size: CGSize,
+        foreground: GraphicsContext.Shading,
+        bounds: CGRect,
+        seed: Seed
+    ) {
+        guard let bounds = Self.itemRecordBounds(bounds) else { return }
+        let command = ItemCommand.text(
+            ItemRecord.TextRecord(
+                foreground: Self.shadingRecord(for: foreground)
+            ),
+            bounds: bounds
+        )
+        items.append(Item(
+            text: text,
+            size: size,
+            frame: bounds,
+            shading: foreground,
+            command: command,
+            seed: seed
+        ))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendCustomItem(
         bounds: CGRect? = nil,
         isOpaque: Bool,
@@ -650,26 +1223,36 @@ struct DisplayList {
         _ item: Item,
         affineTransform: CGAffineTransform
     ) {
-        let command = item.command.transformed(by: affineTransform)
-        items.append(Item(command: command) { context in
-            var context = context
-            context.concatenate(affineTransform)
-            item(context)
-        })
-        recordInterpolationBounds(command.bounds)
+        guard case let .content(content) = item.value else {
+            preconditionFailure("DisplayList transformed items require content")
+        }
+        let transformedContent = content.transformed(by: affineTransform)
+        let frame = transformedContent.command.bounds ?? item.frame.applying(affineTransform)
+        items.append(Item(
+            content: transformedContent,
+            frame: frame,
+            identity: item.identity,
+            version: item.version
+        ))
+        recordInterpolationBounds(transformedContent.command.bounds)
     }
 
     mutating func appendTransformedDebugItem(
         _ item: Item,
         affineTransform: CGAffineTransform
     ) {
-        let command = item.command.transformed(by: affineTransform)
-        debugItems.append(Item(command: command) { context in
-            var context = context
-            context.concatenate(affineTransform)
-            item(context)
-        })
-        recordInterpolationBounds(command.bounds)
+        guard case let .content(content) = item.value else {
+            preconditionFailure("DisplayList transformed debug items require content")
+        }
+        let transformedContent = content.transformed(by: affineTransform)
+        let frame = transformedContent.command.bounds ?? item.frame.applying(affineTransform)
+        debugItems.append(Item(
+            content: transformedContent,
+            frame: frame,
+            identity: item.identity,
+            version: item.version
+        ))
+        recordInterpolationBounds(transformedContent.command.bounds)
     }
 
     mutating func appendCrossFadeItem(
@@ -746,7 +1329,7 @@ struct DisplayList {
     }
 
     mutating func appendEffect(_ effect: Effect, contents: DisplayList) {
-        effects.append(EffectItem(effect: effect, contents: contents))
+        items.append(Item(effect: effect, contents: contents))
         recordInterpolationBounds(contents.interpolationBounds)
     }
 
@@ -935,6 +1518,238 @@ struct DisplayList {
         }
     }
 
+    final class GraphicsRenderer {
+        private struct CallbackKey: Hashable {
+            var index: Index.ID
+            var seed: Seed
+            var scale: CGFloat
+        }
+
+        private struct AnimatorKey: Hashable {
+            var index: Index.ID
+        }
+
+        private struct Cache {
+            var callbacks: [CallbackKey: GraphicsContext.ResolvedText.Drawing] = [:]
+            var animators: [AnimatorKey: any _DisplayList_AnyEffectAnimator] = [:]
+        }
+
+        private var oldCache = Cache()
+        private var newCache = Cache()
+        private(set) var index = Index()
+        private(set) var time = Time.zero
+        private(set) var nextTime = Time.infinity
+
+        var animatorCount: Int {
+            oldCache.animators.count
+        }
+
+        var textCallbackCount: Int {
+            oldCache.callbacks.count
+        }
+
+        func render(
+            list: DisplayList,
+            at time: Time,
+            in context: GraphicsContext,
+            includeDebug: Bool = true
+        ) {
+            let savedIndex = index
+            beginPass(at: time)
+            let sampled = sampleItems(in: list)
+            renderItems(in: sampled, context: context, includeDebug: includeDebug)
+            endPass()
+            index = savedIndex
+        }
+
+        func sample(list: DisplayList, at time: Time) -> DisplayList {
+            let savedIndex = index
+            beginPass(at: time)
+            let sampled = sampleItems(in: list)
+            endPass()
+            index = savedIndex
+            return sampled
+        }
+
+        func beginPass(at time: Time) {
+            self.time = time
+            nextTime = .infinity
+            newCache = Cache()
+        }
+
+        func endPass() {
+            oldCache = newCache
+            newCache = Cache()
+        }
+
+        private func sampleItems(in list: DisplayList) -> DisplayList {
+            var sampled = list
+            sampled.items.removeAll(keepingCapacity: true)
+
+            for item in list.items {
+                let previous = index.enter(identity: item.identity)
+                var sampledItem = item
+                switch item.value {
+                case .content, .empty:
+                    break
+
+                case let .effect(effect, contents):
+                    if case let .animation(animation) = effect {
+                        let key = AnimatorKey(index: index.id)
+                        var animator: any _DisplayList_AnyEffectAnimator
+                        if let cached = oldCache.animators[key] {
+                            animator = cached
+                        } else {
+                            animator = animation.makeAnimator()
+                        }
+                        let evaluation = animator.evaluate(
+                            animation,
+                            at: time,
+                            size: item.frame.size
+                        )
+                        if !evaluation.finished {
+                            nextTime = time
+                        }
+                        newCache.animators[key] = animator
+                        sampledItem.value = .effect(
+                            evaluation.effect,
+                            sampleItems(in: contents)
+                        )
+                    } else {
+                        sampledItem.value = .effect(effect, sampleItems(in: contents))
+                    }
+
+                case let .states(states):
+                    sampledItem.value = .states(states.map { hash, contents in
+                        (hash, sampleItems(in: contents))
+                    })
+                }
+                sampled.items.append(sampledItem)
+                index.leave(index: previous)
+            }
+            return sampled
+        }
+
+        private func renderItems(
+            in list: DisplayList,
+            context: GraphicsContext,
+            includeDebug: Bool
+        ) {
+            for item in list.items {
+                let previous = index.enter(identity: item.identity)
+                render(item: item, context: context, includeDebug: includeDebug)
+                index.leave(index: previous)
+            }
+            if includeDebug {
+                for item in list.debugItems {
+                    item(context)
+                }
+            }
+        }
+
+        private func render(
+            item: Item,
+            context: GraphicsContext,
+            includeDebug: Bool
+        ) {
+            switch item.value {
+            case let .content(content):
+                switch content.value {
+                case .backend:
+                    content.draw(in: context)
+                case let .text(text):
+                    guard let drawing = resolveTextCallback(
+                        text,
+                        seed: content.seed,
+                        scale: context.contentScaleFactor
+                    ) else {
+                        return
+                    }
+                    text.draw(drawing, in: context)
+                }
+
+            case let .effect(effect, contents):
+                render(
+                    effect: effect,
+                    contents: contents,
+                    frame: item.frame,
+                    context: context,
+                    includeDebug: includeDebug
+                )
+
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    renderItems(in: contents, context: context, includeDebug: includeDebug)
+                }
+
+            case .empty:
+                break
+            }
+        }
+
+        func resolveTextCallback(
+            _ text: Content.TextValue,
+            seed: Seed,
+            scale: CGFloat
+        ) -> GraphicsContext.ResolvedText.Drawing? {
+            let key = CallbackKey(
+                index: index.id,
+                seed: seed,
+                scale: max(scale.rounded(.toNearestOrEven), 1)
+            )
+            guard let drawing = oldCache.callbacks[key] ?? text.makeDrawing() else {
+                return nil
+            }
+            newCache.callbacks[key] = drawing
+            return drawing
+        }
+
+        private func render(
+            effect: Effect,
+            contents: DisplayList,
+            frame: CGRect,
+            context: GraphicsContext,
+            includeDebug: Bool
+        ) {
+            switch effect {
+            case .identity,
+                 .state,
+                 .contentTransition,
+                 .interpolatorRoot,
+                 .interpolatorLayer,
+                 .interpolatorAnimation:
+                renderItems(in: contents, context: context, includeDebug: includeDebug)
+
+            case let .opacity(opacity):
+                guard opacity > 0 else { return }
+                var context = context
+                context.opacity *= Double(opacity)
+                guard context.opacity > 0 else { return }
+                context.drawLayer { layer in
+                    self.renderItems(in: contents, context: layer, includeDebug: includeDebug)
+                }
+
+            case let .transform(transform):
+                guard transform.isAffine else { return }
+                var context = context
+                context.concatenate(
+                    CGAffineTransform(
+                        a: transform.m11,
+                        b: transform.m12,
+                        c: transform.m21,
+                        d: transform.m22,
+                        tx: transform.m31,
+                        ty: transform.m32
+                    )
+                )
+                renderItems(in: contents, context: context, includeDebug: includeDebug)
+
+            case .animation:
+                preconditionFailure("Effect animations must be sampled before rendering")
+            }
+        }
+    }
+
     static func effect(_ effect: Effect, contents: DisplayList) -> DisplayList {
         var list = DisplayList()
         list.appendEffect(effect, contents: contents)
@@ -943,10 +1758,7 @@ struct DisplayList {
 
     func forEachRenderItem(includeDebug: Bool = true, _ body: (Item) -> Void) {
         for item in items {
-            body(item)
-        }
-        for effectItem in effects {
-            effectItem.forEachRenderItem(includeDebug: includeDebug, body)
+            item.forEachRenderItem(includeDebug: includeDebug, body)
         }
         if includeDebug {
             for item in debugItems {
@@ -956,46 +1768,71 @@ struct DisplayList {
     }
 
     func draw(in context: GraphicsContext, includeDebug: Bool = true) {
-        forEachRenderItem(includeDebug: includeDebug) { item in
-            item(context)
-        }
+        GraphicsRenderer().render(
+            list: self,
+            at: .systemUptime,
+            in: context,
+            includeDebug: includeDebug
+        )
     }
 
     func hasSameInterpolationSurface(as other: DisplayList) -> Bool {
         itemSurfaceMatches(
-            commands: itemCommands,
-            otherCommands: other.itemCommands
+            items,
+            other.items
         ) &&
-        itemSurfaceMatches(
+        commandSurfaceMatches(
             commands: debugItemCommands,
             otherCommands: other.debugItemCommands
         ) &&
             styles == other.styles &&
-            effectSurfaceMatches(effects, other.effects) &&
             interpolationBounds == other.interpolationBounds
     }
 
     private func itemSurfaceMatches(
+        _ items: [Item],
+        _ otherItems: [Item]
+    ) -> Bool {
+        guard items.count == otherItems.count else { return false }
+        return zip(items, otherItems).allSatisfy { lhs, rhs in
+            guard lhs.frame == rhs.frame,
+                  lhs.version.value == rhs.version.value,
+                  lhs.identity == rhs.identity else {
+                return false
+            }
+            switch (lhs.value, rhs.value) {
+            case let (.content(lhs), .content(rhs)):
+                return lhs.seed == rhs.seed && lhs.command == rhs.command
+            case let (.effect(lhsEffect, lhsContents), .effect(rhsEffect, rhsContents)):
+                return lhsEffect.surfaceRecord == rhsEffect.surfaceRecord &&
+                    lhsContents.hasSameInterpolationSurface(as: rhsContents)
+            case let (.states(lhsStates), .states(rhsStates)):
+                guard lhsStates.count == rhsStates.count else { return false }
+                return zip(lhsStates, rhsStates).allSatisfy { lhs, rhs in
+                    lhs.0 == rhs.0 && lhs.1.hasSameInterpolationSurface(as: rhs.1)
+                }
+            case (.empty, .empty):
+                return true
+            case (.content, _), (.effect, _), (.states, _), (.empty, _):
+                return false
+            }
+        }
+    }
+
+    private func commandSurfaceMatches(
         commands: [ItemCommand],
         otherCommands: [ItemCommand]
     ) -> Bool {
         commands == otherCommands
     }
-
-    private func effectSurfaceMatches(
-        _ effects: [EffectItem],
-        _ otherEffects: [EffectItem]
-    ) -> Bool {
-        guard effects.count == otherEffects.count else { return false }
-        return zip(effects, otherEffects).allSatisfy { lhs, rhs in
-            lhs.effect.surfaceRecord == rhs.effect.surfaceRecord &&
-                lhs.contents.hasSameInterpolationSurface(as: rhs.contents)
-        }
-    }
 }
 
 private struct DisplayListEffectSurfaceRecord: Equatable {
     enum Kind: UInt8, Equatable {
+        case identity
+        case opacity
+        case transform
+        case animation
         case state
         case contentTransition
         case interpolatorRoot
@@ -1012,11 +1849,41 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     var layerID: UInt32?
     var animationValue: StrongHash?
     var animation: Animation?
+    var opacity: Float?
+    var transform: ProjectionTransform?
+    var effectAnimation: DisplayListEffectAnimationSurfaceRecord?
+}
+
+private struct DisplayListEffectAnimationSurfaceRecord: Equatable {
+    var type: ObjectIdentifier
+    var encodedValue: Data?
 }
 
 private extension DisplayList.Effect {
     var surfaceRecord: DisplayListEffectSurfaceRecord {
         switch self {
+        case .identity:
+            return DisplayListEffectSurfaceRecord(kind: .identity)
+        case let .opacity(opacity):
+            return DisplayListEffectSurfaceRecord(kind: .opacity, opacity: opacity)
+        case let .transform(transform):
+            return DisplayListEffectSurfaceRecord(kind: .transform, transform: transform)
+        case let .animation(animation):
+            var encoder = ProtobufEncoder()
+            let encodedValue: Data?
+            do {
+                try animation.encode(to: &encoder)
+                encodedValue = encoder.data
+            } catch {
+                encodedValue = nil
+            }
+            return DisplayListEffectSurfaceRecord(
+                kind: .animation,
+                effectAnimation: DisplayListEffectAnimationSurfaceRecord(
+                    type: ObjectIdentifier(type(of: animation)),
+                    encodedValue: encodedValue
+                )
+            )
         case let .state(hash):
             return DisplayListEffectSurfaceRecord(kind: .state, hash: hash)
         case let .contentTransition(state):
@@ -1104,9 +1971,32 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .contentTransition:
+        case .identity, .opacity, .transform, .animation, .contentTransition:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
+            break
+        }
+    }
+}
+
+private extension DisplayList.Item {
+    func forEachRenderItem(
+        includeDebug: Bool,
+        _ body: (DisplayList.Item) -> Void
+    ) {
+        switch value {
+        case .content:
+            body(self)
+        case let .effect(effect, contents):
+            switch effect {
+            case .identity, .opacity, .transform, .animation, .contentTransition:
+                contents.forEachRenderItem(includeDebug: includeDebug, body)
+            case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
+                break
+            }
+        case let .states(states):
+            states.last?.1.forEachRenderItem(includeDebug: includeDebug, body)
+        case .empty:
             break
         }
     }

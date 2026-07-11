@@ -321,7 +321,7 @@ private extension Array {
     }
 }
 
-private final class AnimatorState<AnimatedValue: Animatable> {
+final class AnimatorState<AnimatedValue: Animatable> {
     // Local sampling phase for the active animation. This is separate from the
     // graph phase seed used by the helper to detect attribute resets.
     private enum Phase {

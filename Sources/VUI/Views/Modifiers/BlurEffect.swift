@@ -87,13 +87,13 @@ private enum _BlurEffectSupport {
             )
         }
 
-        guard !source.items.isEmpty else { return result }
+        guard !source.renderItems.isEmpty else { return result }
         guard radius >= .ulpOfOne else {
-            result.items.append(contentsOf: source.items)
+            result.items.append(contentsOf: source.renderItems)
             return result
         }
 
-        let items = source.items
+        let items = source.renderItems
         result.appendBlurItem(
             bounds: source.interpolationBounds,
             radius: radius,

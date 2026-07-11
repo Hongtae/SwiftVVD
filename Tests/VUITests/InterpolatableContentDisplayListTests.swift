@@ -57,6 +57,23 @@ private struct VersionedTransitionContent: Equatable, InterpolatableContent {
 }
 
 final class InterpolatableContentDisplayListTests: XCTestCase {
+    func testInterpolatorLayerPhaseCaseOrderMatchesRuntimeSurface() {
+        typealias LayerPhase = DisplayList.InterpolatorLayer.Phase
+
+        XCTAssertEqual(MemoryLayout<LayerPhase>.size, 1)
+        XCTAssertEqual(MemoryLayout<LayerPhase>.stride, 1)
+
+        func tag(_ phase: LayerPhase) -> UInt8 {
+            withUnsafeBytes(of: phase) { $0[0] }
+        }
+
+        XCTAssertEqual(tag(.pending), 0)
+        XCTAssertEqual(tag(.first), 1)
+        XCTAssertEqual(tag(.second), 2)
+        XCTAssertEqual(tag(.running), 3)
+        XCTAssertEqual(Set<LayerPhase>([.pending, .first, .second, .running]).count, 4)
+    }
+
     func testPrivateColorMatrixSurface() throws {
         XCTAssertEqual(_ColorMatrix(), _ColorMatrix(_ColorMatrix().colorMatrix))
 
@@ -1192,7 +1209,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
 
         let midpoint = interpolator.copyContents(withProgress: 0.5)
-        XCTAssertEqual(midpoint.items.count, 0)
+        XCTAssertEqual(midpoint.renderItems.count, 0)
         XCTAssertEqual(midpoint.effects.count, 1)
 
         let effectItem = try XCTUnwrap(midpoint.effects.first)
@@ -3262,6 +3279,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
+    func testInterpolatorLayerStagesRemovalAndPreservesShortPreparationBegin() {
+        var layer = DisplayList.InterpolatorLayer()
+        let current = makeDisplayList(debugItemCount: 1)
+        let target = makeDisplayList(debugItemCount: 2)
+        var state = ContentTransition.State(transition: .opacity)
+        state.animation = .linear(duration: 0.2)
+
+        layer.setDisplayList(current, origin: .zero)
+        layer.setDisplayList(
+            target,
+            origin: .zero,
+            state: state,
+            animation: state.animation
+        )
+        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1))
+
+        XCTAssertEqual(layer.removed.first?.phase, .first)
+        XCTAssertEqual(layer.removed.first?.startTime.seconds, 1)
+        XCTAssertNotNil(layer.removed.first?.interpolator)
+
+        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1))
+        XCTAssertEqual(layer.removed.first?.phase, .first)
+
+        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1.01))
+        XCTAssertEqual(layer.removed.first?.phase, .second)
+        XCTAssertEqual(layer.removed.first?.startTime.seconds ?? .nan, 1.01, accuracy: 0.000_001)
+
+        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1.02))
+        XCTAssertEqual(layer.removed.first?.phase, .running)
+        XCTAssertEqual(layer.removed.first?.startTime.seconds ?? .nan, 1.01, accuracy: 0.000_001)
+        XCTAssertEqual(layer.nextUpdateTime.seconds, 1.21, accuracy: 0.000_001)
+    }
+
     func testUnaryInterpolatorGroupTracksLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
         let current = makeDisplayList(debugItemCount: 1)
@@ -3299,6 +3349,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertNil(unary.layer.removed.first?.interpolator?.options[.rasterizationScale])
         XCTAssertEqual(unary.layer.removed.first?.interpolator?.animation?.activeDuration, 0.2)
         XCTAssertEqual(unary.layer.removed.first?.activeDuration, 0.2)
+        XCTAssertEqual(unary.layer.removed.first?.phase, .first)
         XCTAssertEqual(unary.layer.nextUpdateTime.seconds, 2.2, accuracy: 0.000_001)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.2, accuracy: 0.000_001)
         XCTAssertEqual(unary.layer.removed.first?.interpolator?.copyContents(withProgress: 0).debugItems.count, 1)
@@ -3309,13 +3360,18 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(output.effects.first?.contents.debugItems.count, 1)
 
         unary.updateTime(Time(seconds: 2.1))
-        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.2, accuracy: 0.000_001)
+        XCTAssertEqual(unary.layer.removed.first?.phase, .second)
+        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.3, accuracy: 0.000_001)
 
-        unary.updateTime(Time(seconds: 2.2))
+        unary.updateTime(Time(seconds: 2.3))
+        XCTAssertEqual(unary.layer.removed.first?.phase, .running)
+        XCTAssertEqual(unary.layer.removed.first?.startTime.seconds ?? .nan, 2.3, accuracy: 0.000_001)
+
+        unary.updateTime(Time(seconds: 2.5))
         let completedOutput = unary.apply(to: target)
         XCTAssertEqual(unary.layer.removedCount, 0)
         XCTAssertTrue(unary.layer.nextUpdateTime.seconds.isInfinite)
-        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.2, accuracy: 0.000_001)
+        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.5, accuracy: 0.000_001)
         XCTAssertTrue(completedOutput.effects.isEmpty)
 
         unary.reset()
@@ -3353,7 +3409,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             defersRender: false,
             supportsVFD: false
         )
-        unary.updateTime(Time(seconds: 1))
+        unary.updateTime(Time(seconds: 0.01))
+        unary.updateTime(Time(seconds: 0.02))
+        unary.updateTime(Time(seconds: 1.01))
 
         let firstPresentation = try XCTUnwrap(
             unary.layer.removed.last?.interpolator?.copyContents(withProgress: 1)
@@ -3366,7 +3424,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             current: firstTarget,
             target: secondTarget,
             state: state,
-            time: Time(seconds: 1),
+            time: Time(seconds: 1.01),
             animatesSize: false,
             defersRender: false,
             supportsVFD: false
@@ -3537,6 +3595,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 firstTarget.interpolationBounds
             )
 
+            inputs.base.time.setValue(Time(seconds: 0.01))
+            _ = output.value
+            inputs.base.time.setValue(Time(seconds: 0.02))
+            _ = output.value
+
             displayList.setValue(retargeted, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 69, height: 17), transaction: transaction)
             XCTAssertEqual(output.value.effects.count, 1)
@@ -3597,13 +3660,18 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(output.value.effects.count, 1)
             XCTAssertEqual(group.layer.removedCount, 1)
 
-            inputs.base.time.setValue(Time(seconds: 0.21))
+            inputs.base.time.setValue(Time(seconds: 0.01))
+            _ = output.value
+            inputs.base.time.setValue(Time(seconds: 0.02))
+            _ = output.value
+
+            inputs.base.time.setValue(Time(seconds: 0.22))
             displayList.setValue(expandedList, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 35, height: 10), transaction: transaction)
             XCTAssertEqual(output.value.effects.count, 0)
             XCTAssertEqual(group.layer.removedCount, 0)
 
-            inputs.base.time.setValue(Time(seconds: 0.22))
+            inputs.base.time.setValue(Time(seconds: 0.23))
             displayList.setValue(residualList, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 35.1, height: 10), transaction: transaction)
             XCTAssertEqual(output.value.effects.count, 1)
@@ -3767,13 +3835,19 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
         viewGraph.data.withCurrent {
-            unary.updateTime(Time(seconds: 2.1))
+            unary.updateTime(Time(seconds: 2.01))
         }
-        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.2, accuracy: 0.000_001)
+        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.21, accuracy: 0.000_001)
 
         viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
         viewGraph.data.withCurrent {
-            unary.updateTime(Time(seconds: 2.2))
+            unary.updateTime(Time(seconds: 2.02))
+        }
+        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.21, accuracy: 0.000_001)
+
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+        viewGraph.data.withCurrent {
+            unary.updateTime(Time(seconds: 2.21))
             _ = unary.apply(to: target)
         }
         XCTAssertTrue(viewGraph.nextUpdate.views.time.seconds.isInfinite)

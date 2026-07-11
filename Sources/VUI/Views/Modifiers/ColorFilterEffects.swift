@@ -90,13 +90,13 @@ private enum _ColorFilterEffectSupport {
             )
         }
 
-        guard !source.items.isEmpty else { return result }
+        guard !source.renderItems.isEmpty else { return result }
         guard !configuration.isIdentity else {
-            result.items.append(contentsOf: source.items)
+            result.items.append(contentsOf: source.renderItems)
             return result
         }
 
-        let items = source.items
+        let items = source.renderItems
         result.appendColorFilterItem(
             bounds: source.interpolationBounds,
             filter: configuration.record

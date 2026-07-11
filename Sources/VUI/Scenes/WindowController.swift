@@ -407,6 +407,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its owner-side state separately from ViewGraph's internal state.
     var currentTimestamp: Time = Time(seconds: 0)
+    private let displayListRenderer = DisplayList.GraphicsRenderer()
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
     var externalUpdateCount: Int = 0
@@ -903,9 +904,16 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let changeSet = _AGChangeSet()
             _AGGraph.withChangeSet(changeSet) {
                 let displayList = rootDisplayList.value
-                displayList.draw(in: context)
+                displayListRenderer.render(
+                    list: displayList,
+                    at: currentTimestamp,
+                    in: context
+                )
             }
             self.viewChangedWhileDrawing = !changeSet.isEmpty
+        }
+        if !(currentTimestamp < displayListRenderer.nextTime) {
+            viewChangedWhileDrawing = true
         }
         if drainActionOutbox(viewGraph.data.graph) {
             viewChangedWhileDrawing = true

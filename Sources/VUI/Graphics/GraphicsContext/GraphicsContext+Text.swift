@@ -209,6 +209,46 @@ extension GraphicsContext {
             var height: CGFloat { ascender - descender }
         }
 
+        final class Drawing {
+            fileprivate struct Vertex {
+                var position: CGPoint
+                var texcoord: Float2
+            }
+
+            fileprivate struct Batch {
+                var texture: Texture
+                var vertices: [Vertex]
+                var colorGlyphs: Bool
+            }
+
+            fileprivate struct Attachment {
+                var texture: Texture
+                var frame: CGRect
+                var textureFrame: CGRect
+            }
+
+            fileprivate var source: ResolvedText
+            fileprivate var lineGlyphs: [LineGlyphs]
+            fileprivate var batches: [Batch]
+            fileprivate var attachments: [Attachment]
+
+            fileprivate init(
+                source: ResolvedText,
+                lineGlyphs: [LineGlyphs],
+                batches: [Batch],
+                attachments: [Attachment]
+            ) {
+                self.source = source
+                self.lineGlyphs = lineGlyphs
+                self.batches = batches
+                self.attachments = attachments
+            }
+
+            var isEmpty: Bool {
+                lineGlyphs.isEmpty
+            }
+        }
+
         private func sizeInPixel(maxWidth: Int = .max, maxHeight: Int = .max) -> CGSize {
             return makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
                 .reduce(CGSize.zero) { result, line in
@@ -300,6 +340,147 @@ extension GraphicsContext {
             }
 
             return _lineWrap(lineGlyphs, maxWidth: maxWidth, maxHeight: maxHeight)
+        }
+
+        func makeDrawing(in size: CGSize) -> Drawing {
+            let width = max(size.width, 0) * scaleFactor
+            let height = max(size.height, 0) * scaleFactor
+            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
+            let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+
+            struct Quad {
+                var vertices: [Drawing.Vertex]
+                var texture: Texture
+                var colorGlyphs: Bool
+            }
+
+            var quads: [Quad] = []
+            var attachments: [Drawing.Attachment] = []
+            Self.forEachGlyph(in: lineGlyphs) { glyph, baseline in
+                switch glyph.content {
+                case let .texture(data):
+                    guard glyph.scalar != UnicodeScalar(0),
+                          let texture = data.texture else {
+                        return
+                    }
+                    let colorGlyphs: Bool
+                    switch texture.pixelFormat {
+                    case .r8Unorm:
+                        colorGlyphs = false
+                    case .bgra8Unorm, .bgra8Unorm_srgb:
+                        colorGlyphs = true
+                    default:
+                        assertionFailure("Unsupported glyph texture format: \(texture.pixelFormat)")
+                        return
+                    }
+
+                    let invW = 1.0 / Float(texture.width)
+                    let invH = 1.0 / Float(texture.height)
+                    let pad: CGFloat = 1
+                    let textureFrame = data.frame.insetBy(dx: -pad, dy: -pad)
+                    let frame = CGRect(
+                        x: baseline.x,
+                        y: baseline.y - data.offset.y,
+                        width: data.frame.width,
+                        height: data.frame.height
+                    ).insetBy(dx: -pad, dy: -pad)
+                    let uvMinX = Float(textureFrame.minX) * invW
+                    let uvMinY = Float(textureFrame.minY) * invH
+                    let uvMaxX = Float(textureFrame.maxX) * invW
+                    let uvMaxY = Float(textureFrame.maxY) * invH
+                    let lt = Drawing.Vertex(
+                        position: CGPoint(x: frame.minX, y: frame.minY),
+                        texcoord: (uvMinX, uvMinY)
+                    )
+                    let rt = Drawing.Vertex(
+                        position: CGPoint(x: frame.maxX, y: frame.minY),
+                        texcoord: (uvMaxX, uvMinY)
+                    )
+                    let lb = Drawing.Vertex(
+                        position: CGPoint(x: frame.minX, y: frame.maxY),
+                        texcoord: (uvMinX, uvMaxY)
+                    )
+                    let rb = Drawing.Vertex(
+                        position: CGPoint(x: frame.maxX, y: frame.maxY),
+                        texcoord: (uvMaxX, uvMaxY)
+                    )
+                    quads.append(Quad(
+                        vertices: [lb, lt, rb, rb, lt, rt],
+                        texture: texture,
+                        colorGlyphs: colorGlyphs
+                    ))
+
+                case let .attachment(data):
+                    guard glyph.scalar == UnicodeScalar(0),
+                          let texture = data.texture else {
+                        return
+                    }
+                    attachments.append(Drawing.Attachment(
+                        texture: texture,
+                        frame: CGRect(
+                            x: baseline.x,
+                            y: baseline.y - data.offset.y,
+                            width: glyph.advance.width,
+                            height: glyph.advance.height
+                        ),
+                        textureFrame: data.frame
+                    ))
+
+                case .vector, .missing:
+                    break
+                }
+            }
+
+            quads.sort { lhs, rhs in
+                if lhs.colorGlyphs != rhs.colorGlyphs {
+                    return !lhs.colorGlyphs
+                }
+                return ObjectIdentifier(lhs.texture) > ObjectIdentifier(rhs.texture)
+            }
+
+            var batches: [Drawing.Batch] = []
+            for quad in quads {
+                if let last = batches.indices.last,
+                   batches[last].texture === quad.texture,
+                   batches[last].colorGlyphs == quad.colorGlyphs {
+                    batches[last].vertices.append(contentsOf: quad.vertices)
+                } else {
+                    batches.append(Drawing.Batch(
+                        texture: quad.texture,
+                        vertices: quad.vertices,
+                        colorGlyphs: quad.colorGlyphs
+                    ))
+                }
+            }
+
+            return Drawing(
+                source: self,
+                lineGlyphs: lineGlyphs,
+                batches: batches,
+                attachments: attachments
+            )
+        }
+
+        fileprivate static func forEachGlyph(
+            in lineGlyphs: [LineGlyphs],
+            callback: (_ glyph: Glyph, _ baseline: CGPoint) -> Void
+        ) {
+            var offset: CGPoint = .zero
+            for line in lineGlyphs {
+                offset.x = 0
+                for glyph in line.glyphs {
+                    let baseline = CGPoint(
+                        x: glyph.contentOffset.x + offset.x,
+                        y: line.ascender + offset.y
+                    )
+                    callback(glyph, baseline)
+                    let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
+                    offset.x += glyph.advance.width
+                    offset += kerning
+                }
+                offset.y += line.height
+            }
         }
 
         private func _lineWrap(_ lines: [LineGlyphs], maxWidth: Int, maxHeight: Int) -> [LineGlyphs] {
@@ -562,19 +743,24 @@ extension GraphicsContext {
     }
 
     func draw(_ text: ResolvedText, in rect: CGRect, shading: Shading) {
+        let rect = rect.standardized
+        if rect.isEmpty || rect.isNull { return }
+        if shading.properties.isEmpty {
+            fatalError("Invalid shading property!")
+        }
+        let drawing = text.makeDrawing(in: rect.size)
+        draw(drawing, in: rect, shading: shading)
+    }
+
+    func draw(_ drawing: ResolvedText.Drawing, in rect: CGRect, shading: Shading) {
         var rect = rect.standardized
         if rect.isEmpty { return }
         if rect.isNull { return }
 
-        let width = Int(rect.width * self.contentScaleFactor)
-        let height = Int(rect.height * self.contentScaleFactor)
-
         if shading.properties.isEmpty {
             fatalError("Invalid shading property!")
         }
-
-        let lineGlyphs = text.makeGlyphs(maxWidth: width, maxHeight: height)
-        if lineGlyphs.isEmpty { return }
+        if drawing.isEmpty { return }
 
         var scissorRect: ScissorRect? = nil
         let snapOrigin = true
@@ -620,7 +806,7 @@ extension GraphicsContext {
             }
         }
 
-        let scale = 1.0 / text.scaleFactor
+        let scale = 1.0 / drawing.source.scaleFactor
         let offset = rect.origin
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
@@ -631,7 +817,7 @@ extension GraphicsContext {
             }
             // drawing text glyphs in the alpha channel of a RenderTarget
             self.encodeDrawTextCommand(renderPass: renderPass,
-                                       lineGlyphs: lineGlyphs,
+                                       drawing: drawing,
                                        transform: transform,
                                        color: .white,
                                        colorGlyphs: false)
@@ -642,28 +828,20 @@ extension GraphicsContext {
                                          blendState: .multiply)
             // color glyphs already carry premultiplied RGB values and should not be tinted by text shading.
             self.encodeDrawTextCommand(renderPass: renderPass,
-                                       lineGlyphs: lineGlyphs,
+                                       drawing: drawing,
                                        transform: transform,
                                        color: .white,
                                        colorGlyphs: true)
             // draw attachments (scalar = 0)
-            forEachGlyph(in: lineGlyphs) { glyph, baseline in
-                if glyph.scalar == UnicodeScalar(0),
-                   case let .attachment(data) = glyph.content,
-                   let texture = data.texture {
-                    let frame = CGRect(x: baseline.x,
-                                       y: baseline.y - data.offset.y,
-                                       width: glyph.advance.width,
-                                       height: glyph.advance.height)
-                    self.encodeDrawTextureCommand(renderPass: renderPass,
-                                                  texture: texture,
-                                                  frame: frame,
-                                                  transform: transform,
-                                                  textureFrame: data.frame,
-                                                  textureTransform: .identity,
-                                                  blendState: .opaque,
-                                                  color: .white)
-                }
+            for attachment in drawing.attachments {
+                self.encodeDrawTextureCommand(renderPass: renderPass,
+                                              texture: attachment.texture,
+                                              frame: attachment.frame,
+                                              transform: transform,
+                                              textureFrame: attachment.textureFrame,
+                                              textureTransform: .identity,
+                                              blendState: .opaque,
+                                              color: .white)
             }
             renderPass.end()
             self.drawSource()
@@ -697,131 +875,40 @@ extension GraphicsContext {
     // as parameters to the closure.
     func forEachGlyph(in lineGlyphs: [ResolvedText.LineGlyphs],
                       callback: (_: ResolvedText.Glyph, _:CGPoint)->Void) {
-        if lineGlyphs.isEmpty { return }
-
-        var offset: CGPoint = .zero
-        for line in lineGlyphs {
-            offset.x = 0
-            for glyph in line.glyphs {
-                let baseline = CGPoint(x: glyph.contentOffset.x + offset.x,
-                                       y: line.ascender + offset.y)
-                callback(glyph, baseline)
-
-                // No kerning for line leads
-                let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
-                offset.x += glyph.advance.width
-                offset += kerning
-            }
-            offset.y += line.height
-        }
+        ResolvedText.forEachGlyph(in: lineGlyphs, callback: callback)
     }
 
     func encodeDrawTextCommand(renderPass: RenderPass,
-                               lineGlyphs: [ResolvedText.LineGlyphs],
+                               drawing: ResolvedText.Drawing,
                                transform: CGAffineTransform,
                                color: VVD.Color,
                                colorGlyphs: Bool) {
-        if lineGlyphs.isEmpty { return }
-
-        struct GlyphVertex {
-            let pos: Vector2
-            let tex: Float2
-        }
-        struct Quad {
-            let lt: GlyphVertex
-            let rt: GlyphVertex
-            let lb: GlyphVertex
-            let rb: GlyphVertex
-            let texture: Texture
-        }
-        var quads: [Quad] = []
-
-        forEachGlyph(in: lineGlyphs) { glyph, baseline in
-            if glyph.scalar != UnicodeScalar(0),
-               case let .texture(data) = glyph.content,
-               let texture = data.texture {
-                let isColorGlyph: Bool
-                switch texture.pixelFormat {
-                case .r8Unorm:
-                    isColorGlyph = false
-                case .bgra8Unorm, .bgra8Unorm_srgb:
-                    isColorGlyph = true
-                default:
-                    assertionFailure("Unsupported glyph texture format: \(texture.pixelFormat)")
-                    return
-                }
-                if isColorGlyph != colorGlyphs { return }
-
-                let invW = 1.0 / Float(texture.width)
-                let invH = 1.0 / Float(texture.height)
-
-                let pad: CGFloat = 1
-                let textureFrame = data.frame.insetBy(dx: -pad, dy: -pad)
-                let uvMinX = Float(textureFrame.minX) * invW
-                let uvMinY = Float(textureFrame.minY) * invH
-                let uvMaxX = Float(textureFrame.maxX) * invW
-                let uvMaxY = Float(textureFrame.maxY) * invH
-
-                let frame = CGRect(x: baseline.x,
-                                   y: baseline.y - data.offset.y,
-                                   width: data.frame.width,
-                                   height: data.frame.height)
-                                   .insetBy(dx: -pad, dy: -pad)
-
-                let q = Quad(
-                    lt: GlyphVertex(pos: Vector2(frame.minX, frame.minY),
-                                    tex: (uvMinX, uvMinY)),
-                    rt: GlyphVertex(pos: Vector2(frame.maxX, frame.minY),
-                                    tex: (uvMaxX, uvMinY)),
-                    lb: GlyphVertex(pos: Vector2(frame.minX, frame.maxY),
-                                    tex: (uvMinX, uvMaxY)),
-                    rb: GlyphVertex(pos: Vector2(frame.maxX, frame.maxY),
-                                    tex: (uvMaxX, uvMaxY)),
-                    texture: texture)
-                quads.append(q)
-            }
-        }
-
-        quads.sort {
-            ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
-        }
-
+        if drawing.isEmpty { return }
         let c = color.float4
         let transform = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
 
-        var texture: Texture? = nil
-        var vertices: [_Vertex] = []
-        let draw = {
-            if vertices.isEmpty == false {
-                let shader: _Shader = colorGlyphs ? .image : .rcImage
-                let blendState: BlendState = colorGlyphs ? .premultipliedAlphaBlend : .alphaBlend
-                self.encodeDrawCommand(renderPass: renderPass,
-                                       shader: shader,
-                                       stencil: .ignore,
-                                       vertices: vertices,
-                                       texture: texture,
-                                       blendState: blendState)
-                vertices.removeAll(keepingCapacity: true)
+        for batch in drawing.batches where batch.colorGlyphs == colorGlyphs {
+            let vertices = batch.vertices.map { vertex in
+                _Vertex(
+                    position: Vector2(vertex.position).applying(transform).float2,
+                    texcoord: vertex.texcoord,
+                    color: c
+                )
             }
+            let shader: _Shader = colorGlyphs ? .image : .rcImage
+            let blendState: BlendState = colorGlyphs
+                ? .premultipliedAlphaBlend
+                : .alphaBlend
+            self.encodeDrawCommand(
+                renderPass: renderPass,
+                shader: shader,
+                stencil: .ignore,
+                vertices: vertices,
+                texture: batch.texture,
+                blendState: blendState
+            )
         }
-        for quad in quads {
-            if quad.texture !== texture {
-                draw()
-                texture = quad.texture
-            }
-            vertices.append(contentsOf: [quad.lb, quad.lt, quad.rb].map {
-                _Vertex(position: $0.pos.applying(transform).float2,
-                        texcoord: $0.tex,
-                        color: c)
-            })
-            vertices.append(contentsOf: [quad.rb, quad.lt, quad.rt].map {
-                _Vertex(position: $0.pos.applying(transform).float2,
-                        texcoord: $0.tex,
-                        color: c)
-            })
-        }
-        draw()
     }
 }

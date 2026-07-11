@@ -183,12 +183,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var contents = DisplayList()
         contents.interpolationBounds = outputBounds
 
-        if !from.items.isEmpty || !to.items.isEmpty {
+        if !from.renderItems.isEmpty || !to.renderItems.isEmpty {
             appendInterpolatedItems(
-                fromItems: from.items,
+                fromItems: from.renderItems,
                 fromCommands: from.itemCommands,
                 fromFallbackBounds: fromBounds,
-                toItems: to.items,
+                toItems: to.renderItems,
                 toCommands: to.itemCommands,
                 toFallbackBounds: toBounds,
                 outputFallbackBounds: outputBounds,
@@ -585,11 +585,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) -> CGRect? {
         var bounds: CGRect?
 
-        if !fromList.items.isEmpty || !toList.items.isEmpty {
+        if !fromList.renderItems.isEmpty || !toList.renderItems.isEmpty {
             guard let itemBounds = interpolatedRecordedItemBounds(
-                fromItems: fromList.items,
+                fromItems: fromList.renderItems,
                 fromCommands: fromList.itemCommands,
-                toItems: toList.items,
+                toItems: toList.renderItems,
                 toCommands: toList.itemCommands,
                 progress: progress,
                 allowsCountMismatch: true
@@ -660,9 +660,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
 
         if canInterpolateRecordedItems(
-            fromItems: source.items,
+            fromItems: source.renderItems,
             fromCommands: source.itemCommands,
-            toItems: target.items,
+            toItems: target.renderItems,
             toCommands: target.itemCommands
         ) {
             return true
@@ -843,7 +843,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func hasDisplayListContents(_ displayList: DisplayList) -> Bool {
         displayList.interpolationBounds != nil ||
-            !displayList.items.isEmpty ||
+            !displayList.renderItems.isEmpty ||
             !displayList.debugItems.isEmpty ||
             !displayList.effects.isEmpty
     }

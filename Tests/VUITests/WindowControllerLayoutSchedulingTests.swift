@@ -2141,6 +2141,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         for effect in displayList.effects {
             let label: String
             switch effect.effect {
+            case .identity:
+                label = "identity"
+            case .opacity:
+                label = "opacity"
+            case .transform:
+                label = "transform"
+            case .animation:
+                label = "animation"
             case .state:
                 label = "state"
             case .contentTransition:

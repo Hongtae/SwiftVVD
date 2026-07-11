@@ -92,7 +92,7 @@ enum _GeometryEffectSupport {
             return source
         }
 
-        let items = source.items
+        let items = source.renderItems
         let debugItems = source.debugItems
         var result = DisplayList()
         let transformedBounds = source.interpolationBounds?.applying(affine).standardized
@@ -606,6 +606,95 @@ public struct _ScaleEffect: GeometryEffect, Equatable {
     }
 
     public typealias Body = Never
+}
+
+extension _OffsetEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        if offset != .zero {
+            try encoder.encodeMessageField(1, offset)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var offset = CGSize.zero
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            if fieldNumber == 1, wireType == 2 {
+                offset = try decoder.decodeMessage(CGSize.self)
+            } else if fieldNumber == 1 {
+                throw ProtobufDecoder.DecodingError.failed
+            } else {
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(offset: offset)
+    }
+}
+
+extension _ScaleEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        if scale != CGSize(width: 1, height: 1) {
+            try encoder.encodeMessageField(1, scale)
+        }
+        if anchor != .center {
+            try encoder.encodeMessageField(2, anchor)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var scale = CGSize(width: 1, height: 1)
+        var anchor = UnitPoint.center
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            switch fieldNumber {
+            case 1 where wireType == 2:
+                scale = try decoder.decodeMessage(CGSize.self)
+            case 2 where wireType == 2:
+                anchor = try decoder.decodeMessage(UnitPoint.self)
+            case 1, 2:
+                throw ProtobufDecoder.DecodingError.failed
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(scale: scale, anchor: anchor)
+    }
+}
+
+extension _RotationEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        if angle.radians != 0 {
+            encoder.encodeDoubleFieldAlways(1, angle.radians)
+        }
+        if anchor != .center {
+            try encoder.encodeMessageField(2, anchor)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var angle = Angle.zero
+        var anchor = UnitPoint.center
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            switch fieldNumber {
+            case 1:
+                angle = Angle(radians: try decoder.decodeDoubleField(wireType: wireType))
+            case 2 where wireType == 2:
+                anchor = try decoder.decodeMessage(UnitPoint.self)
+            case 2:
+                throw ProtobufDecoder.DecodingError.failed
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(angle: angle, anchor: anchor)
+    }
 }
 
 extension View {
