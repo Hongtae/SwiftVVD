@@ -9,26 +9,13 @@ import Foundation
 import Synchronization
 import VVD
 
-protocol WindowInputEventHandler {
-    @discardableResult
-    func handleKeyboardEvent(event: KeyboardEvent) -> Bool
-    @discardableResult
-    func handleMouseEvent(event: MouseEvent) -> Bool
-    @discardableResult
-    func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool
-    @discardableResult
-    func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool
-
-    func resetGestureHandlers()
-}
-
 // WindowController owns ViewGraph and drives rendering plus event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
 // Optionally owns a WindowContext, created lazily on the first makeWindow() call.
 // Overlay-mode presentation-child/modal controllers never call makeWindow(), so windowContext stays nil.
 //
 // Conforms to ViewRendererHost plus ViewGraphRootValueUpdater as the platform host.
-class WindowController: WindowInputEventHandler, WindowDelegate,
+class WindowController: WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
                         ViewGraphDelegate,
