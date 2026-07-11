@@ -494,7 +494,8 @@ extension Text: View {
 
         // 1. Internal state nodes for communication between the resource and layout passes.
         // Caches the fully resolved styled text object (including glyphs/metrics).
-        let resolvedStyledTextAttr = graph.makeInput(value: ResolvedStyledText())
+        let initialResolvedStyledText = ResolvedStyledText()
+        let resolvedStyledTextAttr = graph.makeInput(value: initialResolvedStyledText)
         let resolvedStyledTextTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _TextResourceResolutionState()
         let displayListContentState = _TextDisplayListContentState()
@@ -509,6 +510,7 @@ extension Text: View {
         let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
+        let usesSizeFittingText = inputs.base[VariantThatFitsFlag.self]
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
             cachedEnvironmentAttr.value.environment.value._debugLayout
@@ -588,46 +590,79 @@ extension Text: View {
         }
 
         // 3. Layout pass (Layout Rule)
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
-            let resolved = resolvedStyledTextAttr.value.resolvedText
-            let renderer = textRendererAttr?.value
-
-            func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-                guard let r = resolved else { return .zero } // Return zero size before loading completes
-                if let renderer {
-                    return renderer.sizeThatFits(proposal: proposal, text: TextProxy(r))
-                }
-                if proposal == .zero {
-                    return .zero
-                }
-                // Keep Text width at zero for zero-width proposals while still
-                // reporting the measured height when height is non-zero or unspecified.
-                if proposal.width == 0 {
-                    let measured = r.measure(maxWidth: 0, maxHeight: proposal.height)
-                    return CGSize(width: 0, height: measured.height)
-                }
-                if proposal == .infinity {
-                    return r.measure()
-                }
-                return r.measure(maxWidth: proposal.width, maxHeight: proposal.height)
-            }
-
-            return LayoutComputer(
-                sizeThatFits: { sizeThatFits($0) },
-                spacing: .text,
-                explicitAlignment: { key, size in
-                    guard let r = resolved else { return nil }
-                    let cgSize = CGSize(width: size.width, height: size.height)
-                    if key == VerticalAlignment.firstTextBaseline.key {
-                        return r.firstBaseline(in: cgSize)
-                    }
-                    if key == VerticalAlignment.lastTextBaseline.key {
-                        return r.lastBaseline(in: cgSize)
-                    }
-                    return nil
-                }
+        let displayedStyledTextAttr: Attribute<ResolvedStyledText>
+        let lcAttr: Attribute<LayoutComputer>
+        if usesSizeFittingText {
+            let cache = SizeFittingTextCache(
+                resolver: ResolvedTextHelper(),
+                logic: StickyTextSizeFittingLogic(),
+                input: ResolvedTextHelper.Input(
+                    text: initialResolvedStyledText,
+                    renderer: nil
+                )
             )
+            displayedStyledTextAttr = graph.makeStatefulRule(
+                SizeFittingTextFilter(
+                    size: sizeAttr,
+                    text: resolvedStyledTextAttr,
+                    cache: cache
+                )
+            )
+            lcAttr = graph.makeStatefulRule(
+                SizeFittingTextLayoutComputer(
+                    text: resolvedStyledTextAttr,
+                    renderer: textRendererAttr?.asWeak() ?? WeakAttribute(),
+                    cache: cache
+                )
+            )
+        } else {
+            displayedStyledTextAttr = resolvedStyledTextAttr
+            lcAttr = graph.makeRule {
+                let resolved = resolvedStyledTextAttr.value.resolvedText
+                let renderer = textRendererAttr?.value
+
+                func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+                    guard let resolved else { return .zero }
+                    if let renderer {
+                        return renderer.sizeThatFits(
+                            proposal: proposal,
+                            text: TextProxy(resolved)
+                        )
+                    }
+                    if proposal == .zero {
+                        return .zero
+                    }
+                    if proposal.width == 0 {
+                        let measured = resolved.measure(
+                            maxWidth: 0,
+                            maxHeight: proposal.height
+                        )
+                        return CGSize(width: 0, height: measured.height)
+                    }
+                    if proposal == .infinity {
+                        return resolved.measure()
+                    }
+                    return resolved.measure(
+                        maxWidth: proposal.width,
+                        maxHeight: proposal.height
+                    )
+                }
+
+                return LayoutComputer(
+                    sizeThatFits: { sizeThatFits($0) },
+                    spacing: .text,
+                    explicitAlignment: { key, size in
+                        guard let resolved else { return nil }
+                        if key == VerticalAlignment.firstTextBaseline.key {
+                            return resolved.firstBaseline(in: size.value)
+                        }
+                        if key == VerticalAlignment.lastTextBaseline.key {
+                            return resolved.lastBaseline(in: size.value)
+                        }
+                        return nil
+                    }
+                )
+            }
         }
 
         let interpolatorGroup = DisplayList.UnaryInterpolatorGroup()
@@ -637,7 +672,7 @@ extension Text: View {
             let viewSize = sizeAttr.value.value
             let targetSize = targetSizeAttr.value.value
             let position = positionAttr.value
-            let styledText = resolvedStyledTextAttr.value
+            let styledText = displayedStyledTextAttr.value
             let resolved = styledText.resolvedText
             let debugLayout = debugLayoutAttr.value
             let foreground = text.foregroundShading(in: environment)
@@ -714,7 +749,7 @@ extension Text: View {
         interpolatorInputs.size = animatedFrame?.size ?? inputs.size
         outputs.applyInterpolatorGroup(
             interpolatorGroup,
-            content: resolvedStyledTextAttr,
+            content: displayedStyledTextAttr,
             inputs: interpolatorInputs,
             animatesSize: false,
             defersRender: false
