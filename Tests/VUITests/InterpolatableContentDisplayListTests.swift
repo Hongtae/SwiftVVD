@@ -1689,7 +1689,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         XCTAssertEqual(
             sourceExtraInterpolator.boundingRect(withProgress: 1),
-            CGRect(x: -40, y: 10, width: 80, height: 25)
+            CGRect(x: 20, y: 10, width: 20, height: 20)
         )
 
         let sourceExtraStart = sourceExtraInterpolator.copyContents(withProgress: 0)
@@ -1700,8 +1700,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: -40, y: 30, width: 5, height: 5),
             ]
         )
-        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.sourceFraction), [0, 0])
-        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.targetFraction), [0, 0])
+        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.sourceFraction), [0, nil])
+        XCTAssertEqual(sourceExtraStart.itemRecords.map(\.targetFraction), [0, nil])
         XCTAssertEqual(sourceExtraStart.interpolationBounds, CGRect(x: -40, y: 0, width: 50, height: 35))
 
         let sourceExtraMidpoint = sourceExtraInterpolator.copyContents(withProgress: 0.5)
@@ -1712,28 +1712,26 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: -40, y: 30, width: 5, height: 5),
             ]
         )
-        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0.5])
-        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0])
+        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, nil])
+        XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, nil])
         XCTAssertEqual(sourceExtraMidpoint.interpolationBounds, CGRect(x: -40, y: 5, width: 65, height: 30))
-        guard let sourceExtraOperations = typedCrossFades(in: sourceExtraMidpoint) else {
-            return XCTFail("source-extra interpolation should use typed operations")
+        guard let sourceExtraPair = typedCrossFade(in: sourceExtraMidpoint.items[0]),
+              let sourceExtraRemoval = typedOpacityStyle(in: sourceExtraMidpoint.items[1]) else {
+            return XCTFail("source-extra interpolation should keep a mixed pair and removal effect")
         }
-        XCTAssertNotNil(sourceExtraOperations[0].source)
-        XCTAssertNotNil(sourceExtraOperations[0].target)
-        XCTAssertNotNil(sourceExtraOperations[1].source)
-        XCTAssertNil(sourceExtraOperations[1].target)
+        XCTAssertNotNil(sourceExtraPair.source)
+        XCTAssertNotNil(sourceExtraPair.target)
+        XCTAssertEqual(sourceExtraRemoval.opacity, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(sourceExtraRemoval.contents.itemRecords.map(\.kind), [.shapeFill])
 
         let sourceExtraEnd = sourceExtraInterpolator.copyContents(withProgress: 1)
         XCTAssertEqual(
             sourceExtraEnd.itemRecords.map(\.bounds),
-            [
-                CGRect(x: 20, y: 10, width: 20, height: 20),
-                CGRect(x: -40, y: 30, width: 5, height: 5),
-            ]
+            [CGRect(x: 20, y: 10, width: 20, height: 20)]
         )
-        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.sourceFraction), [1, 1])
-        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.targetFraction), [1, 0])
-        XCTAssertEqual(sourceExtraEnd.interpolationBounds, CGRect(x: -40, y: 10, width: 80, height: 25))
+        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.sourceFraction), [1])
+        XCTAssertEqual(sourceExtraEnd.itemRecords.map(\.targetFraction), [1])
+        XCTAssertEqual(sourceExtraEnd.interpolationBounds, CGRect(x: 20, y: 10, width: 20, height: 20))
 
         let targetExtraInterpolator = RBDisplayListInterpolator(
             from: makeDisplayList(
@@ -1749,7 +1747,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         XCTAssertEqual(
             targetExtraInterpolator.boundingRect(withProgress: 0),
-            CGRect(x: 0, y: 0, width: 20, height: 35)
+            CGRect(x: 0, y: 0, width: 10, height: 10)
         )
         XCTAssertEqual(
             targetExtraInterpolator.boundingRect(withProgress: 1),
@@ -1759,14 +1757,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let targetExtraStart = targetExtraInterpolator.copyContents(withProgress: 0)
         XCTAssertEqual(
             targetExtraStart.itemRecords.map(\.bounds),
-            [
-                CGRect(x: 0, y: 0, width: 10, height: 10),
-                CGRect(x: 5, y: 25, width: 15, height: 10),
-            ]
+            [CGRect(x: 0, y: 0, width: 10, height: 10)]
         )
-        XCTAssertEqual(targetExtraStart.itemRecords.map(\.sourceFraction), [0, 0])
-        XCTAssertEqual(targetExtraStart.itemRecords.map(\.targetFraction), [0, 0])
-        XCTAssertEqual(targetExtraStart.interpolationBounds, CGRect(x: 0, y: 0, width: 20, height: 35))
+        XCTAssertEqual(targetExtraStart.itemRecords.map(\.sourceFraction), [0])
+        XCTAssertEqual(targetExtraStart.itemRecords.map(\.targetFraction), [0])
+        XCTAssertEqual(targetExtraStart.interpolationBounds, CGRect(x: 0, y: 0, width: 10, height: 10))
 
         let targetExtraMidpoint = targetExtraInterpolator.copyContents(withProgress: 0.5)
         XCTAssertEqual(
@@ -1776,16 +1771,17 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: 5, y: 25, width: 15, height: 10),
             ]
         )
-        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0])
-        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0.5])
+        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, nil])
+        XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, nil])
         XCTAssertEqual(targetExtraMidpoint.interpolationBounds, CGRect(x: 5, y: 5, width: 20, height: 30))
-        guard let targetExtraOperations = typedCrossFades(in: targetExtraMidpoint) else {
-            return XCTFail("target-extra interpolation should use typed operations")
+        guard let targetExtraPair = typedCrossFade(in: targetExtraMidpoint.items[0]),
+              let targetExtraInsertion = typedOpacityStyle(in: targetExtraMidpoint.items[1]) else {
+            return XCTFail("target-extra interpolation should keep a mixed pair and insertion effect")
         }
-        XCTAssertNotNil(targetExtraOperations[0].source)
-        XCTAssertNotNil(targetExtraOperations[0].target)
-        XCTAssertNil(targetExtraOperations[1].source)
-        XCTAssertNotNil(targetExtraOperations[1].target)
+        XCTAssertNotNil(targetExtraPair.source)
+        XCTAssertNotNil(targetExtraPair.target)
+        XCTAssertEqual(targetExtraInsertion.opacity, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(targetExtraInsertion.contents.itemRecords.map(\.kind), [.shapeFill])
 
         let targetExtraEnd = targetExtraInterpolator.copyContents(withProgress: 1)
         XCTAssertEqual(
@@ -1795,8 +1791,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 CGRect(x: 5, y: 25, width: 15, height: 10),
             ]
         )
-        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.sourceFraction), [1, 0])
-        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.targetFraction), [1, 1])
+        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.sourceFraction), [1, nil])
+        XCTAssertEqual(targetExtraEnd.itemRecords.map(\.targetFraction), [1, nil])
         XCTAssertEqual(targetExtraEnd.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
     }
 
@@ -1830,6 +1826,213 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(
             operations[0].target?.outputBounds,
             CGRect(x: 10, y: 5, width: 15, height: 15)
+        )
+    }
+
+    func testRBDisplayListInterpolatorMiddleKindMismatchKeepsSampledPrefixPairing() {
+        var removalSource = DisplayList()
+        removalSource.appendItem(kind: .shapeFill, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
+        removalSource.appendItem(kind: .shapeStroke, bounds: CGRect(x: 25, y: 0, width: 10, height: 10)) { _ in }
+        removalSource.appendItem(kind: .shapeFill, bounds: CGRect(x: 60, y: 0, width: 10, height: 10)) { _ in }
+        var removalTarget = DisplayList()
+        removalTarget.appendItem(kind: .shapeFill, bounds: CGRect(x: 0, y: 20, width: 10, height: 10)) { _ in }
+        removalTarget.appendItem(kind: .shapeFill, bounds: CGRect(x: 40, y: 20, width: 10, height: 10)) { _ in }
+
+        let removal = RBDisplayListInterpolator(
+            from: removalSource,
+            to: removalTarget,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(removal.interpolationBounds, CGRect(x: 0, y: 0, width: 70, height: 20))
+        XCTAssertEqual(removal.items.count, 3)
+        guard let removalPair = typedCrossFade(in: removal.items[1]),
+              let removalEffect = typedOpacityStyle(in: removal.items[2]) else {
+            return XCTFail("middle removal should keep prefix pairing and a removal effect")
+        }
+        XCTAssertEqual(removalPair.source?.contents.itemRecords.first?.kind, .shapeStroke)
+        XCTAssertEqual(removalPair.target?.contents.itemRecords.first?.kind, .shapeFill)
+        XCTAssertEqual(removalEffect.opacity, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(removalEffect.contents.itemRecords.first?.kind, .shapeFill)
+
+        var insertionSource = DisplayList()
+        insertionSource.appendItem(kind: .shapeFill, bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
+        insertionSource.appendItem(kind: .shapeFill, bounds: CGRect(x: 60, y: 0, width: 10, height: 10)) { _ in }
+        var insertionTarget = DisplayList()
+        insertionTarget.appendItem(kind: .shapeFill, bounds: CGRect(x: 0, y: 20, width: 10, height: 10)) { _ in }
+        insertionTarget.appendItem(kind: .shapeStroke, bounds: CGRect(x: 25, y: 20, width: 10, height: 10)) { _ in }
+        insertionTarget.appendItem(kind: .shapeFill, bounds: CGRect(x: 40, y: 20, width: 10, height: 10)) { _ in }
+
+        let insertion = RBDisplayListInterpolator(
+            from: insertionSource,
+            to: insertionTarget,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(insertion.interpolationBounds, CGRect(x: 0, y: 10, width: 52.5, height: 20))
+        XCTAssertEqual(insertion.items.count, 3)
+        guard let insertionPair = typedCrossFade(in: insertion.items[1]),
+              let insertionEffect = typedOpacityStyle(in: insertion.items[2]) else {
+            return XCTFail("middle insertion should keep prefix pairing and an insertion effect")
+        }
+        XCTAssertEqual(insertionPair.source?.contents.itemRecords.first?.kind, .shapeFill)
+        XCTAssertEqual(insertionPair.target?.contents.itemRecords.first?.kind, .shapeStroke)
+        XCTAssertEqual(insertionEffect.opacity, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(insertionEffect.contents.itemRecords.first?.kind, .shapeFill)
+    }
+
+    func testRBDisplayListInterpolatorRoutesTransitionEffectsByOperationEvent() {
+        let source = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 0, y: 0, width: 10, height: 10),
+                CGRect(x: 60, y: 0, width: 10, height: 10),
+            ],
+            itemKind: .shapeFill
+        )
+        let removalTarget = makeDisplayList(
+            itemBounds: [CGRect(x: 0, y: 20, width: 10, height: 10)],
+            itemKind: .shapeFill
+        )
+
+        let insertOnlyRemovalInterpolator = RBDisplayListInterpolator(
+            from: source,
+            to: removalTarget,
+            options: [.transition: opacityTransition(events: 1)]
+        )
+        XCTAssertEqual(
+            insertOnlyRemovalInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 10, height: 10)
+        )
+        XCTAssertEqual(
+            insertOnlyRemovalInterpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 0, y: 10, width: 10, height: 10)
+        )
+        let insertOnlyRemoval = insertOnlyRemovalInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(insertOnlyRemoval.items.count, 1)
+        XCTAssertNotNil(typedCrossFade(in: insertOnlyRemoval.items[0]))
+
+        let removalOnlyRemovalInterpolator = RBDisplayListInterpolator(
+            from: source,
+            to: removalTarget,
+            options: [.transition: opacityTransition(events: 2)]
+        )
+        XCTAssertEqual(
+            removalOnlyRemovalInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 70, height: 10)
+        )
+        XCTAssertEqual(
+            removalOnlyRemovalInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 20, width: 10, height: 10)
+        )
+        let removalOnlyRemoval = removalOnlyRemovalInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(removalOnlyRemoval.items.count, 2)
+        XCTAssertNotNil(typedCrossFade(in: removalOnlyRemoval.items[0]))
+        guard let removalEffect = typedOpacityStyle(in: removalOnlyRemoval.items[1]) else {
+            return XCTFail("matching removal event should lower an opacity style")
+        }
+        XCTAssertEqual(removalEffect.opacity, 0.5, accuracy: 0.000001)
+
+        let insertionTarget = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 0, y: 20, width: 10, height: 10),
+                CGRect(x: 40, y: 20, width: 10, height: 10),
+            ],
+            itemKind: .shapeFill
+        )
+        let insertionSource = makeDisplayList(
+            itemBounds: [CGRect(x: 0, y: 0, width: 10, height: 10)],
+            itemKind: .shapeFill
+        )
+
+        let removalOnlyInsertionInterpolator = RBDisplayListInterpolator(
+            from: insertionSource,
+            to: insertionTarget,
+            options: [.transition: opacityTransition(events: 2)]
+        )
+        XCTAssertEqual(
+            removalOnlyInsertionInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 50, height: 30)
+        )
+        let removalOnlyInsertion = removalOnlyInsertionInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(removalOnlyInsertion.items.count, 2)
+        XCTAssertNotNil(typedCrossFade(in: removalOnlyInsertion.items[0]))
+        XCTAssertEqual(removalOnlyInsertion.itemRecords[1].kind, .shapeFill)
+
+        let insertOnlyInsertionInterpolator = RBDisplayListInterpolator(
+            from: insertionSource,
+            to: insertionTarget,
+            options: [.transition: opacityTransition(events: 1)]
+        )
+        XCTAssertEqual(
+            insertOnlyInsertionInterpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 10, height: 10)
+        )
+        XCTAssertEqual(
+            insertOnlyInsertionInterpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 20, width: 50, height: 10)
+        )
+        let insertOnlyInsertion = insertOnlyInsertionInterpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(insertOnlyInsertion.items.count, 2)
+        XCTAssertNotNil(typedCrossFade(in: insertOnlyInsertion.items[0]))
+        guard let insertionEffect = typedOpacityStyle(in: insertOnlyInsertion.items[1]) else {
+            return XCTFail("matching insertion event should lower an opacity style")
+        }
+        XCTAssertEqual(insertionEffect.opacity, 0.5, accuracy: 0.000001)
+    }
+
+    func testRBDisplayListInterpolatorLowersTransitionGeometryAndBlurIntoTypedContents() throws {
+        let source = makeDisplayList(
+            itemBounds: [CGRect(x: 0, y: 0, width: 10, height: 10)],
+            itemKind: .shapeFill
+        )
+        let target = makeDisplayList(
+            itemBounds: [
+                CGRect(x: 0, y: 20, width: 10, height: 10),
+                CGRect(x: 40, y: 20, width: 10, height: 10),
+            ],
+            itemKind: .shapeFill
+        )
+        let transition = RBTransition()
+        transition.addEffect(opacityEffect(events: 1))
+
+        let translation = RBTransitionEffect()
+        translation.type = ContentTransition.EffectType.translation(.zero).type
+        translation.setArgumentValue(10, atIndex: 0)
+        translation.setArgumentValue(-4, atIndex: 1)
+        translation.duration = 1
+        translation.events = 1
+        transition.addEffect(translation)
+
+        let blur = RBTransitionEffect()
+        blur.type = ContentTransition.EffectType.blur(radius: 12).type
+        blur.setArgumentValue(12, atIndex: 0)
+        blur.duration = 1
+        blur.events = 1
+        transition.addEffect(blur)
+
+        let midpoint = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: transition]
+        ).copyContents(withProgress: 0.5)
+        let expected = try XCTUnwrap(
+            transition.effectResults(
+                at: 0.5,
+                event: 1,
+                bounds: CGRect(x: 40, y: 20, width: 10, height: 10)
+            )
+        )
+        XCTAssertEqual(midpoint.items.count, 2)
+        guard let blurStyle = typedBlurStyle(in: midpoint.items[1]),
+              let opacityStyle = typedOpacityStyle(in: blurStyle.contents.items[0]) else {
+            return XCTFail("transition output should retain blur and opacity wrappers")
+        }
+        XCTAssertEqual(blurStyle.radius, expected.blurRadius, accuracy: 0.000001)
+        XCTAssertEqual(midpoint.itemRecords[1].bounds, expected.bounds)
+        XCTAssertEqual(opacityStyle.opacity, Double(expected.alpha), accuracy: 0.000001)
+        XCTAssertEqual(
+            opacityStyle.contents.itemRecords.first?.bounds,
+            CGRect(x: 40, y: 20, width: 10, height: 10)
+                .applying(expected.transform)
+                .standardized
         )
     }
 
@@ -4574,6 +4777,52 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             values.append(value)
         }
         return values
+    }
+
+    private func typedCrossFade(
+        in item: DisplayList.Item
+    ) -> DisplayList.Content.CrossFadeValue? {
+        guard case let .content(content) = item.value,
+              case let .crossFade(value) = content.value else {
+            return nil
+        }
+        return value
+    }
+
+    private func typedOpacityStyle(
+        in item: DisplayList.Item
+    ) -> (opacity: Double, contents: DisplayList)? {
+        guard case let .content(content) = item.value,
+              case let .style(value) = content.value,
+              case let .opacity(opacity) = value.style else {
+            return nil
+        }
+        return (opacity, value.contents)
+    }
+
+    private func typedBlurStyle(
+        in item: DisplayList.Item
+    ) -> (radius: CGFloat, isOpaque: Bool, contents: DisplayList)? {
+        guard case let .content(content) = item.value,
+              case let .style(value) = content.value,
+              case let .blur(radius, isOpaque) = value.style else {
+            return nil
+        }
+        return (radius, isOpaque, value.contents)
+    }
+
+    private func opacityTransition(events: UInt32) -> RBTransition {
+        let transition = RBTransition()
+        transition.addEffect(opacityEffect(events: events))
+        return transition
+    }
+
+    private func opacityEffect(events: UInt32) -> RBTransitionEffect {
+        let effect = RBTransitionEffect()
+        effect.type = ContentTransition.EffectType.opacity.type
+        effect.duration = 1
+        effect.events = events
+        return effect
     }
 
     private func displayList<Modifier: ViewModifier>(

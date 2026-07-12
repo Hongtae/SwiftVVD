@@ -43,18 +43,42 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             targetBounds: CGRect
         )
 
-        func reportedBounds(at progress: CGFloat) -> CGRect {
+        func reportedBounds(
+            at progress: CGFloat,
+            transition: RBTransition?
+        ) -> CGRect? {
             switch self {
             case let .paired(source, target):
+                // Paired commands use the mixed cross-fade path. Insertion and removal
+                // event masks only govern unmatched operations.
                 return RBDisplayListInterpolator.interpolatedBounds(
                     from: source.bounds,
                     to: target.bounds,
                     progress: progress
                 )
             case let .removed(source):
-                return source.bounds
+                // A present transition owns one-sided lifetime. A nonmatching removal
+                // event drops the old item instead of applying the generic cross-fade.
+                guard let transition else { return source.bounds }
+                guard !transition.isEmpty(for: 2) else { return nil }
+                guard let results = transition.effectResults(
+                    at: Float(progress),
+                    event: 2,
+                    bounds: source.bounds
+                ) else { return source.bounds }
+                return visibleBounds(from: results, fallback: source.bounds)
             case let .inserted(target):
-                return target.bounds
+                // Inserted items remain fully visible when a present transition does not
+                // match insertion; matching effects wrap the target item below.
+                guard let transition, !transition.isEmpty(for: 1) else {
+                    return target.bounds
+                }
+                guard let results = transition.effectResults(
+                    at: Float(progress),
+                    event: 1,
+                    bounds: target.bounds
+                ) else { return target.bounds }
+                return visibleBounds(from: results, fallback: target.bounds)
             case let .fallback(_, sourceBounds, _, targetBounds):
                 return RBDisplayListInterpolator.interpolatedBounds(
                     from: sourceBounds,
@@ -64,7 +88,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             }
         }
 
-        func append(at progress: CGFloat, into contents: inout DisplayList) {
+        func append(
+            at progress: CGFloat,
+            transition: RBTransition?,
+            into contents: inout DisplayList
+        ) {
             switch self {
             case let .paired(source, target):
                 if RBDisplayListInterpolator.isTextItemPair(
@@ -79,7 +107,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     )
                     return
                 }
-                let outputBounds = reportedBounds(at: progress)
+                guard let outputBounds = reportedBounds(
+                    at: progress,
+                    transition: transition
+                ) else { return }
                 contents.appendCrossFadeItem(
                     sourceItems: [source.item],
                     sourceBounds: source.bounds,
@@ -92,31 +123,40 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     targetFraction: Float(progress)
                 )
             case let .removed(source):
-                contents.appendCrossFadeItem(
-                    sourceItems: [source.item],
-                    sourceBounds: source.bounds,
-                    sourceOutputBounds: source.bounds,
-                    targetItems: [],
-                    targetBounds: nil,
-                    targetOutputBounds: nil,
-                    bounds: source.bounds,
-                    sourceFraction: Float(progress),
-                    targetFraction: 0
-                )
+                guard let transition else {
+                    appendRemovedCrossFade(source, progress: progress, into: &contents)
+                    return
+                }
+                guard !transition.isEmpty(for: 2) else { return }
+                guard let results = transition.effectResults(
+                    at: Float(progress),
+                    event: 2,
+                    bounds: source.bounds
+                ) else {
+                    appendRemovedCrossFade(source, progress: progress, into: &contents)
+                    return
+                }
+                appendTransitionedItem(source, results: results, into: &contents)
             case let .inserted(target):
-                contents.appendCrossFadeItem(
-                    sourceItems: [],
-                    sourceBounds: nil,
-                    sourceOutputBounds: nil,
-                    targetItems: [target.item],
-                    targetBounds: target.bounds,
-                    targetOutputBounds: target.bounds,
-                    bounds: target.bounds,
-                    sourceFraction: 0,
-                    targetFraction: Float(progress)
-                )
+                guard let transition else {
+                    appendInsertedCrossFade(target, progress: progress, into: &contents)
+                    return
+                }
+                guard !transition.isEmpty(for: 1) else {
+                    contents.items.append(target.item)
+                    return
+                }
+                guard let results = transition.effectResults(
+                    at: Float(progress),
+                    event: 1,
+                    bounds: target.bounds
+                ) else {
+                    appendInsertedCrossFade(target, progress: progress, into: &contents)
+                    return
+                }
+                appendTransitionedItem(target, results: results, into: &contents)
             case let .fallback(sourceItems, sourceBounds, targetItems, targetBounds):
-                let outputBounds = reportedBounds(at: progress)
+                let outputBounds = reportedBounds(at: progress, transition: transition) ?? .zero
                 contents.appendCrossFadeItem(
                     sourceItems: sourceItems,
                     sourceBounds: sourceBounds,
@@ -129,6 +169,104 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     targetFraction: Float(progress)
                 )
             }
+        }
+
+        private func appendRemovedCrossFade(
+            _ source: ItemInterpolationInput,
+            progress: CGFloat,
+            into contents: inout DisplayList
+        ) {
+            contents.appendCrossFadeItem(
+                sourceItems: [source.item],
+                sourceBounds: source.bounds,
+                sourceOutputBounds: source.bounds,
+                targetItems: [],
+                targetBounds: nil,
+                targetOutputBounds: nil,
+                bounds: source.bounds,
+                sourceFraction: Float(progress),
+                targetFraction: 0
+            )
+        }
+
+        private func appendInsertedCrossFade(
+            _ target: ItemInterpolationInput,
+            progress: CGFloat,
+            into contents: inout DisplayList
+        ) {
+            contents.appendCrossFadeItem(
+                sourceItems: [],
+                sourceBounds: nil,
+                sourceOutputBounds: nil,
+                targetItems: [target.item],
+                targetBounds: target.bounds,
+                targetOutputBounds: target.bounds,
+                bounds: target.bounds,
+                sourceFraction: 0,
+                targetFraction: Float(progress)
+            )
+        }
+
+        private func appendTransitionedItem(
+            _ input: ItemInterpolationInput,
+            results: RBTransitionEffectResults,
+            into contents: inout DisplayList
+        ) {
+            guard results.alpha > 0 else { return }
+
+            var resolved = DisplayList()
+            resolved.items = [input.item]
+            resolved.interpolationBounds = input.bounds
+            var resolvedBounds = input.bounds
+
+            if !results.transform.isIdentity {
+                var transformed = DisplayList()
+                for item in resolved.items {
+                    transformed.appendTransformedItem(
+                        item,
+                        affineTransform: results.transform
+                    )
+                }
+                resolved = transformed
+                resolvedBounds = input.bounds.applying(results.transform).standardized
+            }
+
+            if results.alpha < 1 {
+                var faded = DisplayList()
+                faded.appendOpacityItem(
+                    bounds: resolvedBounds,
+                    opacity: Double(results.alpha),
+                    contents: resolved
+                )
+                resolved = faded
+            }
+
+            if results.hasBlur, results.blurRadius > 0 {
+                var blurred = DisplayList()
+                blurred.appendBlurItem(
+                    bounds: results.bounds ?? resolvedBounds,
+                    radius: results.blurRadius,
+                    isOpaque: false,
+                    contents: resolved
+                )
+                resolved = blurred
+            }
+
+            contents.items.append(contentsOf: resolved.items)
+        }
+
+        private func visibleBounds(
+            from results: RBTransitionEffectResults,
+            fallback: CGRect
+        ) -> CGRect? {
+            guard results.alpha > 0 else { return nil }
+            let bounds = results.bounds ?? fallback
+            guard !bounds.isNull,
+                  bounds.width > 0,
+                  bounds.height > 0 else {
+                return nil
+            }
+            return bounds
         }
 
         private func appendTextPair(
@@ -298,11 +436,21 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     private func interpolatedBounds(at time: Float) -> CGRect? {
-        Self.interpolatedBounds(from: from, to: to, progress: resolvedProgress(at: time))
+        Self.interpolatedBounds(
+            from: from,
+            to: to,
+            progress: resolvedProgress(at: time),
+            transition: transition
+        )
     }
 
     private func interpolatedContents(forResolvedProgress progress: Float) -> DisplayList {
-        Self.interpolatedContents(from: from, to: to, progress: progress)
+        Self.interpolatedContents(
+            from: from,
+            to: to,
+            progress: progress,
+            transition: transition
+        )
     }
 
     private var shouldMaterializeEndpointContents: Bool {
@@ -313,11 +461,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     private static func interpolatedContents(
         from: DisplayList,
         to: DisplayList,
-        progress: Float
+        progress: Float,
+        transition: RBTransition?
     ) -> DisplayList {
         guard let fromBounds = from.interpolationBounds,
               let toBounds = to.interpolationBounds,
-              let outputBounds = interpolatedBounds(from: from, to: to, progress: progress) else {
+              let outputBounds = interpolatedBounds(
+                from: from,
+                to: to,
+                progress: progress,
+                transition: transition
+              ) else {
             return from
         }
 
@@ -334,6 +488,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toCommands: to.itemCommands,
                 toFallbackBounds: toBounds,
                 progress: clampedProgress,
+                transition: transition,
                 into: &contents
             )
         }
@@ -356,6 +511,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             from: from.effects,
             to: to.effects,
             progress: progress,
+            transition: transition,
             into: &contents
         )
 
@@ -370,6 +526,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toCommands: [DisplayList.ItemCommand],
         toFallbackBounds: CGRect,
         progress: CGFloat,
+        transition: RBTransition?,
         into contents: inout DisplayList
     ) {
         let operations = itemInterpolationOperations(
@@ -387,7 +544,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             ),
         ]
         for operation in operations {
-            operation.append(at: progress, into: &contents)
+            operation.append(
+                at: progress,
+                transition: transition,
+                into: &contents
+            )
         }
     }
 
@@ -478,6 +639,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         from sourceEffects: [DisplayList.EffectItem],
         to targetEffects: [DisplayList.EffectItem],
         progress: Float,
+        transition: RBTransition?,
         into contents: inout DisplayList
     ) {
         guard sourceEffects.count == targetEffects.count else {
@@ -497,7 +659,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 contents: interpolatedContents(
                     from: source.contents,
                     to: target.contents,
-                    progress: progress
+                    progress: progress,
+                    transition: transition
                 )
             )
         }
@@ -561,13 +724,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     private static func interpolatedBounds(
         from fromList: DisplayList,
         to toList: DisplayList,
-        progress: Float
+        progress: Float,
+        transition: RBTransition?
     ) -> CGRect? {
         let clampedProgress = CGFloat(min(max(progress, 0), 1))
         if let recordedBounds = interpolatedRecordedBounds(
             from: fromList,
             to: toList,
-            progress: clampedProgress
+            progress: clampedProgress,
+            transition: transition
         ) {
             return recordedBounds
         }
@@ -582,7 +747,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     private static func interpolatedRecordedBounds(
         from fromList: DisplayList,
         to toList: DisplayList,
-        progress: CGFloat
+        progress: CGFloat,
+        transition: RBTransition?
     ) -> CGRect? {
         var bounds: CGRect?
 
@@ -593,6 +759,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toItems: toList.renderItems,
                 toCommands: toList.itemCommands,
                 progress: progress,
+                transition: transition,
                 allowsCountMismatch: true
             ) else { return nil }
             bounds = union(bounds, itemBounds)
@@ -605,6 +772,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toItems: toList.debugItems,
                 toCommands: toList.debugItemCommands,
                 progress: progress,
+                transition: nil,
                 allowsCountMismatch: false
             ) else { return nil }
             bounds = union(bounds, debugBounds)
@@ -614,7 +782,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             guard let effectBounds = interpolatedRecordedEffectBounds(
                 from: fromList.effects,
                 to: toList.effects,
-                progress: progress
+                progress: progress,
+                transition: transition
             ) else { return nil }
             bounds = union(bounds, effectBounds)
         }
@@ -625,7 +794,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     private static func interpolatedRecordedEffectBounds(
         from sourceEffects: [DisplayList.EffectItem],
         to targetEffects: [DisplayList.EffectItem],
-        progress: CGFloat
+        progress: CGFloat,
+        transition: RBTransition?
     ) -> CGRect? {
         guard !sourceEffects.isEmpty,
               sourceEffects.count == targetEffects.count else {
@@ -638,11 +808,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                   let effectBounds = interpolatedRecordedBounds(
                     from: source.contents,
                     to: target.contents,
-                    progress: progress
+                    progress: progress,
+                    transition: transition
                   ) ?? interpolatedBounds(
                     from: source.contents,
                     to: target.contents,
-                    progress: Float(progress)
+                    progress: Float(progress),
+                    transition: transition
                   ) else {
                 return nil
             }
@@ -708,6 +880,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand],
         progress: CGFloat,
+        transition: RBTransition?,
         allowsCountMismatch: Bool
     ) -> CGRect? {
         guard let operations = itemInterpolationOperations(
@@ -720,7 +893,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return nil
         }
         return operations.reduce(nil) { partial, operation in
-            union(partial, operation.reportedBounds(at: progress))
+            union(
+                partial,
+                operation.reportedBounds(
+                    at: progress,
+                    transition: transition
+                )
+            )
         }
     }
 
