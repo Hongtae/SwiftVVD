@@ -7,6 +7,21 @@
 
 import Foundation
 
+struct RBTransitionAnimationContext {
+    var animationTable: RBAnimationTable
+    var operation: RBAnimationSequencer.OperationAnimationRecord
+    var time: Float
+
+    func progress(sequence: UInt32, event: UInt32) -> Float {
+        let sampled = animationTable.evaluate(
+            animationIndex: operation.animationIndex,
+            sequence: sequence,
+            time: Double(time) - Double(operation.delay)
+        )
+        return event & 1 == 0 ? 1 - sampled : sampled
+    }
+}
+
 // Accumulated render-state mutations produced by applying transition effects to one item.
 struct RBTransitionEffectResults: Equatable {
     var alpha: Float = 1
@@ -234,12 +249,16 @@ final class RBTransitionEffect: NSObject, NSCopying {
         at progress: Float,
         event: UInt32,
         transition: RBTransition,
-        usesAddRemoveDurationFallback: Bool = false
+        usesAddRemoveDurationFallback: Bool = false,
+        animationContext: RBTransitionAnimationContext? = nil
     ) -> Float? {
         let directedProgress = event & 1 == 0 ? 1 - progress : progress
 
         if usesAnimationIndexMode {
             let index = event & 1 == 0 ? removeAnimationIndex : insertAnimationIndex
+            if let animationContext {
+                return animationContext.progress(sequence: UInt32(index), event: event)
+            }
             return index == 0 ? directedProgress : nil
         }
 
@@ -264,7 +283,8 @@ final class RBTransitionEffect: NSObject, NSCopying {
         progress: Float,
         event: UInt32,
         transition: RBTransition,
-        usesAddRemoveDurationFallback: Bool = false
+        usesAddRemoveDurationFallback: Bool = false,
+        animationContext: RBTransitionAnimationContext? = nil
     ) -> Bool {
         let requestedEvents = event & 0x3f
         guard requestedEvents != 0, (events & requestedEvents) != 0 else {
@@ -275,7 +295,8 @@ final class RBTransitionEffect: NSObject, NSCopying {
             at: progress,
             event: event,
             transition: transition,
-            usesAddRemoveDurationFallback: usesAddRemoveDurationFallback
+            usesAddRemoveDurationFallback: usesAddRemoveDurationFallback,
+            animationContext: animationContext
         ) else {
             return false
         }
@@ -517,7 +538,8 @@ final class RBTransition: NSObject, NSCopying {
         at progress: Float,
         event: UInt32,
         bounds: CGRect,
-        usesAddRemoveDurationFallback: Bool = false
+        usesAddRemoveDurationFallback: Bool = false,
+        animationContext: RBTransitionAnimationContext? = nil
     ) -> RBTransitionEffectResults? {
         var results = RBTransitionEffectResults()
         results.bounds = bounds.standardized
@@ -528,7 +550,8 @@ final class RBTransition: NSObject, NSCopying {
                 progress: progress,
                 event: event,
                 transition: self,
-                usesAddRemoveDurationFallback: usesAddRemoveDurationFallback
+                usesAddRemoveDurationFallback: usesAddRemoveDurationFallback,
+                animationContext: animationContext
             ) else {
                 return nil
             }

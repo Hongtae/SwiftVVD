@@ -460,34 +460,62 @@ struct DisplayList {
         var contents: DisplayList
     }
 
-    // Backend-local style metadata recorded on the display list before exact private style
-    // storage and renderer lowering exist.
+    // Style commands are captured by each item when it is recorded. Keeping the chain on the
+    // item preserves nested style scope when independently recorded lists are composed later.
     enum StyleCommand: Equatable {
+        struct MetadataIdentity: Equatable {
+            var count: UInt32
+            var namespace: UUID?
+
+            static let empty = MetadataIdentity(count: 0, namespace: nil)
+
+            func matches(_ other: MetadataIdentity) -> Bool {
+                guard count == other.count else { return false }
+                if count == 0 { return true }
+                guard let namespace, let otherNamespace = other.namespace else {
+                    return false
+                }
+                return namespace == otherNamespace
+            }
+        }
+
         struct AnimationStyle: Equatable {
             static let defaultFlags: UInt32 = 0x111
 
             var animation: RBAnimation
             var id: UUID?
             var flags: UInt32
+            var metadataIdentity: MetadataIdentity
 
             init(
                 animation: RBAnimation,
                 id: UUID?,
-                flags: UInt32
+                flags: UInt32,
+                metadataIdentity: MetadataIdentity = .empty
             ) {
                 self.animation = animation.copy() as? RBAnimation ?? RBAnimation()
                 self.id = id
                 self.flags = flags
+                self.metadataIdentity = metadataIdentity
             }
 
             static func == (lhs: AnimationStyle, rhs: AnimationStyle) -> Bool {
                 lhs.animation.isEqual(rhs.animation) &&
                     lhs.id == rhs.id &&
-                    lhs.flags == rhs.flags
+                    lhs.flags == rhs.flags &&
+                    lhs.metadataIdentity == rhs.metadataIdentity
             }
         }
 
         case animation(AnimationStyle)
+    }
+
+    struct StyleChain: Equatable {
+        var commands: [StyleCommand] = []
+
+        func appendingOuter(_ outer: StyleChain) -> StyleChain {
+            StyleChain(commands: commands + outer.commands)
+        }
     }
 
     // Lightweight render-item summary used by interpolation before backend typed
@@ -1421,6 +1449,7 @@ struct DisplayList {
         var version: Version
         var value: Value
         var identity: _DisplayList_Identity
+        var styleChain = StyleChain()
 
         init(
             command: ItemCommand,
@@ -1563,12 +1592,14 @@ struct DisplayList {
             content: Content,
             frame: CGRect,
             identity: _DisplayList_Identity,
-            version: Version
+            version: Version,
+            styleChain: StyleChain = StyleChain()
         ) {
             self.frame = frame
             self.version = version
             self.value = .content(content)
             self.identity = identity
+            self.styleChain = styleChain
         }
 
         var command: ItemCommand {
@@ -1603,7 +1634,7 @@ struct DisplayList {
 
     var items: [Item] = []
     var debugItems: [Item] = []
-    var styles: [StyleCommand] = []
+    private var activeStyleChain = StyleChain()
     // Backend-local bounds used by display-list interpolation before exact private command storage exists.
     var interpolationBounds: CGRect?
 
@@ -1635,7 +1666,6 @@ struct DisplayList {
         // level and are recursively rewritten by the modifier before this list is constructed.
         var list = DisplayList()
         list.items = renderItems
-        list.styles = styles
         list.recordInterpolationBounds(interpolationBounds)
         return list
     }
@@ -1645,10 +1675,23 @@ struct DisplayList {
     }
 
     mutating func append(contentsOf other: Self) {
-        self.items.append(contentsOf: other.items)
-        self.debugItems.append(contentsOf: other.debugItems)
-        self.styles.append(contentsOf: other.styles)
+        self.items.append(contentsOf: other.items.map(applyingActiveStyles(to:)))
+        self.debugItems.append(contentsOf: other.debugItems.map(applyingActiveStyles(to:)))
         self.recordInterpolationBounds(other.interpolationBounds)
+    }
+
+    private func applyingActiveStyles(to item: Item) -> Item {
+        var item = item
+        item.styleChain = item.styleChain.appendingOuter(activeStyleChain)
+        return item
+    }
+
+    private mutating func appendRecordedItem(_ item: Item) {
+        items.append(applyingActiveStyles(to: item))
+    }
+
+    private mutating func appendRecordedDebugItem(_ item: Item) {
+        debugItems.append(applyingActiveStyles(to: item))
     }
 
     mutating func appendItem(
@@ -1664,7 +1707,7 @@ struct DisplayList {
             bounds: bounds,
             effectKind: effectKind
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1685,7 +1728,7 @@ struct DisplayList {
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1707,7 +1750,7 @@ struct DisplayList {
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1729,7 +1772,7 @@ struct DisplayList {
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             path: path,
             shading: .style(style),
             fillStyle: fillStyle,
@@ -1754,7 +1797,7 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1771,7 +1814,7 @@ struct DisplayList {
             ),
             bounds: commandBounds
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             image: image,
             frame: bounds,
             command: command,
@@ -1793,7 +1836,7 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1814,7 +1857,7 @@ struct DisplayList {
             ),
             bounds: commandBounds
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             text: text,
             size: size,
             frame: bounds,
@@ -1843,7 +1886,7 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1854,7 +1897,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.opacity(opacity), bounds: bounds)
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1865,7 +1908,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.opacity(opacity), bounds: bounds)
-        items.append(Item(
+        appendRecordedItem(Item(
             style: .opacity(opacity),
             contents: contents,
             command: command
@@ -1884,7 +1927,7 @@ struct DisplayList {
             .blur(radius: radius, isOpaque: isOpaque),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1899,7 +1942,7 @@ struct DisplayList {
             .blur(radius: radius, isOpaque: isOpaque),
             bounds: bounds
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             style: .blur(radius: radius, isOpaque: isOpaque),
             contents: contents,
             command: command
@@ -1914,7 +1957,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.geometry(affineTransform), bounds: bounds)
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -1927,11 +1970,12 @@ struct DisplayList {
         }
         let transformedContent = content.transformed(by: affineTransform)
         let frame = transformedContent.command.bounds ?? item.frame.applying(affineTransform)
-        items.append(Item(
+        appendRecordedItem(Item(
             content: transformedContent,
             frame: frame,
             identity: item.identity,
-            version: item.version
+            version: item.version,
+            styleChain: item.styleChain
         ))
         recordInterpolationBounds(transformedContent.command.bounds)
     }
@@ -1945,11 +1989,12 @@ struct DisplayList {
         }
         let transformedContent = content.transformed(by: affineTransform)
         let frame = transformedContent.command.bounds ?? item.frame.applying(affineTransform)
-        debugItems.append(Item(
+        appendRecordedDebugItem(Item(
             content: transformedContent,
             frame: frame,
             identity: item.identity,
-            version: item.version
+            version: item.version,
+            styleChain: item.styleChain
         ))
         recordInterpolationBounds(transformedContent.command.bounds)
     }
@@ -1983,7 +2028,7 @@ struct DisplayList {
             sourceBounds: targetBounds,
             outputBounds: targetOutputBounds
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             source: source,
             target: target,
             command: command
@@ -2018,7 +2063,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.blendMode(blendMode), bounds: bounds)
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -2029,7 +2074,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.blendMode(blendMode), bounds: bounds)
-        items.append(Item(
+        appendRecordedItem(Item(
             style: .blendMode(blendMode),
             contents: contents,
             command: command
@@ -2057,7 +2102,7 @@ struct DisplayList {
             )),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -2087,7 +2132,7 @@ struct DisplayList {
             blendMode: blendMode,
             options: options
         )
-        items.append(Item(
+        appendRecordedItem(Item(
             style: .shadow(record, filter),
             contents: contents,
             command: command
@@ -2102,7 +2147,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.colorFilter(filter), bounds: bounds)
-        items.append(Item(command: command, item))
+        appendRecordedItem(Item(command: command, item))
         recordInterpolationBounds(bounds)
     }
 
@@ -2114,7 +2159,7 @@ struct DisplayList {
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.colorFilter(record), bounds: bounds)
-        items.append(Item(
+        appendRecordedItem(Item(
             style: .colorFilter(record, graphicsFilter),
             contents: contents,
             command: command
@@ -2127,24 +2172,26 @@ struct DisplayList {
         _ item: @escaping (GraphicsContext) -> Void
     ) {
         let bounds = Self.itemRecordBounds(bounds)
-        debugItems.append(Item(command: .debug(bounds: bounds), item))
+        appendRecordedDebugItem(Item(command: .debug(bounds: bounds), item))
         recordInterpolationBounds(bounds)
     }
 
     mutating func appendEffect(_ effect: Effect, contents: DisplayList) {
-        items.append(Item(effect: effect, contents: contents))
+        appendRecordedItem(Item(effect: effect, contents: contents))
         recordInterpolationBounds(contents.interpolationBounds)
     }
 
     mutating func appendAnimationStyle(
         _ animation: RBAnimation,
         id: UUID? = nil,
-        flags: UInt32 = StyleCommand.AnimationStyle.defaultFlags
+        flags: UInt32 = StyleCommand.AnimationStyle.defaultFlags,
+        metadataIdentity: StyleCommand.MetadataIdentity = .empty
     ) {
-        styles.append(.animation(StyleCommand.AnimationStyle(
+        activeStyleChain.commands.append(.animation(StyleCommand.AnimationStyle(
             animation: animation,
             id: id,
-            flags: flags
+            flags: flags,
+            metadataIdentity: metadataIdentity
         )))
     }
 
@@ -2698,7 +2745,9 @@ struct DisplayList {
             commands: debugItemCommands,
             otherCommands: other.debugItemCommands
         ) &&
-            styles == other.styles &&
+            zip(debugItems, other.debugItems).allSatisfy { lhs, rhs in
+                lhs.styleChain == rhs.styleChain
+            } &&
             interpolationBounds == other.interpolationBounds
     }
 
@@ -2710,7 +2759,8 @@ struct DisplayList {
         return zip(items, otherItems).allSatisfy { lhs, rhs in
             guard lhs.frame == rhs.frame,
                   lhs.version.value == rhs.version.value,
-                  lhs.identity == rhs.identity else {
+                  lhs.identity == rhs.identity,
+                  lhs.styleChain == rhs.styleChain else {
                 return false
             }
             switch (lhs.value, rhs.value) {

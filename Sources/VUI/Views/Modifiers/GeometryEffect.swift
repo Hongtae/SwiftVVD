@@ -97,9 +97,6 @@ enum _GeometryEffectSupport {
         var result = DisplayList()
         let transformedBounds = source.interpolationBounds?.applying(affine).standardized
         result.recordInterpolationBounds(transformedBounds)
-        for style in source.styles {
-            result.styles.append(style)
-        }
         for effect in source.effects {
             result.appendEffect(
                 effect.effect,

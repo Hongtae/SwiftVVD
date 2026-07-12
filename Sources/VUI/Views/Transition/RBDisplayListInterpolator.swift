@@ -32,24 +32,152 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var bounds: CGRect
     }
 
-    private enum ItemInterpolationOperation {
-        case paired(source: ItemInterpolationInput, target: ItemInterpolationInput)
-        case removed(ItemInterpolationInput)
-        case inserted(ItemInterpolationInput)
-        case wholeRemoved(items: [DisplayList.Item], bounds: CGRect)
-        case wholeInserted(items: [DisplayList.Item], bounds: CGRect)
-        case fallback(
+    private struct ItemInterpolationOperation {
+        private enum Kind {
+            case paired(source: ItemInterpolationInput, target: ItemInterpolationInput)
+            case removed(ItemInterpolationInput)
+            case inserted(ItemInterpolationInput)
+            case wholeRemoved(items: [DisplayList.Item], bounds: CGRect)
+            case wholeInserted(items: [DisplayList.Item], bounds: CGRect)
+            case fallback(
+                sourceItems: [DisplayList.Item],
+                sourceBounds: CGRect,
+                targetItems: [DisplayList.Item],
+                targetBounds: CGRect
+            )
+        }
+
+        private var kind: Kind
+        var animation = RBAnimationSequencer.OperationAnimationRecord(
+            animationIndex: 0,
+            delay: 0
+        )
+
+        static func paired(
+            source: ItemInterpolationInput,
+            target: ItemInterpolationInput
+        ) -> Self {
+            Self(kind: .paired(source: source, target: target))
+        }
+
+        static func removed(_ source: ItemInterpolationInput) -> Self {
+            Self(kind: .removed(source))
+        }
+
+        static func inserted(_ target: ItemInterpolationInput) -> Self {
+            Self(kind: .inserted(target))
+        }
+
+        static func wholeRemoved(items: [DisplayList.Item], bounds: CGRect) -> Self {
+            Self(kind: .wholeRemoved(items: items, bounds: bounds))
+        }
+
+        static func wholeInserted(items: [DisplayList.Item], bounds: CGRect) -> Self {
+            Self(kind: .wholeInserted(items: items, bounds: bounds))
+        }
+
+        static func fallback(
             sourceItems: [DisplayList.Item],
             sourceBounds: CGRect,
             targetItems: [DisplayList.Item],
             targetBounds: CGRect
-        )
+        ) -> Self {
+            Self(kind: .fallback(
+                sourceItems: sourceItems,
+                sourceBounds: sourceBounds,
+                targetItems: targetItems,
+                targetBounds: targetBounds
+            ))
+        }
+
+        private var animatedOperationType: UInt8 {
+            switch kind {
+            case .removed, .wholeRemoved:
+                return 0
+            case .inserted, .wholeInserted:
+                return 1
+            case .paired, .fallback:
+                return 2
+            }
+        }
+
+        private var center: CGPoint? {
+            let bounds: CGRect
+            switch kind {
+            case let .paired(_, target), let .inserted(target):
+                bounds = target.bounds
+            case let .removed(source):
+                bounds = source.bounds
+            case let .wholeRemoved(_, value), let .wholeInserted(_, value):
+                bounds = value
+            case let .fallback(_, _, _, targetBounds):
+                bounds = targetBounds
+            }
+            guard !bounds.isNull else { return nil }
+            return CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+
+        mutating func resolveAnimation(
+            table: inout RBAnimationTable,
+            defaultAnimationIndex: Int32,
+            sequencer: RBAnimationSequencer?
+        ) {
+            let itemAnimation: RBAnimation?
+            switch kind {
+            case let .paired(source, target):
+                itemAnimation = RBDisplayListInterpolator.animationStyle(
+                    from: source.item.styleChain,
+                    to: target.item.styleChain
+                )
+            default:
+                itemAnimation = nil
+            }
+
+            let resolvedAnimationIndex = itemAnimation.map {
+                table.internAnimation($0)
+            }
+            // Transition animations are not universal secondary sequences. Their ownership
+            // depends on the concrete operation family, so this plan resolves only the
+            // operation's default or item-style animation.
+            let sequencerDelay = center.flatMap {
+                sequencer?.evalDelay(
+                    at: $0,
+                    animatedOperationType: animatedOperationType
+                )
+            }
+            animation = RBAnimationSequencer.operationAnimationRecord(
+                operationLowNibble: animatedOperationType,
+                resolvedAnimationIndex: resolvedAnimationIndex,
+                defaultAnimationIndex: defaultAnimationIndex,
+                operationDelay: 0,
+                sequencerDelay: sequencerDelay
+            )
+        }
+
+        func resolvedProgress(at time: Float, table: RBAnimationTable) -> CGFloat {
+            CGFloat(table.evaluate(
+                animationIndex: animation.animationIndex,
+                time: Double(time) - Double(animation.delay)
+            ))
+        }
+
+        func transitionAnimationContext(
+            at time: Float,
+            table: RBAnimationTable
+        ) -> RBTransitionAnimationContext {
+            RBTransitionAnimationContext(
+                animationTable: table,
+                operation: animation,
+                time: time
+            )
+        }
 
         func reportedBounds(
             at progress: CGFloat,
-            transition: RBTransition?
+            transition: RBTransition?,
+            animationContext: RBTransitionAnimationContext? = nil
         ) -> CGRect? {
-            switch self {
+            switch kind {
             case let .paired(source, target):
                 // Paired commands use the mixed cross-fade path. Insertion and removal
                 // event masks only govern unmatched operations.
@@ -66,7 +194,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 guard let results = transition.effectResults(
                     at: Float(progress),
                     event: 2,
-                    bounds: source.bounds
+                    bounds: source.bounds,
+                    animationContext: animationContext
                 ) else { return source.bounds }
                 return visibleBounds(from: results, fallback: source.bounds)
             case let .inserted(target):
@@ -78,7 +207,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 guard let results = transition.effectResults(
                     at: Float(progress),
                     event: 1,
-                    bounds: target.bounds
+                    bounds: target.bounds,
+                    animationContext: animationContext
                 ) else { return target.bounds }
                 return visibleBounds(from: results, fallback: target.bounds)
             case let .wholeRemoved(_, bounds), let .wholeInserted(_, bounds):
@@ -98,9 +228,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         func append(
             at progress: CGFloat,
             transition: RBTransition?,
+            animationContext: RBTransitionAnimationContext? = nil,
             into contents: inout DisplayList
         ) {
-            switch self {
+            switch kind {
             case let .paired(source, target):
                 if RBDisplayListInterpolator.isTextItemPair(
                     source.command,
@@ -138,7 +269,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 guard let results = transition.effectResults(
                     at: Float(progress),
                     event: 2,
-                    bounds: source.bounds
+                    bounds: source.bounds,
+                    animationContext: animationContext
                 ) else {
                     appendRemovedCrossFade(source, progress: progress, into: &contents)
                     return
@@ -156,7 +288,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 guard let results = transition.effectResults(
                     at: Float(progress),
                     event: 1,
-                    bounds: target.bounds
+                    bounds: target.bounds,
+                    animationContext: animationContext
                 ) else {
                     appendInsertedCrossFade(target, progress: progress, into: &contents)
                     return
@@ -187,7 +320,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                       let results = transition.effectResults(
                         at: Float(progress),
                         event: 2,
-                        bounds: bounds
+                        bounds: bounds,
+                        animationContext: animationContext
                       ) else {
                     return
                 }
@@ -220,7 +354,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 guard let results = transition.effectResults(
                     at: Float(progress),
                     event: 1,
-                    bounds: bounds
+                    bounds: bounds,
+                    animationContext: animationContext
                 ) else {
                     return
                 }
@@ -410,9 +545,41 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
     }
 
+    private struct ItemOperationPlan {
+        var operations: [ItemInterpolationOperation]
+        var animationTable: RBAnimationTable
+
+        var activeDuration: Double {
+            operations.reduce(0) { duration, operation in
+                max(
+                    duration,
+                    Double(operation.animation.delay) + animationTable.maximumDuration(
+                        animationIndex: operation.animation.animationIndex
+                    )
+                )
+            }
+        }
+
+        func maximumSpeed(at time: Double) -> Double {
+            // Sequencer delay shifts presentation progress, but the velocity query samples
+            // animation time directly from the caller's elapsed time.
+            operations.reduce(0) { speed, operation in
+                max(
+                    speed,
+                    animationTable.maxSpeed(
+                        animationIndex: operation.animation.animationIndex,
+                        time: time
+                    )
+                )
+            }
+        }
+    }
+
     var from: DisplayList
     private(set) var to: DisplayList
     let options: [RBDisplayListInterpolatorOptionKey: Any]
+    private var cachedItemOperationPlan: ItemOperationPlan?
+    private var hasCachedItemOperationPlan = false
 
     init(
         from: DisplayList,
@@ -422,6 +589,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         self.from = from
         self.to = to
         self.options = options
+        self.cachedItemOperationPlan = nil
         super.init()
     }
 
@@ -431,6 +599,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
         if isImmediateWholeListInsertion {
             return 0
+        }
+        if let itemOperationPlan = itemOperationPlan() {
+            return itemOperationPlan.activeDuration
         }
         if let animation = checkedAnimationOption() {
             if let sequencerDelay = animationSequencerDelayDuration {
@@ -471,10 +642,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     func setFrom(_ displayList: DisplayList) {
         from = displayList
+        invalidateItemOperationPlan()
     }
 
     func setTo(_ displayList: DisplayList) {
         to = displayList
+        invalidateItemOperationPlan()
     }
 
     func boundingRect(withProgress progress: Float) -> CGRect {
@@ -483,30 +656,32 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     func maxAbsoluteVelocity(withProgress progress: Float) -> Double {
         guard hasChangedDisplayLists,
-              let animation = checkedAnimationOption(),
               let bounds = Self.unionBounds(from: from, to: to) else {
             return 0
         }
         let boundsSize = max(bounds.width, bounds.height)
         guard boundsSize.isFinite, boundsSize > 0 else { return 0 }
+        if let itemOperationPlan = itemOperationPlan() {
+            return itemOperationPlan.maximumSpeed(at: Double(progress)) * Double(boundsSize)
+        }
+        guard let animation = checkedAnimationOption() else { return 0 }
         return animation.speed(atTime: Double(progress)) * Double(boundsSize)
     }
 
     func copyContents(withProgress progress: Float) -> DisplayList {
-        let resolvedProgress = resolvedProgress(at: progress)
-        if resolvedProgress >= 1 {
+        if progress >= Float(activeDuration) {
             if shouldMaterializeEndpointContents {
-                return interpolatedContents(forResolvedProgress: 1)
+                return interpolatedContents(at: progress)
             }
             return to
         }
-        if resolvedProgress <= 0 {
+        if progress <= 0 {
             if shouldMaterializeEndpointContents {
-                return interpolatedContents(forResolvedProgress: 0)
+                return interpolatedContents(at: 0)
             }
             return from
         }
-        return interpolatedContents(forResolvedProgress: resolvedProgress)
+        return interpolatedContents(at: progress)
     }
 
     func contents(withProgress progress: Float) -> DisplayList {
@@ -543,7 +718,53 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     private func interpolatedBounds(at time: Float) -> CGRect? {
-        Self.interpolatedBounds(
+        if let plan = itemOperationPlan(), !plan.operations.isEmpty {
+            var bounds = plan.operations.reduce(nil) { partial, operation in
+                Self.union(
+                    partial,
+                    operation.reportedBounds(
+                        at: operation.resolvedProgress(
+                            at: time,
+                            table: plan.animationTable
+                        ),
+                        transition: transition,
+                        animationContext: operation.transitionAnimationContext(
+                            at: time,
+                            table: plan.animationTable
+                        )
+                    )
+                )
+            }
+            let auxiliaryProgress = CGFloat(min(max(resolvedProgress(at: time), 0), 1))
+            if !from.debugItems.isEmpty || !to.debugItems.isEmpty {
+                bounds = Self.union(
+                    bounds,
+                    Self.interpolatedRecordedItemBounds(
+                        fromItems: from.debugItems,
+                        fromCommands: from.debugItemCommands,
+                        toItems: to.debugItems,
+                        toCommands: to.debugItemCommands,
+                        progress: auxiliaryProgress,
+                        transition: nil,
+                        allowsCountMismatch: false,
+                        allowsWholeListOperations: false
+                    )
+                )
+            }
+            if !from.effects.isEmpty || !to.effects.isEmpty {
+                bounds = Self.union(
+                    bounds,
+                    Self.interpolatedRecordedEffectBounds(
+                        from: from.effects,
+                        to: to.effects,
+                        progress: auxiliaryProgress,
+                        transition: transition
+                    )
+                )
+            }
+            return bounds
+        }
+        return Self.interpolatedBounds(
             from: from,
             to: to,
             progress: resolvedProgress(at: time),
@@ -551,13 +772,66 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         )
     }
 
-    private func interpolatedContents(forResolvedProgress progress: Float) -> DisplayList {
-        Self.interpolatedContents(
-            from: from,
-            to: to,
-            progress: progress,
-            transition: transition
+    private func interpolatedContents(at time: Float) -> DisplayList {
+        guard let nonEmptyBounds = from.interpolationBounds ?? to.interpolationBounds,
+              let outputBounds = interpolatedBounds(at: time) else {
+            return from
+        }
+        let fromBounds = from.interpolationBounds ?? nonEmptyBounds
+        let toBounds = to.interpolationBounds ?? nonEmptyBounds
+        let auxiliaryProgress = CGFloat(min(max(resolvedProgress(at: time), 0), 1))
+        var contents = DisplayList()
+        contents.interpolationBounds = outputBounds
+
+        if let plan = itemOperationPlan(), !plan.operations.isEmpty {
+            for operation in plan.operations {
+                operation.append(
+                    at: operation.resolvedProgress(at: time, table: plan.animationTable),
+                    transition: transition,
+                    animationContext: operation.transitionAnimationContext(
+                        at: time,
+                        table: plan.animationTable
+                    ),
+                    into: &contents
+                )
+            }
+        } else if !from.renderItems.isEmpty || !to.renderItems.isEmpty {
+            Self.appendInterpolatedItems(
+                fromItems: from.renderItems,
+                fromCommands: from.itemCommands,
+                fromFallbackBounds: fromBounds,
+                toItems: to.renderItems,
+                toCommands: to.itemCommands,
+                toFallbackBounds: toBounds,
+                allowsWholeListOperations: Self.allowsWholeListOperations(from: from, to: to),
+                progress: auxiliaryProgress,
+                transition: transition,
+                into: &contents
+            )
+        }
+
+        if !from.debugItems.isEmpty || !to.debugItems.isEmpty {
+            Self.appendInterpolatedDebugItems(
+                fromItems: from.debugItems,
+                fromCommands: from.debugItemCommands,
+                fromFallbackBounds: fromBounds,
+                toItems: to.debugItems,
+                toCommands: to.debugItemCommands,
+                toFallbackBounds: toBounds,
+                outputFallbackBounds: outputBounds,
+                progress: auxiliaryProgress,
+                into: &contents
+            )
+        }
+
+        Self.appendInterpolatedEffects(
+            from: from.effects,
+            to: to.effects,
+            progress: Float(auxiliaryProgress),
+            transition: transition,
+            into: &contents
         )
+        return contents
     }
 
     private var shouldMaterializeEndpointContents: Bool {
@@ -1127,6 +1401,77 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             operations.append(.inserted(input))
         }
         return operations
+    }
+
+    private func itemOperationPlan() -> ItemOperationPlan? {
+        if !hasCachedItemOperationPlan {
+            cachedItemOperationPlan = makeItemOperationPlan()
+            hasCachedItemOperationPlan = true
+        }
+        return cachedItemOperationPlan
+    }
+
+    private func invalidateItemOperationPlan() {
+        cachedItemOperationPlan = nil
+        hasCachedItemOperationPlan = false
+    }
+
+    private func makeItemOperationPlan() -> ItemOperationPlan? {
+        var animationTable = RBAnimationTable(defaultAnimationIndex: 0)
+        let defaultAnimationIndex = animationTable.internAnimation(checkedAnimationOption())
+        animationTable.defaultAnimationIndex = defaultAnimationIndex
+        guard var operations = Self.itemInterpolationOperations(
+            fromItems: from.renderItems,
+            fromCommands: from.itemCommands,
+            toItems: to.renderItems,
+            toCommands: to.itemCommands,
+            allowsCountMismatch: true,
+            allowsWholeListOperations: Self.allowsWholeListOperations(from: from, to: to)
+        ) else {
+            return nil
+        }
+        for index in operations.indices {
+            operations[index].resolveAnimation(
+                table: &animationTable,
+                defaultAnimationIndex: defaultAnimationIndex,
+                sequencer: animationSequencer
+            )
+        }
+        return ItemOperationPlan(
+            operations: operations,
+            animationTable: animationTable
+        )
+    }
+
+    // Style identity is independent of the animation UUID. The outermost target style is
+    // considered first, and non-selecting styles do not hide a matching inner style.
+    private static func animationStyle(
+        from source: DisplayList.StyleChain,
+        to target: DisplayList.StyleChain
+    ) -> RBAnimation? {
+        let sourceStyles = source.commands.reversed().compactMap { command -> DisplayList.StyleCommand.AnimationStyle? in
+            guard case let .animation(style) = command else { return nil }
+            return style
+        }
+        for command in target.commands.reversed() {
+            guard case let .animation(targetStyle) = command,
+                  let sourceStyle = sourceStyles.first(where: {
+                      $0.metadataIdentity.matches(targetStyle.metadataIdentity)
+                  }) else {
+                continue
+            }
+            switch targetStyle.flags & 0xf00 {
+            case 0x200:
+                return targetStyle.animation
+            case 0x100 where sourceStyle.id == nil ||
+                    targetStyle.id == nil ||
+                    sourceStyle.id != targetStyle.id:
+                return targetStyle.animation
+            default:
+                continue
+            }
+        }
+        return nil
     }
 
     private static func unionBounds(

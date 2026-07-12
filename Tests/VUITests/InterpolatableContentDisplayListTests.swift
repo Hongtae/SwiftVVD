@@ -397,6 +397,19 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
     func testDisplayListAnimationStyleParticipatesInSurfaceMatching() throws {
         let id = try XCTUnwrap(UUID(uuidString: "00112233-4455-6677-8899-AABBCCDDEEFF"))
+        func styledList(
+            _ animation: RBAnimation,
+            id: UUID?,
+            flags: UInt32 = DisplayList.StyleCommand.AnimationStyle.defaultFlags
+        ) -> DisplayList {
+            var list = DisplayList()
+            list.appendAnimationStyle(animation, id: id, flags: flags)
+            list.appendItem(
+                kind: .shapeFill,
+                bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+            ) { _ in }
+            return list
+        }
         let animation = RBAnimation()
         animation.addBezierDuration(
             2,
@@ -404,8 +417,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             controlPoint2: CGPoint(x: 0.75, y: 1)
         )
 
-        var source = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
-        source.appendAnimationStyle(animation, id: id)
+        let source = styledList(animation, id: id)
 
         let matchingAnimation = RBAnimation()
         matchingAnimation.addBezierDuration(
@@ -413,10 +425,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             controlPoint1: CGPoint(x: 0.25, y: 0),
             controlPoint2: CGPoint(x: 0.75, y: 1)
         )
-        var same = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
-        same.appendAnimationStyle(matchingAnimation, id: id)
+        let same = styledList(matchingAnimation, id: id)
 
-        guard case let .animation(style)? = source.styles.first else {
+        guard case let .animation(style)? = source.renderItems.first?.styleChain.commands.first else {
             XCTFail("missing animation style")
             return
         }
@@ -429,7 +440,6 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         animation.addDelay(1)
         XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
 
-        var changedAnimation = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
         let delayedAnimation = RBAnimation()
         delayedAnimation.addDelay(1)
         delayedAnimation.addBezierDuration(
@@ -437,16 +447,14 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             controlPoint1: CGPoint(x: 0.25, y: 0),
             controlPoint2: CGPoint(x: 0.75, y: 1)
         )
-        changedAnimation.appendAnimationStyle(delayedAnimation, id: id)
+        let changedAnimation = styledList(delayedAnimation, id: id)
 
-        var changedID = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
-        changedID.appendAnimationStyle(
+        let changedID = styledList(
             matchingAnimation,
             id: try XCTUnwrap(UUID(uuidString: "FFEEDDCC-BBAA-9988-7766-554433221100"))
         )
 
-        var changedFlags = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
-        changedFlags.appendAnimationStyle(matchingAnimation, id: id, flags: 0x211)
+        let changedFlags = styledList(matchingAnimation, id: id, flags: 0x211)
 
         XCTAssertFalse(source.hasSameInterpolationSurface(as: changedAnimation))
         XCTAssertFalse(source.hasSameInterpolationSurface(as: changedID))
@@ -454,7 +462,102 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         var appended = DisplayList()
         appended.append(contentsOf: source)
-        XCTAssertEqual(appended.styles, source.styles)
+        XCTAssertEqual(
+            appended.renderItems.first?.styleChain,
+            source.renderItems.first?.styleChain
+        )
+
+        let outerAnimation = RBAnimation()
+        outerAnimation.addBezierDuration(
+            4,
+            controlPoint1: CGPoint(x: 0.25, y: 0),
+            controlPoint2: CGPoint(x: 0.75, y: 1)
+        )
+        appended.appendAnimationStyle(outerAnimation, id: nil, flags: 0x200)
+        appended.append(contentsOf: source)
+        XCTAssertEqual(appended.renderItems[1].styleChain.commands.count, 2)
+        guard case let .animation(outerStyle) = appended.renderItems[1].styleChain.commands[1] else {
+            XCTFail("missing outer animation style")
+            return
+        }
+        XCTAssertTrue(outerStyle.animation.isEqual(outerAnimation))
+    }
+
+    func testRBDisplayListInterpolatorResolvesPerItemAnimationStyleChain() throws {
+        let styleA = DisplayList.StyleCommand.MetadataIdentity(
+            count: 1,
+            namespace: try XCTUnwrap(UUID(uuidString: "00112233-4455-6677-8899-AABBCCDDEEFF"))
+        )
+        let styleB = DisplayList.StyleCommand.MetadataIdentity(
+            count: 1,
+            namespace: try XCTUnwrap(UUID(uuidString: "FFEEDDCC-BBAA-9988-7766-554433221100"))
+        )
+        let animation2 = Animation.linear(duration: 2).rbAnimation
+        let animation4 = Animation.linear(duration: 4).rbAnimation
+        let idA = try XCTUnwrap(UUID(uuidString: "10213243-5465-7687-98A9-BACBDCEDFE0F"))
+        let idB = try XCTUnwrap(UUID(uuidString: "0FFEDDCB-BAA9-8976-6554-433221100001"))
+
+        func makeStyledList(
+            bounds: CGRect,
+            styles: [(RBAnimation, UUID?, UInt32, DisplayList.StyleCommand.MetadataIdentity)]
+        ) -> DisplayList {
+            var list = DisplayList()
+            for (animation, id, flags, metadataIdentity) in styles {
+                list.appendAnimationStyle(
+                    animation,
+                    id: id,
+                    flags: flags,
+                    metadataIdentity: metadataIdentity
+                )
+            }
+            list.appendItem(kind: .shapeFill, bounds: bounds) { _ in }
+            return list
+        }
+
+        let transition = RBTransition()
+        transition.method = ContentTransition.Method.diff.method
+        let effect = RBTransitionEffect()
+        effect.type = ContentTransition.EffectType.opacity.type
+        effect.events = 3
+        effect.animationIndex = 1
+        transition.addEffect(effect)
+
+        let fromBounds = CGRect(x: 0, y: 0, width: 10, height: 20)
+        let toBounds = CGRect(x: 20, y: 5, width: 30, height: 40)
+        func interpolator(
+            _ styles: [(RBAnimation, UUID?, UInt32, DisplayList.StyleCommand.MetadataIdentity)]
+        ) -> RBDisplayListInterpolator {
+            RBDisplayListInterpolator(
+                from: makeStyledList(bounds: fromBounds, styles: styles),
+                to: makeStyledList(bounds: toBounds, styles: styles),
+                options: [.transition: transition]
+            )
+        }
+
+        let outerWins = interpolator([
+            (animation2, idA, 0x200, styleA),
+            (animation4, idB, 0x200, styleB),
+        ])
+        XCTAssertEqual(outerWins.activeDuration, 4)
+        XCTAssertEqual(
+            outerWins.boundingRect(withProgress: 0.5),
+            CGRect(x: 2.5, y: 0.625, width: 12.5, height: 22.5)
+        )
+
+        let skippedOuterDefault = interpolator([
+            (animation2, idA, 0x200, styleA),
+            (animation4, idB, 0x111, styleB),
+        ])
+        XCTAssertEqual(skippedOuterDefault.activeDuration, 2)
+        XCTAssertEqual(
+            skippedOuterDefault.boundingRect(withProgress: 0.5),
+            CGRect(x: 5, y: 1.25, width: 15, height: 25)
+        )
+
+        let nilIDSelectsTarget = interpolator([
+            (animation2, nil, 0x111, styleA),
+        ])
+        XCTAssertEqual(nilIDSelectsTarget.activeDuration, 2)
     }
 
     func testDisplayListShapeRoleParticipatesInSurfaceMatching() {
