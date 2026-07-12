@@ -24,8 +24,150 @@ struct RBDisplayListInterpolatorOptionKey: RawRepresentable, Hashable {
 }
 
 // Interpolates between two DisplayList values for content-transition layers.
-// The current implementation uses local bounds and closure replay until typed command storage exists.
+// The local operation stream preserves item roles without mirroring RenderBox's private C++ ABI.
 final class RBDisplayListInterpolator: NSObject, NSCopying {
+    private struct ItemInterpolationInput {
+        var item: DisplayList.Item
+        var command: DisplayList.ItemCommand
+        var bounds: CGRect
+    }
+
+    private enum ItemInterpolationOperation {
+        case paired(source: ItemInterpolationInput, target: ItemInterpolationInput)
+        case removed(ItemInterpolationInput)
+        case inserted(ItemInterpolationInput)
+        case fallback(
+            sourceItems: [DisplayList.Item],
+            sourceBounds: CGRect,
+            targetItems: [DisplayList.Item],
+            targetBounds: CGRect
+        )
+
+        func reportedBounds(at progress: CGFloat) -> CGRect {
+            switch self {
+            case let .paired(source, target):
+                return RBDisplayListInterpolator.interpolatedBounds(
+                    from: source.bounds,
+                    to: target.bounds,
+                    progress: progress
+                )
+            case let .removed(source):
+                return source.bounds
+            case let .inserted(target):
+                return target.bounds
+            case let .fallback(_, sourceBounds, _, targetBounds):
+                return RBDisplayListInterpolator.interpolatedBounds(
+                    from: sourceBounds,
+                    to: targetBounds,
+                    progress: progress
+                )
+            }
+        }
+
+        func append(at progress: CGFloat, into contents: inout DisplayList) {
+            switch self {
+            case let .paired(source, target):
+                if RBDisplayListInterpolator.isTextItemPair(
+                    source.command,
+                    target.command
+                ) {
+                    appendTextPair(
+                        source: source,
+                        target: target,
+                        progress: progress,
+                        into: &contents
+                    )
+                    return
+                }
+                let outputBounds = reportedBounds(at: progress)
+                contents.appendCrossFadeItem(
+                    sourceItems: [source.item],
+                    sourceBounds: source.bounds,
+                    sourceOutputBounds: outputBounds,
+                    targetItems: [target.item],
+                    targetBounds: target.bounds,
+                    targetOutputBounds: outputBounds,
+                    bounds: outputBounds,
+                    sourceFraction: Float(progress),
+                    targetFraction: Float(progress)
+                )
+            case let .removed(source):
+                contents.appendCrossFadeItem(
+                    sourceItems: [source.item],
+                    sourceBounds: source.bounds,
+                    sourceOutputBounds: source.bounds,
+                    targetItems: [],
+                    targetBounds: nil,
+                    targetOutputBounds: nil,
+                    bounds: source.bounds,
+                    sourceFraction: Float(progress),
+                    targetFraction: 0
+                )
+            case let .inserted(target):
+                contents.appendCrossFadeItem(
+                    sourceItems: [],
+                    sourceBounds: nil,
+                    sourceOutputBounds: nil,
+                    targetItems: [target.item],
+                    targetBounds: target.bounds,
+                    targetOutputBounds: target.bounds,
+                    bounds: target.bounds,
+                    sourceFraction: 0,
+                    targetFraction: Float(progress)
+                )
+            case let .fallback(sourceItems, sourceBounds, targetItems, targetBounds):
+                let outputBounds = reportedBounds(at: progress)
+                contents.appendCrossFadeItem(
+                    sourceItems: sourceItems,
+                    sourceBounds: sourceBounds,
+                    sourceOutputBounds: outputBounds,
+                    targetItems: targetItems,
+                    targetBounds: targetBounds,
+                    targetOutputBounds: outputBounds,
+                    bounds: outputBounds,
+                    sourceFraction: Float(progress),
+                    targetFraction: Float(progress)
+                )
+            }
+        }
+
+        private func appendTextPair(
+            source: ItemInterpolationInput,
+            target: ItemInterpolationInput,
+            progress: CGFloat,
+            into contents: inout DisplayList
+        ) {
+            let center = CGPoint(x: target.bounds.midX, y: target.bounds.midY)
+            let sourceOutputBounds = RBDisplayListInterpolator.centeredBounds(
+                size: source.bounds.size,
+                at: center
+            )
+            let targetOutputBounds = RBDisplayListInterpolator.centeredBounds(
+                size: target.bounds.size,
+                at: center
+            )
+            let crossFadeBounds: CGRect
+            if progress <= 0 {
+                crossFadeBounds = sourceOutputBounds
+            } else if progress >= 1 {
+                crossFadeBounds = targetOutputBounds
+            } else {
+                crossFadeBounds = sourceOutputBounds.union(targetOutputBounds)
+            }
+            contents.appendCrossFadeItem(
+                sourceItems: [source.item],
+                sourceBounds: source.bounds,
+                sourceOutputBounds: sourceOutputBounds,
+                targetItems: [target.item],
+                targetBounds: target.bounds,
+                targetOutputBounds: targetOutputBounds,
+                bounds: crossFadeBounds,
+                sourceFraction: Float(progress),
+                targetFraction: Float(progress)
+            )
+        }
+    }
+
     var from: DisplayList
     private(set) var to: DisplayList
     let options: [RBDisplayListInterpolatorOptionKey: Any]
@@ -191,7 +333,6 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toItems: to.renderItems,
                 toCommands: to.itemCommands,
                 toFallbackBounds: toBounds,
-                outputFallbackBounds: outputBounds,
                 progress: clampedProgress,
                 into: &contents
             )
@@ -228,91 +369,26 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand],
         toFallbackBounds: CGRect,
-        outputFallbackBounds: CGRect,
         progress: CGFloat,
         into contents: inout DisplayList
     ) {
-        if canInterpolateRecordedItems(
+        let operations = itemInterpolationOperations(
             fromItems: fromItems,
             fromCommands: fromCommands,
             toItems: toItems,
-            toCommands: toCommands
-        ) {
-            let pairedCount = min(fromItems.count, toItems.count)
-            for index in 0..<pairedCount {
-                let sourceBounds = fromCommands[index].bounds!
-                let targetBounds = toCommands[index].bounds!
-                let outputBounds = interpolatedBounds(
-                    from: sourceBounds,
-                    to: targetBounds,
-                    progress: progress
-                )
-                let fromItem = fromItems[index]
-                let toItem = toItems[index]
-                if isTextItemPair(fromCommands[index], toCommands[index]) {
-                    let center = CGPoint(x: targetBounds.midX, y: targetBounds.midY)
-                    let sourceOutputBounds = centeredBounds(size: sourceBounds.size, at: center)
-                    let targetOutputBounds = centeredBounds(size: targetBounds.size, at: center)
-                    let crossFadeBounds: CGRect
-                    if progress <= 0 {
-                        crossFadeBounds = sourceOutputBounds
-                    } else if progress >= 1 {
-                        crossFadeBounds = targetOutputBounds
-                    } else {
-                        crossFadeBounds = sourceOutputBounds.union(targetOutputBounds)
-                    }
-                    contents.appendCrossFadeItem(
-                        sourceItems: [fromItem],
-                        sourceBounds: sourceBounds,
-                        sourceOutputBounds: sourceOutputBounds,
-                        targetItems: [toItem],
-                        targetBounds: targetBounds,
-                        targetOutputBounds: targetOutputBounds,
-                        bounds: crossFadeBounds,
-                        sourceFraction: Float(progress),
-                        targetFraction: Float(progress)
-                    )
-                    continue
-                }
-                contents.appendCrossFadeItem(
-                    sourceItems: [fromItem],
-                    sourceBounds: sourceBounds,
-                    sourceOutputBounds: outputBounds,
-                    targetItems: [toItem],
-                    targetBounds: targetBounds,
-                    targetOutputBounds: outputBounds,
-                    bounds: outputBounds,
-                    sourceFraction: Float(progress),
-                    targetFraction: Float(progress)
-                )
-            }
-
-            appendSourceExtraItems(
-                fromItems[pairedCount...],
-                commands: fromCommands[pairedCount...],
-                progress: progress,
-                into: &contents
-            )
-            appendTargetExtraItems(
-                toItems[pairedCount...],
-                commands: toCommands[pairedCount...],
-                progress: progress,
-                into: &contents
-            )
-            return
+            toCommands: toCommands,
+            allowsCountMismatch: true
+        ) ?? [
+            .fallback(
+                sourceItems: fromItems,
+                sourceBounds: fromFallbackBounds,
+                targetItems: toItems,
+                targetBounds: toFallbackBounds
+            ),
+        ]
+        for operation in operations {
+            operation.append(at: progress, into: &contents)
         }
-
-        contents.appendCrossFadeItem(
-            sourceItems: fromItems,
-            sourceBounds: fromFallbackBounds,
-            sourceOutputBounds: outputFallbackBounds,
-            targetItems: toItems,
-            targetBounds: toFallbackBounds,
-            targetOutputBounds: outputFallbackBounds,
-            bounds: outputFallbackBounds,
-            sourceFraction: Float(progress),
-            targetFraction: Float(progress)
-        )
     }
 
     private static func isTextItemPair(
@@ -394,50 +470,6 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 outputBounds: outputFallbackBounds,
                 opacity: Double(progress),
                 in: context
-            )
-        }
-    }
-
-    private static func appendSourceExtraItems(
-        _ items: ArraySlice<DisplayList.Item>,
-        commands: ArraySlice<DisplayList.ItemCommand>,
-        progress: CGFloat,
-        into contents: inout DisplayList
-    ) {
-        for (item, command) in zip(items, commands) {
-            let bounds = command.bounds!
-            contents.appendCrossFadeItem(
-                sourceItems: [item],
-                sourceBounds: bounds,
-                sourceOutputBounds: bounds,
-                targetItems: [],
-                targetBounds: nil,
-                targetOutputBounds: nil,
-                bounds: bounds,
-                sourceFraction: Float(progress),
-                targetFraction: 0
-            )
-        }
-    }
-
-    private static func appendTargetExtraItems(
-        _ items: ArraySlice<DisplayList.Item>,
-        commands: ArraySlice<DisplayList.ItemCommand>,
-        progress: CGFloat,
-        into contents: inout DisplayList
-    ) {
-        for (item, command) in zip(items, commands) {
-            let bounds = command.bounds!
-            contents.appendCrossFadeItem(
-                sourceItems: [],
-                sourceBounds: nil,
-                sourceOutputBounds: nil,
-                targetItems: [item],
-                targetBounds: bounds,
-                targetOutputBounds: bounds,
-                bounds: bounds,
-                sourceFraction: 0,
-                targetFraction: Float(progress)
             )
         }
     }
@@ -678,37 +710,18 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         progress: CGFloat,
         allowsCountMismatch: Bool
     ) -> CGRect? {
-        let canInterpolate = allowsCountMismatch
-            ? canInterpolateRecordedItems(
-                fromItems: fromItems,
-                fromCommands: fromCommands,
-                toItems: toItems,
-                toCommands: toCommands
-            )
-            : canInterpolateMatchingRecordedItems(
-                fromItems: fromItems,
-                fromCommands: fromCommands,
-                toItems: toItems,
-                toCommands: toCommands
-            )
-        guard canInterpolate else { return nil }
-
-        let pairedCount = min(fromCommands.count, toCommands.count)
-        var bounds = (0..<pairedCount).reduce(nil) { partial, index in
-            let bounds = interpolatedBounds(
-                from: fromCommands[index].bounds!,
-                to: toCommands[index].bounds!,
-                progress: progress
-            )
-            return union(partial, bounds)
+        guard let operations = itemInterpolationOperations(
+            fromItems: fromItems,
+            fromCommands: fromCommands,
+            toItems: toItems,
+            toCommands: toCommands,
+            allowsCountMismatch: allowsCountMismatch
+        ) else {
+            return nil
         }
-        bounds = fromCommands[pairedCount...].reduce(bounds) { partial, command in
-            union(partial, command.bounds!)
+        return operations.reduce(nil) { partial, operation in
+            union(partial, operation.reportedBounds(at: progress))
         }
-        bounds = toCommands[pairedCount...].reduce(bounds) { partial, command in
-            union(partial, command.bounds!)
-        }
-        return bounds
     }
 
     private static func union(_ lhs: CGRect?, _ rhs: CGRect?) -> CGRect? {
@@ -723,14 +736,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand]
     ) -> Bool {
-        guard !fromItems.isEmpty,
-              !toItems.isEmpty,
-              fromCommands.count == fromItems.count,
-              toCommands.count == toItems.count else {
-            return false
-        }
-        return fromCommands.allSatisfy { $0.bounds != nil } &&
-            toCommands.allSatisfy { $0.bounds != nil }
+        itemInterpolationOperations(
+            fromItems: fromItems,
+            fromCommands: fromCommands,
+            toItems: toItems,
+            toCommands: toCommands,
+            allowsCountMismatch: true
+        ) != nil
     }
 
     private static func canInterpolateMatchingRecordedItems(
@@ -739,13 +751,72 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand]
     ) -> Bool {
-        fromItems.count == toItems.count &&
-            canInterpolateRecordedItems(
-                fromItems: fromItems,
-                fromCommands: fromCommands,
-                toItems: toItems,
-                toCommands: toCommands
-            )
+        itemInterpolationOperations(
+            fromItems: fromItems,
+            fromCommands: fromCommands,
+            toItems: toItems,
+            toCommands: toCommands,
+            allowsCountMismatch: false
+        ) != nil
+    }
+
+    private static func itemInterpolationOperations(
+        fromItems: [DisplayList.Item],
+        fromCommands: [DisplayList.ItemCommand],
+        toItems: [DisplayList.Item],
+        toCommands: [DisplayList.ItemCommand],
+        allowsCountMismatch: Bool
+    ) -> [ItemInterpolationOperation]? {
+        // Current runtime fixtures pin source-order pairing for this reduced carrier. Keeping
+        // planning separate lets a future classifier/diff producer replace only this step.
+        guard !fromItems.isEmpty,
+              !toItems.isEmpty,
+              allowsCountMismatch || fromItems.count == toItems.count,
+              let sourceInputs = itemInterpolationInputs(
+                items: fromItems,
+                commands: fromCommands
+              ),
+              let targetInputs = itemInterpolationInputs(
+                items: toItems,
+                commands: toCommands
+              ) else {
+            return nil
+        }
+
+        let pairedCount = min(sourceInputs.count, targetInputs.count)
+        var operations: [ItemInterpolationOperation] = []
+        operations.reserveCapacity(max(sourceInputs.count, targetInputs.count))
+        for index in 0..<pairedCount {
+            operations.append(.paired(
+                source: sourceInputs[index],
+                target: targetInputs[index]
+            ))
+        }
+        for input in sourceInputs[pairedCount...] {
+            operations.append(.removed(input))
+        }
+        for input in targetInputs[pairedCount...] {
+            operations.append(.inserted(input))
+        }
+        return operations
+    }
+
+    private static func itemInterpolationInputs(
+        items: [DisplayList.Item],
+        commands: [DisplayList.ItemCommand]
+    ) -> [ItemInterpolationInput]? {
+        guard commands.count == items.count else { return nil }
+        var inputs: [ItemInterpolationInput] = []
+        inputs.reserveCapacity(items.count)
+        for (item, command) in zip(items, commands) {
+            guard let bounds = command.bounds else { return nil }
+            inputs.append(ItemInterpolationInput(
+                item: item,
+                command: command,
+                bounds: bounds
+            ))
+        }
+        return inputs
     }
 
     private static func interpolatedBounds(

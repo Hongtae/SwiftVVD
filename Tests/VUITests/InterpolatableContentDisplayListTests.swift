@@ -1715,6 +1715,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0.5])
         XCTAssertEqual(sourceExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0])
         XCTAssertEqual(sourceExtraMidpoint.interpolationBounds, CGRect(x: -40, y: 5, width: 65, height: 30))
+        guard let sourceExtraOperations = typedCrossFades(in: sourceExtraMidpoint) else {
+            return XCTFail("source-extra interpolation should use typed operations")
+        }
+        XCTAssertNotNil(sourceExtraOperations[0].source)
+        XCTAssertNotNil(sourceExtraOperations[0].target)
+        XCTAssertNotNil(sourceExtraOperations[1].source)
+        XCTAssertNil(sourceExtraOperations[1].target)
 
         let sourceExtraEnd = sourceExtraInterpolator.copyContents(withProgress: 1)
         XCTAssertEqual(
@@ -1772,6 +1779,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.sourceFraction), [0.5, 0])
         XCTAssertEqual(targetExtraMidpoint.itemRecords.map(\.targetFraction), [0.5, 0.5])
         XCTAssertEqual(targetExtraMidpoint.interpolationBounds, CGRect(x: 5, y: 5, width: 20, height: 30))
+        guard let targetExtraOperations = typedCrossFades(in: targetExtraMidpoint) else {
+            return XCTFail("target-extra interpolation should use typed operations")
+        }
+        XCTAssertNotNil(targetExtraOperations[0].source)
+        XCTAssertNotNil(targetExtraOperations[0].target)
+        XCTAssertNil(targetExtraOperations[1].source)
+        XCTAssertNotNil(targetExtraOperations[1].target)
 
         let targetExtraEnd = targetExtraInterpolator.copyContents(withProgress: 1)
         XCTAssertEqual(
@@ -1784,6 +1798,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(targetExtraEnd.itemRecords.map(\.sourceFraction), [1, 0])
         XCTAssertEqual(targetExtraEnd.itemRecords.map(\.targetFraction), [1, 1])
         XCTAssertEqual(targetExtraEnd.interpolationBounds, CGRect(x: 5, y: 10, width: 35, height: 25))
+    }
+
+    func testRBDisplayListInterpolatorUsesTypedFallbackForOneSidedContents() {
+        var source = DisplayList()
+        source.interpolationBounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let target = makeDisplayList(
+            itemBounds: [CGRect(x: 20, y: 10, width: 20, height: 20)],
+            itemKind: .shapeFill
+        )
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.opacity.rbTransition]
+        )
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(
+            midpoint.interpolationBounds,
+            CGRect(x: 10, y: 5, width: 15, height: 15)
+        )
+        guard let operations = typedCrossFades(in: midpoint) else {
+            return XCTFail("one-sided interpolation should use a typed fallback operation")
+        }
+        XCTAssertEqual(operations.count, 1)
+        XCTAssertNil(operations[0].source)
+        XCTAssertEqual(
+            operations[0].target?.sourceBounds,
+            CGRect(x: 20, y: 10, width: 20, height: 20)
+        )
+        XCTAssertEqual(
+            operations[0].target?.outputBounds,
+            CGRect(x: 10, y: 5, width: 15, height: 15)
+        )
     }
 
     func testRBDisplayListInterpolatorKeepsTextCrossFadeCenteredOnLiveTarget() throws {
@@ -4512,6 +4559,21 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             )
         )
         return source
+    }
+
+    private func typedCrossFades(
+        in list: DisplayList
+    ) -> [DisplayList.Content.CrossFadeValue]? {
+        var values: [DisplayList.Content.CrossFadeValue] = []
+        values.reserveCapacity(list.items.count)
+        for item in list.items {
+            guard case let .content(content) = item.value,
+                  case let .crossFade(value) = content.value else {
+                return nil
+            }
+            values.append(value)
+        }
+        return values
     }
 
     private func displayList<Modifier: ViewModifier>(
