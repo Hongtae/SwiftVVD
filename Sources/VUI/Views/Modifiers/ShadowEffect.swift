@@ -89,27 +89,13 @@ private enum _ShadowEffectSupport {
 
         guard !source.renderItems.isEmpty else { return result }
 
-        let items = source.renderItems
         result.appendShadowItem(
             bounds: source.interpolationBounds,
             color: style.color.base,
             radius: style.radius,
-            offset: style.offset
-        ) { context in
-            context.drawLayer { layerContext in
-                layerContext.addFilter(
-                    .shadow(
-                        color: Color(style.color),
-                        radius: style.radius,
-                        x: style.offset.width,
-                        y: style.offset.height
-                    )
-                )
-                for item in items {
-                    item(layerContext)
-                }
-            }
-        }
+            offset: style.offset,
+            contents: source.renderItemList
+        )
         return result
     }
 }

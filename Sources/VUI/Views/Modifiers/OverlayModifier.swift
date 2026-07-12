@@ -169,14 +169,13 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = Rectangle().path(in: frame)
                 list.appendShapeItem(
+                    path: path,
                     role: .fill,
                     style: m.style,
                     bounds: frame,
                     fillStyle: FillStyle(),
                     environment: environment
-                ) { context in
-                    context.fill(path, with: .style(m.style))
-                }
+                )
             }
             return list
         }
@@ -223,14 +222,13 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
                 list.appendShapeItem(
+                    path: path,
                     role: .fill,
                     style: m.style,
                     bounds: frame,
                     fillStyle: m.fillStyle,
                     environment: environment
-                ) { context in
-                    context.fill(path, with: .style(m.style), style: m.fillStyle)
-                }
+                )
             }
             return list
         }

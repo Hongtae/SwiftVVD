@@ -845,6 +845,140 @@ struct DisplayList {
     }
 
     struct Content {
+        // Typed drawing payloads retain their source geometry and accumulate replay transforms.
+        // This keeps later interpolation and renderer passes from recovering state from closures.
+        struct ShapeValue {
+            var path: Path
+            var shading: GraphicsContext.Shading
+            var fillStyle: FillStyle
+            var strokeStyle: StrokeStyle?
+            var transform: CGAffineTransform
+            var command: ItemCommand
+
+            func draw(in context: GraphicsContext) {
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                guard case let .shape(role, _, _, _, _) = command else {
+                    preconditionFailure("DisplayList.ShapeValue requires a shape command")
+                }
+                switch role {
+                case .stroke:
+                    guard let strokeStyle else { return }
+                    context.stroke(path, with: shading, style: strokeStyle)
+                case .fill, .separator:
+                    context.fill(path, with: shading, style: fillStyle)
+                }
+            }
+
+            func transformed(
+                command: ItemCommand,
+                by affineTransform: CGAffineTransform
+            ) -> Self {
+                var copy = self
+                copy.command = command
+                copy.transform = transform.concatenating(affineTransform)
+                return copy
+            }
+        }
+
+        struct ImageValue {
+            var image: GraphicsContext.ResolvedImage
+            var frame: CGRect
+            var transform: CGAffineTransform
+            var command: ItemCommand
+
+            func draw(in context: GraphicsContext) {
+                guard frame.width > 0, frame.height > 0 else { return }
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                context.draw(image, in: frame)
+            }
+
+            func transformed(
+                command: ItemCommand,
+                by affineTransform: CGAffineTransform
+            ) -> Self {
+                var copy = self
+                copy.command = command
+                copy.transform = transform.concatenating(affineTransform)
+                return copy
+            }
+        }
+
+        struct StyleValue {
+            enum Style {
+                case opacity(Double)
+                case blur(radius: CGFloat, isOpaque: Bool)
+                case blendMode(BlendMode)
+                case shadow(ItemRecord.ShadowRecord, GraphicsContext.Filter)
+                case colorFilter(ItemRecord.ColorFilterRecord, GraphicsContext.Filter)
+            }
+
+            var style: Style
+            var contents: DisplayList
+            var transform: CGAffineTransform
+            var command: ItemCommand
+
+            func draw(in context: GraphicsContext) {
+                draw(in: context) { contents, context in
+                    for item in contents.items {
+                        item(context)
+                    }
+                }
+            }
+
+            func draw(
+                in context: GraphicsContext,
+                replayContents: (DisplayList, GraphicsContext) -> Void
+            ) {
+                // Nested style contents must replay through the caller's renderer so animation
+                // sampling, identity traversal, and callback caches remain in one render pass.
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                switch style {
+                case let .opacity(opacity):
+                    guard opacity > 0 else { return }
+                    context.opacity *= opacity
+                    guard context.opacity > 0 else { return }
+                    context.drawLayer { layer in
+                        replayContents(contents, layer)
+                    }
+                case let .blur(radius, isOpaque):
+                    context.drawLayer { layer in
+                        let options: GraphicsContext.BlurOptions = isOpaque ? .opaque : []
+                        layer.addFilter(.blur(radius: radius, options: options))
+                        replayContents(contents, layer)
+                    }
+                case let .blendMode(blendMode):
+                    context.blendMode = blendMode.graphicsContextBlendMode
+                    context.drawLayer { layer in
+                        replayContents(contents, layer)
+                    }
+                case let .shadow(_, filter), let .colorFilter(_, filter):
+                    context.drawLayer { layer in
+                        layer.addFilter(filter)
+                        replayContents(contents, layer)
+                    }
+                }
+            }
+
+            func transformed(
+                command: ItemCommand,
+                by affineTransform: CGAffineTransform
+            ) -> Self {
+                var copy = self
+                copy.command = command
+                copy.transform = transform.concatenating(affineTransform)
+                return copy
+            }
+        }
+
         struct TextValue {
             var view: StyledTextContentView
             var size: CGSize
@@ -904,6 +1038,9 @@ struct DisplayList {
 
         enum Value {
             case backend(ItemCommand, (GraphicsContext) -> Void)
+            case shape(ShapeValue)
+            case image(ImageValue)
+            case style(StyleValue)
             case text(TextValue)
             case flattened(DisplayList, CGPoint, RasterizationOptions)
             case drawing(any RBDisplayListContents, CGPoint, RasterizationOptions)
@@ -922,6 +1059,61 @@ struct DisplayList {
             body: @escaping (GraphicsContext) -> Void
         ) {
             self.value = .backend(command, body)
+            self.seed = seed
+            self.environment = environment
+        }
+
+        init(
+            path: Path,
+            shading: GraphicsContext.Shading,
+            fillStyle: FillStyle,
+            strokeStyle: StrokeStyle?,
+            command: ItemCommand,
+            seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil
+        ) {
+            self.value = .shape(ShapeValue(
+                path: path,
+                shading: shading,
+                fillStyle: fillStyle,
+                strokeStyle: strokeStyle,
+                transform: .identity,
+                command: command
+            ))
+            self.seed = seed
+            self.environment = environment
+        }
+
+        init(
+            image: GraphicsContext.ResolvedImage,
+            frame: CGRect,
+            command: ItemCommand,
+            seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil
+        ) {
+            self.value = .image(ImageValue(
+                image: image,
+                frame: frame,
+                transform: .identity,
+                command: command
+            ))
+            self.seed = seed
+            self.environment = environment
+        }
+
+        init(
+            style: StyleValue.Style,
+            contents: DisplayList,
+            command: ItemCommand,
+            seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil
+        ) {
+            self.value = .style(StyleValue(
+                style: style,
+                contents: contents,
+                transform: .identity,
+                command: command
+            ))
             self.seed = seed
             self.environment = environment
         }
@@ -973,6 +1165,12 @@ struct DisplayList {
             switch value {
             case let .backend(command, _):
                 return command
+            case let .shape(shape):
+                return shape.command
+            case let .image(image):
+                return image.command
+            case let .style(style):
+                return style.command
             case let .text(text):
                 return text.command
             case let .flattened(list, origin, _):
@@ -999,6 +1197,12 @@ struct DisplayList {
             switch value {
             case let .backend(_, body):
                 body(context)
+            case let .shape(shape):
+                shape.draw(in: context)
+            case let .image(image):
+                image.draw(in: context)
+            case let .style(style):
+                style.draw(in: context)
             case let .text(text):
                 text.draw(in: context)
             case let .flattened(list, origin, _):
@@ -1026,6 +1230,27 @@ struct DisplayList {
                     context.concatenate(affineTransform)
                     self.draw(in: context)
                 }
+            case let .shape(shape):
+                var copy = self
+                copy.value = .shape(shape.transformed(
+                    command: transformedCommand,
+                    by: affineTransform
+                ))
+                return copy
+            case let .image(image):
+                var copy = self
+                copy.value = .image(image.transformed(
+                    command: transformedCommand,
+                    by: affineTransform
+                ))
+                return copy
+            case let .style(style):
+                var copy = self
+                copy.value = .style(style.transformed(
+                    command: transformedCommand,
+                    by: affineTransform
+                ))
+                return copy
             case let .text(text):
                 var copy = self
                 copy.value = .text(text.transformed(
@@ -1089,6 +1314,67 @@ struct DisplayList {
             self.frame = frame ?? contents.interpolationBounds ?? .zero
             self.version = version
             self.value = .effect(effect, contents)
+            self.identity = identity
+        }
+
+        init(
+            path: Path,
+            shading: GraphicsContext.Shading,
+            fillStyle: FillStyle,
+            strokeStyle: StrokeStyle?,
+            command: ItemCommand,
+            environment: EnvironmentValues? = nil,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0)
+        ) {
+            self.frame = command.bounds ?? .zero
+            self.version = version
+            self.value = .content(Content(
+                path: path,
+                shading: shading,
+                fillStyle: fillStyle,
+                strokeStyle: strokeStyle,
+                command: command,
+                environment: environment
+            ))
+            self.identity = identity
+        }
+
+        init(
+            image: GraphicsContext.ResolvedImage,
+            frame: CGRect,
+            command: ItemCommand,
+            environment: EnvironmentValues? = nil,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0)
+        ) {
+            self.frame = command.bounds ?? frame
+            self.version = version
+            self.value = .content(Content(
+                image: image,
+                frame: frame,
+                command: command,
+                environment: environment
+            ))
+            self.identity = identity
+        }
+
+        init(
+            style: Content.StyleValue.Style,
+            contents: DisplayList,
+            command: ItemCommand,
+            environment: EnvironmentValues? = nil,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0)
+        ) {
+            self.frame = command.bounds ?? contents.interpolationBounds ?? .zero
+            self.version = version
+            self.value = .content(Content(
+                style: style,
+                contents: contents,
+                command: command,
+                environment: environment
+            ))
             self.identity = identity
         }
 
@@ -1188,6 +1474,16 @@ struct DisplayList {
         }
     }
 
+    var renderItemList: DisplayList {
+        // Modifier styles wrap only ordinary render items. Graph effects stay at their original
+        // level and are recursively rewritten by the modifier before this list is constructed.
+        var list = DisplayList()
+        list.items = renderItems
+        list.styles = styles
+        list.recordInterpolationBounds(interpolationBounds)
+        return list
+    }
+
     var effects: [EffectItem] {
         items.compactMap(\.effectItem)
     }
@@ -1259,6 +1555,35 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendShapeItem<S: ShapeStyle>(
+        path: Path,
+        role: ShapeRole,
+        style: S,
+        bounds: CGRect? = nil,
+        fillStyle: FillStyle = FillStyle(),
+        strokeStyle: StrokeStyle? = nil,
+        environment: EnvironmentValues? = nil
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let isStroke = role == .stroke
+        let command = ItemCommand.shape(
+            role: role,
+            style: Self.shapeStyleRecord(for: style),
+            fillStyle: isStroke ? nil : fillStyle,
+            strokeStyle: isStroke ? strokeStyle : nil,
+            bounds: bounds
+        )
+        items.append(Item(
+            path: path,
+            shading: .style(style),
+            fillStyle: fillStyle,
+            strokeStyle: isStroke ? strokeStyle : nil,
+            command: command,
+            environment: environment
+        ))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendImageItem(
         _ image: GraphicsContext.ResolvedImage,
         bounds: CGRect? = nil,
@@ -1275,6 +1600,28 @@ struct DisplayList {
         )
         items.append(Item(command: command, environment: environment, item))
         recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendImageItem(
+        _ image: GraphicsContext.ResolvedImage,
+        bounds: CGRect,
+        environment: EnvironmentValues? = nil
+    ) {
+        let commandBounds = Self.itemRecordBounds(bounds)
+        let command = ItemCommand.image(
+            ItemRecord.ImageRecord(
+                image,
+                shading: image.shading.flatMap(Self.shadingRecord(for:))
+            ),
+            bounds: commandBounds
+        )
+        items.append(Item(
+            image: image,
+            frame: bounds,
+            command: command,
+            environment: environment
+        ))
+        recordInterpolationBounds(commandBounds)
     }
 
     mutating func appendTextItem(
@@ -1355,6 +1702,21 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendOpacityItem(
+        bounds: CGRect? = nil,
+        opacity: Double,
+        contents: DisplayList
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let command = ItemCommand.effect(.opacity(opacity), bounds: bounds)
+        items.append(Item(
+            style: .opacity(opacity),
+            contents: contents,
+            command: command
+        ))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendBlurItem(
         bounds: CGRect? = nil,
         radius: CGFloat,
@@ -1367,6 +1729,25 @@ struct DisplayList {
             bounds: bounds
         )
         items.append(Item(command: command, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendBlurItem(
+        bounds: CGRect? = nil,
+        radius: CGFloat,
+        isOpaque: Bool,
+        contents: DisplayList
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let command = ItemCommand.effect(
+            .blur(radius: radius, isOpaque: isOpaque),
+            bounds: bounds
+        )
+        items.append(Item(
+            style: .blur(radius: radius, isOpaque: isOpaque),
+            contents: contents,
+            command: command
+        ))
         recordInterpolationBounds(bounds)
     }
 
@@ -1446,6 +1827,21 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendBlendModeItem(
+        bounds: CGRect? = nil,
+        blendMode: BlendMode,
+        contents: DisplayList
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let command = ItemCommand.effect(.blendMode(blendMode), bounds: bounds)
+        items.append(Item(
+            style: .blendMode(blendMode),
+            contents: contents,
+            command: command
+        ))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendShadowItem(
         bounds: CGRect? = nil,
         color: Color.Resolved,
@@ -1470,6 +1866,40 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
+    mutating func appendShadowItem(
+        bounds: CGRect? = nil,
+        color: Color.Resolved,
+        radius: CGFloat,
+        offset: CGSize,
+        blendMode: GraphicsContext.BlendMode = .normal,
+        options: GraphicsContext.ShadowOptions = GraphicsContext.ShadowOptions(),
+        contents: DisplayList
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let record = ItemRecord.ShadowRecord(
+            color: color,
+            radius: radius,
+            offset: offset,
+            blendModeRawValue: blendMode.rawValue,
+            optionsRawValue: options.rawValue
+        )
+        let command = ItemCommand.effect(.shadow(record), bounds: bounds)
+        let filter = GraphicsContext.Filter.shadow(
+            color: Color(color),
+            radius: radius,
+            x: offset.width,
+            y: offset.height,
+            blendMode: blendMode,
+            options: options
+        )
+        items.append(Item(
+            style: .shadow(record, filter),
+            contents: contents,
+            command: command
+        ))
+        recordInterpolationBounds(bounds)
+    }
+
     mutating func appendColorFilterItem(
         bounds: CGRect? = nil,
         filter: ItemRecord.ColorFilterRecord,
@@ -1478,6 +1908,22 @@ struct DisplayList {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(.colorFilter(filter), bounds: bounds)
         items.append(Item(command: command, item))
+        recordInterpolationBounds(bounds)
+    }
+
+    mutating func appendColorFilterItem(
+        bounds: CGRect? = nil,
+        filter record: ItemRecord.ColorFilterRecord,
+        graphicsFilter: GraphicsContext.Filter,
+        contents: DisplayList
+    ) {
+        let bounds = Self.itemRecordBounds(bounds)
+        let command = ItemCommand.effect(.colorFilter(record), bounds: bounds)
+        items.append(Item(
+            style: .colorFilter(record, graphicsFilter),
+            contents: contents,
+            command: command
+        ))
         recordInterpolationBounds(bounds)
     }
 
@@ -1758,7 +2204,15 @@ struct DisplayList {
                 let previous = index.enter(identity: item.identity)
                 var sampledItem = item
                 switch item.value {
-                case .content, .empty:
+                case let .content(content):
+                    if case var .style(style) = content.value {
+                        var sampledContent = content
+                        style.contents = sampleItems(in: style.contents)
+                        sampledContent.value = .style(style)
+                        sampledItem.value = .content(sampledContent)
+                    }
+
+                case .empty:
                     break
 
                 case let .effect(effect, contents):
@@ -1825,6 +2279,14 @@ struct DisplayList {
                 switch content.value {
                 case .backend:
                     content.draw(in: context)
+                case .shape, .image:
+                    content.draw(in: context)
+                case let .style(style):
+                    render(
+                        style: style,
+                        context: content.renderContext(from: context),
+                        includeDebug: includeDebug
+                    )
                 case let .text(text):
                     let context = content.renderContext(from: context)
                     if text.view.renderer != nil {
@@ -1874,6 +2336,20 @@ struct DisplayList {
 
             case .empty:
                 break
+            }
+        }
+
+        private func render(
+            style: Content.StyleValue,
+            context: GraphicsContext,
+            includeDebug: Bool
+        ) {
+            style.draw(in: context) { contents, context in
+                self.renderItems(
+                    in: contents,
+                    context: context,
+                    includeDebug: includeDebug
+                )
             }
         }
 
@@ -2014,6 +2490,26 @@ struct DisplayList {
             case let (.content(lhs), .content(rhs)):
                 guard lhs.seed == rhs.seed else { return false }
                 switch (lhs.value, rhs.value) {
+                case let (.shape(lhsShape), .shape(rhsShape)):
+                    return lhsShape.path == rhsShape.path &&
+                        lhsShape.fillStyle == rhsShape.fillStyle &&
+                        lhsShape.strokeStyle == rhsShape.strokeStyle &&
+                        lhsShape.transform == rhsShape.transform &&
+                        lhsShape.command == rhsShape.command
+                case (.shape, _), (_, .shape):
+                    return false
+                case let (.image(lhsImage), .image(rhsImage)):
+                    return lhsImage.frame == rhsImage.frame &&
+                        lhsImage.transform == rhsImage.transform &&
+                        lhsImage.command == rhsImage.command
+                case (.image, _), (_, .image):
+                    return false
+                case let (.style(lhsStyle), .style(rhsStyle)):
+                    return lhsStyle.transform == rhsStyle.transform &&
+                        lhsStyle.command == rhsStyle.command &&
+                        lhsStyle.contents.hasSameInterpolationSurface(as: rhsStyle.contents)
+                case (.style, _), (_, .style):
+                    return false
                 case let (.flattened(lhsList, lhsOrigin, lhsOptions),
                           .flattened(rhsList, rhsOrigin, rhsOptions)):
                     return lhsOrigin == rhsOrigin &&

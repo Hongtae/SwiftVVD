@@ -79,20 +79,11 @@ enum _OpacityEffectSupport {
             return result
         }
 
-        let items = source.renderItems
         result.appendOpacityItem(
             bounds: source.interpolationBounds,
-            opacity: opacity
-        ) { context in
-            var context = context
-            context.opacity *= opacity
-            guard context.opacity > 0 else { return }
-            context.drawLayer { layerContext in
-                for item in items {
-                    item(layerContext)
-                }
-            }
-        }
+            opacity: opacity,
+            contents: source.renderItemList
+        )
         return result
     }
 }

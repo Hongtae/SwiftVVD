@@ -96,18 +96,12 @@ private enum _ColorFilterEffectSupport {
             return result
         }
 
-        let items = source.renderItems
         result.appendColorFilterItem(
             bounds: source.interpolationBounds,
-            filter: configuration.record
-        ) { context in
-            context.drawLayer { layerContext in
-                layerContext.addFilter(configuration.filter)
-                for item in items {
-                    item(layerContext)
-                }
-            }
-        }
+            filter: configuration.record,
+            graphicsFilter: configuration.filter,
+            contents: source.renderItemList
+        )
         return result
     }
 }

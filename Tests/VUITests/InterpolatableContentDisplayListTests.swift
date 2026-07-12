@@ -619,6 +619,64 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertFalse(thin.hasSameInterpolationSurface(as: thick))
     }
 
+    func testTypedShapeContentPreservesPayloadTransformAndSurfaceIdentity() throws {
+        let bounds = CGRect(x: 2, y: 3, width: 10, height: 12)
+        let path = Path(bounds)
+
+        var source = DisplayList()
+        source.appendShapeItem(
+            path: path,
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: FillStyle(eoFill: true)
+        )
+
+        let item = try XCTUnwrap(source.items.first)
+        guard case let .content(content) = item.value,
+              case let .shape(shape) = content.value else {
+            return XCTFail("shape should use typed display-list content")
+        }
+        XCTAssertEqual(shape.path, path)
+        XCTAssertEqual(shape.fillStyle, FillStyle(eoFill: true))
+        XCTAssertEqual(shape.transform, .identity)
+        XCTAssertEqual(shape.command.record.kind, .shapeFill)
+
+        var same = DisplayList()
+        same.appendShapeItem(
+            path: path,
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: FillStyle(eoFill: true)
+        )
+        var changedPath = DisplayList()
+        changedPath.appendShapeItem(
+            path: Path(ellipseIn: bounds),
+            role: .fill,
+            style: Color.red,
+            bounds: bounds,
+            fillStyle: FillStyle(eoFill: true)
+        )
+        XCTAssertTrue(source.hasSameInterpolationSurface(as: same))
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: changedPath))
+
+        let transform = CGAffineTransform(translationX: 11, y: 13)
+        var transformed = DisplayList()
+        transformed.appendTransformedItem(item, affineTransform: transform)
+        let transformedItem = try XCTUnwrap(transformed.items.first)
+        guard case let .content(transformedContent) = transformedItem.value,
+              case let .shape(transformedShape) = transformedContent.value else {
+            return XCTFail("transformed shape should remain typed content")
+        }
+        XCTAssertEqual(transformedShape.path, path)
+        XCTAssertEqual(transformedShape.transform, transform)
+        XCTAssertEqual(
+            transformedShape.command.bounds,
+            bounds.offsetBy(dx: 11, dy: 13)
+        )
+    }
+
     func testDisplayListImagePayloadParticipatesInSurfaceMatching() {
         let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
 
@@ -683,6 +741,39 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertFalse(changedShadingPresence.hasSameInterpolationSurface(as: changedShadingColor))
         XCTAssertTrue(sameTexture.hasSameInterpolationSurface(as: sameTextureAgain))
         XCTAssertFalse(sameTexture.hasSameInterpolationSurface(as: differentTexture))
+    }
+
+    func testTypedImageContentPreservesPayloadAcrossTransformation() throws {
+        let bounds = CGRect(x: 2, y: 3, width: 10, height: 12)
+        let image = makeResolvedImage(baseline: 4, shading: .color(.red))
+        var source = DisplayList()
+        source.appendImageItem(image, bounds: bounds)
+
+        let item = try XCTUnwrap(source.items.first)
+        guard case let .content(content) = item.value,
+              case let .image(imageValue) = content.value else {
+            return XCTFail("image should use typed display-list content")
+        }
+        XCTAssertEqual(imageValue.image.baseline, 4)
+        XCTAssertEqual(imageValue.frame, bounds)
+        XCTAssertEqual(imageValue.transform, .identity)
+        XCTAssertEqual(imageValue.command.record.kind, .image)
+
+        let transform = CGAffineTransform(a: 1, b: 0.25, c: 0, d: 1, tx: 7, ty: 9)
+        var transformed = DisplayList()
+        transformed.appendTransformedItem(item, affineTransform: transform)
+        let transformedItem = try XCTUnwrap(transformed.items.first)
+        guard case let .content(transformedContent) = transformedItem.value,
+              case let .image(transformedImage) = transformedContent.value else {
+            return XCTFail("transformed image should remain typed content")
+        }
+        XCTAssertEqual(transformedImage.image.baseline, 4)
+        XCTAssertEqual(transformedImage.frame, bounds)
+        XCTAssertEqual(transformedImage.transform, transform)
+        XCTAssertEqual(
+            transformedImage.command.bounds,
+            bounds.applying(transform).standardized
+        )
     }
 
     func testDisplayListTextForegroundPayloadParticipatesInSurfaceMatching() {
@@ -1827,6 +1918,84 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(brightnessContents.itemRecords.first?.effectKind, .colorFilter)
         XCTAssertEqual(brightnessContents.itemRecords.first?.colorFilter?.kind, .brightness)
         XCTAssertEqual(brightnessContents.itemRecords.first?.colorFilter?.amount, 0.2)
+    }
+
+    func testDisplayListModifiersStoreTypedStyleContents() throws {
+        let bounds = CGRect(x: 2, y: 3, width: 10, height: 12)
+        var source = DisplayList()
+        source.appendShapeItem(
+            path: Path(bounds),
+            role: .fill,
+            style: Color.red,
+            bounds: bounds
+        )
+
+        let opacity = try displayList(
+            applying: _OpacityEffect(opacity: 0.5),
+            to: source
+        )
+        let opacityItem = try XCTUnwrap(opacity.items.first)
+        guard case let .content(opacityContent) = opacityItem.value,
+              case let .style(opacityStyle) = opacityContent.value,
+              case let .opacity(value) = opacityStyle.style else {
+            return XCTFail("opacity should use typed style content")
+        }
+        XCTAssertEqual(value, 0.5)
+        XCTAssertEqual(opacityStyle.contents.items.count, 1)
+        XCTAssertEqual(opacityStyle.contents.itemRecords.first?.kind, .shapeFill)
+
+        var changedSource = DisplayList()
+        changedSource.appendShapeItem(
+            path: Path(ellipseIn: bounds),
+            role: .fill,
+            style: Color.red,
+            bounds: bounds
+        )
+        let changedOpacity = try displayList(
+            applying: _OpacityEffect(opacity: 0.5),
+            to: changedSource
+        )
+        XCTAssertFalse(opacity.hasSameInterpolationSurface(as: changedOpacity))
+
+        let blur = try displayList(
+            applying: _BlurEffect(radius: 4, opaque: true),
+            to: source
+        )
+        let blurItem = try XCTUnwrap(blur.items.first)
+        guard case let .content(blurContent) = blurItem.value,
+              case let .style(blurStyle) = blurContent.value,
+              case let .blur(radius, isOpaque) = blurStyle.style else {
+            return XCTFail("blur should use typed style content")
+        }
+        XCTAssertEqual(radius, 4)
+        XCTAssertTrue(isOpaque)
+
+        let blend = try displayList(
+            applying: _BlendModeEffect(blendMode: .multiply),
+            to: source
+        )
+        let blendItem = try XCTUnwrap(blend.items.first)
+        guard case let .content(blendContent) = blendItem.value,
+              case let .style(blendStyle) = blendContent.value,
+              case let .blendMode(mode) = blendStyle.style else {
+            return XCTFail("blend mode should use typed style content")
+        }
+        XCTAssertEqual(mode, .multiply)
+
+        let transform = CGAffineTransform(translationX: 7, y: 9)
+        var transformed = DisplayList()
+        transformed.appendTransformedItem(opacityItem, affineTransform: transform)
+        let transformedItem = try XCTUnwrap(transformed.items.first)
+        guard case let .content(transformedContent) = transformedItem.value,
+              case let .style(transformedStyle) = transformedContent.value else {
+            return XCTFail("transformed style should remain typed content")
+        }
+        XCTAssertEqual(transformedStyle.transform, transform)
+        XCTAssertEqual(transformedStyle.contents.items.count, 1)
+        XCTAssertEqual(
+            transformedStyle.command.bounds,
+            bounds.offsetBy(dx: 7, dy: 9)
+        )
     }
 
     func testDisplayListModifierPayloadsParticipateInSurfaceMatching() throws {

@@ -66,36 +66,50 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
                 let strokeStyle = (shape as? ShapeStrokeStyleProviding)?.strokeStyle
                 if let animatedColorStyle {
                     let style = animatedColorStyle.value
-                    list.appendShapeItem(
-                        role: Content.role,
-                        style: style,
-                        bounds: frame,
-                        fillStyle: v.fillStyle,
-                        strokeStyle: strokeStyle,
-                        environment: environment
-                    ) { context in
-                        if let drawer = shape as? ShapeDrawer {
+                    if let drawer = shape as? ShapeDrawer {
+                        list.appendShapeItem(
+                            role: Content.role,
+                            style: style,
+                            bounds: frame,
+                            fillStyle: v.fillStyle,
+                            strokeStyle: strokeStyle,
+                            environment: environment
+                        ) { context in
                             drawer._draw(in: frame, style: style, fillStyle: v.fillStyle, context: context)
-                        } else {
-                            let path = shape.path(in: frame)
-                            context.fill(path, with: .style(style), style: v.fillStyle)
                         }
+                    } else {
+                        list.appendShapeItem(
+                            path: shape.path(in: frame),
+                            role: Content.role,
+                            style: style,
+                            bounds: frame,
+                            fillStyle: v.fillStyle,
+                            strokeStyle: strokeStyle,
+                            environment: environment
+                        )
                     }
                 } else {
-                    list.appendShapeItem(
-                        role: Content.role,
-                        style: v.style,
-                        bounds: frame,
-                        fillStyle: v.fillStyle,
-                        strokeStyle: strokeStyle,
-                        environment: environment
-                    ) { context in
-                        if let drawer = shape as? ShapeDrawer {
+                    if let drawer = shape as? ShapeDrawer {
+                        list.appendShapeItem(
+                            role: Content.role,
+                            style: v.style,
+                            bounds: frame,
+                            fillStyle: v.fillStyle,
+                            strokeStyle: strokeStyle,
+                            environment: environment
+                        ) { context in
                             drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
-                        } else {
-                            let path = shape.path(in: frame)
-                            context.fill(path, with: .style(v.style), style: v.fillStyle)
                         }
+                    } else {
+                        list.appendShapeItem(
+                            path: shape.path(in: frame),
+                            role: Content.role,
+                            style: v.style,
+                            bounds: frame,
+                            fillStyle: v.fillStyle,
+                            strokeStyle: strokeStyle,
+                            environment: environment
+                        )
                     }
                 }
             }

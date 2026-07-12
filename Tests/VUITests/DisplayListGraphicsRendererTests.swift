@@ -504,6 +504,40 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertEqual(renderer.animatorCount, 0)
     }
 
+    func testGraphicsRendererSamplesAnimationsInsideTypedStyleContents() throws {
+        let nested = animationList(
+            identity: _DisplayList_Identity(decodedValue: 47),
+            from: 0,
+            to: 1
+        )
+        var list = DisplayList()
+        list.appendOpacityItem(
+            bounds: CGRect(x: 0, y: 0, width: 20, height: 10),
+            opacity: 0.5,
+            contents: nested
+        )
+
+        let renderer = DisplayList.GraphicsRenderer()
+        for time in [0.0, 0.1, 0.2] {
+            _ = renderer.sample(list: list, at: Time(seconds: time))
+        }
+        let running = renderer.sample(list: list, at: Time(seconds: 0.3))
+
+        let item = try XCTUnwrap(running.items.first)
+        guard case let .content(content) = item.value,
+              case let .style(style) = content.value else {
+            return XCTFail("sampled item should remain typed style content")
+        }
+        let nestedItem = try XCTUnwrap(style.contents.items.first)
+        guard case let .effect(.opacity(value), _) = nestedItem.value else {
+            return XCTFail("typed style contents should contain the sampled animation effect")
+        }
+        XCTAssertGreaterThan(value, 0)
+        XCTAssertLessThan(value, 1)
+        XCTAssertEqual(renderer.animatorCount, 1)
+        XCTAssertEqual(renderer.nextTime.seconds, 0.3, accuracy: 0.0001)
+    }
+
     func testGraphicsRendererSeparatesAnimatorsByExplicitItemIdentity() {
         let first = animationItem(
             identity: _DisplayList_Identity(decodedValue: 51),

@@ -169,14 +169,13 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = Rectangle().path(in: frame)
                 list.appendShapeItem(
+                    path: path,
                     role: .fill,
                     style: m.style,
                     bounds: frame,
                     fillStyle: FillStyle(),
                     environment: environment
-                ) { context in
-                    context.fill(path, with: .style(m.style))
-                }
+                )
             }
             return list
         }
@@ -223,14 +222,13 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
                 list.appendShapeItem(
+                    path: path,
                     role: .fill,
                     style: m.style,
                     bounds: frame,
                     fillStyle: m.fillStyle,
                     environment: environment
-                ) { context in
-                    context.fill(path, with: .style(m.style), style: m.fillStyle)
-                }
+                )
             }
             return list
         }
@@ -277,14 +275,13 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
                 let frame = CGRect(origin: position, size: viewSize)
                 let path = m.shape.path(in: frame)
                 list.appendShapeItem(
+                    path: path,
                     role: .fill,
                     style: m.style,
                     bounds: frame,
                     fillStyle: m.fillStyle,
                     environment: environment
-                ) { context in
-                    context.fill(path, with: .style(m.style), style: m.fillStyle)
-                }
+                )
             }
             return list
         }

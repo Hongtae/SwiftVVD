@@ -332,12 +332,7 @@ extension Image: View {
                     resolved,
                     bounds: frame,
                     environment: environment
-                ) { context in
-                    // 1. Local rendering frame (origin is the position assigned by the parent)
-                    if frame.width > 0 && frame.height > 0 {
-                        context.draw(resolved, in: frame)
-                    }
-                }
+                )
             }
             return list
         }

@@ -84,19 +84,11 @@ private enum _BlendModeEffectSupport {
             return result
         }
 
-        let items = source.renderItems
         result.appendBlendModeItem(
             bounds: source.interpolationBounds,
-            blendMode: blendMode
-        ) { context in
-            var context = context
-            context.blendMode = blendMode.graphicsContextBlendMode
-            context.drawLayer { layerContext in
-                for item in items {
-                    item(layerContext)
-                }
-            }
-        }
+            blendMode: blendMode,
+            contents: source.renderItemList
+        )
         return result
     }
 }

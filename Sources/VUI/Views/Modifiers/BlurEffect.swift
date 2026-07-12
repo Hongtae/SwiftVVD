@@ -93,20 +93,12 @@ private enum _BlurEffectSupport {
             return result
         }
 
-        let items = source.renderItems
         result.appendBlurItem(
             bounds: source.interpolationBounds,
             radius: radius,
-            isOpaque: isOpaque
-        ) { context in
-            context.drawLayer { layerContext in
-                let options: GraphicsContext.BlurOptions = isOpaque ? .opaque : []
-                layerContext.addFilter(.blur(radius: radius, options: options))
-                for item in items {
-                    item(layerContext)
-                }
-            }
-        }
+            isOpaque: isOpaque,
+            contents: source.renderItemList
+        )
         return result
     }
 }
