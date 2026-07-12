@@ -36,6 +36,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         case paired(source: ItemInterpolationInput, target: ItemInterpolationInput)
         case removed(ItemInterpolationInput)
         case inserted(ItemInterpolationInput)
+        case wholeRemoved(items: [DisplayList.Item], bounds: CGRect)
+        case wholeInserted(items: [DisplayList.Item], bounds: CGRect)
         case fallback(
             sourceItems: [DisplayList.Item],
             sourceBounds: CGRect,
@@ -79,6 +81,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     bounds: target.bounds
                 ) else { return target.bounds }
                 return visibleBounds(from: results, fallback: target.bounds)
+            case let .wholeRemoved(_, bounds), let .wholeInserted(_, bounds):
+                // Whole-list lifetime and geometry are separate. The interpolator keeps
+                // reporting the non-empty side's geometry even when an event filter or
+                // zero-alpha transition suppresses every rendered pixel.
+                return bounds
             case let .fallback(_, sourceBounds, _, targetBounds):
                 return RBDisplayListInterpolator.interpolatedBounds(
                     from: sourceBounds,
@@ -155,6 +162,69 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     return
                 }
                 appendTransitionedItem(target, results: results, into: &contents)
+            case let .wholeRemoved(items, bounds):
+                guard let transition else {
+                    appendWholeListCrossFade(
+                        sourceItems: items,
+                        targetItems: [],
+                        bounds: bounds,
+                        progress: progress,
+                        into: &contents
+                    )
+                    return
+                }
+                guard RBDisplayListInterpolator.usesWholeListOpacityEventRouting(transition) else {
+                    appendWholeListCrossFade(
+                        sourceItems: items,
+                        targetItems: [],
+                        bounds: bounds,
+                        progress: progress,
+                        into: &contents
+                    )
+                    return
+                }
+                guard !transition.isEmpty(for: 2),
+                      let results = transition.effectResults(
+                        at: Float(progress),
+                        event: 2,
+                        bounds: bounds
+                      ) else {
+                    return
+                }
+                appendTransitionedItems(items, bounds: bounds, results: results, into: &contents)
+            case let .wholeInserted(items, bounds):
+                guard let transition else {
+                    appendWholeListCrossFade(
+                        sourceItems: [],
+                        targetItems: items,
+                        bounds: bounds,
+                        progress: progress,
+                        into: &contents
+                    )
+                    return
+                }
+                guard RBDisplayListInterpolator.usesWholeListOpacityEventRouting(transition) else {
+                    appendWholeListCrossFade(
+                        sourceItems: [],
+                        targetItems: items,
+                        bounds: bounds,
+                        progress: progress,
+                        into: &contents
+                    )
+                    return
+                }
+                guard !transition.isEmpty(for: 1) else {
+                    contents.items.append(contentsOf: items)
+                    return
+                }
+                guard let results = transition.effectResults(
+                    at: Float(progress),
+                    event: 1,
+                    bounds: bounds
+                ) else {
+                    return
+                }
+                appendTransitionedItems(items, bounds: bounds, results: results, into: &contents)
             case let .fallback(sourceItems, sourceBounds, targetItems, targetBounds):
                 let outputBounds = reportedBounds(at: progress, transition: transition) ?? .zero
                 contents.appendCrossFadeItem(
@@ -212,12 +282,26 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             results: RBTransitionEffectResults,
             into contents: inout DisplayList
         ) {
+            appendTransitionedItems(
+                [input.item],
+                bounds: input.bounds,
+                results: results,
+                into: &contents
+            )
+        }
+
+        private func appendTransitionedItems(
+            _ items: [DisplayList.Item],
+            bounds: CGRect,
+            results: RBTransitionEffectResults,
+            into contents: inout DisplayList
+        ) {
             guard results.alpha > 0 else { return }
 
             var resolved = DisplayList()
-            resolved.items = [input.item]
-            resolved.interpolationBounds = input.bounds
-            var resolvedBounds = input.bounds
+            resolved.items = items
+            resolved.interpolationBounds = bounds
+            var resolvedBounds = bounds
 
             if !results.transform.isIdentity {
                 var transformed = DisplayList()
@@ -228,7 +312,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     )
                 }
                 resolved = transformed
-                resolvedBounds = input.bounds.applying(results.transform).standardized
+                resolvedBounds = bounds.applying(results.transform).standardized
             }
 
             if results.alpha < 1 {
@@ -253,6 +337,26 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             }
 
             contents.items.append(contentsOf: resolved.items)
+        }
+
+        private func appendWholeListCrossFade(
+            sourceItems: [DisplayList.Item],
+            targetItems: [DisplayList.Item],
+            bounds: CGRect,
+            progress: CGFloat,
+            into contents: inout DisplayList
+        ) {
+            contents.appendCrossFadeItem(
+                sourceItems: sourceItems,
+                sourceBounds: sourceItems.isEmpty ? nil : bounds,
+                sourceOutputBounds: sourceItems.isEmpty ? nil : bounds,
+                targetItems: targetItems,
+                targetBounds: targetItems.isEmpty ? nil : bounds,
+                targetOutputBounds: targetItems.isEmpty ? nil : bounds,
+                bounds: bounds,
+                sourceFraction: Float(progress),
+                targetFraction: Float(progress)
+            )
         }
 
         private func visibleBounds(
@@ -323,6 +427,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     var activeDuration: Double {
         guard hasChangedDisplayLists else {
+            return 0
+        }
+        if isImmediateWholeListInsertion {
             return 0
         }
         if let animation = checkedAnimationOption() {
@@ -464,14 +571,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         progress: Float,
         transition: RBTransition?
     ) -> DisplayList {
-        guard let fromBounds = from.interpolationBounds,
-              let toBounds = to.interpolationBounds,
-              let outputBounds = interpolatedBounds(
-                from: from,
-                to: to,
-                progress: progress,
-                transition: transition
-              ) else {
+        guard let nonEmptyBounds = from.interpolationBounds ?? to.interpolationBounds else {
+            return from
+        }
+        let fromBounds = from.interpolationBounds ?? nonEmptyBounds
+        let toBounds = to.interpolationBounds ?? nonEmptyBounds
+        guard let outputBounds = interpolatedBounds(
+            from: from,
+            to: to,
+            progress: progress,
+            transition: transition
+        ) else {
             return from
         }
 
@@ -487,6 +597,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toItems: to.renderItems,
                 toCommands: to.itemCommands,
                 toFallbackBounds: toBounds,
+                allowsWholeListOperations: allowsWholeListOperations(from: from, to: to),
                 progress: clampedProgress,
                 transition: transition,
                 into: &contents
@@ -525,6 +636,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand],
         toFallbackBounds: CGRect,
+        allowsWholeListOperations: Bool,
         progress: CGFloat,
         transition: RBTransition?,
         into contents: inout DisplayList
@@ -534,7 +646,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             fromCommands: fromCommands,
             toItems: toItems,
             toCommands: toCommands,
-            allowsCountMismatch: true
+            allowsCountMismatch: true,
+            allowsWholeListOperations: allowsWholeListOperations
         ) ?? [
             .fallback(
                 sourceItems: fromItems,
@@ -760,7 +873,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toCommands: toList.itemCommands,
                 progress: progress,
                 transition: transition,
-                allowsCountMismatch: true
+                allowsCountMismatch: true,
+                allowsWholeListOperations: allowsWholeListOperations(
+                    from: fromList,
+                    to: toList
+                )
             ) else { return nil }
             bounds = union(bounds, itemBounds)
         }
@@ -773,7 +890,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 toCommands: toList.debugItemCommands,
                 progress: progress,
                 transition: nil,
-                allowsCountMismatch: false
+                allowsCountMismatch: false,
+                allowsWholeListOperations: false
             ) else { return nil }
             bounds = union(bounds, debugBounds)
         }
@@ -827,8 +945,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         from source: DisplayList,
         to target: DisplayList
     ) -> Bool {
-        guard source.interpolationBounds != nil,
-              target.interpolationBounds != nil else {
+        guard source.interpolationBounds != nil || target.interpolationBounds != nil else {
             return false
         }
 
@@ -836,7 +953,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             fromItems: source.renderItems,
             fromCommands: source.itemCommands,
             toItems: target.renderItems,
-            toCommands: target.itemCommands
+            toCommands: target.itemCommands,
+            allowsWholeListOperations: allowsWholeListOperations(
+                from: source,
+                to: target
+            )
         ) {
             return true
         }
@@ -881,14 +1002,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         toCommands: [DisplayList.ItemCommand],
         progress: CGFloat,
         transition: RBTransition?,
-        allowsCountMismatch: Bool
+        allowsCountMismatch: Bool,
+        allowsWholeListOperations: Bool
     ) -> CGRect? {
         guard let operations = itemInterpolationOperations(
             fromItems: fromItems,
             fromCommands: fromCommands,
             toItems: toItems,
             toCommands: toCommands,
-            allowsCountMismatch: allowsCountMismatch
+            allowsCountMismatch: allowsCountMismatch,
+            allowsWholeListOperations: allowsWholeListOperations
         ) else {
             return nil
         }
@@ -913,14 +1036,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         fromItems: [DisplayList.Item],
         fromCommands: [DisplayList.ItemCommand],
         toItems: [DisplayList.Item],
-        toCommands: [DisplayList.ItemCommand]
+        toCommands: [DisplayList.ItemCommand],
+        allowsWholeListOperations: Bool
     ) -> Bool {
         itemInterpolationOperations(
             fromItems: fromItems,
             fromCommands: fromCommands,
             toItems: toItems,
             toCommands: toCommands,
-            allowsCountMismatch: true
+            allowsCountMismatch: true,
+            allowsWholeListOperations: allowsWholeListOperations
         ) != nil
     }
 
@@ -935,7 +1060,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             fromCommands: fromCommands,
             toItems: toItems,
             toCommands: toCommands,
-            allowsCountMismatch: false
+            allowsCountMismatch: false,
+            allowsWholeListOperations: false
         ) != nil
     }
 
@@ -944,18 +1070,41 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         fromCommands: [DisplayList.ItemCommand],
         toItems: [DisplayList.Item],
         toCommands: [DisplayList.ItemCommand],
-        allowsCountMismatch: Bool
+        allowsCountMismatch: Bool,
+        allowsWholeListOperations: Bool
     ) -> [ItemInterpolationOperation]? {
-        // Current runtime fixtures pin source-order pairing for this reduced carrier. Keeping
-        // planning separate lets a future classifier/diff producer replace only this step.
+        // This reduced carrier preserves source-order pairing. Keeping planning separate
+        // lets a future classifier/diff producer replace only this step.
+        guard allowsCountMismatch || fromItems.count == toItems.count else {
+            return nil
+        }
+
+        if allowsWholeListOperations, fromItems.isEmpty, !toItems.isEmpty {
+            guard let targetInputs = itemInterpolationInputs(
+                items: toItems,
+                commands: toCommands
+            ), let bounds = unionBounds(of: targetInputs) else {
+                return nil
+            }
+            return [.wholeInserted(items: toItems, bounds: bounds)]
+        }
+
+        if allowsWholeListOperations, !fromItems.isEmpty, toItems.isEmpty {
+            guard let sourceInputs = itemInterpolationInputs(
+                items: fromItems,
+                commands: fromCommands
+            ), let bounds = unionBounds(of: sourceInputs) else {
+                return nil
+            }
+            return [.wholeRemoved(items: fromItems, bounds: bounds)]
+        }
+
         guard !fromItems.isEmpty,
               !toItems.isEmpty,
-              allowsCountMismatch || fromItems.count == toItems.count,
               let sourceInputs = itemInterpolationInputs(
                 items: fromItems,
                 commands: fromCommands
-              ),
-              let targetInputs = itemInterpolationInputs(
+              ), let targetInputs = itemInterpolationInputs(
                 items: toItems,
                 commands: toCommands
               ) else {
@@ -978,6 +1127,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             operations.append(.inserted(input))
         }
         return operations
+    }
+
+    private static func unionBounds(
+        of inputs: [ItemInterpolationInput]
+    ) -> CGRect? {
+        inputs.reduce(nil) { bounds, input in
+            union(bounds, input.bounds)
+        }
     }
 
     private static func itemInterpolationInputs(
@@ -1012,11 +1169,26 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     private static func unionBounds(from fromList: DisplayList, to toList: DisplayList) -> CGRect? {
-        guard let fromBounds = fromList.interpolationBounds,
-              let toBounds = toList.interpolationBounds else {
+        guard let fromBounds = fromList.interpolationBounds ?? toList.interpolationBounds,
+              let toBounds = toList.interpolationBounds ?? fromList.interpolationBounds else {
             return nil
         }
         return fromBounds.union(toBounds)
+    }
+
+    private static func allowsWholeListOperations(
+        from source: DisplayList,
+        to target: DisplayList
+    ) -> Bool {
+        (source.interpolationBounds == nil) != (target.interpolationBounds == nil)
+    }
+
+    private static func usesWholeListOpacityEventRouting(
+        _ transition: RBTransition
+    ) -> Bool {
+        transition.effects.allSatisfy {
+            $0.semanticType == ContentTransition.EffectType.opacity.type
+        }
     }
 
     private static func interpolate(_ from: CGFloat, _ to: CGFloat, by progress: CGFloat) -> CGFloat {
@@ -1054,6 +1226,21 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private var hasChangedDisplayLists: Bool {
         !from.hasSameInterpolationSurface(as: to)
+    }
+
+    private var isImmediateWholeListInsertion: Bool {
+        guard from.interpolationBounds == nil,
+              from.renderItems.isEmpty,
+              from.debugItems.isEmpty,
+              from.effects.isEmpty,
+              !to.renderItems.isEmpty,
+              to.debugItems.isEmpty,
+              to.effects.isEmpty,
+              let transition,
+              Self.usesWholeListOpacityEventRouting(transition) else {
+            return false
+        }
+        return transition.isEmpty(for: 1)
     }
 
     private var hasDisplayListContents: Bool {

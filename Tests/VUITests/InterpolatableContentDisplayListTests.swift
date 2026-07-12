@@ -1978,6 +1978,99 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(insertionEffect.opacity, 0.5, accuracy: 0.000001)
     }
 
+    func testRBDisplayListInterpolatorRoutesWholeListOperationEvents() {
+        let bounds = CGRect(x: 20, y: 15, width: 20, height: 10)
+        let empty = DisplayList()
+        let content = makeDisplayList(
+            itemBounds: [bounds],
+            itemKind: .shapeFill
+        )
+        let samples: [Float] = [0, 0.5, 1]
+
+        func assertStableBounds(
+            _ interpolator: RBDisplayListInterpolator,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            for progress in samples {
+                XCTAssertEqual(
+                    interpolator.boundingRect(withProgress: progress),
+                    bounds,
+                    file: file,
+                    line: line
+                )
+                XCTAssertEqual(
+                    interpolator.copyContents(withProgress: progress).interpolationBounds,
+                    bounds,
+                    file: file,
+                    line: line
+                )
+            }
+        }
+
+        let defaultInsertion = RBDisplayListInterpolator(from: empty, to: content)
+        XCTAssertEqual(defaultInsertion.activeDuration, 1)
+        assertStableBounds(defaultInsertion)
+        for (progress, expectedFraction) in zip(samples, [Float(0), 0.5, 1]) {
+            let list = defaultInsertion.copyContents(withProgress: progress)
+            let crossFade = typedCrossFade(in: list.items.first!)
+            XCTAssertNil(crossFade?.source)
+            XCTAssertNotNil(crossFade?.target)
+            XCTAssertEqual(list.itemRecords.first?.targetFraction, expectedFraction)
+        }
+
+        let defaultRemoval = RBDisplayListInterpolator(from: content, to: empty)
+        XCTAssertEqual(defaultRemoval.activeDuration, 1)
+        assertStableBounds(defaultRemoval)
+        for (progress, expectedFraction) in zip(samples, [Float(0), 0.5, 1]) {
+            let list = defaultRemoval.copyContents(withProgress: progress)
+            let crossFade = typedCrossFade(in: list.items.first!)
+            XCTAssertNotNil(crossFade?.source)
+            XCTAssertNil(crossFade?.target)
+            XCTAssertEqual(list.itemRecords.first?.sourceFraction, expectedFraction)
+        }
+
+        for events in UInt32(0)...UInt32(3) {
+            let insertion = RBDisplayListInterpolator(
+                from: empty,
+                to: content,
+                options: [.transition: opacityTransition(events: events)]
+            )
+            let matchesInsertion = events & 1 != 0
+            XCTAssertEqual(insertion.activeDuration, matchesInsertion ? 1 : 0)
+            assertStableBounds(insertion)
+            let insertionLists = samples.map(insertion.copyContents(withProgress:))
+            if matchesInsertion {
+                XCTAssertTrue(insertionLists[0].items.isEmpty)
+                XCTAssertEqual(typedOpacityStyle(in: insertionLists[1].items.first!)?.opacity, 0.5)
+                XCTAssertEqual(insertionLists[2].itemRecords.map(\.kind), [.shapeFill])
+            } else {
+                for list in insertionLists {
+                    XCTAssertEqual(list.itemRecords.map(\.kind), [.shapeFill])
+                }
+            }
+
+            let removal = RBDisplayListInterpolator(
+                from: content,
+                to: empty,
+                options: [.transition: opacityTransition(events: events)]
+            )
+            let matchesRemoval = events & 2 != 0
+            XCTAssertEqual(removal.activeDuration, 1)
+            assertStableBounds(removal)
+            let removalLists = samples.map(removal.copyContents(withProgress:))
+            if matchesRemoval {
+                XCTAssertEqual(removalLists[0].itemRecords.map(\.kind), [.shapeFill])
+                XCTAssertEqual(typedOpacityStyle(in: removalLists[1].items.first!)?.opacity, 0.5)
+                XCTAssertTrue(removalLists[2].items.isEmpty)
+            } else {
+                for list in removalLists {
+                    XCTAssertTrue(list.items.isEmpty)
+                }
+            }
+        }
+    }
+
     func testRBDisplayListInterpolatorLowersTransitionGeometryAndBlurIntoTypedContents() throws {
         let source = makeDisplayList(
             itemBounds: [CGRect(x: 0, y: 0, width: 10, height: 10)],
