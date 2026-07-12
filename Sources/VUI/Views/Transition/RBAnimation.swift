@@ -642,11 +642,12 @@ final class RBAnimation: NSObject, NSCopying {
     }
 }
 
-// Local animation table used by future display-list operation storage.
+// Animation records are table entries, while transition effects select one
+// ordered animation sequence inside the operation's entry.
 struct RBAnimationTable {
     struct Entry {
         var index: Int32
-        var animation: RBAnimation
+        var animations: [RBAnimation]
         var activeDuration: Double
     }
 
@@ -667,37 +668,89 @@ struct RBAnimationTable {
             return -1
         }
 
-        if let entry = entries.first(where: { $0.animation.isEqual(animation) }) {
+        return internAnimationSequences([animation])
+    }
+
+    /// Interns an item animation followed by the transition animation. When no
+    /// item animation is present, the current default entry supplies the
+    /// primary sequences before the transition sequence is appended.
+    @discardableResult
+    mutating func internAnimation(
+        _ primary: RBAnimation?,
+        secondary: RBAnimation?
+    ) -> Int32 {
+        if let primary {
+            guard primary.hasStoredTerms else { return -1 }
+            var animations = [primary]
+            if let secondary, secondary.hasStoredTerms {
+                animations.append(secondary)
+            }
+            return internAnimationSequences(animations)
+        }
+
+        guard let secondary, secondary.hasStoredTerms else {
+            return defaultAnimationIndex
+        }
+        var animations = animationSequences(at: defaultAnimationIndex)
+        animations.append(secondary)
+        return internAnimationSequences(animations)
+    }
+
+    private mutating func internAnimationSequences(
+        _ animations: [RBAnimation]
+    ) -> Int32 {
+        guard !animations.isEmpty else { return defaultAnimationIndex }
+        if let entry = entries.first(where: { entry in
+            entry.animations.count == animations.count &&
+                zip(entry.animations, animations).allSatisfy { stored, candidate in
+                    stored.isEqual(candidate)
+                }
+        }) {
             return entry.index
         }
         guard entries.count < Int(Int32.max) else {
             fatalError("RBAnimationTable animation index overflow.")
         }
 
-        let storedAnimation = animation.copy() as? RBAnimation ?? RBAnimation()
+        let storedAnimations = animations.map {
+            $0.copy() as? RBAnimation ?? RBAnimation()
+        }
         let index = Int32(entries.count + 1)
         entries.append(Entry(
             index: index,
-            animation: storedAnimation,
-            activeDuration: storedAnimation.activeDuration
+            animations: storedAnimations,
+            activeDuration: storedAnimations.reduce(0) {
+                max($0, $1.activeDuration)
+            }
         ))
         return index
     }
 
-    func animation(at index: Int32) -> RBAnimation? {
+    func animation(at index: Int32, sequence: UInt32 = 0) -> RBAnimation? {
+        let animations = animationSequences(at: index)
+        guard !animations.isEmpty else { return nil }
+        let offset = min(Int(sequence), animations.count - 1)
+        return animations[offset]
+    }
+
+    private func animationSequences(at index: Int32) -> [RBAnimation] {
+        entry(at: index)?.animations ?? []
+    }
+
+    private func entry(at index: Int32) -> Entry? {
         guard index > 0 else { return nil }
         let offset = Int(index - 1)
         guard offset >= 0, offset < entries.count else { return nil }
-        return entries[offset].animation
+        return entries[offset]
     }
 
     func activeDuration(animationIndex index: Int32) -> Double {
-        animation(at: index)?.activeDuration ?? 0
+        entry(at: index)?.activeDuration ?? 0
     }
 
     func maximumDuration(animationIndex index: Int32) -> Double {
         guard index != 0 else { return 1 }
-        return animation(at: index)?.activeDuration ?? 0
+        return entry(at: index)?.activeDuration ?? 0
     }
 
     func evaluate(animationIndex index: Int32, sequence: UInt32 = 0, time: Double) -> Float {
@@ -707,18 +760,24 @@ struct RBAnimationTable {
         case 0, -2:
             return Float(time)
         default:
-            _ = sequence
-            return animation(at: index)?.evaluateAtTime(time) ?? Float(time)
+            return animation(at: index, sequence: sequence)?.evaluateAtTime(time) ?? Float(time)
         }
     }
 
     func maxSpeed(animationIndex index: Int32, time: Double) -> Double {
-        animation(at: index)?.speed(atTime: time) ?? 0
+        animationSequences(at: index).reduce(0) {
+            max($0, $1.speed(atTime: time))
+        }
     }
 
     func maxSpeed(atTime time: Double) -> Double {
         entries.reduce(0) { result, entry in
-            max(result, entry.animation.speed(atTime: time))
+            max(
+                result,
+                entry.animations.reduce(0) {
+                    max($0, $1.speed(atTime: time))
+                }
+            )
         }
     }
 }

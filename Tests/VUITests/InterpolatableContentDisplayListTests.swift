@@ -3282,6 +3282,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(animationTable.internAnimation(delayedTableAnimation), 2)
         XCTAssertEqual(animationTable.entries.count, 2)
         XCTAssertEqual(animationTable.entries[0].index, 1)
+        XCTAssertEqual(animationTable.entries[0].animations.count, 1)
         XCTAssertEqual(animationTable.entries[0].activeDuration, 2)
         XCTAssertEqual(animationTable.animation(at: 1)?.activeDuration, 2)
         XCTAssertNil(animationTable.animation(at: 0))
@@ -3313,6 +3314,59 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             animationTable.maxSpeed(atTime: 1),
             0.75,
             accuracy: 0.001
+        )
+
+        let secondaryTableAnimation = RBAnimation()
+        secondaryTableAnimation.addBezierDuration(
+            4,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let pairedIndex = animationTable.internAnimation(
+            matchingTableAnimation,
+            secondary: secondaryTableAnimation
+        )
+        XCTAssertEqual(pairedIndex, 3)
+        XCTAssertEqual(
+            animationTable.internAnimation(
+                matchingTableAnimation,
+                secondary: secondaryTableAnimation
+            ),
+            pairedIndex
+        )
+        XCTAssertEqual(animationTable.entries[2].animations.count, 2)
+        XCTAssertEqual(animationTable.maximumDuration(animationIndex: pairedIndex), 4)
+        XCTAssertEqual(
+            animationTable.evaluate(
+                animationIndex: pairedIndex,
+                sequence: 0,
+                time: 1
+            ),
+            0.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            animationTable.evaluate(
+                animationIndex: pairedIndex,
+                sequence: 1,
+                time: 1
+            ),
+            0.25,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            animationTable.evaluate(
+                animationIndex: pairedIndex,
+                sequence: 7,
+                time: 1
+            ),
+            0.25,
+            accuracy: 0.001
+        )
+        secondaryTableAnimation.addDelay(10)
+        XCTAssertEqual(
+            animationTable.animation(at: pairedIndex, sequence: 1)?.activeDuration,
+            4
         )
 
         let effects = RBAnimationSequencerEffects()
