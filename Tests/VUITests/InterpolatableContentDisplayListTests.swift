@@ -1424,6 +1424,35 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             effectItem.contents.interpolationBounds,
             CGRect(x: 10, y: 2.5, width: 20, height: 30)
         )
+
+        let item = try XCTUnwrap(effectItem.contents.items.first)
+        guard case let .content(content) = item.value,
+              case let .crossFade(crossFade) = content.value else {
+            return XCTFail("interpolator should preserve typed cross-fade branches")
+        }
+        XCTAssertEqual(crossFade.source?.sourceBounds, CGRect(x: 0, y: 0, width: 10, height: 20))
+        XCTAssertEqual(crossFade.source?.outputBounds, CGRect(x: 10, y: 2.5, width: 20, height: 30))
+        XCTAssertEqual(crossFade.source?.contents.itemRecords.first?.kind, .shapeFill)
+        XCTAssertEqual(crossFade.target?.sourceBounds, CGRect(x: 20, y: 5, width: 30, height: 40))
+        XCTAssertEqual(crossFade.target?.outputBounds, CGRect(x: 10, y: 2.5, width: 20, height: 30))
+        XCTAssertEqual(crossFade.target?.contents.itemRecords.first?.kind, .shapeFill)
+        XCTAssertTrue(crossFade.transform.isIdentity)
+
+        let transform = CGAffineTransform(translationX: 7, y: 9)
+        var transformed = DisplayList()
+        transformed.appendTransformedItem(item, affineTransform: transform)
+        let transformedItem = try XCTUnwrap(transformed.items.first)
+        guard case let .content(transformedContent) = transformedItem.value,
+              case let .crossFade(transformedCrossFade) = transformedContent.value else {
+            return XCTFail("affine transformation should preserve typed cross-fade content")
+        }
+        XCTAssertEqual(transformedCrossFade.transform, transform)
+        XCTAssertEqual(
+            transformedCrossFade.command.bounds,
+            CGRect(x: 17, y: 11.5, width: 20, height: 30)
+        )
+        XCTAssertEqual(transformedCrossFade.source?.sourceBounds, crossFade.source?.sourceBounds)
+        XCTAssertEqual(transformedCrossFade.target?.sourceBounds, crossFade.target?.sourceBounds)
     }
 
     func testRBDisplayListInterpolatorEndpointPreservesTargetEffectFallback() throws {

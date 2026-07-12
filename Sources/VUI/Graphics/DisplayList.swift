@@ -979,6 +979,114 @@ struct DisplayList {
             }
         }
 
+        struct CrossFadeValue {
+            struct Branch {
+                var contents: DisplayList
+                var sourceBounds: CGRect
+                var outputBounds: CGRect
+
+                func draw(
+                    opacity: Double,
+                    in context: GraphicsContext,
+                    replayContents: (DisplayList, GraphicsContext) -> Void
+                ) {
+                    guard opacity > 0,
+                          let transform = Self.interpolationTransform(
+                            from: sourceBounds,
+                            to: outputBounds
+                          ) else {
+                        return
+                    }
+
+                    var context = context
+                    context.opacity *= opacity
+                    guard context.opacity > 0 else { return }
+                    context.concatenate(transform)
+                    replayContents(contents, context)
+                }
+
+                private static func interpolationTransform(
+                    from sourceBounds: CGRect,
+                    to outputBounds: CGRect
+                ) -> CGAffineTransform? {
+                    guard sourceBounds.width.magnitude > .ulpOfOne,
+                          sourceBounds.height.magnitude > .ulpOfOne else {
+                        return nil
+                    }
+                    let scaleX = outputBounds.width / sourceBounds.width
+                    let scaleY = outputBounds.height / sourceBounds.height
+                    return CGAffineTransform(
+                        a: scaleX,
+                        b: 0,
+                        c: 0,
+                        d: scaleY,
+                        tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                        ty: outputBounds.minY - sourceBounds.minY * scaleY
+                    )
+                }
+            }
+
+            var source: Branch?
+            var target: Branch?
+            var transform: CGAffineTransform
+            var command: ItemCommand
+
+            func draw(in context: GraphicsContext) {
+                draw(in: context) { contents, context in
+                    for item in contents.items {
+                        item(context)
+                    }
+                }
+            }
+
+            func draw(
+                in context: GraphicsContext,
+                replayContents: (DisplayList, GraphicsContext) -> Void
+            ) {
+                guard case let .effect(
+                    .crossFade(sourceFraction, targetFraction),
+                    _
+                ) = command else {
+                    preconditionFailure("DisplayList.CrossFadeValue requires a cross-fade command")
+                }
+                let sourceOpacity = 1 - Double(sourceFraction)
+                let targetOpacity = Double(targetFraction)
+                guard (source != nil && sourceOpacity > 0) ||
+                        (target != nil && targetOpacity > 0) else {
+                    return
+                }
+
+                var context = context
+                if !transform.isIdentity {
+                    context.concatenate(transform)
+                }
+                // Both branches share one temporary layer. Their complementary alpha values
+                // remain local to the branch while clip and outer transform state stay joined.
+                context.drawLayer { layer in
+                    source?.draw(
+                        opacity: sourceOpacity,
+                        in: layer,
+                        replayContents: replayContents
+                    )
+                    target?.draw(
+                        opacity: targetOpacity,
+                        in: layer,
+                        replayContents: replayContents
+                    )
+                }
+            }
+
+            func transformed(
+                command: ItemCommand,
+                by affineTransform: CGAffineTransform
+            ) -> Self {
+                var copy = self
+                copy.command = command
+                copy.transform = transform.concatenating(affineTransform)
+                return copy
+            }
+        }
+
         struct TextValue {
             var view: StyledTextContentView
             var size: CGSize
@@ -1041,6 +1149,7 @@ struct DisplayList {
             case shape(ShapeValue)
             case image(ImageValue)
             case style(StyleValue)
+            case crossFade(CrossFadeValue)
             case text(TextValue)
             case flattened(DisplayList, CGPoint, RasterizationOptions)
             case drawing(any RBDisplayListContents, CGPoint, RasterizationOptions)
@@ -1119,6 +1228,23 @@ struct DisplayList {
         }
 
         init(
+            source: CrossFadeValue.Branch?,
+            target: CrossFadeValue.Branch?,
+            command: ItemCommand,
+            seed: Seed = Seed(),
+            environment: EnvironmentValues? = nil
+        ) {
+            self.value = .crossFade(CrossFadeValue(
+                source: source,
+                target: target,
+                transform: .identity,
+                command: command
+            ))
+            self.seed = seed
+            self.environment = environment
+        }
+
+        init(
             text: StyledTextContentView,
             size: CGSize,
             frame: CGRect,
@@ -1171,6 +1297,8 @@ struct DisplayList {
                 return image.command
             case let .style(style):
                 return style.command
+            case let .crossFade(crossFade):
+                return crossFade.command
             case let .text(text):
                 return text.command
             case let .flattened(list, origin, _):
@@ -1203,6 +1331,8 @@ struct DisplayList {
                 image.draw(in: context)
             case let .style(style):
                 style.draw(in: context)
+            case let .crossFade(crossFade):
+                crossFade.draw(in: context)
             case let .text(text):
                 text.draw(in: context)
             case let .flattened(list, origin, _):
@@ -1247,6 +1377,13 @@ struct DisplayList {
             case let .style(style):
                 var copy = self
                 copy.value = .style(style.transformed(
+                    command: transformedCommand,
+                    by: affineTransform
+                ))
+                return copy
+            case let .crossFade(crossFade):
+                var copy = self
+                copy.value = .crossFade(crossFade.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
@@ -1372,6 +1509,25 @@ struct DisplayList {
             self.value = .content(Content(
                 style: style,
                 contents: contents,
+                command: command,
+                environment: environment
+            ))
+            self.identity = identity
+        }
+
+        init(
+            source: Content.CrossFadeValue.Branch?,
+            target: Content.CrossFadeValue.Branch?,
+            command: ItemCommand,
+            environment: EnvironmentValues? = nil,
+            identity: _DisplayList_Identity = .none,
+            version: Version = Version(value: 0)
+        ) {
+            self.frame = command.bounds ?? .zero
+            self.version = version
+            self.value = .content(Content(
+                source: source,
+                target: target,
                 command: command,
                 environment: environment
             ))
@@ -1799,10 +1955,15 @@ struct DisplayList {
     }
 
     mutating func appendCrossFadeItem(
+        sourceItems: [Item],
+        sourceBounds: CGRect?,
+        sourceOutputBounds: CGRect?,
+        targetItems: [Item],
+        targetBounds: CGRect?,
+        targetOutputBounds: CGRect?,
         bounds: CGRect? = nil,
         sourceFraction: Float,
-        targetFraction: Float,
-        _ item: @escaping (GraphicsContext) -> Void
+        targetFraction: Float
     ) {
         let bounds = Self.itemRecordBounds(bounds)
         let command = ItemCommand.effect(
@@ -1812,8 +1973,42 @@ struct DisplayList {
             ),
             bounds: bounds
         )
-        items.append(Item(command: command, item))
+        let source = Self.crossFadeBranch(
+            items: sourceItems,
+            sourceBounds: sourceBounds,
+            outputBounds: sourceOutputBounds
+        )
+        let target = Self.crossFadeBranch(
+            items: targetItems,
+            sourceBounds: targetBounds,
+            outputBounds: targetOutputBounds
+        )
+        items.append(Item(
+            source: source,
+            target: target,
+            command: command
+        ))
         recordInterpolationBounds(bounds)
+    }
+
+    private static func crossFadeBranch(
+        items: [Item],
+        sourceBounds: CGRect?,
+        outputBounds: CGRect?
+    ) -> Content.CrossFadeValue.Branch? {
+        guard !items.isEmpty,
+              let sourceBounds,
+              let outputBounds else {
+            return nil
+        }
+        var contents = DisplayList()
+        contents.items = items
+        contents.recordInterpolationBounds(sourceBounds)
+        return Content.CrossFadeValue.Branch(
+            contents: contents,
+            sourceBounds: sourceBounds,
+            outputBounds: outputBounds
+        )
     }
 
     mutating func appendBlendModeItem(
@@ -2210,6 +2405,18 @@ struct DisplayList {
                         style.contents = sampleItems(in: style.contents)
                         sampledContent.value = .style(style)
                         sampledItem.value = .content(sampledContent)
+                    } else if case var .crossFade(crossFade) = content.value {
+                        var sampledContent = content
+                        if var source = crossFade.source {
+                            source.contents = sampleItems(in: source.contents)
+                            crossFade.source = source
+                        }
+                        if var target = crossFade.target {
+                            target.contents = sampleItems(in: target.contents)
+                            crossFade.target = target
+                        }
+                        sampledContent.value = .crossFade(crossFade)
+                        sampledItem.value = .content(sampledContent)
                     }
 
                 case .empty:
@@ -2287,6 +2494,12 @@ struct DisplayList {
                         context: content.renderContext(from: context),
                         includeDebug: includeDebug
                     )
+                case let .crossFade(crossFade):
+                    render(
+                        crossFade: crossFade,
+                        context: content.renderContext(from: context),
+                        includeDebug: includeDebug
+                    )
                 case let .text(text):
                     let context = content.renderContext(from: context)
                     if text.view.renderer != nil {
@@ -2345,6 +2558,20 @@ struct DisplayList {
             includeDebug: Bool
         ) {
             style.draw(in: context) { contents, context in
+                self.renderItems(
+                    in: contents,
+                    context: context,
+                    includeDebug: includeDebug
+                )
+            }
+        }
+
+        private func render(
+            crossFade: Content.CrossFadeValue,
+            context: GraphicsContext,
+            includeDebug: Bool
+        ) {
+            crossFade.draw(in: context) { contents, context in
                 self.renderItems(
                     in: contents,
                     context: context,
@@ -2510,6 +2737,19 @@ struct DisplayList {
                         lhsStyle.contents.hasSameInterpolationSurface(as: rhsStyle.contents)
                 case (.style, _), (_, .style):
                     return false
+                case let (.crossFade(lhsCrossFade), .crossFade(rhsCrossFade)):
+                    return lhsCrossFade.transform == rhsCrossFade.transform &&
+                        lhsCrossFade.command == rhsCrossFade.command &&
+                        crossFadeBranchesHaveSameSurface(
+                            lhsCrossFade.source,
+                            rhsCrossFade.source
+                        ) &&
+                        crossFadeBranchesHaveSameSurface(
+                            lhsCrossFade.target,
+                            rhsCrossFade.target
+                        )
+                case (.crossFade, _), (_, .crossFade):
+                    return false
                 case let (.flattened(lhsList, lhsOrigin, lhsOptions),
                           .flattened(rhsList, rhsOrigin, rhsOptions)):
                     return lhsOrigin == rhsOrigin &&
@@ -2548,6 +2788,22 @@ struct DisplayList {
         otherCommands: [ItemCommand]
     ) -> Bool {
         commands == otherCommands
+    }
+
+    private func crossFadeBranchesHaveSameSurface(
+        _ lhs: Content.CrossFadeValue.Branch?,
+        _ rhs: Content.CrossFadeValue.Branch?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case let (.some(lhs), .some(rhs)):
+            return lhs.sourceBounds == rhs.sourceBounds &&
+                lhs.outputBounds == rhs.outputBounds &&
+                lhs.contents.hasSameInterpolationSurface(as: rhs.contents)
+        case (.none, .none):
+            return true
+        case (.some, .none), (.none, .some):
+            return false
+        }
     }
 }
 

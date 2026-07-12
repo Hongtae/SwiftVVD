@@ -262,47 +262,29 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                         crossFadeBounds = sourceOutputBounds.union(targetOutputBounds)
                     }
                     contents.appendCrossFadeItem(
+                        sourceItems: [fromItem],
+                        sourceBounds: sourceBounds,
+                        sourceOutputBounds: sourceOutputBounds,
+                        targetItems: [toItem],
+                        targetBounds: targetBounds,
+                        targetOutputBounds: targetOutputBounds,
                         bounds: crossFadeBounds,
                         sourceFraction: Float(progress),
                         targetFraction: Float(progress)
-                    ) { context in
-                        drawInterpolatedItems(
-                            [fromItem],
-                            sourceBounds: sourceBounds,
-                            outputBounds: sourceOutputBounds,
-                            opacity: 1 - Double(progress),
-                            in: context
-                        )
-                        drawInterpolatedItems(
-                            [toItem],
-                            sourceBounds: targetBounds,
-                            outputBounds: targetOutputBounds,
-                            opacity: Double(progress),
-                            in: context
-                        )
-                    }
+                    )
                     continue
                 }
                 contents.appendCrossFadeItem(
+                    sourceItems: [fromItem],
+                    sourceBounds: sourceBounds,
+                    sourceOutputBounds: outputBounds,
+                    targetItems: [toItem],
+                    targetBounds: targetBounds,
+                    targetOutputBounds: outputBounds,
                     bounds: outputBounds,
                     sourceFraction: Float(progress),
                     targetFraction: Float(progress)
-                ) { context in
-                    drawInterpolatedItems(
-                        [fromItem],
-                        sourceBounds: sourceBounds,
-                        outputBounds: outputBounds,
-                        opacity: 1 - Double(progress),
-                        in: context
-                    )
-                    drawInterpolatedItems(
-                        [toItem],
-                        sourceBounds: targetBounds,
-                        outputBounds: outputBounds,
-                        opacity: Double(progress),
-                        in: context
-                    )
-                }
+                )
             }
 
             appendSourceExtraItems(
@@ -321,25 +303,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
 
         contents.appendCrossFadeItem(
+            sourceItems: fromItems,
+            sourceBounds: fromFallbackBounds,
+            sourceOutputBounds: outputFallbackBounds,
+            targetItems: toItems,
+            targetBounds: toFallbackBounds,
+            targetOutputBounds: outputFallbackBounds,
             bounds: outputFallbackBounds,
             sourceFraction: Float(progress),
             targetFraction: Float(progress)
-        ) { context in
-            drawInterpolatedItems(
-                fromItems,
-                sourceBounds: fromFallbackBounds,
-                outputBounds: outputFallbackBounds,
-                opacity: 1 - Double(progress),
-                in: context
-            )
-            drawInterpolatedItems(
-                toItems,
-                sourceBounds: toFallbackBounds,
-                outputBounds: outputFallbackBounds,
-                opacity: Double(progress),
-                in: context
-            )
-        }
+        )
     }
 
     private static func isTextItemPair(
@@ -434,18 +407,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         for (item, command) in zip(items, commands) {
             let bounds = command.bounds!
             contents.appendCrossFadeItem(
+                sourceItems: [item],
+                sourceBounds: bounds,
+                sourceOutputBounds: bounds,
+                targetItems: [],
+                targetBounds: nil,
+                targetOutputBounds: nil,
                 bounds: bounds,
                 sourceFraction: Float(progress),
                 targetFraction: 0
-            ) { context in
-                drawInterpolatedItems(
-                    [item],
-                    sourceBounds: bounds,
-                    outputBounds: bounds,
-                    opacity: 1 - Double(progress),
-                    in: context
-                )
-            }
+            )
         }
     }
 
@@ -458,18 +429,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         for (item, command) in zip(items, commands) {
             let bounds = command.bounds!
             contents.appendCrossFadeItem(
+                sourceItems: [],
+                sourceBounds: nil,
+                sourceOutputBounds: nil,
+                targetItems: [item],
+                targetBounds: bounds,
+                targetOutputBounds: bounds,
                 bounds: bounds,
                 sourceFraction: 0,
                 targetFraction: Float(progress)
-            ) { context in
-                drawInterpolatedItems(
-                    [item],
-                    sourceBounds: bounds,
-                    outputBounds: bounds,
-                    opacity: Double(progress),
-                    in: context
-                )
-            }
+            )
         }
     }
 

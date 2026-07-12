@@ -538,6 +538,48 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertEqual(renderer.nextTime.seconds, 0.3, accuracy: 0.0001)
     }
 
+    func testGraphicsRendererSamplesAnimationsInsideTypedCrossFadeBranches() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 20, height: 10)
+        let source = animationList(
+            identity: _DisplayList_Identity(decodedValue: 49),
+            from: 0,
+            to: 1
+        )
+        var list = DisplayList()
+        list.appendCrossFadeItem(
+            sourceItems: source.items,
+            sourceBounds: bounds,
+            sourceOutputBounds: bounds,
+            targetItems: [],
+            targetBounds: nil,
+            targetOutputBounds: nil,
+            bounds: bounds,
+            sourceFraction: 0.5,
+            targetFraction: 0
+        )
+
+        let renderer = DisplayList.GraphicsRenderer()
+        for time in [0.0, 0.1, 0.2] {
+            _ = renderer.sample(list: list, at: Time(seconds: time))
+        }
+        let running = renderer.sample(list: list, at: Time(seconds: 0.3))
+
+        let item = try XCTUnwrap(running.items.first)
+        guard case let .content(content) = item.value,
+              case let .crossFade(crossFade) = content.value else {
+            return XCTFail("sampled item should remain typed cross-fade content")
+        }
+        let sourceItem = try XCTUnwrap(crossFade.source?.contents.items.first)
+        guard case let .effect(.opacity(value), _) = sourceItem.value else {
+            return XCTFail("typed cross-fade branch should contain the sampled animation effect")
+        }
+        XCTAssertGreaterThan(value, 0)
+        XCTAssertLessThan(value, 1)
+        XCTAssertNil(crossFade.target)
+        XCTAssertEqual(renderer.animatorCount, 1)
+        XCTAssertEqual(renderer.nextTime.seconds, 0.3, accuracy: 0.0001)
+    }
+
     func testGraphicsRendererSeparatesAnimatorsByExplicitItemIdentity() {
         let first = animationItem(
             identity: _DisplayList_Identity(decodedValue: 51),
