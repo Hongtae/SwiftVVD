@@ -1004,6 +1004,70 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicConditionalReinsertionReusesRetainedBranchItem() throws {
+        typealias Root = _ConditionalContent<Text, Text>
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var source: Attribute<Root>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+
+        func root(showChild: Bool) -> Root {
+            if showChild {
+                return ViewBuilder.buildEither(first: Text("child"))
+            } else {
+                return ViewBuilder.buildEither(second: Text("empty"))
+            }
+        }
+
+        let initialItem = try ref.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: inputs)
+            source = graph.makeInput(value: root(showChild: true))
+            let outputs = Root._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+            let viewListAttr = try XCTUnwrap({
+                if case .dynamicList(let attribute, _) = outputs.views {
+                    return attribute
+                }
+                return nil
+            }(), "conditional replacement should produce a dynamic list")
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: viewListAttr,
+                    inputs: viewInputs
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            return try XCTUnwrap(initial.activeItems.first)
+        }
+
+        ref.withCurrent {
+            let replacement = Transaction(animation: .linear(duration: 5))
+            source.setValue(root(showChild: false), transaction: replacement)
+
+            let removedTrueBranch = infoAttr.value
+            XCTAssertEqual(removedTrueBranch.activeItems.count, 1)
+            XCTAssertEqual(removedTrueBranch.removedCount, 1)
+            XCTAssertTrue(removedTrueBranch.items.last === initialItem)
+
+            source.setValue(root(showChild: true), transaction: replacement)
+
+            let reinserted = infoAttr.value
+            XCTAssertEqual(reinserted.activeItems.count, 1)
+            XCTAssertEqual(reinserted.removedCount, 1)
+            XCTAssertTrue(reinserted.activeItems.first === initialItem)
+            XCTAssertEqual(
+                Set(reinserted.items.map(\.uniqueId)).count,
+                reinserted.items.count,
+                "reinsertion must not leave an older item with the same conditional branch identity"
+            )
+        }
+    }
+
     func testPublicConditionalStaticBranchRemovalInterpolatesTransitionValue() throws {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(

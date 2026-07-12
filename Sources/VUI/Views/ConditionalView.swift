@@ -26,7 +26,11 @@ private final class _ConditionalListBranchState {
     var activeSubgraph: AGSubgraph? = nil
     var activeManagedSubgraph: _ViewList_Subgraph? = nil
     var activeListOutputs: _ViewListOutputs? = nil
-    var activeID = UniqueID()
+    // Branch identities stay stable for the lifetime of the conditional list. A branch
+    // that re-enters while its outgoing item is retained must recover that item instead
+    // of materializing a second subtree at the new presentation position.
+    let trueID = UniqueID()
+    let falseID = UniqueID()
 }
 
 private struct _ConditionalIdentityViewList: ViewList {
@@ -343,7 +347,6 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             let nextSubgraph = AGSubgraph()
             state.activeSubgraph = nextSubgraph
             state.activeManagedSubgraph = _ViewList_Subgraph(subgraph: nextSubgraph)
-            state.activeID = UniqueID()
             state.activeListOutputs = makeBranchOutputs(isTrue: nowTrue)
             state.isTrue = nowTrue
             state.isUpdating = false
@@ -374,7 +377,7 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             let activeType: Any.Type = nowTrue ? TrueContent.self : FalseContent.self
             return _ConditionalIdentityViewList(
                 base: resolvedList(from: outputs),
-                id: state.activeID,
+                id: nowTrue ? state.trueID : state.falseID,
                 owner: view._attribute.identifier,
                 isUnary: outputs.staticCount == 1,
                 reuseID: Int(bitPattern: ObjectIdentifier(activeType)),

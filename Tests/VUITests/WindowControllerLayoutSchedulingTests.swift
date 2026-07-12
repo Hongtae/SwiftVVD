@@ -1655,15 +1655,21 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             }
 
             let list = try displayList(in: controller)
-            let childTexts = textBounds(in: list).filter {
+            let childTexts = renderedTextBounds(in: list).filter {
                 $0.width >= 50 && $0.width < 150 && $0.height >= 8 && $0.height < 25
             }
-            let backgrounds: [CGRect] = translucentShapeFillRecords(in: list).compactMap { record in
+            let backgrounds: [CGRect] = renderedTranslucentShapeFillRecords(in: list).compactMap { record in
                 guard record.bounds.width >= 60, record.bounds.height >= 25 else {
                     return nil
                 }
                 return record.bounds
             }
+
+            XCTAssertLessThanOrEqual(
+                backgrounds.count,
+                1,
+                "retained and inserted child backgrounds overlapped at \(time): \(backgrounds)"
+            )
 
             if let firstBackground = backgrounds.first {
                 for background in backgrounds.dropFirst() {
@@ -1682,7 +1688,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 }
                 if containingBackground == nil {
                     XCTFail(
-                        "child text escaped its background at \(time): text=\(text) backgrounds=\(backgrounds) allText=\(textBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                        "child text escaped its background at \(time): text=\(text) backgrounds=\(backgrounds) allText=\(renderedTextBounds(in: list)) tree=\(displayListTreeDescription(list))"
                     )
                 }
             }
@@ -1704,16 +1710,32 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         for cycle in 0..<8 {
             let base = Double(cycle) * 1.2
 
+            try advance(to: base + 0.05)
+            try XCTUnwrap(probe.springMove)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
             try advance(to: base + 0.10)
             try XCTUnwrap(probe.removeChild)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
 
-            try advance(to: base + 0.40)
+            try advance(to: base + 0.15)
             try XCTUnwrap(probe.insertChild)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
 
-            try advance(to: base + 0.70)
-            try XCTUnwrap(probe.springMove)()
+            try advance(to: base + 0.20)
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            try advance(to: base + 0.25)
+            try XCTUnwrap(probe.insertChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            try advance(to: base + 0.30)
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+            try advance(to: base + 0.35)
+            try XCTUnwrap(probe.insertChild)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
             try advance(to: base + 1.20)
         }
@@ -2192,6 +2214,42 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             records.append(contentsOf: translucentShapeFillRecords(in: effect.contents))
         }
         return records
+    }
+
+    private func renderedTranslucentShapeFillRecords(
+        in displayList: DisplayList
+    ) -> [(bounds: CGRect, color: VUI.Color)] {
+        var records = translucentShapeFillRecords(in: displayList)
+        for item in displayList.items {
+            guard case let .content(content) = item.value,
+                  case let .crossFade(crossFade) = content.value else {
+                continue
+            }
+            if let source = crossFade.source {
+                records.append(contentsOf: renderedTranslucentShapeFillRecords(in: source.contents))
+            }
+            if let target = crossFade.target {
+                records.append(contentsOf: renderedTranslucentShapeFillRecords(in: target.contents))
+            }
+        }
+        return records
+    }
+
+    private func renderedTextBounds(in displayList: DisplayList) -> [CGRect] {
+        var bounds = textBounds(in: displayList)
+        for item in displayList.items {
+            guard case let .content(content) = item.value,
+                  case let .crossFade(crossFade) = content.value else {
+                continue
+            }
+            if let source = crossFade.source {
+                bounds.append(contentsOf: renderedTextBounds(in: source.contents))
+            }
+            if let target = crossFade.target {
+                bounds.append(contentsOf: renderedTextBounds(in: target.contents))
+            }
+        }
+        return bounds
     }
 
     private func translucentShapeFillColors(in displayList: DisplayList) -> [VUI.Color] {
