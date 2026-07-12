@@ -178,13 +178,9 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     override func otherMouseUp(with event: NSEvent) { self.handleMouseUp(event: event) }
 
     override func scrollWheel(with event: NSEvent) {
-        if event.phase != [] {
-            // Trackpad pan gesture. Forward as GestureEvent.
-            self.postGestureEvent(event)
-        } else {
-            // Traditional mouse wheel uses the mouse event path.
-            self.postMouseEvent(event)
-        }
+        // Keep direct and native-momentum samples on one raw wheel path. The
+        // consumer decides whether to use or replace the platform momentum.
+        self.postMouseEvent(event)
     }
 
     func handleMouseDown(event: NSEvent) {
@@ -648,6 +644,7 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             var eventType: MouseEventType
             var pressure: CGFloat = 0.0
             var tilt: CGPoint = .zero
+            var scrollData: ScrollEventData?
 
             switch event.type {
             case .leftMouseDown, .rightMouseDown, .otherMouseDown:
@@ -658,6 +655,13 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
                 eventType = .move
             case .scrollWheel:
                 eventType = .wheel
+                scrollData = ScrollEventData(
+                    phase: scrollEventPhase(event.phase),
+                    nativeMomentumPhase: scrollEventPhase(event.momentumPhase),
+                    source: event.hasPreciseScrollingDeltas ? .continuous : .wheel,
+                    isPrecise: event.hasPreciseScrollingDeltas,
+                    isDirectionInvertedFromDevice: event.isDirectionInvertedFromDevice
+                )
             case .tabletPoint, .tabletProximity:
                 deviceType = .stylus
                 eventType = .pointing
@@ -692,8 +696,20 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
                                              location: location,
                                              delta: delta,
                                              tilt: tilt,
-                                             pressure: pressure))
+                                             pressure: pressure,
+                                             timestamp: event.timestamp,
+                                             scrollData: scrollData))
         }
+    }
+
+    private func scrollEventPhase(_ phase: NSEvent.Phase) -> ScrollEventPhase? {
+        if phase.contains(.cancelled) { return .cancelled }
+        if phase.contains(.ended) { return .ended }
+        if phase.contains(.began) { return .began }
+        if phase.contains(.changed) { return .changed }
+        if phase.contains(.stationary) { return .stationary }
+        if phase.contains(.mayBegin) { return .mayBegin }
+        return nil
     }
 
     func postKeyboardEvent(

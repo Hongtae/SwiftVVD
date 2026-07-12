@@ -6,6 +6,7 @@
 //
 
 #if ENABLE_WAYLAND
+import Foundation
 
 public struct PlatformFactoryWayland: PlatformFactory {
 
@@ -33,6 +34,23 @@ public struct PlatformFactoryWayland: PlatformFactory {
             }
         }
         return style.intersection(supported)
+    }
+}
+
+/// Extends Wayland's ordered 32-bit millisecond stream without assuming that
+/// its undefined epoch matches the process monotonic clock.
+struct MillisecondTimestampExtender {
+    private var lastRawValue: UInt32?
+    private var extendedMilliseconds: UInt64 = 0
+
+    mutating func timestamp(for rawValue: UInt32) -> TimeInterval {
+        if let lastRawValue {
+            extendedMilliseconds += UInt64(rawValue &- lastRawValue)
+        } else {
+            extendedMilliseconds = UInt64(rawValue)
+        }
+        self.lastRawValue = rawValue
+        return TimeInterval(extendedMilliseconds) / 1_000
     }
 }
 

@@ -37,6 +37,48 @@ public enum MouseEventDevice {
     case touch
 }
 
+public enum ScrollEventPhase: Sendable, Hashable {
+    case mayBegin
+    case began
+    case stationary
+    case changed
+    case ended
+    case cancelled
+}
+
+public enum ScrollEventSource: Sendable, Hashable {
+    case unknown
+    case wheel
+    case finger
+    case continuous
+    case wheelTilt
+}
+
+public struct ScrollEventData: Sendable, Hashable {
+    /// Direct-manipulation phase supplied by the platform, when available.
+    public var phase: ScrollEventPhase? = nil
+    /// Native inertial phase is preserved separately so higher layers can choose
+    /// between platform momentum and their own cross-platform simulation.
+    public var nativeMomentumPhase: ScrollEventPhase? = nil
+    public var source: ScrollEventSource = .unknown
+    public var isPrecise: Bool = false
+    public var isDirectionInvertedFromDevice: Bool = false
+
+    init(
+        phase: ScrollEventPhase? = nil,
+        nativeMomentumPhase: ScrollEventPhase? = nil,
+        source: ScrollEventSource = .unknown,
+        isPrecise: Bool = false,
+        isDirectionInvertedFromDevice: Bool = false
+    ) {
+        self.phase = phase
+        self.nativeMomentumPhase = nativeMomentumPhase
+        self.source = source
+        self.isPrecise = isPrecise
+        self.isDirectionInvertedFromDevice = isDirectionInvertedFromDevice
+    }
+}
+
 public struct MouseEvent {
     public var type: MouseEventType
     public weak var window: (any Window)?
@@ -44,9 +86,14 @@ public struct MouseEvent {
     public var deviceID: Int
     public var buttonID: Int
     public var location: CGPoint
+    /// Relative pointer movement or scroll displacement.
     public var delta: CGPoint = .zero
     public var tilt: CGPoint = .zero
     public var pressure: CGFloat = 0.0
+    /// Event occurrence time in the platform's monotonic clock.
+    public var timestamp: TimeInterval
+    /// Additional raw semantics for wheel input. Non-nil when `type == .wheel`.
+    public var scrollData: ScrollEventData? = nil
 }
 
 public enum KeyboardEventType {

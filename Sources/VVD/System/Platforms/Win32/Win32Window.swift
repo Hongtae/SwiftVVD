@@ -926,6 +926,22 @@ final class Win32Window: Window {
             return WORD(value & 0xffff)
         }
 
+        func messageTimestamp() -> TimeInterval {
+            // GetMessageTime carries the low 32 bits of the uptime at which the
+            // message entered the queue. Reconstruct the most recent matching
+            // 64-bit epoch so timestamps remain monotonic across its rollover.
+            let messageTime = UInt64(
+                UInt32(truncatingIfNeeded: GetMessageTime())
+            )
+            let uptime = UInt64(GetTickCount64())
+            let cycle = UInt64(UInt32.max) + 1
+            var fullTime = (uptime & ~(cycle - 1)) | messageTime
+            if fullTime > uptime {
+                fullTime -= cycle
+            }
+            return TimeInterval(fullTime) / 1_000
+        }
+
         if let window = window, window.hWnd == hWnd {
             let activateWindow = {
                 if window.activated == false {
@@ -1188,7 +1204,8 @@ final class Win32Window: Window {
                                                          deviceID: 0,
                                                          buttonID: 0,
                                                          location: window.mousePosition,
-                                                         delta: delta))
+                                                         delta: delta,
+                                                         timestamp: messageTimestamp()))
                     }
                 }
                 return 0
@@ -1202,7 +1219,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 0,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_LBUTTONUP):
@@ -1215,7 +1233,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 0,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONDOWN):
@@ -1228,7 +1247,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 1,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONUP):
@@ -1241,7 +1261,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 1,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONDOWN):
@@ -1254,7 +1275,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 2,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONUP):
@@ -1267,7 +1289,8 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 2,
-                                                 location: pos))
+                                                 location: pos,
+                                                 timestamp: messageTimestamp()))
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_XBUTTONDOWN):
@@ -1283,7 +1306,8 @@ final class Win32Window: Window {
                                                      device: .genericMouse,
                                                      deviceID: 0,
                                                      buttonID: 3,
-                                                     location: pos))
+                                                     location: pos,
+                                                     timestamp: messageTimestamp()))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.insert(.button5)
 
@@ -1292,7 +1316,8 @@ final class Win32Window: Window {
                                                      device: .genericMouse,
                                                      deviceID: 0,
                                                      buttonID: 4,
-                                                     location: pos))
+                                                     location: pos,
+                                                     timestamp: messageTimestamp()))
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 1 // Return TRUE.
@@ -1309,7 +1334,8 @@ final class Win32Window: Window {
                                                      device: .genericMouse,
                                                      deviceID: 0,
                                                      buttonID: 3,
-                                                     location: pos))
+                                                     location: pos,
+                                                     timestamp: messageTimestamp()))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.remove(.button5)
 
@@ -1318,7 +1344,8 @@ final class Win32Window: Window {
                                                      device: .genericMouse,
                                                      deviceID: 0,
                                                      buttonID: 4,
-                                                     location: pos))
+                                                     location: pos,
+                                                     timestamp: messageTimestamp()))
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // Return TRUE.
@@ -1378,14 +1405,26 @@ final class Win32Window: Window {
                 }
                 return 0
 
-            case UINT(WM_MOUSEWHEEL):
+            case UINT(WM_MOUSEWHEEL), UINT(WM_MOUSEHWHEEL):
                 let pts = MAKEPOINTS(lParam)
                 var pt = POINT(x: LONG(pts.x), y: LONG(pts.y))
                 ScreenToClient(hWnd, &pt)
                 let pos = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
 
-                let deltaY = Int16(bitPattern: UInt16(HIWORD(wParam)))
-                let deltaYScaled = CGFloat(deltaY) / window.contentScaleFactor
+                // Both messages store their single-axis wheel delta in the high
+                // word. The message kind determines which logical axis it drives;
+                // the low word contains modifier/button flags, not another delta.
+                let rawDelta = Int16(bitPattern: UInt16(HIWORD(wParam)))
+                let scaledDelta = CGFloat(rawDelta) / window.contentScaleFactor
+                let delta: CGPoint
+                let source: ScrollEventSource
+                if uMsg == UINT(WM_MOUSEHWHEEL) {
+                    delta = CGPoint(x: Int(scaledDelta), y: 0)
+                    source = .wheelTilt
+                } else {
+                    delta = CGPoint(x: 0, y: Int(scaledDelta))
+                    source = .wheel
+                }
 
                 window.postMouseEvent(MouseEvent(type: .wheel,
                                                  window: window,
@@ -1393,7 +1432,12 @@ final class Win32Window: Window {
                                                  deviceID: 0,
                                                  buttonID: 2,
                                                  location: pos,
-                                                 delta: CGPoint(x: 0, y: Int(deltaYScaled))))
+                                                 delta: delta,
+                                                 timestamp: messageTimestamp(),
+                                                 scrollData: ScrollEventData(
+                                                    source: source,
+                                                    isPrecise: abs(Int(rawDelta)) % 120 != 0
+                                                 )))
                 return 0
             case UINT(WM_CHAR):
                 window.synchronizeKeyStates()

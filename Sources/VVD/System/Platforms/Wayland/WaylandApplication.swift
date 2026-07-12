@@ -511,6 +511,19 @@ final class WaylandApplication: Application, @unchecked Sendable {
     var pointerLocation: CGPoint = .zero    // location in target surface
     weak var activeWindow: WaylandWindow? = nil
 
+    private struct PointerAxisFrame {
+        var delta = CGPoint.zero
+        var axes: UInt8 = 0
+        var stoppedAxes: UInt8 = 0
+        var source = ScrollEventSource.unknown
+        var timestamp: TimeInterval?
+    }
+
+    private var pointerAxisFrame = PointerAxisFrame()
+    private var pointerAxisActiveAxes: UInt8 = 0
+    private var pointerAxisSource = ScrollEventSource.unknown
+    private var pointerEventClock = MillisecondTimestampExtender()
+
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerTarget = self.window(forSurface: surface)
         Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
@@ -518,10 +531,14 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
         pointerTarget = nil
+        pointerAxisFrame = PointerAxisFrame()
+        pointerAxisActiveAxes = 0
+        pointerAxisSource = .unknown
         Log.debug("wl_pointer_listener.leave (serial:\(serial))")
     }
 
     fileprivate func pointerMotion(time: UInt32, x: Double, y: Double) {
+        let timestamp = pointerEventClock.timestamp(for: time)
         if let target = pointerTarget {
             pointerLocation = CGPoint(x: x, y: y)
             MainActor.assumeIsolated {
@@ -530,13 +547,15 @@ final class WaylandApplication: Application, @unchecked Sendable {
                                       device: .genericMouse,
                                       deviceID: 0,
                                       buttonID: 0,
-                                      location: pointerLocation))
+                                      location: pointerLocation,
+                                      timestamp: timestamp))
             }
         }
         //Log.debug("wl_pointer_listener.motion (time:\(time), x:\(x), y:\(y))")
     }
 
     fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
+        let timestamp = pointerEventClock.timestamp(for: time)
         if let target = pointerTarget {
 
             // alt+ctrl+click to move window if server-side decoration is not used.
@@ -562,41 +581,101 @@ final class WaylandApplication: Application, @unchecked Sendable {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: buttonID,
-                                                 location: pointerLocation))
+                                                 location: pointerLocation,
+                                                 timestamp: timestamp))
             }
         }
         Log.debug("wl_pointer_listener.button (serial:\(serial), time:\(time), button:\(button), state:\(state))")
     }
 
     fileprivate func pointerAxis(time: UInt32, axis: UInt32, value: Double) {
-        if let target = pointerTarget {
-            let delta = CGPoint(x: 0, y: value)
-            MainActor.assumeIsolated {
-                target.postMouseEvent(MouseEvent(type: .wheel,
-                                                 window: target,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 2,
-                                                 location: pointerLocation,
-                                                 delta: delta))
-            }
+        let axisBit: UInt8
+        if axis == 0 { // WL_POINTER_AXIS_VERTICAL_SCROLL
+            pointerAxisFrame.delta.y += value
+            axisBit = 1 << 0
+        } else { // WL_POINTER_AXIS_HORIZONTAL_SCROLL
+            pointerAxisFrame.delta.x += value
+            axisBit = 1 << 1
         }
+        pointerAxisFrame.axes |= axisBit
+        pointerAxisFrame.timestamp = pointerEventClock.timestamp(for: time)
         //Log.debug("wl_pointer_listener.axis (time:\(time), axis:\(axis), value:\(value))")
     }
 
     fileprivate func pointerFrame() { // end of single-frame of event sequence.
+        defer { pointerAxisFrame = PointerAxisFrame() }
+        guard let target = pointerTarget else { return }
+
+        let source = pointerAxisFrame.source == .unknown
+            ? pointerAxisSource
+            : pointerAxisFrame.source
+        let wasActive = pointerAxisActiveAxes != 0
+        pointerAxisActiveAxes |= pointerAxisFrame.axes
+        pointerAxisActiveAxes &= ~pointerAxisFrame.stoppedAxes
+
+        let phase: ScrollEventPhase?
+        if source == .finger {
+            if pointerAxisActiveAxes == 0 && pointerAxisFrame.stoppedAxes != 0 {
+                phase = .ended
+            } else if wasActive {
+                phase = .changed
+            } else if pointerAxisFrame.axes != 0 {
+                phase = .began
+            } else {
+                phase = nil
+            }
+        } else {
+            // Wheel, tilt, and continuous sources are not guaranteed to send
+            // axis_stop, so keep them discrete instead of inventing a session.
+            phase = nil
+        }
+
+        guard pointerAxisFrame.delta != .zero || phase != nil,
+              let timestamp = pointerAxisFrame.timestamp else { return }
+        MainActor.assumeIsolated {
+            target.postMouseEvent(MouseEvent(
+                type: .wheel,
+                window: target,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 2,
+                location: pointerLocation,
+                delta: pointerAxisFrame.delta,
+                timestamp: timestamp,
+                scrollData: ScrollEventData(
+                    phase: phase,
+                    source: source,
+                    isPrecise: source == .finger || source == .continuous
+                )
+            ))
+        }
         //Log.debug("wl_pointer_listener.frame")
     }
 
     fileprivate func pointerAxis(source: UInt32) {
+        switch source {
+        case 0: pointerAxisFrame.source = .wheel
+        case 1: pointerAxisFrame.source = .finger
+        case 2: pointerAxisFrame.source = .continuous
+        case 3: pointerAxisFrame.source = .wheelTilt
+        default: pointerAxisFrame.source = .unknown
+        }
+        pointerAxisSource = pointerAxisFrame.source
         Log.debug("wl_pointer_listener.axis_source (source:\(source))")
     }
 
     fileprivate func pointerAxisStop(time: UInt32, axis: UInt32) {
+        let axisBit: UInt8 = axis == 0 ? 1 << 0 : 1 << 1
+        pointerAxisFrame.stoppedAxes |= axisBit
+        pointerAxisFrame.timestamp = pointerEventClock.timestamp(for: time)
         Log.debug("wl_pointer_listener.axis_top (time:\(time), axis:\(axis))")
     }
 
     fileprivate func pointerAxis(_ axis: UInt32, discrete: Int32) {
+        if pointerAxisFrame.source == .unknown {
+            pointerAxisFrame.source = .wheel
+            pointerAxisSource = .wheel
+        }
         Log.debug("wl_pointer_listener.axis_discrete (axis:\(axis), discrete:\(discrete))")
     }
 

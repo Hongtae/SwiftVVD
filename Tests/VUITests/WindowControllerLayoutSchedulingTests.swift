@@ -342,14 +342,16 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: CGPoint(x: 210, y: 120)
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0
         )))
         XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
             type: .buttonUp,
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: CGPoint(x: 210, y: 120)
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0
         )))
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
@@ -2231,14 +2233,16 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: CGPoint(x: 210, y: 120)
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0
         )))
         XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
             type: .buttonUp,
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: CGPoint(x: 210, y: 120)
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0
         )))
     }
 }

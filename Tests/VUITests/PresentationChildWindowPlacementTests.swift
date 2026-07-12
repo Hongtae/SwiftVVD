@@ -223,7 +223,8 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: pointInHost
+            location: pointInHost,
+            timestamp: 0
         ))
         host.onMouseEvent(event: MouseEvent(
             type: .buttonUp,
@@ -231,7 +232,8 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
-            location: pointInHost
+            location: pointInHost,
+            timestamp: 0
         ))
 
         redraw = false

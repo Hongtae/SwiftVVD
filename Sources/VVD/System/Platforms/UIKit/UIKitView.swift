@@ -282,7 +282,8 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  location: pos,
                                                  delta: .zero,
                                                  tilt: tilt,
-                                                 pressure: touch.force))
+                                                 pressure: touch.force,
+                                                 timestamp: touch.timestamp))
             }
             self.touches[index] = touch
         }
@@ -308,7 +309,8 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  location: pos,
                                                  delta: delta,
                                                  tilt: tilt,
-                                                 pressure: touch.force))
+                                                 pressure: touch.force,
+                                                 timestamp: touch.timestamp))
                 processed = true
             }
             if processed == false {
@@ -336,7 +338,8 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                      location: pos,
                                                      delta: delta,
                                                      tilt: tilt,
-                                                     pressure: touch.force))
+                                                     pressure: touch.force,
+                                                     timestamp: touch.timestamp))
                 }
                 self.touches[index] = nil
                 processed = true
