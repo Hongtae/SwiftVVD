@@ -238,6 +238,16 @@ struct HostingScrollViewUpdateContext: Equatable {
 /// Logical platform-host carrier. A backend can mirror this state while
 /// graph-side scroll ownership remains in the graph layer.
 class HostingScrollView {
+    private struct DragState {
+        var initialOffset: CGPoint
+        var translation: CGSize
+    }
+
+    private struct DecelerationState {
+        var simulation: Deceleration2D
+        var beginTime: Time?
+    }
+
     final class PlatformContainer {
         private(set) var safeAreaInsets = EdgeInsets()
         private(set) var layoutDirection = LayoutDirection.leftToRight
@@ -253,6 +263,9 @@ class HostingScrollView {
 
     private let graphRef: _AGGraphContext
     private let layoutState: WeakAttribute<SystemScrollLayoutState>
+    private let phaseState: WeakAttribute<ScrollPhaseState>
+    private var dragState: DragState?
+    private var decelerationState: DecelerationState?
 
     private(set) var pendingContext: HostingScrollViewUpdateContext?
     private(set) var configuration = ScrollViewConfiguration()
@@ -266,12 +279,22 @@ class HostingScrollView {
     private(set) var animationTarget: ScrollTarget?
     private(set) var animationTargetConfig: ScrollTargetConfiguration?
 
+    var isDecelerating: Bool {
+        decelerationState != nil
+    }
+
+    var currentMotionVelocity: _Velocity<CGSize> {
+        decelerationState?.simulation.velocity ?? _Velocity(valuePerSecond: .zero)
+    }
+
     init(
         graphRef: _AGGraphContext,
-        layoutState: WeakAttribute<SystemScrollLayoutState>
+        layoutState: WeakAttribute<SystemScrollLayoutState>,
+        phaseState: WeakAttribute<ScrollPhaseState> = WeakAttribute()
     ) {
         self.graphRef = graphRef
         self.layoutState = layoutState
+        self.phaseState = phaseState
     }
 
     @discardableResult
@@ -280,6 +303,13 @@ class HostingScrollView {
         switch context.offsetMode {
         case let .target(targetProvider, config):
             animationTargetConfig = config
+            if !config.preservesVelocity {
+                // A non-preserving target owns the presentation immediately;
+                // stale drag or inertial state must not move it afterward.
+                dragState = nil
+                decelerationState = nil
+                publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+            }
             let geometry = ScrollGeometry(
                 contentOffset: context.contentOffset,
                 contentSize: context.contentFrame.size,
@@ -295,6 +325,12 @@ class HostingScrollView {
                     contentFrame: context.contentFrame,
                     requiresVisibility: config.requiresVisibility
                 )
+                if config.preservesVelocity, var decelerationState {
+                    // Retarget only the destination. The simulation keeps its
+                    // current velocity so the presentation remains continuous.
+                    decelerationState.simulation.updateTarget(context.contentOffset)
+                    self.decelerationState = decelerationState
+                }
             } else {
                 animationTarget = nil
             }
@@ -364,6 +400,259 @@ class HostingScrollView {
             state.contentOffsetMode = .system
             state.contentOffsetSeed.value &+= 1
             stateAttribute.setValue(state, transaction: Transaction.current)
+        }
+    }
+
+    func dispatchScrollGesturePhase(_ gesturePhase: GesturePhase<ScrollGesture.Value>) {
+        graphRef.withCurrent {
+            guard let graph = _AGGraph.current,
+                  layoutState.isValid(in: graph) else {
+                return
+            }
+            let currentOffset = layoutState.toStrong().value.contentOffset
+            switch gesturePhase {
+            case .possible(.none):
+                return
+            case .possible(.some(let value)), .active(let value):
+                let translation: CGSize
+                let velocity: _Velocity<CGSize>
+                switch value {
+                case .pan(let pan):
+                    translation = pan.translation
+                    velocity = pan.velocity
+                case .wheel(let wheel):
+                    translation = wheel
+                    velocity = _Velocity(valuePerSecond: .zero)
+                }
+
+                decelerationState = nil
+                var drag = dragState ?? DragState(
+                    initialOffset: currentOffset,
+                    translation: .zero
+                )
+                drag.translation = translation
+                dragState = drag
+                // Gesture translation follows the pointer; content offset moves
+                // in the opposite direction as if the content were being dragged.
+                let nextOffset = clampedContentOffset(CGPoint(
+                    x: drag.initialOffset.x - translation.width,
+                    y: drag.initialOffset.y - translation.height
+                ))
+                let moved = nextOffset != currentOffset
+                publishInteraction(
+                    offset: nextOffset,
+                    phase: moved ? .interacting : .tracking,
+                    velocity: velocity
+                )
+
+            case .ended(let value):
+                let velocity: _Velocity<CGSize>
+                let eventTime: Time?
+                switch value {
+                case .pan(let pan):
+                    velocity = pan.velocity
+                    eventTime = pan.timestamp
+                case .wheel:
+                    velocity = _Velocity(valuePerSecond: .zero)
+                    eventTime = nil
+                }
+                dragState = nil
+                // Deceleration evolves content-space offset, so convert the
+                // pointer-space terminal velocity before starting the simulation.
+                let contentVelocity = velocity.map {
+                    CGSize(width: -$0.width, height: -$0.height)
+                }
+                if contentVelocity.valuePerSecond != .zero {
+                    decelerationState = DecelerationState(
+                        simulation: Deceleration2D(
+                            offset: currentOffset,
+                            velocity: contentVelocity,
+                            decelerationRate: resolvedDecelerationRate
+                        ),
+                        beginTime: eventTime
+                    )
+                    publishInteraction(
+                        offset: currentOffset,
+                        phase: .decelerating,
+                        velocity: contentVelocity
+                    )
+                    scheduleMotionUpdate()
+                } else {
+                    decelerationState = nil
+                    publishInteraction(
+                        offset: currentOffset,
+                        phase: .idle,
+                        velocity: velocity
+                    )
+                }
+
+            case .failed:
+                dragState = nil
+                decelerationState = nil
+                publishInteraction(
+                    offset: currentOffset,
+                    phase: .idle,
+                    velocity: _Velocity(valuePerSecond: .zero)
+                )
+            }
+        }
+    }
+
+    @discardableResult
+    func updateMotion(at time: Time) -> Bool {
+        guard var decelerationState else {
+            return false
+        }
+        let elapsed: Double
+        if let beginTime = decelerationState.beginTime {
+            // beginTime and the frame clock share WindowController's epoch.
+            elapsed = max(time.seconds - beginTime.seconds, 0)
+        } else {
+            decelerationState.beginTime = time
+            elapsed = 0
+        }
+        let maximum = maximumContentOffset()
+        let completed = decelerationState.simulation.iter(
+            elapsed,
+            minValue: .zero,
+            maxValue: maximum
+        )
+        let offset = clampedContentOffset(decelerationState.simulation.offset)
+        let velocity = decelerationState.simulation.velocity
+        if completed {
+            self.decelerationState = nil
+            publishInteraction(
+                offset: offset,
+                phase: .idle,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+        } else {
+            self.decelerationState = decelerationState
+            publishInteraction(
+                offset: offset,
+                phase: .decelerating,
+                velocity: velocity
+            )
+            scheduleMotionUpdate()
+        }
+        return true
+    }
+
+    private func clampedContentOffset(_ offset: CGPoint) -> CGPoint {
+        guard let context = pendingContext else {
+            return offset
+        }
+        let visibleSize = context.containingSize.inset(by: context.safeInsets)
+        let maxOffset = maximumContentOffset(
+            contentSize: context.contentFrame.size,
+            visibleSize: visibleSize
+        )
+        return CGPoint(
+            x: configuration.axes.contains(.horizontal)
+                ? min(max(offset.x, 0), maxOffset.x)
+                : 0,
+            y: configuration.axes.contains(.vertical)
+                ? min(max(offset.y, 0), maxOffset.y)
+                : 0
+        )
+    }
+
+    private func maximumContentOffset() -> CGPoint {
+        guard let context = pendingContext else {
+            return .zero
+        }
+        return maximumContentOffset(
+            contentSize: context.contentFrame.size,
+            visibleSize: context.containingSize.inset(by: context.safeInsets)
+        )
+    }
+
+    private func maximumContentOffset(
+        contentSize: CGSize,
+        visibleSize: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: configuration.axes.contains(.horizontal)
+                ? max(contentSize.width - visibleSize.width, 0)
+                : 0,
+            y: configuration.axes.contains(.vertical)
+                ? max(contentSize.height - visibleSize.height, 0)
+                : 0
+        )
+    }
+
+    private var resolvedDecelerationRate: Double {
+        switch properties.decelerationRate {
+        case .fast, .viewAligned, .paging:
+            _ScrollViewConfig.decelerationRateFast
+        default:
+            _ScrollViewConfig.decelerationRateNormal
+        }
+    }
+
+    private func scheduleMotionUpdate() {
+        guard let viewGraph = graphRef.context as? ViewGraph else {
+            return
+        }
+        viewGraph.nextUpdate.views.interval(1.0 / 60.0)
+    }
+
+    private func publishInteraction(
+        offset: CGPoint,
+        phase: ScrollPhase,
+        velocity: _Velocity<CGSize>
+    ) {
+        guard let graph = _AGGraph.current,
+              layoutState.isValid(in: graph) else {
+            return
+        }
+        let stateAttribute = layoutState.toStrong()
+        var state = stateAttribute.value
+        state.contentOffset = offset
+        state.contentOffsetMode = .system
+        state.contentOffsetSeed.value &+= 1
+
+        var transaction = Transaction.current
+        // Only direct manipulation is continuous. Inertial samples remain
+        // scroll-originated but form discrete frame updates.
+        transaction.isContinuous = phase == .tracking || phase == .interacting
+        transaction.fromScrollView = true
+        stateAttribute.setValue(state, transaction: transaction)
+
+        guard phaseState.isValid(in: graph) else {
+            return
+        }
+        let phaseAttribute = phaseState.toStrong()
+        let value = ScrollPhaseState(
+            phase: phase,
+            velocity: CGVector(
+                dx: velocity.valuePerSecond.width,
+                dy: velocity.valuePerSecond.height
+            )
+        )
+        if phaseAttribute.value != value {
+            phaseAttribute.setValue(value, transaction: transaction)
+        }
+    }
+
+    private func publishPhase(
+        _ phase: ScrollPhase,
+        velocity: _Velocity<CGSize>
+    ) {
+        guard let graph = _AGGraph.current,
+              phaseState.isValid(in: graph) else {
+            return
+        }
+        let phaseAttribute = phaseState.toStrong()
+        let value = ScrollPhaseState(
+            phase: phase,
+            velocity: CGVector(
+                dx: velocity.valuePerSecond.width,
+                dy: velocity.valuePerSecond.height
+            )
+        )
+        if phaseAttribute.value != value {
+            phaseAttribute.setValue(value, transaction: Transaction.current)
         }
     }
 }
@@ -588,7 +877,32 @@ struct MakeHostingScrollView: StatefulRule {
     typealias Value = HostingScrollView
 
     var _layoutState: Attribute<SystemScrollLayoutState>
+    var _phaseState: Attribute<ScrollPhaseState>
     var graphRef: _AGGraphContext
+
+    init(
+        _layoutState: Attribute<SystemScrollLayoutState>,
+        _phaseState: Attribute<ScrollPhaseState>,
+        graphRef: _AGGraphContext
+    ) {
+        self._layoutState = _layoutState
+        self._phaseState = _phaseState
+        self.graphRef = graphRef
+    }
+
+    init(
+        _layoutState: Attribute<SystemScrollLayoutState>,
+        graphRef: _AGGraphContext
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("MakeHostingScrollView.init requires AG context")
+        }
+        self.init(
+            _layoutState: _layoutState,
+            _phaseState: graph.makeInput(value: ScrollPhaseState()),
+            graphRef: graphRef
+        )
+    }
 
     mutating func updateValue() {
         if let existing = _AGGraph.currentStatefulOutput(HostingScrollView.self) {
@@ -597,7 +911,8 @@ struct MakeHostingScrollView: StatefulRule {
         }
         _AGGraph.setStatefulOutput(HostingScrollView(
             graphRef: graphRef,
-            layoutState: _layoutState.asWeak()
+            layoutState: _layoutState.asWeak(),
+            phaseState: _phaseState.asWeak()
         ))
     }
 }
@@ -1111,6 +1426,20 @@ struct UpdatedHostingScrollView: StatefulRule {
         }
         oldProperties = properties
         oldMargins = margins
+        _AGGraph.setStatefulOutput(scrollView)
+    }
+}
+
+/// Advances host-owned inertial motion from the view graph's frame clock.
+struct HostingScrollViewMotionUpdate: StatefulRule {
+    typealias Value = HostingScrollView
+
+    var _scrollView: Attribute<HostingScrollView>
+    var _time: Attribute<Time>
+
+    mutating func updateValue() {
+        let scrollView = _scrollView.value
+        _ = scrollView.updateMotion(at: _time.value)
         _AGGraph.setStatefulOutput(scrollView)
     }
 }

@@ -655,8 +655,10 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
 
     func eventBinding(at location: CGPoint, accepting eventType: Any.Type) -> EventBinding? {
         refreshResponderGeometrySnapshots()
-        guard let responder = hitTestResponders(at: location)
-            .first(where: { $0.accepts(eventType: eventType) }),
+        guard let responder = hitTestResponders(
+            at: location,
+            accepting: eventType
+        ).first,
               let node = responder as? ResponderNode else {
             return nil
         }
@@ -705,14 +707,16 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             for (eventID, event) in events where activeSessions[eventID] == nil {
                 guard event.eventPhase == .began else { continue }
                 let responders: [any AnyGestureResponder]
-                if let wheel = event as? WheelEvent,
-                   let binding = wheel.binding,
+                if let boundEvent = event as? any ResponderBoundEvent,
+                   let binding = boundEvent.binding,
                    let responder = binding.responder as? any AnyGestureResponder,
                    responder.accepts(eventType: eventID.type) {
                     responders = [responder]
                 } else if let location = event.location {
-                    responders = hitTestResponders(at: location)
-                        .filter { $0.accepts(eventType: eventID.type) }
+                    responders = hitTestResponders(
+                        at: location,
+                        accepting: eventID.type
+                    )
                 } else {
                     responders = []
                 }
@@ -784,11 +788,19 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     /// .simultaneous(.global): always included alongside any other policy.
     /// .simultaneous(.descendants/.ancestors): included only when the hierarchy relationship
     ///   is satisfied with at least one other hit responder (via isDescendant chain).
-    private func hitTestResponders(at location: CGPoint) -> [any AnyGestureResponder] {
+    private func hitTestResponders(
+        at location: CGPoint,
+        accepting eventType: Any.Type? = nil
+    ) -> [any AnyGestureResponder] {
         guard let rootResponder else { return [] }
         let hits = rootResponder.respondersContaining(point: location)
             .compactMap { $0 as? any AnyGestureResponder }
             .filter { $0.mask.contains(.gesture) }
+            // Apply compatibility before exclusion. Otherwise an inner responder
+            // for another event family can hide the compatible ancestor.
+            .filter { responder in
+                eventType.map { responder.accepts(eventType: $0) } ?? true
+            }
         guard !hits.isEmpty else { return [] }
         let hasHighPriority = hits.contains { $0.exclusionPolicy == .highPriority }
         var result: [any AnyGestureResponder] = []

@@ -69,6 +69,46 @@ extension _ScrollViewGestureProvider {
     }
 }
 
+/// Input chain for the logical hosting scroll view. Pointer/touch scrolling
+/// retains the pan recognizer, while discrete wheels bypass its distance gate.
+private struct SystemScrollGesture: Gesture {
+    typealias Value = ScrollGesture.Value
+    typealias Body = ModifierGesture<
+        CombineGesture<PanGesture.Value, SystemWheelEvent, Value>,
+        PanGesture
+    >
+
+    var minimumDistance: CGFloat
+    var allowedDirections: _EventDirections
+
+    var body: Body {
+        PanGesture(
+            minimumDistance: minimumDistance,
+            allowedDirections: allowedDirections
+        ).combined(with: EventListener<SystemWheelEvent>()) { panPhase, wheelPhase in
+            switch wheelPhase {
+            case .possible(let event):
+                if let event {
+                    return .possible(.wheel(event.delta))
+                }
+                return panPhase.map(Value.pan)
+            case .active(let event):
+                return .active(.wheel(event.delta))
+            case .ended(let event):
+                return .ended(.wheel(event.delta))
+            case .failed:
+                return panPhase.map(Value.pan)
+            }
+        }
+    }
+}
+
+extension SystemScrollGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == ScrollEvent.self || eventType == SystemWheelEvent.self
+    }
+}
+
 struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
     typealias Combiner = DefaultGestureCombiner
     typealias Value = ScrollGesture.Value
@@ -160,6 +200,130 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
             return outputs
         }
         guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+              viewGraph.rendererHost?.gestureGraph != nil else {
+            return outputs
+        }
+
+        let responderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map(\.value)
+        let responders: Attribute<[any ViewResponder]>
+        if responderNodes.isEmpty {
+            responders = graph.makeInput(value: [])
+        } else if responderNodes.count == 1 {
+            responders = Attribute<[any ViewResponder]>(responderNodes[0])
+        } else {
+            responders = graph.makeRule {
+                var result = ViewRespondersKey.defaultValue
+                for identifier in responderNodes {
+                    ViewRespondersKey.reduce(value: &result) {
+                        Attribute<[any ViewResponder]>(identifier).value
+                    }
+                }
+                return result
+            }
+        }
+
+        let filter = GestureFilter<Self>(
+            modifierAttr: modifier._attribute,
+            innerRespondersAttr: responders,
+            viewInputs: inputs,
+            exclusionPolicy: Combiner.exclusionPolicy,
+            subgraph: AGSubgraph()
+        )
+        let responder = graph.makeStatefulRule(filter)
+        outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
+        outputs.preferences.append(ViewRespondersKey.self, node: responder.identifier)
+        return outputs
+    }
+}
+
+// Connects the public logical scroll host to the shared gesture pipeline without
+// routing it through the legacy _ScrollView node.
+struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
+    typealias Combiner = DefaultGestureCombiner
+    typealias Value = ScrollGesture.Value
+    typealias StateType = Void
+    typealias Body = Never
+
+    var scrollView: HostingScrollView
+
+    static var initialState: Void { () }
+
+    var gestureMask: GestureMask {
+        scrollView.properties.isEnabled && (scrollView.configuration.isScrollEnabled ?? true)
+            ? .all
+            : .gesture
+    }
+
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == ScrollEvent.self || eventType == SystemWheelEvent.self
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        Self.acceptsEventType(eventType)
+    }
+
+    static func _makeSessionGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<()> {
+        guard let graph = _AGGraph.current else {
+            fatalError("SystemScrollViewGesture._makeSessionGesture requires AG context")
+        }
+        let current = modifier._attribute.value
+        let axes = current.scrollView.configuration.axes
+        var directions: _EventDirections = []
+        if axes.contains(.horizontal) {
+            directions.formUnion(.horizontal)
+        }
+        if axes.contains(.vertical) {
+            directions.formUnion(.vertical)
+        }
+        let scrollGesture = SystemScrollGesture(
+            minimumDistance: 10,
+            allowedDirections: directions
+        )
+        typealias Chain = ModifierGesture<CallbacksGesture<SystemScrollViewGesture>, SystemScrollGesture>
+        let chain = Chain(
+            modifier: CallbacksGesture(callbacks: current),
+            body: scrollGesture
+        )
+        let chainAttribute = graph.makeInput(value: chain)
+        let outputs = Chain._makeGesture(
+            gesture: _GraphValue(_attribute: chainAttribute),
+            inputs: inputs
+        )
+        let mapped: Attribute<GesturePhase<()>> = graph.makeRule {
+            outputs.phase.value.map { _ in () }
+        }
+        return outputs.withPhase(mapped)
+    }
+
+    func dispatch(
+        phase: GesturePhase<ScrollGesture.Value>,
+        state: inout Void
+    ) -> (() -> Void)? {
+        _ = state
+        return { scrollView.dispatchScrollGesturePhase(phase) }
+    }
+
+    func cancel(state: Void) -> (() -> Void)? {
+        { scrollView.dispatchScrollGesturePhase(.failed) }
+    }
+
+    static func makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("SystemScrollViewGesture.makeView requires AG context")
+        }
+
+        var outputs = body(_Graph(), inputs)
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self),
+              let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
               viewGraph.rendererHost?.gestureGraph != nil else {
             return outputs
         }

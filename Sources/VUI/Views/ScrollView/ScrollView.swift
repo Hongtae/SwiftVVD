@@ -173,6 +173,7 @@ struct SystemScrollView<Content>: View where Content: View {
         let hostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
             MakeHostingScrollView(
                 _layoutState: layoutState,
+                _phaseState: phaseState,
                 graphRef: graphRef
             )
         )
@@ -332,6 +333,18 @@ struct SystemScrollView<Content>: View where Content: View {
             _ = updatedHostingScrollView.value
             return ()
         }
+        // Motion is sampled from the graph clock, while the host object remains
+        // stable across frames and owns the in-flight deceleration state.
+        let motionHostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
+            HostingScrollViewMotionUpdate(
+                _scrollView: updatedHostingScrollView,
+                _time: inputs.base.time
+            )
+        )
+        _ = graph.makeSideEffectRule {
+            _ = motionHostingScrollView.value
+            return ()
+        }
         let geometry: Attribute<ScrollGeometry> = graph.makeRule(
             ScrollGeometryProvider(
                 layoutState: adjustedState,
@@ -383,7 +396,17 @@ struct SystemScrollView<Content>: View where Content: View {
             return ()
         }
 
-        return outputs
+        let gestureModifier: Attribute<SystemScrollViewGesture> = graph.makeRule {
+            SystemScrollViewGesture(scrollView: motionHostingScrollView.value)
+        }
+        // Wrap the completed content outputs so child responders remain nested
+        // under the scroll responder for click-versus-pan arbitration.
+        return SystemScrollViewGesture.makeView(
+            modifier: _GraphValue(_attribute: gestureModifier),
+            inputs: inputs
+        ) { _, _ in
+            outputs
+        }
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

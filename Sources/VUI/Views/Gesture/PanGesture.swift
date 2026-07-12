@@ -7,7 +7,11 @@
 
 import Foundation
 
-struct WheelEvent: EventType, Equatable {
+protocol ResponderBoundEvent: EventType {
+    var binding: EventBinding? { get }
+}
+
+struct WheelEvent: ResponderBoundEvent, Equatable {
     var timestamp: Time
     var phase: EventPhase
     var binding: EventBinding?
@@ -25,6 +29,30 @@ struct WheelEvent: EventType, Equatable {
             lhs.phase == rhs.phase &&
             lhs.binding == rhs.binding &&
             lhs.offset == rhs.offset
+    }
+}
+
+/// Cross-platform wheel carrier used by the logical hosting scroll view.
+/// The separate carrier preserves both axes without changing the mirrored
+/// scalar WheelEvent used by the legacy scroll gesture chain.
+struct SystemWheelEvent: ResponderBoundEvent, Equatable {
+    var timestamp: Time
+    var phase: EventPhase
+    var binding: EventBinding?
+    var delta: CGSize
+
+    var eventPhase: EventPhase { phase }
+
+    var location: CGPoint? {
+        get { nil }
+        set { _ = newValue }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.timestamp.seconds == rhs.timestamp.seconds &&
+            lhs.phase == rhs.phase &&
+            lhs.binding == rhs.binding &&
+            lhs.delta == rhs.delta
     }
 }
 

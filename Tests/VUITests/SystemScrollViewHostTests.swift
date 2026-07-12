@@ -2,6 +2,119 @@ import XCTest
 @testable import VUI
 
 final class SystemScrollViewHostTests: XCTestCase {
+    func testHostingScrollViewConsumesPanIntoSystemOffsetAndPhase() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        _AGGraph.withCurrent(graph) {
+            let state = graph.makeInput(value: SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 0, y: 20)
+            ))
+            let phase = graph.makeInput(value: ScrollPhaseState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak(),
+                phaseState: phase.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: CGRect(x: 0, y: 0, width: 100, height: 400),
+                containingSize: CGSize(width: 100, height: 100),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+
+            host.dispatchScrollGesturePhase(.active(.pan(PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -30),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
+            ))))
+
+            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 50))
+            XCTAssertEqual(state.value.contentOffsetMode, .system)
+            XCTAssertEqual(phase.value.phase, .interacting)
+            XCTAssertEqual(phase.value.velocity, CGVector(dx: 0, dy: -300))
+
+            host.dispatchScrollGesturePhase(.ended(.pan(PanGesture.Value(
+                timestamp: Time(seconds: 1.1),
+                translation: CGSize(width: 0, height: -30),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
+            ))))
+
+            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 50))
+            XCTAssertEqual(phase.value.phase, .decelerating)
+            XCTAssertEqual(phase.value.velocity, CGVector(dx: 0, dy: 300))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.1)))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.2)))
+            XCTAssertGreaterThan(state.value.contentOffset.y, 50)
+        }
+    }
+
+    func testHostingScrollViewTargetUpdateHonorsVelocityPreservation() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        _AGGraph.withCurrent(graph) {
+            let state = graph.makeInput(value: SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 0, y: 50)
+            ))
+            let phase = graph.makeInput(value: ScrollPhaseState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak(),
+                phaseState: phase.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            let context = HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: CGRect(x: 0, y: 0, width: 100, height: 500),
+                containingSize: CGSize(width: 100, height: 100),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            )
+            _ = host.updateContext(context)
+            let pan = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -20),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -240))
+            )
+            host.dispatchScrollGesturePhase(.active(.pan(pan)))
+            host.dispatchScrollGesturePhase(.ended(.pan(pan)))
+            XCTAssertTrue(host.isDecelerating)
+            let preservedVelocity = host.currentMotionVelocity
+
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: context.contentFrame,
+                containingSize: context.containingSize,
+                offsetMode: .target(
+                    { _, _ in ScrollTarget(rect: CGRect(x: 0, y: 220, width: 100, height: 40)) },
+                    config: ScrollTargetConfiguration(preservesVelocity: true)
+                ),
+                safeInsets: context.safeInsets
+            ))
+            XCTAssertTrue(host.isDecelerating)
+            XCTAssertEqual(host.currentMotionVelocity, preservedVelocity)
+
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: context.contentFrame,
+                containingSize: context.containingSize,
+                offsetMode: .target(
+                    { _, _ in ScrollTarget(rect: CGRect(x: 0, y: 40, width: 100, height: 40)) },
+                    config: ScrollTargetConfiguration(preservesVelocity: false)
+                ),
+                safeInsets: context.safeInsets
+            ))
+            XCTAssertFalse(host.isDecelerating)
+            XCTAssertEqual(host.currentMotionVelocity.valuePerSecond, .zero)
+        }
+    }
+
     func testContentOffsetAdjustmentReasonMatchesProbedCases() {
         func name(_ reason: ContentOffsetAdjustmentReason) -> String {
             switch reason {
