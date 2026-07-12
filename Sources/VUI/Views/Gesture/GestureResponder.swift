@@ -113,6 +113,26 @@ extension ViewResponder {
 // AnyGestureResponder extension defaults.
 
 extension AnyGestureResponder {
+    /// Reads the tap-count requirement published by the responder's gesture graph.
+    var requiredTapCount: Int? {
+        guard let id = cachedGestureOutputs?.preferences.value(for: RequiredTapCountKey.self) else {
+            return nil
+        }
+        return gestureGraph.data.withCurrent {
+            Attribute<Int?>(id).value
+        }
+    }
+
+    /// Reads the strongest recognition dependency published by the responder's gesture graph.
+    var dependency: GestureDependency {
+        guard let id = cachedGestureOutputs?.preferences.value(for: GestureDependency.Key.self) else {
+            return .none
+        }
+        return gestureGraph.data.withCurrent {
+            Attribute<GestureDependency>(id).value
+        }
+    }
+
     /// Returns true if self is a descendant of other in the nextResponder chain.
     /// Convenience wrapper for exclusionPolicy checks.
     func isDescendant(of other: any AnyGestureResponder) -> Bool {
@@ -123,14 +143,26 @@ extension AnyGestureResponder {
 
     /// Returns true if first and second should run simultaneously given policy.
     ///
-    /// exclusionPolicy is applied as first's policy:
-    ///   tag 0 (.descendants): isDescendant(first, of: second)
-    ///   tag 1 (.ancestors):   isDescendant(second, of: first)
+    /// exclusionPolicy is owned by `first`:
+    ///   tag 0 (.descendants): second is a descendant of first
+    ///   tag 1 (.ancestors):   first is a descendant of second
     ///   tag 2 (.global):      true
     ///   tag 3/4:              false
     static func isSimultaneous(
         _ first: any AnyGestureResponder,
         with second: any AnyGestureResponder,
+        exclusionPolicy policy: GestureResponderExclusionPolicy
+    ) -> Bool {
+        guard let first = first as? any ViewResponder,
+              let second = second as? any ViewResponder else {
+            return false
+        }
+        return isSimultaneous(first, with: second, exclusionPolicy: policy)
+    }
+
+    private static func isSimultaneous(
+        _ first: any ViewResponder,
+        with second: any ViewResponder,
         exclusionPolicy policy: GestureResponderExclusionPolicy
     ) -> Bool {
         switch policy {
@@ -141,27 +173,121 @@ extension AnyGestureResponder {
             case .global:
                 return true
             case .descendants:
-                return first.isDescendant(of: second)
-            case .ancestors:
+                guard let first = first as? ResponderNode else { return false }
                 return second.isDescendant(of: first)
+            case .ancestors:
+                guard let second = second as? ResponderNode else { return false }
+                return first.isDescendant(of: second)
             }
         }
     }
 
-    /// Evaluates whether self and other should run simultaneously, using other's policy.
-    ///
-    /// self.exclusionPolicy is not consulted. Result is asymmetric:
-    ///   child.isSimultaneous(with: parent) = true  (parent has .descendants, child is in subtree)
-    ///   parent.isSimultaneous(with: child) = false (child has .default, both calls return false)
-    ///
-    /// call1 = static(self,  other, other.policy)
-    /// call2 = static(other, self,  other.policy)
-    /// return call1 || call2
+    /// Evaluates both responders' coexistence policies. Each policy is applied
+    /// in its owner's direction, making the combined result symmetric.
     func isSimultaneous(with other: any AnyGestureResponder) -> Bool {
-        let p = other.exclusionPolicy
-        let check1 = Self.isSimultaneous(self,  with: other, exclusionPolicy: p)
-        let check2 = Self.isSimultaneous(other, with: self,  exclusionPolicy: p)
-        return check1 || check2
+        let otherExclusionPolicy = other.exclusionPolicy
+        guard let other = other as? any ViewResponder else { return false }
+        return isSimultaneous(
+            with: other,
+            otherExclusionPolicy: otherExclusionPolicy
+        )
+    }
+
+    /// Evaluates simultaneous recognition using the policy supplied for `other`.
+    func isSimultaneous(
+        with other: any ViewResponder,
+        otherExclusionPolicy: GestureResponderExclusionPolicy
+    ) -> Bool {
+        guard let selfResponder = self as? any ViewResponder else { return false }
+        return Self.isSimultaneous(
+            selfResponder,
+            with: other,
+            exclusionPolicy: exclusionPolicy
+        ) || Self.isSimultaneous(
+            other,
+            with: selfResponder,
+            exclusionPolicy: otherExclusionPolicy
+        )
+    }
+
+    /// Returns whether this responder has recognition priority over `other`.
+    func isPrioritized(
+        over other: any ViewResponder,
+        otherExclusionPolicy: GestureResponderExclusionPolicy
+    ) -> Bool {
+        guard let selfResponder = self as? any ViewResponder,
+              let selfNode = selfResponder as? ResponderNode,
+              let otherNode = other as? ResponderNode else {
+            return false
+        }
+        guard !isSimultaneous(
+            with: other,
+            otherExclusionPolicy: otherExclusionPolicy
+        ) else {
+            return false
+        }
+
+        switch exclusionPolicy {
+        case .default:
+            if otherExclusionPolicy == .highPriority {
+                return false
+            }
+            return selfResponder.isDescendant(of: otherNode)
+        case .highPriority:
+            if otherExclusionPolicy == .default {
+                return true
+            }
+            if otherExclusionPolicy == .highPriority {
+                return other.isDescendant(of: selfNode)
+            }
+            return selfResponder.isDescendant(of: otherNode)
+        case .simultaneous:
+            return selfResponder.isDescendant(of: otherNode)
+        }
+    }
+
+    /// Returns whether this responder may force `other` to fail recognition.
+    func canPrevent(
+        _ other: any ViewResponder,
+        otherExclusionPolicy: GestureResponderExclusionPolicy
+    ) -> Bool {
+        guard isPrioritized(
+            over: other,
+            otherExclusionPolicy: otherExclusionPolicy
+        ) else {
+            return false
+        }
+        guard let other = other as? any AnyGestureResponder else {
+            return true
+        }
+        switch other.dependency {
+        case .none, .failIfActive:
+            return true
+        case .pausedWhileActive, .pausedUntilFailed:
+            return false
+        }
+    }
+
+    /// Returns whether this responder must wait for `other` to fail.
+    func shouldRequireFailure(of other: any AnyGestureResponder) -> Bool {
+        guard let selfResponder = self as? any ViewResponder,
+              let otherResponder = other as? any ViewResponder else {
+            return false
+        }
+
+        if !isSimultaneous(
+            with: otherResponder,
+            otherExclusionPolicy: other.exclusionPolicy
+        ), let selfCount = requiredTapCount,
+           let otherCount = other.requiredTapCount,
+           selfCount != otherCount {
+            return selfCount < otherCount
+        }
+
+        return other.isPrioritized(
+            over: selfResponder,
+            otherExclusionPolicy: exclusionPolicy
+        ) && dependency != .none
     }
 
     /// Manages the childSubgraph lifecycle and delegates to makeSubviewsGesture.
@@ -583,22 +709,43 @@ struct DefaultLayoutResponderFilter: StatefulRule {
 /// Created when a touch hits a `GestureResponder` (touch began).
 /// Torn down when the gesture phase becomes terminal (.ended or .failed).
 ///
-/// Event storage is shared at the GestureGraph level. The session only tracks the
-/// terminal phase and the per-responder teardown handle.
+/// Event storage belongs to the responder so a recognizer waiting on another
+/// recognizer's failure can remain dormant until its dependency resolves.
 /// On teardown, resetSeedAttr is incremented so the persistent gesture chain resets.
 final class ActiveGestureSession {
+    /// The responder-local event input wired into this gesture chain.
+    let eventsAttr: Attribute<[EventID: any EventType]>
+
+    /// The full gesture phase distinguishes successful recognition from failure.
+    let phaseAttr: Attribute<GesturePhase<Void>>
+
     /// Derived attribute: true when the gesture phase is .ended or .failed.
     let isTerminalAttr: Attribute<Bool>
+
+    /// Lower-priority recognizers that start only if this session fails.
+    var failureFallbacks: [ActiveGestureSession] = []
+
+    /// Initial event batch retained for replay into a failure fallback.
+    var beganEvents: [EventID: any EventType] = [:]
 
     /// Weak reference to the responder that owns this session.
     weak var responder: (any AnyGestureResponder)?
 
-    init(isTerminalAttr: Attribute<Bool>, responder: any AnyGestureResponder) {
+    init(
+        eventsAttr: Attribute<[EventID: any EventType]>,
+        phaseAttr: Attribute<GesturePhase<Void>>,
+        isTerminalAttr: Attribute<Bool>,
+        responder: any AnyGestureResponder
+    ) {
+        self.eventsAttr = eventsAttr
+        self.phaseAttr = phaseAttr
         self.isTerminalAttr = isTerminalAttr
         self.responder = responder
     }
 
     var isTerminal: Bool { isTerminalAttr.value }
+
+    var phase: GesturePhase<Void> { phaseAttr.value }
 
     /// Ends this session: increments the responder's per-session resetSeedAttr so the
     /// persistent gesture chain resets itself.

@@ -255,8 +255,8 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     let maximumDelay: Double
 
     var lastResetSeed: UInt32 = 0
-    var lastTapTime: Double = 0        // timestamp of last completed tap
-    var isFirstTap: Bool = true        // true = waiting for first tap
+    var lastTapTime: Double = 0        // deadline for the pending inter-tap interval
+    var isFirstTap: Bool = true        // true when no inter-tap deadline is pending
     var completedTaps: Int = 0
     var lastActivePhase: GesturePhase<E> = .possible(nil)
 
@@ -278,11 +278,9 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         let now = timeAttr.value.seconds
         let childPhase = childPhaseAttr.value
 
-        // Check inter-tap timeout against the last completed tap.
-        if !isFirstTap && lastTapTime > 0 && (now - lastTapTime) > maximumDelay {
-            // Tap interval exceeded, so the sequence fails.
-            isFirstTap = true
-            completedTaps = 0
+        // A repeat stores an absolute deadline so graph time can wake it without
+        // replaying the previous terminal input as another tap.
+        if !isFirstTap && lastTapTime > 0 && now > lastTapTime {
             _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
             return
         }
@@ -295,11 +293,11 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             // Keep possible while a tap sequence is in progress.
         case .active(let v):
             lastActivePhase = childPhase
-            if completedTaps == 0 {
-                isFirstTap = false
-            }
-            // A single-tap repeat becomes active immediately.
-            if requiredCount == 1 {
+            lastTapTime = 0
+            isFirstTap = true
+            // A later tap becomes active once the preceding completed taps make
+            // this input capable of satisfying the configured count.
+            if completedTaps >= requiredCount - 1 {
                 _AGGraph.setStatefulOutput(GesturePhase<E>.active(v))
             } else {
                 _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
@@ -312,18 +310,31 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
                 // Required tap count reached, completing the sequence.
                 completedTaps = 0
                 isFirstTap = true
+                lastTapTime = 0
                 // Increment tapCountAttr to signal RepeatResetSeed.
                 let newCount = tapCountAttr.value &+ 1
                 tapCountAttr.setValue(newCount)
                 _AGGraph.setStatefulOutput(GesturePhase<E>.ended(v))
             } else {
-                // More taps are needed, so remain possible.
+                // More taps are needed. Keep the gesture possible and publish
+                // the absolute wake-up deadline to the owning gesture host.
+                lastTapTime = now + maximumDelay
+                isFirstTap = false
                 _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
         case .failed:
             completedTaps = 0
             isFirstTap = true
             _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
+        }
+
+        if !isFirstTap,
+           let context = _AGGraphContext.current,
+           let gestureGraph = context.context as? GestureGraph {
+            let deadline = Time(seconds: lastTapTime)
+            if deadline < gestureGraph.nextGestureUpdateTime {
+                gestureGraph.nextGestureUpdateTime = deadline
+            }
         }
     }
 }

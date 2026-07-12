@@ -246,6 +246,14 @@ class HostingScrollView {
     private struct DecelerationState {
         var simulation: Deceleration2D
         var beginTime: Time?
+        var targetOffsetState: TargetOffsetState?
+    }
+
+    private struct TargetOffsetState {
+        var proposedOffset: CGPoint
+        var originalOffset: CGPoint
+        var velocity: _Velocity<CGSize>
+        var resolvedOffset: CGPoint
     }
 
     final class PlatformContainer {
@@ -329,6 +337,7 @@ class HostingScrollView {
                     // Retarget only the destination. The simulation keeps its
                     // current velocity so the presentation remains continuous.
                     decelerationState.simulation.updateTarget(context.contentOffset)
+                    decelerationState.targetOffsetState = nil
                     self.decelerationState = decelerationState
                 }
             } else {
@@ -339,6 +348,7 @@ class HostingScrollView {
             animationTargetConfig = nil
         }
         pendingContext = context
+        retargetContentOffsetIfNeeded()
         return false
     }
 
@@ -434,7 +444,7 @@ class HostingScrollView {
                 dragState = drag
                 // Gesture translation follows the pointer; content offset moves
                 // in the opposite direction as if the content were being dragged.
-                let nextOffset = clampedContentOffset(CGPoint(
+                let nextOffset = interactiveContentOffset(CGPoint(
                     x: drag.initialOffset.x - translation.width,
                     y: drag.initialOffset.y - translation.height
                 ))
@@ -456,20 +466,32 @@ class HostingScrollView {
                     velocity = _Velocity(valuePerSecond: .zero)
                     eventTime = nil
                 }
+                let originalOffset = dragState?.initialOffset ?? currentOffset
                 dragState = nil
                 // Deceleration evolves content-space offset, so convert the
                 // pointer-space terminal velocity before starting the simulation.
                 let contentVelocity = velocity.map {
                     CGSize(width: -$0.width, height: -$0.height)
                 }
-                if contentVelocity.valuePerSecond != .zero {
+                let boundedOffset = clampedContentOffset(currentOffset)
+                var simulation = makeDeceleration(
+                    offset: currentOffset,
+                    velocity: contentVelocity
+                )
+                let targetOffsetState = makeTargetOffsetState(
+                    from: currentOffset,
+                    originalOffset: originalOffset,
+                    velocity: contentVelocity
+                )
+                let behaviorTarget = targetOffsetState?.resolvedOffset
+                simulation.updateTarget(behaviorTarget)
+                if contentVelocity.valuePerSecond != .zero
+                    || currentOffset != boundedOffset
+                    || (behaviorTarget != nil && behaviorTarget != currentOffset) {
                     decelerationState = DecelerationState(
-                        simulation: Deceleration2D(
-                            offset: currentOffset,
-                            velocity: contentVelocity,
-                            decelerationRate: resolvedDecelerationRate
-                        ),
-                        beginTime: eventTime
+                        simulation: simulation,
+                        beginTime: eventTime,
+                        targetOffsetState: targetOffsetState
                     )
                     publishInteraction(
                         offset: currentOffset,
@@ -517,7 +539,7 @@ class HostingScrollView {
             minValue: .zero,
             maxValue: maximum
         )
-        let offset = clampedContentOffset(decelerationState.simulation.offset)
+        let offset = decelerationState.simulation.offset
         let velocity = decelerationState.simulation.velocity
         if completed {
             self.decelerationState = nil
@@ -555,6 +577,190 @@ class HostingScrollView {
                 ? min(max(offset.y, 0), maxOffset.y)
                 : 0
         )
+    }
+
+    /// Applies the sampled residue-based rubber-band curve only while input is
+    /// directly manipulating the content. The graph state keeps this
+    /// presentation offset so the terminal deceleration can spring back from
+    /// the exact visible position instead of jumping to the nearest bound.
+    private func interactiveContentOffset(_ offset: CGPoint) -> CGPoint {
+        guard let context = pendingContext else {
+            return offset
+        }
+        let visibleSize = context.containingSize.inset(by: context.safeInsets)
+        let maximum = maximumContentOffset(
+            contentSize: context.contentFrame.size,
+            visibleSize: visibleSize
+        )
+        let clamped = clampedContentOffset(offset)
+        var residue = CGSize(
+            width: clamped.x - offset.x,
+            height: clamped.y - offset.y
+        )
+        if !permitsBounce(axis: .horizontal, maximumOffset: maximum.x) {
+            residue.width = 0
+        }
+        if !permitsBounce(axis: .vertical, maximumOffset: maximum.y) {
+            residue.height = 0
+        }
+        let rubberBand = _scrollViewAddRubberBandingToResidue(
+            residue,
+            range: visibleSize
+        )
+        return CGPoint(
+            x: clamped.x - rubberBand.width,
+            y: clamped.y - rubberBand.height
+        )
+    }
+
+    private func permitsBounce(axis: Axis, maximumOffset: CGFloat) -> Bool {
+        let axisSet: Axis.Set = axis == .horizontal ? .horizontal : .vertical
+        guard configuration.axes.contains(axisSet) else {
+            return false
+        }
+        let role = axis == .horizontal
+            ? properties.horizontalBounceBehavior
+            : properties.verticalBounceBehavior
+        switch role.rawValue {
+        case 0, 1: // automatic, always
+            return true
+        case 2: // basedOnSize
+            return maximumOffset > 0
+        default:
+            return false
+        }
+    }
+
+    private func makeDeceleration(
+        offset: CGPoint,
+        velocity: _Velocity<CGSize>
+    ) -> Deceleration2D {
+        let maximum = maximumContentOffset()
+        var value = velocity.valuePerSecond
+        if !permitsBounce(axis: .horizontal, maximumOffset: maximum.x) {
+            value.width = maximum.x > 0 ? value.width : 0
+        }
+        if !permitsBounce(axis: .vertical, maximumOffset: maximum.y) {
+            value.height = maximum.y > 0 ? value.height : 0
+        }
+        return Deceleration2D(
+            time: 0,
+            offset: CGSize(width: offset.x, height: offset.y),
+            velocity: _Velocity(valuePerSecond: value),
+            drag: min(max(1 - resolvedDecelerationRate, 0), 1),
+            bounceStiffness: 100,
+            bounceDrag: 17,
+            stoppedVelocity: _Velocity(valuePerSecond: CGFloat(2.5))
+        )
+    }
+
+    /// Resolves the native-style projected offset through the graph-owned target
+    /// behavior before the local deceleration simulation takes ownership.
+    private func makeTargetOffsetState(
+        from offset: CGPoint,
+        originalOffset: CGPoint,
+        velocity: _Velocity<CGSize>
+    ) -> TargetOffsetState? {
+        let rate = resolvedDecelerationRate
+        let proposedOffset = clampedContentOffset(CGPoint(
+            x: offset.x + _scrollViewProjectedDecelerationDistance(
+                velocity: Double(velocity.valuePerSecond.width),
+                decelerationRate: rate
+            ),
+            y: offset.y + _scrollViewProjectedDecelerationDistance(
+                velocity: Double(velocity.valuePerSecond.height),
+                decelerationRate: rate
+            )
+        ))
+        guard let resolvedOffset = targetContentOffset(
+            proposedOffset,
+            originalOffset: originalOffset,
+            velocity: velocity,
+            geometryOffset: offset
+        ) else {
+            return nil
+        }
+        return TargetOffsetState(
+            proposedOffset: proposedOffset,
+            originalOffset: originalOffset,
+            velocity: velocity,
+            resolvedOffset: resolvedOffset
+        )
+    }
+
+    private func targetContentOffset(
+        _ proposedOffset: CGPoint,
+        originalOffset: CGPoint,
+        velocity: _Velocity<CGSize>,
+        geometryOffset: CGPoint
+    ) -> CGPoint? {
+        guard let behavior = properties.scrollBehavior,
+              !configuration.axes.isEmpty,
+              let context = pendingContext else {
+            return nil
+        }
+
+        let geometry = ScrollGeometry(
+            contentOffset: geometryOffset,
+            contentSize: context.contentFrame.size,
+            contentInsets: context.safeInsets,
+            containerSize: context.containingSize
+        )
+        let insetOrigin = CGPoint(
+            x: context.safeInsets.leading,
+            y: context.safeInsets.top
+        )
+        func target(at offset: CGPoint) -> ScrollTarget {
+            ScrollTarget(rect: CGRect(
+                origin: CGPoint(
+                    x: offset.x + insetOrigin.x,
+                    y: offset.y + insetOrigin.y
+                ),
+                size: geometry.containerSize
+            ))
+        }
+
+        var resolvedTarget = target(at: proposedOffset)
+        let targetContext = ScrollTargetBehaviorContext(
+            originalTarget: target(at: originalOffset),
+            velocity: CGVector(
+                dx: velocity.valuePerSecond.width,
+                dy: velocity.valuePerSecond.height
+            ),
+            geometry: geometry,
+            axes: configuration.axes,
+            decelerationRate: properties.decelerationRate,
+            environment: environment
+        )
+        Update.ensure {
+            behavior.updateTarget(&resolvedTarget, context: targetContext)
+        }
+        return clampedContentOffset(CGPoint(
+            x: resolvedTarget.rect.minX - insetOrigin.x,
+            y: resolvedTarget.rect.minY - insetOrigin.y
+        ))
+    }
+
+    /// Layout can change collection frames while inertial motion is active. Keep
+    /// the platform-proposed candidate and terminal velocity stable, and only
+    /// replace the simulation target when the resolved behavior output changes.
+    private func retargetContentOffsetIfNeeded() {
+        guard var decelerationState,
+              var targetOffsetState = decelerationState.targetOffsetState,
+              let context = pendingContext,
+              let resolvedOffset = targetContentOffset(
+                  targetOffsetState.proposedOffset,
+                  originalOffset: targetOffsetState.originalOffset,
+                  velocity: targetOffsetState.velocity,
+                  geometryOffset: context.contentOffset
+              ),
+              resolvedOffset != targetOffsetState.resolvedOffset else {
+            return
+        }
+        decelerationState.simulation.updateTarget(resolvedOffset)
+        targetOffsetState.resolvedOffset = resolvedOffset
+        decelerationState.targetOffsetState = targetOffsetState
+        self.decelerationState = decelerationState
     }
 
     private func maximumContentOffset() -> CGPoint {
@@ -783,11 +989,21 @@ struct ScrollViewAdjustedProperties: Rule {
         if !properties.isEnabled {
             properties.verticalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
             properties.horizontalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
+        } else {
+            if !configuration.axes.contains(.vertical),
+               properties.verticalBounceBehavior.rawValue == ScrollBounceBehavior.automatic.role.rawValue {
+                properties.verticalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
+            }
+            if !configuration.axes.contains(.horizontal),
+               properties.horizontalBounceBehavior.rawValue == ScrollBounceBehavior.automatic.role.rawValue {
+                properties.horizontalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
+            }
         }
         if let isContainedInPlatter = _isContainedInPlatter.attribute?.value {
             properties.isContainedInPlatter = isContainedInPlatter
         }
         _ = _behaviorProperties.value
+        properties.decelerationRate = .standard
         return properties
     }
 }

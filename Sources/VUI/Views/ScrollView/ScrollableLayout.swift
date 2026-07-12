@@ -376,6 +376,22 @@ private let scrollDecelerationEstimatedTargetStiffnessScale = 30.0
 private let scrollRubberBandingMinimumMagnitude = CGFloat(Double.ulpOfOne)
 private let scrollRubberBandingScale = CGFloat(0.1)
 
+func _scrollViewProjectedDecelerationDistance(
+    velocity: Double,
+    decelerationRate: Double
+) -> CGFloat {
+    let speed = abs(velocity)
+    guard speed > scrollDecelerationLowVelocityThreshold else {
+        return 0
+    }
+    let magnitude = speed *
+        scrollDecelerationProjectionMultiplier *
+        decelerationRate *
+        ((-2.5 / speed) + 1) /
+        (1 - decelerationRate)
+    return CGFloat(velocity.sign == .minus ? -magnitude : magnitude)
+}
+
 func _scrollViewAddRubberBandingToResidue(_ residue: CGSize, range: CGSize) -> CGSize {
     CGSize(
         width: _scrollViewAddRubberBandingToResidue(residue.width, range: range.width),
@@ -894,11 +910,11 @@ struct ScrollViewBehavior {
 
         let velocity = sourceVelocity.valuePerSecond
         return CGPoint(
-            x: sourceOffset.x + projectedDecelerationDistance(
+            x: sourceOffset.x + _scrollViewProjectedDecelerationDistance(
                 velocity: Double(velocity.width),
                 decelerationRate: node.config.decelerationRate
             ),
-            y: sourceOffset.y + projectedDecelerationDistance(
+            y: sourceOffset.y + _scrollViewProjectedDecelerationDistance(
                 velocity: Double(velocity.height),
                 decelerationRate: node.config.decelerationRate
             )
@@ -993,22 +1009,6 @@ struct ScrollViewBehavior {
         Update.enqueueAction {
             completion(finished)
         }
-    }
-
-    private func projectedDecelerationDistance(
-        velocity: Double,
-        decelerationRate: Double
-    ) -> CGFloat {
-        let speed = abs(velocity)
-        guard speed > scrollDecelerationLowVelocityThreshold else {
-            return 0
-        }
-        let magnitude = speed *
-            scrollDecelerationProjectionMultiplier *
-            decelerationRate *
-            ((-2.5 / speed) + 1) /
-            (1 - decelerationRate)
-        return CGFloat(velocity.sign == .minus ? -magnitude : magnitude)
     }
 
     private func maxContentOffset(node: ScrollViewNode) -> CGPoint {

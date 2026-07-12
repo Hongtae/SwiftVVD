@@ -2,7 +2,7 @@ import XCTest
 @testable import VUI
 
 final class ViewGraphNextUpdateTests: XCTestCase {
-    func testNextUpdateIntervalNormalizesUnscheduledViewsIntervalToZero() {
+    func testNextUpdateIntervalCombinesViewAndGestureLanes() {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
         rendererHost.storage = viewGraph
@@ -10,12 +10,13 @@ final class ViewGraphNextUpdateTests: XCTestCase {
         XCTAssertEqual(viewGraph.nextUpdateInterval, 0)
 
         viewGraph.nextUpdate.gestures.interval(0.2, reason: 11)
-        XCTAssertEqual(viewGraph.nextUpdateInterval, 0)
-        XCTAssertTrue(viewGraph.nextUpdateReasons.isEmpty)
+        XCTAssertEqual(viewGraph.nextUpdateInterval, 0.2)
+        XCTAssertEqual(viewGraph.nextUpdateReasons, [11])
+        XCTAssertTrue(viewGraph.hasScheduledViewUpdate)
 
         viewGraph.nextUpdate.views.interval(0.25, reason: 12)
-        XCTAssertEqual(viewGraph.nextUpdateInterval, 0.25)
-        XCTAssertEqual(viewGraph.nextUpdateReasons, [12])
+        XCTAssertEqual(viewGraph.nextUpdateInterval, 0.2)
+        XCTAssertEqual(viewGraph.nextUpdateReasons, [11, 12])
     }
 
     func testZeroIntervalSuppressesLaterSlowIntervals() {

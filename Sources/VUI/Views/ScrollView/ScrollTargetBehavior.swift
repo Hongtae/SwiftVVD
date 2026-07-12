@@ -426,6 +426,34 @@ extension ResolvedScrollBehavior: Equatable {
     }
 }
 
+extension ResolvedScrollBehavior: ScrollTargetBehavior {
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        guard let axes else {
+            fatalError("ResolvedScrollBehavior requires resolved axes before target updates.")
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError("ResolvedScrollBehavior.updateTarget requires an active _AGGraph context.")
+        }
+
+        var context = context
+        context._axes = axes
+        context.collections = _collections.isValid(in: graph)
+            ? _collections.toStrong().value
+            : []
+        context.targets = _targets.isValid(in: graph)
+            ? _targets.toStrong().value
+            : []
+        context.environment = _environment.isValid(in: graph)
+            ? _environment.toStrong().value
+            : EnvironmentValues()
+        base.updateTarget(&target, context: context)
+    }
+
+    func properties(context: PropertiesContext) -> Properties {
+        base.properties(context: context)
+    }
+}
+
 protocol ScrollEnvironmentTransform {
     func update(properties: inout ScrollEnvironmentProperties)
 }
@@ -697,16 +725,23 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
     }
 
     public func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        let collections = context.targets.isEmpty ? context.collections : context.targets
-        guard !collections.isEmpty,
+        guard !context.collections.isEmpty,
               let axis = ViewAlignedScrollAxis(axes: context.axes) else {
+            return
+        }
+
+        let targetCoordinate = axis.coordinate(of: target.rect.origin)
+        let maximumTargetCoordinate =
+            axis.length(of: context.contentSize) - axis.length(of: context.containerSize)
+        guard targetCoordinate > 0,
+              targetCoordinate < maximumTargetCoordinate else {
             return
         }
 
         guard var alignedRect = makeTargetRect(
             for: target,
             context: context,
-            collections: collections,
+            collections: context.collections,
             axis: axis
         ) else {
             return
@@ -805,12 +840,16 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
         let originalIndex = closestRectIndex(in: sorted, to: context.originalTarget.rect.origin)
         let velocity = axis.velocity(of: context.velocity, layoutDirection: context.environment.layoutDirection)
         if originalIndex == targetIndex,
+           context.decelerationRate != .standard,
            velocity != 0 {
             let step = velocity > 0 ? 1 : -1
-            let nextIndex = targetIndex + step
-            if sorted.indices.contains(nextIndex),
-               axis.min(of: sorted[nextIndex]) != axis.min(of: sorted[targetIndex]) {
-                return sorted[nextIndex]
+            let currentOrigin = axis.min(of: sorted[targetIndex])
+            var nextIndex = targetIndex + step
+            while sorted.indices.contains(nextIndex) {
+                if axis.min(of: sorted[nextIndex]) != currentOrigin {
+                    return sorted[nextIndex]
+                }
+                nextIndex += step
             }
         }
 

@@ -374,9 +374,26 @@ private struct ScrollEnvironmentProbeTransform: ScrollEnvironmentTransform {
 
 private struct RecordingScrollTargetBehavior: ScrollTargetBehavior {
     var token: Int
+    var recorder: RecordingScrollTargetBehaviorRecorder?
 
     func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        recorder?.contexts.append(context)
+        if recorder != nil {
+            target.rect.origin.y += CGFloat(token)
+        }
     }
+
+    func properties(context: PropertiesContext) -> Properties {
+        recorder?.propertiesContexts.append(context)
+        var properties = ScrollTargetBehaviorProperties()
+        properties.limitsScrolls = recorder != nil
+        return properties
+    }
+}
+
+private final class RecordingScrollTargetBehaviorRecorder {
+    var contexts: [ScrollTargetBehaviorContext] = []
+    var propertiesContexts: [ScrollTargetBehaviorPropertiesContext] = []
 }
 
 private final class ScrollBehaviorEnvironmentRecorder {
@@ -776,6 +793,98 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
+    func testResolvedScrollBehaviorInjectsWeakInputsBeforeDispatchingBaseBehavior() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let recorder = RecordingScrollTargetBehaviorRecorder()
+            let collection = ScrollViewBehaviorCollection(subviews: [])
+            let targetCollection = ScrollViewBehaviorCollection(subviews: [])
+            let collections = graph.makeInput(value: [collection] as [any ScrollableCollection])
+            let targets = graph.makeInput(value: [targetCollection] as [any ScrollableCollection])
+            var environment = EnvironmentValues()
+            environment.layoutDirection = .rightToLeft
+            let environmentAttribute = graph.makeInput(value: environment)
+            let behavior = ResolvedScrollBehavior(
+                base: RecordingScrollTargetBehavior(token: 7, recorder: recorder),
+                axes: .vertical,
+                collections: collections.asWeak(),
+                targets: targets.asWeak(),
+                environment: environmentAttribute.asWeak()
+            )
+            let geometry = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 100, height: 400),
+                contentInsets: EdgeInsets(),
+                containerSize: CGSize(width: 100, height: 100)
+            )
+            var target = ScrollTarget(rect: CGRect(x: 0, y: 100, width: 100, height: 100))
+            let incomingContext = ScrollTargetBehaviorContext(
+                originalTarget: target,
+                velocity: .zero,
+                geometry: geometry,
+                axes: .horizontal,
+                environment: EnvironmentValues()
+            )
+
+            behavior.updateTarget(&target, context: incomingContext)
+
+            XCTAssertEqual(target.rect.origin.y, 107)
+            let context = try! XCTUnwrap(recorder.contexts.last)
+            XCTAssertEqual(context.axes, .vertical)
+            XCTAssertEqual(context.collections.count, 1)
+            XCTAssertTrue((context.collections[0] as AnyObject) === collection)
+            XCTAssertEqual(context.targets.count, 1)
+            XCTAssertTrue((context.targets[0] as AnyObject) === targetCollection)
+            XCTAssertEqual(context.environment.layoutDirection, .rightToLeft)
+
+            let properties = behavior.properties(context: .init(
+                environment: environment,
+                axes: .vertical
+            ))
+            XCTAssertTrue(properties.limitsScrolls)
+            XCTAssertEqual(recorder.propertiesContexts.last?.axes, .vertical)
+        }
+    }
+
+    func testResolvedScrollBehaviorUsesEmptyWeakInputsAndDefaultEnvironmentWhenAbsent() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let recorder = RecordingScrollTargetBehaviorRecorder()
+            let behavior = ResolvedScrollBehavior(
+                base: RecordingScrollTargetBehavior(token: 0, recorder: recorder),
+                axes: .horizontal
+            )
+            let geometry = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 400, height: 100),
+                contentInsets: EdgeInsets(),
+                containerSize: CGSize(width: 100, height: 100)
+            )
+            var incomingEnvironment = EnvironmentValues()
+            incomingEnvironment.layoutDirection = .rightToLeft
+            var target = ScrollTarget(rect: CGRect(x: 100, y: 0, width: 100, height: 100))
+            let incomingContext = ScrollTargetBehaviorContext(
+                originalTarget: target,
+                velocity: .zero,
+                geometry: geometry,
+                axes: .vertical,
+                environment: incomingEnvironment
+            )
+
+            behavior.updateTarget(&target, context: incomingContext)
+
+            let context = try! XCTUnwrap(recorder.contexts.last)
+            XCTAssertEqual(context.axes, .horizontal)
+            XCTAssertTrue(context.collections.isEmpty)
+            XCTAssertTrue(context.targets.isEmpty)
+            XCTAssertEqual(context.environment.layoutDirection, .leftToRight)
+        }
+    }
+
     func testDynamicLayoutPublishesScrollTargetRoleContentKey() {
         let host = GraphHost()
         var layoutsID: AGAttribute!
@@ -1170,6 +1279,200 @@ final class ScrollViewSurfaceTests: XCTestCase {
         ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
 
         XCTAssertEqual(target.rect.origin.y, 170)
+    }
+
+    func testViewAlignedScrollTargetBehaviorSkipsVelocityNeighborForStandardDeceleration() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 0, y: 40, width: 80, height: 40)),
+            viewAlignedSubview(id: "target", frame: CGRect(x: 0, y: 120, width: 80, height: 40)),
+            viewAlignedSubview(id: "third", frame: CGRect(x: 0, y: 200, width: 80, height: 40)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 0, y: 115, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: CGVector(dx: 0, dy: 1),
+            geometry: geometry,
+            axes: .vertical,
+            decelerationRate: .standard,
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.y, 120)
+    }
+
+    func testViewAlignedScrollTargetBehaviorVelocitySkipsDuplicateAxisOrigins() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 40, y: 0, width: 40, height: 80)),
+            viewAlignedSubview(id: "duplicate-a", frame: CGRect(x: 120, y: 0, width: 40, height: 80)),
+            viewAlignedSubview(id: "duplicate-b", frame: CGRect(x: 120, y: 40, width: 40, height: 80)),
+            viewAlignedSubview(id: "last", frame: CGRect(x: 220, y: 0, width: 40, height: 80)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 400, height: 100),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 115, y: 0, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: CGVector(dx: 1, dy: 0),
+            geometry: geometry,
+            axes: .horizontal,
+            decelerationRate: .paging,
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.x, 220)
+    }
+
+    func testViewAlignedScrollTargetBehaviorReversesHorizontalVelocityForRightToLeftLayout() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 40, y: 0, width: 40, height: 80)),
+            viewAlignedSubview(id: "target", frame: CGRect(x: 120, y: 0, width: 40, height: 80)),
+            viewAlignedSubview(id: "last", frame: CGRect(x: 220, y: 0, width: 40, height: 80)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 400, height: 100),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var environment = EnvironmentValues()
+        environment.layoutDirection = .rightToLeft
+        var target = ScrollTarget(rect: CGRect(x: 115, y: 0, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: CGVector(dx: 1, dy: 0),
+            geometry: geometry,
+            axes: .horizontal,
+            decelerationRate: .paging,
+            collections: [collection],
+            environment: environment
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.x, 40)
+    }
+
+    func testViewAlignedScrollTargetBehaviorVelocityDoesNotAdvanceTwiceAfterClosestTargetChanges() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 0, y: 40, width: 80, height: 40)),
+            viewAlignedSubview(id: "target", frame: CGRect(x: 0, y: 120, width: 80, height: 40)),
+            viewAlignedSubview(id: "third", frame: CGRect(x: 0, y: 200, width: 80, height: 40)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 0, y: 115, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: ScrollTarget(rect: CGRect(x: 0, y: 45, width: 100, height: 100)),
+            velocity: CGVector(dx: 0, dy: 1),
+            geometry: geometry,
+            axes: .vertical,
+            decelerationRate: .paging,
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.y, 120)
+    }
+
+    func testViewAlignedScrollTargetBehaviorLeavesBoundaryTargetsUnchanged() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "first", frame: CGRect(x: 0, y: 40, width: 80, height: 40)),
+            viewAlignedSubview(id: "last", frame: CGRect(x: 0, y: 200, width: 80, height: 40)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 300),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+
+        func run(originY: CGFloat) -> ScrollTarget {
+            var target = ScrollTarget(rect: CGRect(x: 0, y: originY, width: 100, height: 100))
+            let context = ScrollTargetBehaviorContext(
+                originalTarget: target,
+                velocity: .zero,
+                geometry: geometry,
+                axes: .vertical,
+                collections: [collection]
+            )
+            ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+            return target
+        }
+
+        XCTAssertEqual(run(originY: 0).rect.origin.y, 0)
+        XCTAssertEqual(run(originY: 200).rect.origin.y, 200)
+    }
+
+    func testViewAlignedScrollTargetBehaviorLeavesMultiAxisTargetUnchanged() {
+        let collection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "target", frame: CGRect(x: 120, y: 120, width: 40, height: 40)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 400, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        let originalRect = CGRect(x: 115, y: 115, width: 100, height: 100)
+        var target = ScrollTarget(rect: originalRect)
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: CGVector(dx: 1, dy: 1),
+            geometry: geometry,
+            axes: [.horizontal, .vertical],
+            collections: [collection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect, originalRect)
+    }
+
+    func testViewAlignedScrollTargetBehaviorUsesContainerCollectionsRatherThanTargetRoleCollections() {
+        let containerCollection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "container", frame: CGRect(x: 0, y: 120, width: 80, height: 40)),
+        ])
+        let targetRoleCollection = ScrollViewBehaviorCollection(subviews: [
+            viewAlignedSubview(id: "target-role", frame: CGRect(x: 0, y: 200, width: 80, height: 40)),
+        ])
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 100, height: 400),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var target = ScrollTarget(rect: CGRect(x: 0, y: 115, width: 100, height: 100))
+        let context = ScrollTargetBehaviorContext(
+            originalTarget: target,
+            velocity: .zero,
+            geometry: geometry,
+            axes: .vertical,
+            collections: [containerCollection],
+            targets: [targetRoleCollection]
+        )
+
+        ViewAlignedScrollTargetBehavior().updateTarget(&target, context: context)
+
+        XCTAssertEqual(target.rect.origin.y, 120)
     }
 
     func testScrollEnvironmentSupportStorageShapes() {

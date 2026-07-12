@@ -2,6 +2,77 @@ import XCTest
 @testable import VUI
 
 final class SystemScrollViewHostTests: XCTestCase {
+    func testHostingScrollViewAppliesBounceRoleAndSpringsBackFromOverscroll() {
+        func makeHost(
+            behavior: ScrollBounceBehavior
+        ) -> (_AGGraph, Attribute<SystemScrollLayoutState>, Attribute<ScrollPhaseState>, HostingScrollView) {
+            let graph = _AGGraph()
+            let graphRef = _AGGraphContext(graph: graph)
+            return _AGGraph.withCurrent(graph) {
+                let state = graph.makeInput(value: SystemScrollLayoutState())
+                let phase = graph.makeInput(value: ScrollPhaseState())
+                let host = HostingScrollView(
+                    graphRef: graphRef,
+                    layoutState: state.asWeak(),
+                    phaseState: phase.asWeak()
+                )
+                host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+                var properties = ScrollEnvironmentProperties()
+                properties.verticalBounceBehavior = behavior.role
+                host.updateProperties(properties)
+                _ = host.updateContext(HostingScrollViewUpdateContext(
+                    contentOffset: .zero,
+                    contentFrame: CGRect(x: 0, y: 0, width: 100, height: 70),
+                    containingSize: CGSize(width: 100, height: 100),
+                    offsetMode: .system,
+                    safeInsets: EdgeInsets()
+                ))
+                return (graph, state, phase, host)
+            }
+        }
+
+        let (automaticGraph, automaticState, automaticPhase, automaticHost) = makeHost(
+            behavior: .automatic
+        )
+        _AGGraph.withCurrent(automaticGraph) {
+            let active = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: 40),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+            automaticHost.dispatchScrollGesturePhase(.active(.pan(active)))
+            XCTAssertEqual(
+                automaticState.value.contentOffset.y,
+                -3.846153846153843,
+                accuracy: 0.0000000001
+            )
+            XCTAssertEqual(automaticPhase.value.phase, .interacting)
+
+            automaticHost.dispatchScrollGesturePhase(.ended(.pan(active)))
+            XCTAssertTrue(automaticHost.isDecelerating)
+            XCTAssertEqual(automaticPhase.value.phase, .decelerating)
+            XCTAssertTrue(automaticHost.updateMotion(at: Time(seconds: 1)))
+            XCTAssertTrue(automaticHost.updateMotion(at: Time(seconds: 1.5)))
+            XCTAssertEqual(automaticState.value.contentOffset.y, 0, accuracy: 0.0000000001)
+            XCTAssertEqual(automaticPhase.value.phase, .idle)
+        }
+
+        let (sizedGraph, sizedState, sizedPhase, sizedHost) = makeHost(
+            behavior: .basedOnSize
+        )
+        _AGGraph.withCurrent(sizedGraph) {
+            sizedHost.dispatchScrollGesturePhase(.active(.pan(PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: 40),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: .zero)
+            ))))
+            XCTAssertEqual(sizedState.value.contentOffset, .zero)
+            XCTAssertEqual(sizedPhase.value.phase, .tracking)
+        }
+    }
+
     func testHostingScrollViewConsumesPanIntoSystemOffsetAndPhase() {
         let graph = _AGGraph()
         let graphRef = _AGGraphContext(graph: graph)
@@ -50,6 +121,174 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.1)))
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.2)))
             XCTAssertGreaterThan(state.value.contentOffset.y, 50)
+        }
+    }
+
+    func testHostingScrollViewResolvesTerminalOffsetThroughScrollTargetBehavior() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        _AGGraph.withCurrent(graph) {
+            let state = graph.makeInput(value: SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 0, y: 50)
+            ))
+            let phase = graph.makeInput(value: ScrollPhaseState())
+            let recorder = HostScrollTargetBehaviorRecorder()
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak(),
+                phaseState: phase.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            var properties = ScrollEnvironmentProperties()
+            properties.decelerationRate = .viewAligned
+            properties.scrollBehavior = ResolvedScrollBehavior(
+                base: HostRecordingScrollTargetBehavior(
+                    recorder: recorder,
+                    targetOrigin: CGPoint(x: 10, y: 190)
+                ),
+                axes: .vertical
+            )
+            host.updateProperties(properties)
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: CGRect(x: 0, y: 0, width: 100, height: 500),
+                containingSize: CGSize(width: 100, height: 100),
+                offsetMode: .system,
+                safeInsets: EdgeInsets(top: 10, leading: 10, bottom: 0, trailing: 0)
+            ))
+
+            let pan = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -10),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
+            )
+            host.dispatchScrollGesturePhase(.active(.pan(pan)))
+            host.dispatchScrollGesturePhase(.ended(.pan(pan)))
+
+            XCTAssertTrue(host.isDecelerating)
+            XCTAssertEqual(recorder.originalTarget?.rect.origin, CGPoint(x: 10, y: 60))
+            XCTAssertEqual(recorder.originalTarget?.rect.size, CGSize(width: 100, height: 100))
+            XCTAssertEqual(recorder.proposedTarget?.rect.size, CGSize(width: 100, height: 100))
+            XCTAssertGreaterThan(recorder.proposedTarget?.rect.minY ?? 0, 70)
+            XCTAssertEqual(recorder.velocity, CGVector(dx: 0, dy: 300))
+            XCTAssertEqual(recorder.geometry?.contentOffset, CGPoint(x: 0, y: 60))
+            XCTAssertEqual(recorder.geometry?.contentInsets.top, 10)
+            XCTAssertEqual(recorder.axes, .vertical)
+            XCTAssertEqual(recorder.decelerationRate, .viewAligned)
+
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
+            XCTAssertFalse(host.isDecelerating)
+            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 180))
+            XCTAssertEqual(phase.value.phase, .idle)
+        }
+    }
+
+    func testHostingScrollViewStartsTargetedMotionAfterZeroVelocityDrag() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        _AGGraph.withCurrent(graph) {
+            let state = graph.makeInput(value: SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 0, y: 50)
+            ))
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            var properties = ScrollEnvironmentProperties()
+            properties.scrollBehavior = ResolvedScrollBehavior(
+                base: HostRecordingScrollTargetBehavior(
+                    recorder: HostScrollTargetBehaviorRecorder(),
+                    targetOrigin: CGPoint(x: 0, y: 180)
+                ),
+                axes: .vertical
+            )
+            host.updateProperties(properties)
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: CGRect(x: 0, y: 0, width: 100, height: 500),
+                containingSize: CGSize(width: 100, height: 100),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+
+            let pan = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -10),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+            host.dispatchScrollGesturePhase(.active(.pan(pan)))
+            host.dispatchScrollGesturePhase(.ended(.pan(pan)))
+
+            XCTAssertTrue(host.isDecelerating)
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
+            XCTAssertFalse(host.isDecelerating)
+            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 180))
+        }
+    }
+
+    func testHostingScrollViewRetargetsActiveBehaviorAfterLayoutUpdate() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        _AGGraph.withCurrent(graph) {
+            let state = graph.makeInput(value: SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 0, y: 50)
+            ))
+            let recorder = HostScrollTargetBehaviorRecorder()
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            var properties = ScrollEnvironmentProperties()
+            properties.scrollBehavior = ResolvedScrollBehavior(
+                base: HostRecordingScrollTargetBehavior(
+                    recorder: recorder,
+                    targetOrigin: CGPoint(x: 0, y: 180)
+                ),
+                axes: .vertical
+            )
+            host.updateProperties(properties)
+            let context = HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: CGRect(x: 0, y: 0, width: 100, height: 500),
+                containingSize: CGSize(width: 100, height: 100),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            )
+            _ = host.updateContext(context)
+
+            let pan = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -10),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
+            )
+            host.dispatchScrollGesturePhase(.active(.pan(pan)))
+            host.dispatchScrollGesturePhase(.ended(.pan(pan)))
+            XCTAssertEqual(recorder.invocationCount, 1)
+
+            recorder.overrideTargetOrigin = CGPoint(x: 0, y: 260)
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: state.value.contentOffset,
+                contentFrame: context.contentFrame,
+                containingSize: context.containingSize,
+                offsetMode: .system,
+                safeInsets: context.safeInsets
+            ))
+            XCTAssertEqual(recorder.invocationCount, 2)
+
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
+            XCTAssertFalse(host.isDecelerating)
+            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 260))
         }
     }
 
@@ -748,8 +987,11 @@ final class SystemScrollViewHostTests: XCTestCase {
             var values = EnvironmentValues()
             values.layoutDirection = .rightToLeft
             let environment = graph.makeInput(value: values)
+            var baseProperties = ScrollEnvironmentProperties(environment: values)
+            baseProperties.horizontalBounceBehavior = ScrollBounceBehavior.always.role
+            baseProperties.decelerationRate = .paging
             let storage = graph.makeInput(value: ScrollEnvironmentStorage(
-                ScrollEnvironmentProperties(environment: values)
+                baseProperties
             ))
             let behaviorRule = ScrollViewAdjustedBehaviorProperties(
                 _configuration: configuration,
@@ -782,12 +1024,24 @@ final class SystemScrollViewHostTests: XCTestCase {
                     "_layoutDirection", "_isEnabled", "_isContainedInPlatter",
                 ]
             )
-            let properties = graph.makeRule(propertiesRule).value
+            let adjustedProperties = graph.makeRule(propertiesRule)
+            let properties = adjustedProperties.value
             XCTAssertFalse(properties.isEnabled)
             XCTAssertEqual(properties.layoutDirection, .rightToLeft)
             XCTAssertTrue(properties.isContainedInPlatter)
             XCTAssertEqual(properties.verticalBounceBehavior.rawValue, 3)
             XCTAssertEqual(properties.horizontalBounceBehavior.rawValue, 3)
+            XCTAssertEqual(properties.decelerationRate, .standard)
+
+            configuration.setValue(ScrollViewConfiguration(
+                axes: .vertical,
+                isScrollEnabled: true
+            ))
+            let enabledProperties = adjustedProperties.value
+            XCTAssertTrue(enabledProperties.isEnabled)
+            XCTAssertEqual(enabledProperties.verticalBounceBehavior.rawValue, 0)
+            XCTAssertEqual(enabledProperties.horizontalBounceBehavior.rawValue, 1)
+            XCTAssertEqual(enabledProperties.decelerationRate, .standard)
         }
     }
 
@@ -1050,5 +1304,32 @@ final class SystemScrollViewHostTests: XCTestCase {
                 safeInsets: insets
             ))
         }
+    }
+}
+
+private final class HostScrollTargetBehaviorRecorder {
+    var originalTarget: ScrollTarget?
+    var proposedTarget: ScrollTarget?
+    var velocity: CGVector?
+    var geometry: ScrollGeometry?
+    var axes: Axis.Set?
+    var decelerationRate: ScrollDecelerationRate?
+    var overrideTargetOrigin: CGPoint?
+    var invocationCount = 0
+}
+
+private struct HostRecordingScrollTargetBehavior: ScrollTargetBehavior {
+    var recorder: HostScrollTargetBehaviorRecorder
+    var targetOrigin: CGPoint
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        recorder.invocationCount += 1
+        recorder.originalTarget = context.originalTarget
+        recorder.proposedTarget = target
+        recorder.velocity = context.velocity
+        recorder.geometry = context.geometry
+        recorder.axes = context.axes
+        recorder.decelerationRate = context.decelerationRate
+        target.rect.origin = recorder.overrideTargetOrigin ?? targetOrigin
     }
 }

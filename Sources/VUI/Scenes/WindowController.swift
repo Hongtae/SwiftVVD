@@ -798,6 +798,14 @@ class WindowController: WindowDelegate,
                 }
             }
 
+            // Gesture deadlines are evaluated on the same controller-relative
+            // clock as input samples. This wakes recognizers that remain possible
+            // between input IDs, such as the single-tap fallback beside a double tap.
+            if let gestureGraph,
+               gestureGraph.updateTimedGestures(at: time) {
+                drainedGestureOutbox = true
+            }
+
             // Drain GestureGraph's action outbox - closures deferred from within GestureGraph
             // AG evaluation (enqueueAction fallback). Run here, outside any AG context,
             // after gesture events are fully processed.

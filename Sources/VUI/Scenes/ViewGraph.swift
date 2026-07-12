@@ -517,20 +517,25 @@ class ViewGraph: ViewGraphHost {
     }
 
     var nextUpdateInterval: Double {
-        let interval = nextUpdate.views.interval
+        let interval = Swift.min(
+            nextUpdate.views.interval,
+            nextUpdate.gestures.interval
+        )
         return interval.isFinite ? interval : 0.0
     }
 
     var nextUpdateReasons: Set<UInt32> {
-        nextUpdate.views.reasons
+        nextUpdate.views.reasons.union(nextUpdate.gestures.reasons)
     }
 
     var hasScheduledViewUpdate: Bool {
-        let views = nextUpdate.views
-        return !(views.time == .infinity) ||
-            views.interval.isFinite ||
-            views.hasZeroInterval ||
-            !views.reasons.isEmpty
+        func isScheduled(_ update: NextUpdate) -> Bool {
+            !(update.time == .infinity) ||
+                update.interval.isFinite ||
+                update.hasZeroInterval ||
+                !update.reasons.isEmpty
+        }
+        return isScheduled(nextUpdate.views) || isScheduled(nextUpdate.gestures)
     }
 
     var viewGraphFeatureCount: Int {
