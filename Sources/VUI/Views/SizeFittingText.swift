@@ -74,7 +74,7 @@ struct StickyTextSizeFittingLogic: TextSizeFittingLogic {
     }
 }
 
-struct ClosestFitCache<Value> {
+struct ClosestFitCache<Value: Equatable> {
     struct Entry {
         var proposal: ProposedViewSize
         var value: Value
@@ -84,6 +84,7 @@ struct ClosestFitCache<Value> {
     private(set) var entries: [Entry]
 
     init(capacity: Int = 10) {
+        precondition(capacity > 0)
         self.capacity = capacity
         self.entries = []
     }
@@ -92,13 +93,55 @@ struct ClosestFitCache<Value> {
         for proposal: ProposedViewSize,
         makeValue: (Value?) -> Value
     ) -> Value {
-        if let entry = entries.last(where: { $0.proposal == proposal }) {
-            return entry.value
+        let requestedWidth = proposal.width ?? .infinity
+        let requestedHeight = proposal.height ?? .infinity
+        var closestIndex: Int?
+        var closestDistance = CGFloat.infinity
+
+        for index in entries.indices {
+            let cachedProposal = entries[index].proposal
+            let cachedWidth = cachedProposal.width ?? .infinity
+            let cachedHeight = cachedProposal.height ?? .infinity
+
+            guard !cachedWidth.isNaN,
+                  !cachedHeight.isNaN,
+                  cachedWidth <= requestedWidth,
+                  cachedHeight <= requestedHeight else {
+                continue
+            }
+
+            let distance: CGFloat
+            if cachedWidth == .infinity && cachedHeight == .infinity {
+                distance = 0
+            } else {
+                let widthDistance = requestedWidth - cachedWidth
+                let heightDistance = requestedHeight - cachedHeight
+                distance = heightDistance < widthDistance
+                    ? heightDistance
+                    : widthDistance
+            }
+            guard distance < closestDistance else { continue }
+            closestIndex = index
+            closestDistance = distance
+            if cachedProposal == proposal {
+                break
+            }
         }
-        let value = makeValue(entries.last?.value)
-        entries.append(Entry(proposal: proposal, value: value))
-        if entries.count > capacity {
-            entries.removeFirst(entries.count - capacity)
+
+        let suggestedValue = closestIndex.map { entries[$0].value }
+        let value = makeValue(suggestedValue)
+        if let closestIndex, value == entries[closestIndex].value {
+            if closestIndex > entries.startIndex {
+                entries.swapAt(closestIndex, closestIndex - 1)
+            }
+            return value
+        }
+
+        let entry = Entry(proposal: proposal, value: value)
+        if entries.count < capacity {
+            entries.append(entry)
+        } else {
+            entries[entries.index(before: entries.endIndex)] = entry
         }
         return value
     }
@@ -121,6 +164,14 @@ struct SizeFittingTextCacheValue<Engine: LayoutEngine> {
     var text: ResolvedStyledText
     var engine: Engine
     var renderer: TextRendererBoxBase?
+
+    func truncates(in proposal: ProposedViewSize) -> Bool {
+        engine.truncates(proposal)
+    }
+
+    func fits(_ proposal: ProposedViewSize) -> Bool {
+        !truncates(in: proposal)
+    }
 }
 
 final class SizeFittingTextCache<Resolver, Logic>
@@ -146,9 +197,6 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
     init(resolver: Resolver, logic: Logic, input: Resolver.Input) {
         self.sizeVariantCache = ClosestFitCache(capacity: 10)
         self.exhaustedWidthVariants = false
-        // Current Text storage can only resolve the regular entry. Keep the
-        // cache/rule ownership boundary in place so variant-producing storage
-        // can extend this resolver chain without replacing the layout route.
         self.resultCache = [CacheEntry(resolver: resolver)]
         self.logic = logic
         self._input = input
@@ -158,6 +206,7 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
         _input = input
         guard changed else { return }
         sizeVariantCache.removeAll()
+        exhaustedWidthVariants = false
         for index in resultCache.indices {
             resultCache[index].inputChanged = true
         }
@@ -167,6 +216,7 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
         body(&_input)
         guard changed else { return }
         sizeVariantCache.removeAll()
+        exhaustedWidthVariants = false
         for index in resultCache.indices {
             resultCache[index].inputChanged = true
         }
@@ -174,11 +224,20 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
 
     func sizeVariant(for proposal: ProposedViewSize) -> TextSizeVariant {
         let suggestion = logic.suggestedVariant(for: proposal)
-        let selected = sizeVariantCache(for: proposal) { previous in
-            suggestion ?? previous ?? resultCache[0].resolver.sizeVariant
+        let result = sizeVariantCache(for: proposal) { _ in
+            var index = suggestion.map(index(for:)) ?? 0
+
+            while true {
+                let fits = withValue(at: index) { $0.fits(proposal) }
+                guard !fits else { break }
+                guard appendNarrowerVariant(after: index) else {
+                    exhaustedWidthVariants = proposal.width != nil
+                    break
+                }
+                index += 1
+            }
+            return resultCache[index].resolver.sizeVariant
         }
-        let available = resultCache[0].resolver.sizeVariant
-        let result = selected == available ? selected : available
         if var sticky = logic as? StickyTextSizeFittingLogic {
             sticky.commit(result, for: proposal)
             // The conditional cast proves this assignment has the same
@@ -211,16 +270,58 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
         let index = index(for: variant)
         resultCache[index].inputChanged = true
         sizeVariantCache.removeAll()
+        exhaustedWidthVariants = false
         logic.onInvalidation(of: variant)
     }
 
     private func index(for variant: TextSizeVariant) -> Int {
-        guard let index = resultCache.firstIndex(where: { $0.resolver.sizeVariant == variant }) else {
-            // Current VUI Text storage has one regular variant. A future
-            // size-adaptive storage extends the resolver chain before this lookup.
-            return 0
+        if let index = resultCache.firstIndex(where: { $0.resolver.sizeVariant == variant }) {
+            return index
         }
-        return index
+
+        while let last = resultCache.indices.last,
+              resultCache[last].resolver.sizeVariant.rawValue < variant.rawValue,
+              appendNarrowerVariant(after: last) {
+            if resultCache.last?.resolver.sizeVariant == variant {
+                return resultCache.count - 1
+            }
+        }
+        return resultCache.indices.last ?? 0
+    }
+
+    private func withValue<Result>(
+        at index: Int,
+        _ body: (inout SizeFittingTextCacheValue<Resolver.Engine>) -> Result
+    ) -> Result {
+        if resultCache[index].lastValue == nil || resultCache[index].inputChanged {
+            resultCache[index].lastValue = resultCache[index].resolver.value(for: _input)
+            resultCache[index].inputChanged = false
+        }
+        return body(&resultCache[index].lastValue!)
+    }
+
+    private func appendNarrowerVariant(after index: Int) -> Bool {
+        precondition(resultCache.indices.contains(index))
+        if resultCache.indices.contains(index + 1) {
+            return true
+        }
+        guard !exhaustedWidthVariants else { return false }
+        let currentIsUnique = withValue(at: index) {
+            $0.text.features.contains(.isUniqueSizeVariant)
+        }
+        guard currentIsUnique else {
+            exhaustedWidthVariants = true
+            return false
+        }
+        resultCache.append(CacheEntry(resolver: resultCache[index].resolver.narrowerVariant))
+        let addedIndex = resultCache.count - 1
+        let isUnique = withValue(at: addedIndex) {
+            $0.text.features.contains(.isUniqueSizeVariant)
+        }
+        if !isUnique {
+            exhaustedWidthVariants = true
+        }
+        return true
     }
 }
 
@@ -241,9 +342,12 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
     }
 
     func value(for input: Input) -> SizeFittingTextCacheValue<StyledTextLayoutEngine> {
-        SizeFittingTextCacheValue(
-            text: input.text,
-            engine: StyledTextLayoutEngine(text: input.text, renderer: input.renderer),
+        let candidates = input.text.sizeVariantCandidates
+        let index = min(sizeVariant.rawValue, candidates.count - 1)
+        let text = candidates[index]
+        return SizeFittingTextCacheValue(
+            text: text,
+            engine: StyledTextLayoutEngine(text: text, renderer: input.renderer),
             renderer: input.renderer
         )
     }
@@ -275,6 +379,31 @@ struct StyledTextLayoutEngine: LayoutEngine {
         return resolved.measure(maxWidth: proposal.width, maxHeight: proposal.height)
     }
 
+    func truncates(_ proposal: ProposedViewSize) -> Bool {
+        guard let resolved = text.resolvedText else { return false }
+        if renderer != nil {
+            let ideal = sizeThatFits(.unspecified)
+            return proposal.width.map { ideal.width > $0 } == true ||
+                proposal.height.map { ideal.height > $0 } == true
+        }
+
+        let layout = resolved.makeLayout(
+            in: CGSize(
+                width: proposal.width ?? .greatestFiniteMagnitude,
+                height: proposal.height ?? .greatestFiniteMagnitude
+            ),
+            layoutDirection: .leftToRight
+        )
+        if layout.isTruncated {
+            return true
+        }
+        if let lineLimit = text.layoutProperties.lineLimit,
+           layout.count > lineLimit {
+            return true
+        }
+        return false
+    }
+
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
         guard let resolved = text.resolvedText else { return nil }
         if key == VerticalAlignment.firstTextBaseline.key {
@@ -292,19 +421,45 @@ struct SizeFittingTextFilter: StatefulRule {
 
     var size: Attribute<ViewSize>
     var text: Attribute<ResolvedStyledText>
+    var environment: Attribute<EnvironmentValues>
+    var isArchived: Bool
     var cache: SizeFittingTextCache<ResolvedTextHelper, StickyTextSizeFittingLogic>
 
     mutating func updateValue() {
         let text = text.value
+        _ = environment.value
         cache.updateInput(
             changed: _AGGraph.currentStatefulInputChanged(self.text.identifier)
         ) { input in
             input.text = text
         }
         let proposal = ProposedViewSize(size.value.value)
-        let selected = cache.withValue(for: proposal) { $0.text }
-        selected.smallerSizeVariant = nil
-        selected.largerSizeVariant = nil
+        let selectedVariant = cache.sizeVariant(for: proposal)
+        let selected = cache.withValue(for: selectedVariant) { $0.text }
+
+        let candidates = text.sizeVariantCandidates
+        guard let selectedIndex = candidates.firstIndex(where: { $0 === selected }) else {
+            _AGGraph.setStatefulOutput(selected)
+            return
+        }
+
+        // Archived text uses a separate dynamic-placeholder splice. Until that
+        // path is fully resolved, keep its existing candidate chain intact.
+        guard !isArchived else {
+            _AGGraph.setStatefulOutput(selected)
+            return
+        }
+
+        let linkedCandidates = [selected] + candidates.dropFirst(selectedIndex + 1).filter {
+            $0.features.contains(.isStandaloneSizeVariant)
+        }
+        for candidate in linkedCandidates {
+            candidate.smallerSizeVariant = nil
+            candidate.largerSizeVariant = nil
+        }
+        for index in linkedCandidates.indices.dropLast() {
+            linkedCandidates[index].smallerSizeVariant = linkedCandidates[index + 1]
+        }
         _AGGraph.setStatefulOutput(selected)
     }
 }
@@ -353,11 +508,13 @@ struct SizeFittingTextLayoutComputer: StatefulRule {
     }
 
     var text: Attribute<ResolvedStyledText>
+    var environment: Attribute<EnvironmentValues>
     var renderer: WeakAttribute<TextRendererBoxBase>
     var cache: SizeFittingTextCache<ResolvedTextHelper, StickyTextSizeFittingLogic>
 
     mutating func updateValue() {
         let text = text.value
+        _ = environment.value
         let rendererValue: TextRendererBoxBase?
         if let graph = _AGGraph.current, renderer.isValid(in: graph) {
             rendererValue = renderer.toStrong().value

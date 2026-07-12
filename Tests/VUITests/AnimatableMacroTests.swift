@@ -55,8 +55,8 @@ private struct LegacyPairMacroCarrier: Animatable {
     }
 
     @_AnimatablePairData private var legacyData = {
-        let x = #_SwiftUIAnimatableProperty(Self[_animatableType: \.x])
-        let y = #_SwiftUIAnimatableProperty(Self[_animatableType: \.y])
+        let x = #_UIAnimatableProperty(Self[_animatableType: \.x])
+        let y = #_UIAnimatableProperty(Self[_animatableType: \.y])
         return AnimatablePair(x, y)
     }()
 }
@@ -72,9 +72,9 @@ private struct LegacyTriplePairMacroCarrier: Animatable {
     }
 
     @_AnimatablePairData private var legacyData = {
-        let x = #_SwiftUIAnimatableProperty(Self[_animatableType: \.x])
-        let y = #_SwiftUIAnimatableProperty(Self[_animatableType: \.y])
-        let z = #_SwiftUIAnimatableProperty(Self[_animatableType: \.z])
+        let x = #_UIAnimatableProperty(Self[_animatableType: \.x])
+        let y = #_UIAnimatableProperty(Self[_animatableType: \.y])
+        let z = #_UIAnimatableProperty(Self[_animatableType: \.z])
         return AnimatablePair(x, AnimatablePair<Double, Double>.self)
     }()
 }

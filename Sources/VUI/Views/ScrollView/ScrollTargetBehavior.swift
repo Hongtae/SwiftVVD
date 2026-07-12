@@ -506,7 +506,7 @@ struct ScrollEnvironmentProperties: Equatable {
     }
 }
 
-struct ScrollEnvironmentStorage: Observable {
+final class ScrollEnvironmentStorage: Observable {
     var _baseProperties: ScrollEnvironmentProperties
     var _transform: (any ScrollEnvironmentTransform)?
     var _$observationRegistrar: ObservationRegistrar

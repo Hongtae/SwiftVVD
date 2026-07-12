@@ -223,6 +223,60 @@ public struct ScrollPosition: Sendable {
             return true
         }
     }
+
+    func initialContentOffset(
+        containerSize: CGSize,
+        contentFrame: CGRect,
+        axes: Axis.Set,
+        layoutDirection: LayoutDirection
+    ) -> CGPoint? {
+        guard isBuildBaselineOnOrAfter(.v6_4) else { return nil }
+
+        let maximumX = max(contentFrame.width - containerSize.width, 0)
+        let maximumY = max(contentFrame.height - containerSize.height, 0)
+
+        func rawHorizontalOffset(_ logicalOffset: CGFloat) -> CGFloat {
+            layoutDirection == .rightToLeft
+                ? maximumX - logicalOffset
+                : logicalOffset
+        }
+
+        switch storage {
+        case .automatic, .positionedByUser, .viewID:
+            return nil
+        case let .edge(edge):
+            switch edge {
+            case .top:
+                return axes.contains(.vertical) ? .zero : nil
+            case .bottom:
+                return axes.contains(.vertical)
+                    ? CGPoint(x: 0, y: maximumY)
+                    : nil
+            case .leading:
+                return axes.contains(.horizontal)
+                    ? CGPoint(x: rawHorizontalOffset(0), y: 0)
+                    : nil
+            case .trailing:
+                return axes.contains(.horizontal)
+                    ? CGPoint(x: rawHorizontalOffset(maximumX), y: 0)
+                    : nil
+            }
+        case let .point(point):
+            if axes.contains(.horizontal) {
+                return CGPoint(x: rawHorizontalOffset(point.x), y: 0)
+            }
+            if axes.contains(.vertical) {
+                return CGPoint(x: 0, y: point.y)
+            }
+            return nil
+        case let .x(x):
+            guard axes.contains(.horizontal) else { return nil }
+            return CGPoint(x: rawHorizontalOffset(x), y: 0)
+        case let .y(y):
+            guard axes.contains(.vertical) else { return nil }
+            return CGPoint(x: 0, y: y)
+        }
+    }
 }
 
 extension ScrollPosition: Equatable {

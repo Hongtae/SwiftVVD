@@ -38,6 +38,10 @@ public struct ScrollContentOffsetAdjustmentBehavior {
     public static var disabled: ScrollContentOffsetAdjustmentBehavior {
         ScrollContentOffsetAdjustmentBehavior(role: .disabled)
     }
+
+    var disablesContentOffsetAdjustment: Bool {
+        role.rawValue == Role.disabled.rawValue
+    }
 }
 
 @available(*, unavailable)

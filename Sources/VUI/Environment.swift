@@ -163,7 +163,16 @@ struct AccessibilityEnabledKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
+private struct LocaleKey: EnvironmentKey {
+    static let defaultValue: Locale = .current
+}
+
 extension EnvironmentValues {
+    public var locale: Locale {
+        get { self[LocaleKey.self] }
+        set { self[LocaleKey.self] = newValue }
+    }
+
     public var isEnabled: Bool {
         get { self[IsEnabledKey.self] }
         set { self[IsEnabledKey.self] = newValue }

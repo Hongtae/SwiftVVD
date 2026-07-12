@@ -189,15 +189,31 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
             contentInputs.requestsLayoutComputer = true
             contentInputs.preferences.keys.insert(ScrollablePreferenceKey.self)
 
-            let childModifier = graph.makeInput(value: ScrollViewChildModifier())
-            let contentOutputs = ScrollViewChildModifier._makeView(
-                modifier: _GraphValue(_attribute: childModifier),
+            let coordinateSpaceModifier = graph.makeInput(value: _CoordinateSpaceModifier(
+                name: ObjectIdentifier(node)
+            ))
+            _CoordinateSpaceModifier<ObjectIdentifier>._makeViewInputs(
+                modifier: _GraphValue(_attribute: coordinateSpaceModifier),
+                inputs: &contentInputs
+            )
+
+            let gestureModifier: Attribute<ScrollViewGesture> = graph.makeRule {
+                ScrollViewGesture(proxy: scrollView.value)
+            }
+            let contentOutputs = ScrollViewGesture._makeView(
+                modifier: _GraphValue(_attribute: gestureModifier),
                 inputs: contentInputs
             ) { _, inputs in
-                Provider.ScrollableContent._makeView(
-                    view: _GraphValue(_attribute: contentAttr),
+                let childModifier = graph.makeInput(value: ScrollViewChildModifier())
+                return ScrollViewChildModifier._makeView(
+                    modifier: _GraphValue(_attribute: childModifier),
                     inputs: inputs
-                )
+                ) { _, inputs in
+                    Provider.ScrollableContent._makeView(
+                        view: _GraphValue(_attribute: contentAttr),
+                        inputs: inputs
+                    )
+                }
             }
 
             let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
@@ -636,6 +652,12 @@ struct Deceleration2D: Equatable {
 struct ScrollViewBehavior {
     typealias Completion = (Bool) -> Void
 
+    struct GestureCommit {
+        var presentation: CGPoint
+        var target: CGPoint?
+        var velocity: _Velocity<CGSize>?
+    }
+
     enum Phase {
         case dragging(DragState)
         case decelerating(DecelerationState)
@@ -677,6 +699,109 @@ struct ScrollViewBehavior {
         self.phase = phase
         self.seed = seed
         self.containers = containers
+    }
+
+    mutating func dispatchPhase(
+        _ gesturePhase: GesturePhase<ScrollGesture.Value>,
+        node: ScrollViewNode
+    ) -> GestureCommit? {
+        switch gesturePhase {
+        case .possible(.none):
+            return nil
+        case .possible(.some(let value)), .active(let value):
+            return updateDragging(value: value, node: node)
+        case .ended(let value):
+            return stopDragging(value: value, node: node)
+        case .failed:
+            return stopDragging(value: nil, node: node)
+        }
+    }
+
+    private mutating func updateDragging(
+        value: ScrollGesture.Value,
+        node: ScrollViewNode
+    ) -> GestureCommit {
+        let translation: CGSize
+        let velocity: _Velocity<CGSize>
+        switch value {
+        case .pan(let pan):
+            translation = pan.translation
+            velocity = pan.velocity
+        case .wheel(let offset):
+            translation = offset
+            velocity = _Velocity(valuePerSecond: .zero)
+        }
+
+        var drag: DragState
+        switch phase {
+        case .dragging(let current) where !current.ended:
+            drag = current
+        case .dragging, .decelerating, .idle:
+            if case .decelerating = phase {
+                _ = resetDeceleration()
+            }
+            reloadContainers(node: node)
+            let beganOffset = node.removeRubberBanding(from: node.presentationOffset)
+            drag = DragState(
+                offset: beganOffset,
+                beganOffset: beganOffset,
+                translation: .zero,
+                velocity: velocity,
+                scrollingVertically: false,
+                scrollingHorizontally: false,
+                ended: false
+            )
+        }
+
+        let delta = CGSize(
+            width: translation.width - drag.translation.width,
+            height: translation.height - drag.translation.height
+        )
+        drag.offset.x -= delta.width
+        drag.offset.y -= delta.height
+        drag.translation = translation
+        drag.velocity = velocity
+        drag.scrollingHorizontally = drag.scrollingHorizontally || delta.width != 0
+        drag.scrollingVertically = drag.scrollingVertically || delta.height != 0
+        drag.ended = false
+        phase = .dragging(drag)
+        seed &+= 1
+
+        let presentation = overflowContentOffset(drag.offset, node: node)
+        return GestureCommit(
+            presentation: presentation,
+            target: nil,
+            velocity: nil
+        )
+    }
+
+    private mutating func stopDragging(
+        value: ScrollGesture.Value?,
+        node: ScrollViewNode
+    ) -> GestureCommit? {
+        guard case .dragging(var drag) = phase, !drag.ended else {
+            return nil
+        }
+        if case .pan(let pan)? = value {
+            drag.velocity = pan.velocity
+        }
+        drag.ended = true
+        phase = .dragging(drag)
+        seed &+= 1
+
+        let viewportSize = (node.containerSize ?? .zero).inset(by: node.config.contentInsets)
+        let requestedTarget = node.decelerationTarget(
+            drag.offset,
+            drag.beganOffset,
+            drag.velocity,
+            viewportSize
+        ) ?? estimatedDeceleration(from: drag.offset, node: node)
+        let target = node.bindingSafeOffsetForGesture(requestedTarget)
+        return GestureCommit(
+            presentation: drag.offset,
+            target: target,
+            velocity: drag.velocity.negated()
+        )
     }
 
     @discardableResult
@@ -1031,6 +1156,13 @@ private func _removeScrollViewNodeBindings(for node: ScrollViewNode) {
 }
 
 final class ScrollViewNode {
+    typealias DecelerationTarget = (
+        CGPoint,
+        CGPoint,
+        _Velocity<CGSize>,
+        CGSize
+    ) -> CGPoint?
+
     let host: _AGGraphContext
     var attribute: WeakAttribute<CGPoint>
     var uniqueId: UInt32
@@ -1042,7 +1174,7 @@ final class ScrollViewNode {
     var config: _ScrollViewConfig
     var contentSize: CGSize?
     var containerSize: CGSize?
-    var decelerationTarget: CGPoint?
+    var decelerationTarget: DecelerationTarget
     weak var container: ScrollViewNode?
     var topScrollIndicatorFollowsContentOffset: Bool
     var pixelLength: Attribute<CGFloat>
@@ -1066,7 +1198,7 @@ final class ScrollViewNode {
         self.config = config
         self.contentSize = nil
         self.containerSize = nil
-        self.decelerationTarget = nil
+        self.decelerationTarget = { _, _, _, _ in nil }
         self.container = nil
         self.topScrollIndicatorFollowsContentOffset = false
         self.pixelLength = pixelLength
@@ -1100,6 +1232,70 @@ final class ScrollViewNode {
         self.config = config
     }
 
+    func dispatchScrollGesturePhase(_ phase: GesturePhase<ScrollGesture.Value>) {
+        var nextBehavior = behavior
+        let commit = nextBehavior.dispatchPhase(phase, node: self)
+        behavior = nextBehavior
+        if let commit {
+            commitGestureOffset(
+                presentation: commit.presentation,
+                target: commit.target,
+                velocity: commit.velocity
+            )
+        }
+    }
+
+    func removeRubberBanding(from offset: CGPoint) -> CGPoint {
+        guard let contentSize, let containerSize else {
+            return offset
+        }
+        return _scrollViewClampContentOffset(
+            offset,
+            maxContentOffset: _scrollViewMaxContentOffset(
+                contentSize: contentSize,
+                containerSize: containerSize,
+                contentInsets: config.contentInsets
+            )
+        )
+    }
+
+    func bindingSafeOffsetForGesture(_ offset: CGPoint) -> CGPoint {
+        bindingSafeOffset(
+            offset,
+            containerSize: containerSize ?? currentProxy?.pageSize ?? .zero,
+            config: currentProxy?.config ?? config
+        )
+    }
+
+    func commitGestureOffset(
+        presentation: CGPoint,
+        target: CGPoint?,
+        velocity: _Velocity<CGSize>?
+    ) {
+        let resolvedConfig = currentProxy?.config ?? config
+        let safeOffset = bindingSafeOffsetForGesture(target ?? presentation)
+        let bindingState = contentOffsetBindingState(config: resolvedConfig)
+        commitScrollTransaction(
+            ScrollViewCommitInfo(
+                contentOffset: (
+                    presentation,
+                    bindingValue: safeOffset
+                ),
+                targetOffset: target.map {
+                    (
+                        $0,
+                        bindingValue: safeOffset,
+                        velocity: velocity,
+                        completion: nil
+                    )
+                }
+            ),
+            value: safeOffset,
+            binding: bindingState.binding,
+            previousBindingValue: bindingState.value
+        )
+    }
+
     @discardableResult
     func update(resetSeed: UInt32) -> Bool {
         guard self.resetSeed != resetSeed else {
@@ -1123,8 +1319,83 @@ final class ScrollViewNode {
             containerSize: resolvedContainerSize,
             config: resolvedConfig
         )
-        commitScrollTransaction(value: safeOffset, config: resolvedConfig)
+        let bindingState = contentOffsetBindingState(config: resolvedConfig)
+        commitScrollTransaction(
+            ScrollViewCommitInfo(
+                contentOffset: (
+                    safeOffset,
+                    bindingValue: bindingState.value
+                )
+            ),
+            value: safeOffset,
+            binding: bindingState.binding,
+            previousBindingValue: bindingState.value
+        )
         return safeOffset
+    }
+
+    func requestContentOffset(
+        _ offset: CGPoint,
+        animated: Bool,
+        completion: ScrollViewBehavior.Completion?
+    ) {
+        if case .dragging(let state) = behavior.phase, !state.ended {
+            if let completion {
+                let finished = presentationOffset == offset
+                Update.enqueueAction {
+                    completion(finished)
+                }
+            }
+            return
+        }
+
+        let resolvedContainerSize = containerSize ?? currentProxy?.pageSize ?? .zero
+        let resolvedConfig = currentProxy?.config ?? config
+        let safeOffset = bindingSafeOffset(
+            offset,
+            containerSize: resolvedContainerSize,
+            config: resolvedConfig
+        )
+        let finishedBeforeCommit = presentationOffset == offset
+        let bindingState = contentOffsetBindingState(config: resolvedConfig)
+
+        guard animated else {
+            commitScrollTransaction(
+                ScrollViewCommitInfo(
+                    contentOffset: (
+                        offset,
+                        bindingValue: safeOffset
+                    )
+                ),
+                value: safeOffset,
+                binding: bindingState.binding,
+                previousBindingValue: bindingState.value
+            )
+            if let completion {
+                Update.enqueueAction {
+                    completion(finishedBeforeCommit)
+                }
+            }
+            return
+        }
+
+        commitScrollTransaction(
+            ScrollViewCommitInfo(
+                contentOffset: (
+                    offset,
+                    bindingValue: nil
+                ),
+                targetOffset: (
+                    safeOffset,
+                    bindingValue: nil,
+                    velocity: nil,
+                    completion: completion
+                )
+            ),
+            value: safeOffset,
+            binding: bindingState.binding,
+            previousBindingValue: bindingState.value
+        )
     }
 
     func updateContentSize(
@@ -1196,7 +1467,9 @@ final class ScrollViewNode {
         )
     }
 
-    private func commitScrollTransaction(value: CGPoint, config: _ScrollViewConfig) {
+    private func contentOffsetBindingState(
+        config: _ScrollViewConfig
+    ) -> (binding: Binding<CGPoint>?, value: CGPoint?) {
         let binding: Binding<CGPoint>?
         let bindingValue: CGPoint?
         switch config.contentOffset {
@@ -1207,10 +1480,17 @@ final class ScrollViewNode {
             binding = contentOffsetBinding
             bindingValue = contentOffsetBinding.wrappedValue
         }
+        return (binding, bindingValue)
+    }
+
+    private func commitScrollTransaction(
+        _ commitInfo: ScrollViewCommitInfo,
+        value: CGPoint,
+        binding: Binding<CGPoint>?,
+        previousBindingValue: CGPoint?
+    ) {
         var transaction = Transaction.current
-        transaction[scrollInfo: uniqueId] = ScrollViewCommitInfo(
-            contentOffset: (value, bindingValue: bindingValue)
-        )
+        transaction[scrollInfo: uniqueId] = commitInfo
         if let graphHost = host.context as? GraphHost {
             graphHost.emptyTransaction(transaction)
         }
@@ -1218,7 +1498,7 @@ final class ScrollViewNode {
             propertySeed &+= 1
         }
         attribute.toStrong().setValue(value, transaction: transaction)
-        guard let binding, bindingValue != value else {
+        guard let binding, previousBindingValue != value else {
             return
         }
         Update.enqueueAction {
@@ -1390,6 +1670,15 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
         let current = _view.value
         _node.updateConfig(current.config)
         _node.update(resetSeed: _phase.value.resetSeed)
+        let contentProvider = current.contentProvider
+        _node.decelerationTarget = { contentOffset, originalContentOffset, velocity, size in
+            contentProvider.decelerationTarget(
+                contentOffset: contentOffset,
+                originalContentOffset: originalContentOffset,
+                velocity: velocity,
+                size: size
+            )
+        }
         _ = _environment.value
         let time = _time.value
 
@@ -1410,7 +1699,7 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
             node: _node,
             time: time,
             offset: &presentationOffset,
-            estimatedTarget: _node.decelerationTarget
+            estimatedTarget: _node.modelOffset
         )
         if presentationOffset != _node.presentationOffset {
             _node.presentationOffset = presentationOffset
@@ -1427,7 +1716,8 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
             config: current.config,
             contentOffset: _node.currentContentOffset,
             contentSize: _node.currentContentSize ?? pageSize,
-            pageSize: pageSize
+            pageSize: pageSize,
+            node: _node
         ))
     }
 
@@ -1619,12 +1909,21 @@ public struct _ScrollViewRoot<P>: View where P: _ScrollableContentProvider {
 /// Mutable scroll-view proxy shared with scrollable layout implementations.
 public struct _ScrollViewProxy: Equatable {
     public var config: _ScrollViewConfig {
-        storage.config
+        storage.node?.config ?? storage.config
     }
 
     public var contentOffset: CGPoint {
-        get { storage.contentOffset }
-        set { storage.contentOffset = newValue }
+        get { storage.node?.currentContentOffset ?? storage.contentOffset }
+        set {
+            if let node = storage.node {
+                node.requestContentOffset(newValue, animated: false, completion: nil)
+            } else {
+                storage.contentOffset = _scrollViewClampContentOffset(
+                    newValue,
+                    maxContentOffset: maxContentOffset
+                )
+            }
+        }
     }
 
     public var minContentOffset: CGPoint { .zero }
@@ -1635,8 +1934,8 @@ public struct _ScrollViewProxy: Equatable {
             contentInsets: config.contentInsets
         )
     }
-    public var contentSize: CGSize { storage.contentSize }
-    public var pageSize: CGSize { storage.pageSize }
+    public var contentSize: CGSize { storage.node?.currentContentSize ?? storage.contentSize }
+    public var pageSize: CGSize { storage.node?.containerSize ?? storage.pageSize }
     public var visibleRect: CGRect {
         CGRect(
             x: contentOffset.x - config.contentInsets.leading,
@@ -1645,11 +1944,32 @@ public struct _ScrollViewProxy: Equatable {
             height: pageSize.height
         )
     }
-    public var isDragging: Bool { false }
-    public var isDecelerating: Bool { false }
+    public var isDragging: Bool {
+        guard let node = storage.node else { return false }
+        if case .dragging = node.behavior.phase { return true }
+        return false
+    }
+    public var isDecelerating: Bool {
+        guard let node = storage.node else { return false }
+        if case .decelerating = node.behavior.phase { return true }
+        return false
+    }
     public var isScrolling: Bool { isDragging || isDecelerating }
-    public var isScrollingHorizontally: Bool { false }
-    public var isScrollingVertically: Bool { false }
+    var isMostlyDecelerating: Bool { isDecelerating }
+    public var isScrollingHorizontally: Bool {
+        guard let node = storage.node,
+              case .dragging(let state) = node.behavior.phase else {
+            return false
+        }
+        return state.scrollingHorizontally
+    }
+    public var isScrollingVertically: Bool {
+        guard let node = storage.node,
+              case .dragging(let state) = node.behavior.phase else {
+            return false
+        }
+        return state.scrollingVertically
+    }
 
     private var storage: Storage
 
@@ -1657,13 +1977,15 @@ public struct _ScrollViewProxy: Equatable {
         config: _ScrollViewConfig = _ScrollViewConfig(),
         contentOffset: CGPoint = .zero,
         contentSize: CGSize = .zero,
-        pageSize: CGSize = .zero
+        pageSize: CGSize = .zero,
+        node: ScrollViewNode? = nil
     ) {
         self.storage = Storage(
             config: config,
             contentOffset: contentOffset,
             contentSize: contentSize,
-            pageSize: pageSize
+            pageSize: pageSize,
+            node: node
         )
     }
 
@@ -1672,7 +1994,20 @@ public struct _ScrollViewProxy: Equatable {
         animated: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        completion?(false)
+        if let node = storage.node {
+            node.requestContentOffset(newOffset, animated: animated, completion: completion)
+            return
+        }
+        let finishedWithoutMovement = storage.contentOffset == newOffset
+        storage.contentOffset = _scrollViewClampContentOffset(
+            newOffset,
+            maxContentOffset: maxContentOffset
+        )
+        if let completion {
+            Update.enqueueAction {
+                completion(finishedWithoutMovement)
+            }
+        }
     }
 
     public func scrollRectToVisible(
@@ -1680,11 +2015,60 @@ public struct _ScrollViewProxy: Equatable {
         animated: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        completion?(false)
+        let viewportSize = pageSize.inset(by: config.contentInsets)
+        let visibleRect = CGRect(
+            x: contentOffset.x - config.contentInsets.leading,
+            y: contentOffset.y - config.contentInsets.top,
+            width: viewportSize.width,
+            height: viewportSize.height
+        )
+        guard !visibleRect.contains(rect) else {
+            if let completion {
+                Update.enqueueAction {
+                    completion(true)
+                }
+            }
+            return
+        }
+
+        var target = visibleRect.origin
+        if rect.maxX > visibleRect.maxX {
+            target.x = rect.minX < visibleRect.minX
+                ? rect.minX
+                : rect.maxX - visibleRect.width
+        } else if rect.minX < visibleRect.minX {
+            target.x = rect.minX
+        }
+        if rect.maxY > visibleRect.maxY {
+            target.y = rect.minY < visibleRect.minY
+                ? rect.minY
+                : rect.maxY - visibleRect.height
+        } else if rect.minY < visibleRect.minY {
+            target.y = rect.minY
+        }
+        setContentOffset(target, animated: animated, completion: completion)
     }
 
     public func contentOffsetOfNextPage(_ directions: _EventDirections) -> CGPoint {
-        contentOffset
+        let viewportSize = pageSize.inset(by: config.contentInsets)
+        var target = contentOffset
+        switch directions.intersection(.horizontal) {
+        case .left:
+            target.x -= viewportSize.width
+        case .right:
+            target.x += viewportSize.width
+        default:
+            break
+        }
+        switch directions.intersection(.vertical) {
+        case .up:
+            target.y -= viewportSize.height
+        case .down:
+            target.y += viewportSize.height
+        default:
+            break
+        }
+        return _scrollViewClampContentOffset(target, maxContentOffset: maxContentOffset)
     }
 
     func _setContentOffset(_ contentOffset: CGPoint) {
@@ -1695,8 +2079,19 @@ public struct _ScrollViewProxy: Equatable {
         storage.contentSize = contentSize
     }
 
+    func _dispatchScrollGesturePhase(_ phase: GesturePhase<ScrollGesture.Value>) {
+        storage.node?.withCurrent {
+            storage.node?.dispatchScrollGesturePhase(phase)
+        }
+    }
+
+    var node: ScrollViewNode? { storage.node }
+
     public static func == (lhs: _ScrollViewProxy, rhs: _ScrollViewProxy) -> Bool {
-        lhs.storage === rhs.storage
+        if let lhsNode = lhs.storage.node, let rhsNode = rhs.storage.node {
+            return lhsNode === rhsNode
+        }
+        return lhs.storage === rhs.storage
     }
 
     private final class Storage {
@@ -1704,17 +2099,20 @@ public struct _ScrollViewProxy: Equatable {
         var contentOffset: CGPoint
         var contentSize: CGSize
         var pageSize: CGSize
+        weak var node: ScrollViewNode?
 
         init(
             config: _ScrollViewConfig,
             contentOffset: CGPoint,
             contentSize: CGSize,
-            pageSize: CGSize
+            pageSize: CGSize,
+            node: ScrollViewNode?
         ) {
             self.config = config
             self.contentOffset = contentOffset
             self.contentSize = contentSize
             self.pageSize = pageSize
+            self.node = node
         }
     }
 }

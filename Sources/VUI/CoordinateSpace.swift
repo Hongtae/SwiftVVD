@@ -2,7 +2,7 @@
 //  File: CoordinateSpace.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -84,6 +84,62 @@ public struct NamedCoordinateSpace: CoordinateSpaceProtocol, Equatable {
         .named(name)
     }
     let name: AnyHashable
+}
+
+public struct _CoordinateSpaceModifier<Name>: ViewModifier, Equatable where Name: Hashable {
+    public var name: Name
+
+    public init(name: Name) {
+        self.name = name
+    }
+
+    public typealias Body = Never
+
+    public static func _makeViewInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _ViewInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("_CoordinateSpaceModifier._makeViewInputs requires AG context")
+        }
+        let animatedFrame = inputs.base.cachedEnvironment.value.animatedFrame
+        let position = animatedFrame?._animatedPosition ?? inputs.position
+        let size: Attribute<CGSize>
+        if let animatedSize = animatedFrame?._animatedCGSize {
+            size = animatedSize
+        } else {
+            let viewSize = animatedFrame?._animatedSize ?? inputs.size
+            size = graph.makeRule { viewSize.value.value }
+        }
+        inputs.transform = graph.makeRule(CoordinateSpaceTransform(
+            _modifier: modifier._attribute,
+            _transform: inputs.transform,
+            _position: position,
+            _size: size
+        ))
+    }
+}
+
+extension _CoordinateSpaceModifier: _ViewInputsModifier {
+}
+
+private struct CoordinateSpaceTransform<Name: Hashable>: Rule {
+    typealias Value = ViewTransform
+
+    var _modifier: Attribute<_CoordinateSpaceModifier<Name>>
+    var _transform: Attribute<ViewTransform>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<CGSize>
+
+    func updateValue() -> ViewTransform {
+        var value = _transform.value
+        value.appendPosition(_position.value)
+        value.appendSizedSpace(
+            name: AnyHashable(_modifier.value.name),
+            size: _size.value
+        )
+        return value
+    }
 }
 
 extension CoordinateSpaceProtocol where Self == NamedCoordinateSpace {

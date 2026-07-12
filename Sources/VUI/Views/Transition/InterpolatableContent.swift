@@ -60,11 +60,26 @@ extension DisplayList {
 
         // Current display-list payload tracked by an interpolation layer.
         struct Contents {
-            var displayList: DisplayList
+            var list: DisplayList
             var origin: CGPoint
+            var rbList: (any RBDisplayListContents)?
+            var nextTime: Time
+            var numericValue: Float?
+
+            // Backend-local state that remains outside the private five-field
+            // recording carrier until its producers are modeled.
             var animation: InterpolatorAnimation?
             var contentsScale: Float
             var version: DisplayList.Version?
+
+            var displayList: DisplayList {
+                get { list }
+                set {
+                    list = newValue
+                    rbList = nil
+                    nextTime = .infinity
+                }
+            }
 
             init(
                 displayList: DisplayList = DisplayList(),
@@ -73,11 +88,30 @@ extension DisplayList {
                 contentsScale: Float = 1,
                 version: DisplayList.Version? = nil
             ) {
-                self.displayList = displayList
+                self.list = displayList
                 self.origin = origin
+                self.rbList = nil
+                self.nextTime = .infinity
+                self.numericValue = nil
                 self.animation = animation
                 self.contentsScale = contentsScale
                 self.version = version
+            }
+
+            mutating func preparedList(
+                using renderer: DisplayList.GraphicsRenderer,
+                at time: Time
+            ) -> DisplayList {
+                if let rbList, time < nextTime,
+                   let local = rbList as? DisplayList.LocalContents {
+                    return local.list
+                }
+
+                let prepared = renderer.sample(list: list, at: time)
+                nextTime = renderer.nextTime
+                let contents = DisplayList.LocalContents(list: prepared)
+                rbList = contents
+                return contents.list
             }
         }
 
@@ -98,6 +132,7 @@ extension DisplayList {
         private(set) var maxDuration: Double
         private(set) var nextUpdateTime: Time
         private(set) var removed: [Removed]
+        private(set) var renderer: DisplayList.GraphicsRenderer?
         private(set) var needsUpdate: Bool
 
         init() {
@@ -106,6 +141,7 @@ extension DisplayList {
             self.maxDuration = .infinity
             self.nextUpdateTime = .infinity
             self.removed = []
+            self.renderer = nil
             self.needsUpdate = true
         }
 
@@ -174,6 +210,15 @@ extension DisplayList {
 
             foldActivePresentationIntoPendingRemoval()
 
+            let renderer: DisplayList.GraphicsRenderer
+            if let currentRenderer = self.renderer {
+                renderer = currentRenderer
+            } else {
+                let currentRenderer = DisplayList.GraphicsRenderer()
+                self.renderer = currentRenderer
+                renderer = currentRenderer
+            }
+
             for index in removed.indices {
                 switch removed[index].phase {
                 case .pending:
@@ -193,6 +238,14 @@ extension DisplayList {
                 }
 
                 if removed[index].interpolator == nil {
+                    let from = removed[index].contents.preparedList(
+                        using: renderer,
+                        at: currentTime
+                    )
+                    let to = contents.preparedList(
+                        using: renderer,
+                        at: currentTime
+                    )
                     var options: [RBDisplayListInterpolatorOptionKey: Any] = [
                         .transition: removed[index].rbTransition,
                     ]
@@ -200,8 +253,8 @@ extension DisplayList {
                         options[.animation] = animation.rbAnimation
                     }
                     removed[index].interpolator = RBDisplayListInterpolator(
-                        from: removed[index].contents.displayList,
-                        to: contents.displayList,
+                        from: from,
+                        to: to,
                         options: options
                     )
                     let interpolatorDuration = removed[index].interpolator?.activeDuration ?? 0

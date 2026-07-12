@@ -141,12 +141,9 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
     }
 }
 
-// MARK: - CoordinateSpaceGesture / CoordinateSpacePhase
+// MARK: - CoordinateSpaceGesture / CoordinateSpaceEvents
 
-// Transforms GesturePhase<E>.location in body outputs to the target coordinateSpace.
-// .global passes through, .local converts global to local via ViewTransform,
-// and .named preserves the incoming location.
-struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
+struct CoordinateSpaceGesture<E>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
     typealias Body = Never
@@ -158,57 +155,53 @@ struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        let bodyOutputs = body(inputs)
-        let cs = modifier._attribute.value.coordinateSpace
-
-        // .global locations are already in global coordinates.
-        if cs == .global { return bodyOutputs }
-
         guard let graph = _AGGraph.current else {
             fatalError("CoordinateSpaceGesture.makeGesture requires AG context")
         }
-        let phase = CoordinateSpacePhase<E>(
-            source: bodyOutputs.phase,
-            transformAttr: inputs.transform,
-            coordinateSpace: cs
-        )
-        let resultAttr = graph.makeStatefulRule(phase)
-        return bodyOutputs.withPhase(resultAttr)
+        var convertedInputs = inputs
+        convertedInputs._events = graph.makeRule(CoordinateSpaceEvents(
+            _modifier: modifier._attribute,
+            _events: inputs.events,
+            _position: inputs.position,
+            _transform: inputs.transform
+        ))
+        convertedInputs.options.insert(.preconvertedEventLocations)
+        return body(convertedInputs)
     }
 }
 
-// CoordinateSpacePhase<E>: StatefulRule that transforms GesturePhase<E>.location.
-struct CoordinateSpacePhase<E: EventType>: StatefulRule {
-    typealias Value = GesturePhase<E>
+struct CoordinateSpaceEvents<E>: Rule {
+    typealias Value = [EventID: any EventType]
 
-    let source: Attribute<GesturePhase<E>>
-    let transformAttr: Attribute<ViewTransform>
-    let coordinateSpace: CoordinateSpace
+    var _modifier: Attribute<CoordinateSpaceGesture<E>>
+    var _events: Attribute<[EventID: any EventType]>
+    var _position: Attribute<CGPoint>
+    var _transform: Attribute<ViewTransform>
 
-    mutating func updateValue() {
-        let phase = source.value
-        switch coordinateSpace {
-        case .global:
-            // Pass through. CoordinateSpaceGesture.makeGesture filters .global early,
-            // but guard here for the initial StatefulRule evaluation)
-            _AGGraph.setStatefulOutput(phase)
-        case .local:
-            // Convert global coordinates to local: ViewTransform.convertGlobal(to: .local, points:)
-            let transform = transformAttr.value
-            let transformed = phase.map { event -> E in
-                var e = event
-                if let loc = e.location {
-                    var pts = [loc]
-                    transform.convertGlobal(to: .local, points: &pts)
-                    e.location = pts[0]
-                }
-                return e
-            }
-            _AGGraph.setStatefulOutput(transformed)
-        case .named:
-            // Named coordinate space preserves the incoming location.
-            _AGGraph.setStatefulOutput(phase)
+    func updateValue() -> [EventID: any EventType] {
+        let coordinateSpace = _modifier.value.coordinateSpace
+        var events = _events.value
+        var transform = _transform.value
+        transform.appendPosition(_position.value)
+        for (id, var event) in events {
+            guard let location = event.location else { continue }
+            var points = [location]
+            transform.convertGlobal(to: coordinateSpace, points: &points)
+            event.location = points[0]
+            events[id] = event
         }
+        return events
+    }
+}
+
+extension Gesture {
+    func coordinateSpace(
+        _ coordinateSpace: CoordinateSpace
+    ) -> ModifierGesture<CoordinateSpaceGesture<Value>, Self> {
+        ModifierGesture(
+            modifier: CoordinateSpaceGesture(coordinateSpace: coordinateSpace),
+            body: self
+        )
     }
 }
 

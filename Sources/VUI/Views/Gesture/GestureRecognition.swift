@@ -7,21 +7,123 @@
 
 import Foundation
 
-// MARK: - DependentGesture
+// MARK: - GestureDependency / DependentGesture
 
-// DependentGesture forwards the body gesture unchanged.
-// Explicit dependency handling lives in recognizers that require it.
-struct DependentGesture<E: EventType>: GestureModifier {
+enum GestureDependency: UInt8, Hashable {
+    case none
+    case pausedWhileActive
+    case pausedUntilFailed
+    case failIfActive
+
+    enum Key: PreferenceKey {
+        static var defaultValue: GestureDependency { .none }
+
+        static func reduce(
+            value: inout GestureDependency,
+            nextValue: () -> GestureDependency
+        ) {
+            let next = nextValue()
+            if next.rank >= value.rank {
+                value = next
+            }
+        }
+    }
+
+    private var rank: UInt8 {
+        switch self {
+        case .none: 0
+        case .pausedWhileActive: 1
+        case .pausedUntilFailed: 2
+        case .failIfActive: 3
+        }
+    }
+}
+
+struct DependentGesture<E>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
     typealias Body = Never
+
+    var dependency: GestureDependency
 
     static func makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        body(inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("DependentGesture.makeGesture requires AG context")
+        }
+        var outputs = body(inputs)
+        let phase = graph.makeRule(DependentPhase(
+            _modifier: modifier._attribute,
+            _phase: outputs.phase,
+            _inheritedPhase: inputs.inheritedPhase
+        ))
+        outputs.phase = phase
+        if outputs.preferences.value(for: GestureDependency.Key.self) == nil {
+            outputs.preferences.setValue(
+                modifier[\.dependency]._attribute.identifier,
+                for: GestureDependency.Key.self
+            )
+        }
+        return outputs
+    }
+}
+
+struct DependentPhase<E>: Rule {
+    typealias Value = GesturePhase<E>
+
+    var _modifier: Attribute<DependentGesture<E>>
+    var _phase: Attribute<GesturePhase<E>>
+    var _inheritedPhase: Attribute<_GestureInputs.InheritedPhase>
+
+    func updateValue() -> GesturePhase<E> {
+        _phase.value.applyingDependency(
+            _modifier.value.dependency,
+            inheritedPhase: _inheritedPhase.value
+        )
+    }
+}
+
+extension GesturePhase {
+    fileprivate func paused() -> GesturePhase<V> {
+        switch self {
+        case .active(let value), .ended(let value):
+            return .possible(value)
+        case .possible, .failed:
+            return self
+        }
+    }
+
+    fileprivate func applyingDependency(
+        _ dependency: GestureDependency,
+        inheritedPhase: _GestureInputs.InheritedPhase
+    ) -> GesturePhase<V> {
+        switch dependency {
+        case .none:
+            return self
+        case .pausedWhileActive:
+            return inheritedPhase.contains(.active) ? paused() : self
+        case .pausedUntilFailed:
+            return inheritedPhase.contains(.failed) ? self : paused()
+        case .failIfActive:
+            if inheritedPhase.contains(.active) {
+                return .failed
+            }
+            return inheritedPhase.contains(.failed) ? self : paused()
+        }
+    }
+}
+
+extension Gesture {
+    func dependency(
+        _ dependency: GestureDependency
+    ) -> ModifierGesture<DependentGesture<Value>, Self> {
+        ModifierGesture(
+            modifier: DependentGesture(dependency: dependency),
+            body: self
+        )
     }
 }
 

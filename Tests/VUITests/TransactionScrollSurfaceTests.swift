@@ -27,6 +27,20 @@ final class TransactionScrollSurfaceTests: XCTestCase {
 
         transaction.scrollPositionUpdatePreservesVelocity = false
         XCTAssertFalse(transaction.scrollPositionUpdatePreservesVelocity)
+
+        XCTAssertFalse(transaction.scrollToRequiresCompleteVisibility)
+        transaction.scrollToRequiresCompleteVisibility = true
+        XCTAssertTrue(transaction.scrollToRequiresCompleteVisibility)
+    }
+
+    func testIsAnimatedRequiresAnimationAndHonorsDisableFlag() {
+        XCTAssertFalse(Transaction().isAnimated)
+
+        var transaction = Transaction(animation: .default)
+        XCTAssertTrue(transaction.isAnimated)
+
+        transaction.disablesAnimations = true
+        XCTAssertFalse(transaction.isAnimated)
     }
 
     func testScrollContentOffsetAdjustmentBehaviorStorageDefaultsAndRoundTrips() {

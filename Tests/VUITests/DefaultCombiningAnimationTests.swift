@@ -54,6 +54,7 @@ final class DefaultCombiningAnimationTests: XCTestCase {
             newAnimation: Animation(UnitLinearAnimation(duration: 1.0)),
             newValue: 5.0
         )
+        state[CombinedOuterStateMarker.self] = 77
         combineAnimation(
             into: &animation,
             state: &state,
@@ -67,6 +68,7 @@ final class DefaultCombiningAnimationTests: XCTestCase {
         XCTAssertEqual(box.base.entries.count, 3)
         XCTAssertEqual(box.base.entries.map(\.elapsed), [0.0, 0.25, 0.50])
         XCTAssertEqual(state.combinedState.entries.map(\.value), [10.0, 15.0, 12.0])
+        XCTAssertEqual(state[CombinedOuterStateMarker.self], 77)
 
         var context = AnimationContext(state: state)
         let sample = try XCTUnwrap(

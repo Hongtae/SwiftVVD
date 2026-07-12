@@ -2017,7 +2017,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             XCTAssertTrue(scrollable.allowsContentOffsetAdjustments)
-            XCTAssertTrue(scrollable.adjustContentOffset(by: CGSize(width: -4, height: 6), reason: .scrollPosition))
+            XCTAssertTrue(scrollable.adjustContentOffset(by: CGSize(width: -4, height: 6), reason: .translation))
 
             let adjustedGeometry = geometryAttribute.value.first?.geometry
             XCTAssertEqual(adjustedGeometry?.contentOffset, CGPoint(x: 10, y: 34))

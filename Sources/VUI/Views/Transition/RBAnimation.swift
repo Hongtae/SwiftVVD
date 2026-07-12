@@ -887,7 +887,7 @@ final class RBAnimationSequencer: NSObject {
     }
 }
 
-// Lowers VUI Animation boxes into the local RenderBox-style animation carrier.
+// Lowers animation boxes into the local RenderBox-style carrier.
 extension Animation {
     var rbAnimation: RBAnimation {
         let animation = RBAnimation()

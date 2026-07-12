@@ -629,7 +629,7 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             globalTimeAttr = graph.makeInput(value: time)
         }
         if inheritedPhaseAttr == nil {
-            inheritedPhaseAttr = graph.makeInput(value: [] as _GestureInputs.InheritedPhase)
+            inheritedPhaseAttr = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
         }
         if phaseAttr == nil {
             phaseAttr = graph.makeInput(value: GesturePhase<Void>.possible(nil))
@@ -651,6 +651,16 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     /// Delivers `events` to the shared eventsAttr, triggering synchronous AG evaluation.
     private func publishEvents() {
         eventsAttr?.setValue(currentEvents)
+    }
+
+    func eventBinding(at location: CGPoint, accepting eventType: Any.Type) -> EventBinding? {
+        refreshResponderGeometrySnapshots()
+        guard let responder = hitTestResponders(at: location)
+            .first(where: { $0.accepts(eventType: eventType) }),
+              let node = responder as? ResponderNode else {
+            return nil
+        }
+        return EventBinding(responder: node)
     }
 
     // MARK: - EventGraphHost
@@ -693,10 +703,19 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             // Create sessions for new events (.began phase, no existing session).
             // Sessions must be wired BEFORE publishing so gesture nodes are ready.
             for (eventID, event) in events where activeSessions[eventID] == nil {
-                guard event.eventPhase == .began,
-                      let location = event.location else { continue }
-                let responders = hitTestResponders(at: location)
-                    .filter { $0.accepts(eventType: eventID.type) }
+                guard event.eventPhase == .began else { continue }
+                let responders: [any AnyGestureResponder]
+                if let wheel = event as? WheelEvent,
+                   let binding = wheel.binding,
+                   let responder = binding.responder as? any AnyGestureResponder,
+                   responder.accepts(eventType: eventID.type) {
+                    responders = [responder]
+                } else if let location = event.location {
+                    responders = hitTestResponders(at: location)
+                        .filter { $0.accepts(eventType: eventID.type) }
+                } else {
+                    responders = []
+                }
                 guard !responders.isEmpty else { continue }
                 var sessions: [ActiveGestureSession] = []
                 for responder in responders {

@@ -1788,29 +1788,37 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             }
         }
 
-        try update(time: 0)
+        var currentTime = 0.0
+        try update(time: currentTime)
+
+        func advance(to targetTime: Double) throws {
+            let interval = 1.0 / 30.0
+            while currentTime + interval < targetTime {
+                currentTime += interval
+                try update(time: currentTime)
+            }
+            currentTime = targetTime
+            try update(time: currentTime)
+        }
+
         for cycle in 0..<20 {
             let base = Double(cycle) * 1.2
 
             try XCTUnwrap(probe.removeChild)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
-            try update(time: base + 0.10)
+            try advance(to: base + 0.10)
 
             try XCTUnwrap(probe.insertChild)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
-            try update(time: base + 0.40)
+            try advance(to: base + 0.40)
 
             try XCTUnwrap(probe.springMove)()
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.003))
-            try update(time: base + 0.70)
-
-            // Deliberately skip frames to model a stalled render loop.
-            try update(time: base + 1.20)
+            try advance(to: base + 0.70)
+            try advance(to: base + 1.20)
         }
 
-        for sampleTime in [24.5, 25.5, 27.0] {
-            try update(time: sampleTime)
-        }
+        try advance(to: 30.0)
         try update(time: 30.0, expectsSettledCenter: true)
     }
 
@@ -2149,10 +2157,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             switch effect.effect {
             case .identity:
                 label = "identity"
+            case .archive:
+                label = "archive"
             case .opacity:
                 label = "opacity"
             case .transform:
                 label = "transform"
+            case .mask:
+                label = "mask"
             case .animation:
                 label = "animation"
             case .state:

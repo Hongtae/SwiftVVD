@@ -88,6 +88,16 @@ struct ProtobufEncoder {
         try encodeMessage(message)
     }
 
+    mutating func encodeDataField(_ fieldNumber: UInt, _ data: Data) {
+        encodeVarint((fieldNumber << 3) | 2)
+        encodeVarint(UInt(data.count))
+        buffer.append(contentsOf: data)
+    }
+
+    mutating func encodeStringField(_ fieldNumber: UInt, _ value: String) {
+        encodeDataField(fieldNumber, Data(value.utf8))
+    }
+
     mutating func startLengthDelimited() {
         lengthDelimitedStarts.append(buffer.count)
         buffer.append(0)
@@ -389,6 +399,48 @@ extension CGSize: ProtobufEncodableMessage, ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws {
         let (width, height) = try decodeProtobufCGFloatPair(from: &decoder)
         self.init(width: width, height: height)
+    }
+}
+
+extension CGRect: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        if origin.x != 0 {
+            encoder.encodeCGFloatFieldAlways(1, origin.x)
+        }
+        if origin.y != 0 {
+            encoder.encodeCGFloatFieldAlways(2, origin.y)
+        }
+        if size.width != 0 {
+            encoder.encodeCGFloatFieldAlways(3, size.width)
+        }
+        if size.height != 0 {
+            encoder.encodeCGFloatFieldAlways(4, size.height)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            switch fieldNumber {
+            case 1:
+                x = try decoder.decodeCGFloatField(wireType: wireType)
+            case 2:
+                y = try decoder.decodeCGFloatField(wireType: wireType)
+            case 3:
+                width = try decoder.decodeCGFloatField(wireType: wireType)
+            case 4:
+                height = try decoder.decodeCGFloatField(wireType: wireType)
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(x: x, y: y, width: width, height: height)
     }
 }
 

@@ -371,10 +371,25 @@ extension _AGGraph {
         // 1. Break input connections (removes this node from its inputs' output sets)
         clearInputs(for: id, includingStatic: true)
 
-        // 2. Collect outputs and clean up their back-references
+        // 2. Collect outputs and clean up their back-references. A side-effect
+        // rule can retain the removed attribute in its closure while also having
+        // another dependency (for example, the key-path parent recorded during
+        // projection). Detach that rule from every input so a later write cannot
+        // eagerly re-enter the stale closure before its owning subgraph is removed.
         let outputs = slots[index].node!.outputs
+        var detachedSideEffects: Set<UInt32> = []
         for outputIndex in outputs {
-            slots[Int(outputIndex)].node?.inputs.remove(id.rawValue)
+            let outputID = AGAttribute(rawValue: outputIndex)
+            if slots[Int(outputIndex)].node?.kind.isSideEffect == true {
+                clearInputs(for: outputID, includingStatic: true)
+                slots[Int(outputIndex)].node?.needsEvaluation = false
+                slots[Int(outputIndex)].node?.inputsChanged = false
+                slots[Int(outputIndex)].node?.changedInputs.removeAll()
+                slots[Int(outputIndex)].node?.transaction = nil
+                detachedSideEffects.insert(outputIndex)
+            } else {
+                slots[Int(outputIndex)].node?.inputs.remove(id.rawValue)
+            }
         }
 
         // 3. Remove from KeyPath cache / cross-graph observer registry if applicable
@@ -401,7 +416,7 @@ extension _AGGraph {
         // evaluateSideEffects:false because the node is gone. Side-effect rules that depended
         // on it must NOT fire now (they would crash reading a freed attribute).
         // They are simply marked dirty and will be removed or re-evaluated later.
-        for outputIndex in outputs {
+        for outputIndex in outputs where !detachedSideEffects.contains(outputIndex) {
             markNeedsEvaluation(AGAttribute(rawValue: outputIndex), evaluateSideEffects: false)
         }
     }
@@ -433,7 +448,6 @@ extension _AGGraph {
 
         // Lazy evaluation
         if shouldEvaluate {
-            slots[index].node!.isEvaluating = true
             evaluateNodeForUpdate(id)
         }
 
@@ -528,6 +542,14 @@ extension _AGGraph {
     // MARK: Dependency Graph
 
     private func evaluateNodeForUpdate(_ id: AGAttribute) {
+        let index = Int(id.rawValue)
+        guard slots[index].node != nil else { return }
+        // Eager side effects can be invalidated by a dependency that mutates
+        // while the side effect is still reading it. The current evaluation
+        // already observes that dependency's completed value, so do not enter
+        // the same side effect recursively.
+        guard !slots[index].node!.isEvaluating else { return }
+        slots[index].node!.isEvaluating = true
         withGraphUpdateCounterIfNeeded {
             evaluateNode(id)
         }

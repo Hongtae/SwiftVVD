@@ -129,11 +129,589 @@ class AnyTextStorage {
     func resolveText(in environment: EnvironmentValues) -> String {
         fatalError("This method should be overridden by subclasses.")
     }
+    func resolveText(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> String {
+        resolveText(in: environment)
+    }
+    func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext,
+        referenceDate: Date
+    ) -> GraphicsContext.ResolvedText {
+        resolve(typefaces: typefaces, context: context)
+    }
     func resolveTransitionText(in environment: EnvironmentValues) -> String? {
         resolveText(in: environment)
     }
+    func sizeVariantTexts(in environment: EnvironmentValues) -> [(TextSizeVariant, String)]? {
+        nil
+    }
+    func sizeVariantTexts(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> [(TextSizeVariant, String)]? {
+        sizeVariantTexts(in: environment)
+    }
+    func nextUpdateDelay(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> TimeInterval? {
+        nil
+    }
+    func needsDynamicRenderingInArchive(in environment: EnvironmentValues) -> Bool {
+        false
+    }
+    func contentHash(
+        into hasher: inout Hasher,
+        environment: EnvironmentValues,
+        referenceDate: Date
+    ) {
+        hasher.combine(resolveText(in: environment, referenceDate: referenceDate))
+    }
     func isEqual(to other: AnyTextStorage) -> Bool {
         self === other
+    }
+}
+
+private func _dynamicArchiveStorage(
+    for resolved: GraphicsContext.ResolvedText,
+    enabled: Bool
+) -> NSAttributedString? {
+    guard enabled else { return nil }
+    let storage = NSMutableAttributedString(attributedString: resolved.attributedStorage)
+    if storage.length > 0 {
+        storage.addAttribute(
+            .updateSchedule,
+            value: true,
+            range: NSRange(location: 0, length: storage.length)
+        )
+    }
+    return storage
+}
+
+private struct CodableRawRepresentable<Value>: Codable, Equatable, @unchecked Sendable
+where Value: RawRepresentable & Equatable,
+      Value.RawValue: Codable & Equatable {
+    var wrappedValue: Value
+
+    init(_ wrappedValue: Value) {
+        self.wrappedValue = wrappedValue
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(Value.RawValue.self)
+        guard let value = Value(rawValue: rawValue) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid raw value for \(Value.self)."
+            )
+        }
+        wrappedValue = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue.rawValue)
+    }
+}
+
+private struct _DateFormatStyleBox: Equatable {
+    enum Format: Equatable {
+        case time
+        case date
+    }
+
+    var input: Date
+    var format: Format
+
+    func formatted() -> String {
+        switch format {
+        case .time:
+            input.formatted(.dateTime.hour().minute())
+        case .date:
+            input.formatted(.dateTime.year().month().day())
+        }
+    }
+}
+
+private final class FormatStyleStorage: AnyTextStorage {
+    let storage: _DateFormatStyleBox
+
+    init(input: Date, format: _DateFormatStyleBox.Format) {
+        self.storage = _DateFormatStyleBox(input: input, format: format)
+    }
+
+    override func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        .init(
+            runs: [.text(typefaces, storage.formatted())],
+            scaleFactor: context.contentScaleFactor
+        )
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        storage.formatted()
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        guard let other = other as? FormatStyleStorage else { return false }
+        return storage == other.storage
+    }
+}
+
+private protocol _TimeDataFormattingSource: Equatable {
+    associatedtype Value
+
+    func value(referenceDate: Date) -> Value
+    func date(for value: Value) -> Date?
+    var pausesUpdates: Bool { get }
+}
+
+private extension _TimeDataFormattingSource {
+    var pausesUpdates: Bool { false }
+}
+
+private struct _DateTimeDataSourceStorage: _TimeDataFormattingSource {
+    var date: Date
+
+    func value(referenceDate: Date) -> Date {
+        date
+    }
+
+    func date(for value: Date) -> Date? { value }
+}
+
+private struct _TimerIntervalTimeDataSourceStorage: _TimeDataFormattingSource {
+    enum Storage: Equatable {
+        case identity
+        case identityWithPause(Date)
+    }
+
+    var storage: Storage
+
+    var pausesUpdates: Bool {
+        if case .identityWithPause = storage { return true }
+        return false
+    }
+
+    func value(referenceDate: Date) -> Date {
+        switch storage {
+        case .identity:
+            referenceDate
+        case .identityWithPause(let pauseDate):
+            pauseDate
+        }
+    }
+
+    func date(for value: Date) -> Date? { value }
+}
+
+private struct _PublicTimeDataSourceStorage<Value>: _TimeDataFormattingSource {
+    var source: TimeDataSource<Value>
+
+    func value(referenceDate: Date) -> Value {
+        source.box.value(for: referenceDate)
+    }
+
+    func date(for value: Value) -> Date? {
+        source.box.date(for: value)
+    }
+
+    static func == (
+        lhs: _PublicTimeDataSourceStorage<Value>,
+        rhs: _PublicTimeDataSourceStorage<Value>
+    ) -> Bool {
+        lhs.source.box.identity == rhs.source.box.identity
+    }
+}
+
+private protocol _TimeDataFormat: Equatable {
+    associatedtype Input
+    associatedtype Output: Equatable & Hashable
+
+    func format(
+        _ input: Input,
+        unitsStyle: Date.RelativeFormatStyle.UnitsStyle,
+        referenceDate: Date,
+        locale: Locale
+    ) -> Output
+    func resolvedText(
+        _ output: Output,
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText
+    func plainText(_ output: Output) -> String
+    func nextUpdateDelay(
+        for input: Input,
+        referenceDate: Date,
+        sourceDate: (Input) -> Date?
+    ) -> TimeInterval
+    var producesRelativeSizeVariants: Bool { get }
+}
+
+private extension _TimeDataFormat where Output == String {
+    func resolvedText(
+        _ output: String,
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        .init(
+            runs: [.text(typefaces, output)],
+            scaleFactor: context.contentScaleFactor
+        )
+    }
+
+    func plainText(_ output: String) -> String { output }
+}
+
+private struct _DateStyleTimeDataFormat: _TimeDataFormat {
+    var style: Text.DateStyle
+
+    var producesRelativeSizeVariants: Bool {
+        style == .relative
+    }
+
+    func format(
+        _ date: Date,
+        unitsStyle: Date.RelativeFormatStyle.UnitsStyle,
+        referenceDate: Date,
+        locale: Locale
+    ) -> String {
+        switch style.kind {
+        case .time:
+            date.formatted(.dateTime.hour().minute())
+        case .date:
+            date.formatted(.dateTime.year().month().day())
+        case .relative:
+            Duration.seconds(abs(date.timeIntervalSince(referenceDate))).formatted(
+                .units(
+                    allowed: [.days, .hours, .minutes, .seconds],
+                    width: unitsStyle == .narrow ? .narrow : .abbreviated,
+                    maximumUnitCount: 2
+                ).locale(locale)
+            )
+        case .offset:
+            offsetString(for: date, referenceDate: referenceDate, locale: locale)
+        case .timer:
+            timerString(for: date, referenceDate: referenceDate)
+        }
+    }
+
+    func nextUpdateDelay(
+        for date: Date,
+        referenceDate: Date,
+        sourceDate: (Date) -> Date?
+    ) -> TimeInterval {
+        let interval = date.timeIntervalSince(referenceDate)
+        let magnitude = abs(interval)
+        let unit: TimeInterval
+        switch style.kind {
+        case .relative:
+            if magnitude >= 86_400 {
+                unit = 3_600
+            } else if magnitude >= 3_600 {
+                unit = 60
+            } else {
+                unit = 1
+            }
+        case .offset:
+            if magnitude >= 86_400 {
+                unit = 86_400
+            } else if magnitude >= 3_600 {
+                unit = 3_600
+            } else if magnitude >= 60 {
+                unit = 60
+            } else {
+                unit = 1
+            }
+        case .timer:
+            unit = 1
+        case .time, .date:
+            return .infinity
+        }
+
+        let remainder = magnitude.truncatingRemainder(dividingBy: unit)
+        let delay = interval >= 0 ? remainder : unit - remainder
+        return delay > 1e-6 ? delay : unit
+    }
+
+    private func offsetString(
+        for date: Date,
+        referenceDate: Date,
+        locale: Locale
+    ) -> String {
+        let interval = date.timeIntervalSince(referenceDate)
+        let value = Duration.seconds(abs(interval)).formatted(
+            .units(
+                allowed: [.days, .hours, .minutes, .seconds],
+                width: .wide,
+                maximumUnitCount: 1
+            ).locale(locale)
+        )
+        return interval > 0 ? "−\(value)" : "+\(value)"
+    }
+
+    private func timerString(for date: Date, referenceDate: Date) -> String {
+        Duration.seconds(abs(date.timeIntervalSince(referenceDate))).formatted(
+            .time(pattern: .hourMinuteSecond)
+        )
+    }
+}
+
+private struct _TimerIntervalTimeDataFormat: _TimeDataFormat {
+    var interval: ClosedRange<Date>
+    var countsDown: Bool
+    var showsHours: Bool
+
+    var producesRelativeSizeVariants: Bool { false }
+
+    func format(
+        _ date: Date,
+        unitsStyle: Date.RelativeFormatStyle.UnitsStyle,
+        referenceDate: Date,
+        locale: Locale
+    ) -> String {
+        let duration = max(interval.upperBound.timeIntervalSince(interval.lowerBound), 0)
+        let elapsed = min(
+            max(date.timeIntervalSince(interval.lowerBound), 0),
+            duration
+        )
+        let seconds: Int
+        if countsDown {
+            seconds = Int(ceil(max(duration - elapsed, 0)))
+        } else {
+            seconds = Int(floor(elapsed))
+        }
+        return timerString(seconds: seconds)
+    }
+
+    func nextUpdateDelay(
+        for date: Date,
+        referenceDate: Date,
+        sourceDate: (Date) -> Date?
+    ) -> TimeInterval {
+        guard date >= interval.lowerBound, date < interval.upperBound else {
+            if date < interval.lowerBound {
+                return interval.lowerBound.timeIntervalSince(date)
+            }
+            return .infinity
+        }
+        let elapsed = date.timeIntervalSince(interval.lowerBound)
+        let remainder = elapsed.truncatingRemainder(dividingBy: 1)
+        return remainder > 1e-6 ? 1 - remainder : 1
+    }
+
+    private func timerString(seconds: Int) -> String {
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainingSeconds = seconds % 60
+        if showsHours, hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+        let totalMinutes = seconds / 60
+        return String(format: "%d:%02d", totalMinutes, remainingSeconds)
+    }
+}
+
+private struct _DiscreteStringTimeDataFormat<Format>: _TimeDataFormat
+where Format: DiscreteFormatStyle, Format.FormatOutput == String {
+    var style: Format
+
+    var producesRelativeSizeVariants: Bool { false }
+
+    func format(
+        _ input: Format.FormatInput,
+        unitsStyle: Date.RelativeFormatStyle.UnitsStyle,
+        referenceDate: Date,
+        locale: Locale
+    ) -> String {
+        style.locale(locale).format(input)
+    }
+
+    func nextUpdateDelay(
+        for input: Format.FormatInput,
+        referenceDate: Date,
+        sourceDate: (Format.FormatInput) -> Date?
+    ) -> TimeInterval {
+        guard let nextInput = style.discreteInput(after: input),
+              let nextDate = sourceDate(nextInput) else {
+            return .infinity
+        }
+        let delay = nextDate.timeIntervalSince(referenceDate)
+        return delay > 1e-6 ? delay : .infinity
+    }
+}
+
+private struct _DiscreteAttributedTimeDataFormat<Format>: _TimeDataFormat
+where Format: DiscreteFormatStyle, Format.FormatOutput == AttributedString {
+    var style: Format
+
+    var producesRelativeSizeVariants: Bool { false }
+
+    func format(
+        _ input: Format.FormatInput,
+        unitsStyle: Date.RelativeFormatStyle.UnitsStyle,
+        referenceDate: Date,
+        locale: Locale
+    ) -> AttributedString {
+        style.locale(locale).format(input)
+    }
+
+    func resolvedText(
+        _ output: AttributedString,
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        _resolvedAttributedText(
+            output,
+            defaultTypefaces: typefaces,
+            context: context
+        )
+    }
+
+    func plainText(_ output: AttributedString) -> String {
+        String(output.characters)
+    }
+
+    func nextUpdateDelay(
+        for input: Format.FormatInput,
+        referenceDate: Date,
+        sourceDate: (Format.FormatInput) -> Date?
+    ) -> TimeInterval {
+        guard let nextInput = style.discreteInput(after: input),
+              let nextDate = sourceDate(nextInput) else {
+            return .infinity
+        }
+        let delay = nextDate.timeIntervalSince(referenceDate)
+        return delay > 1e-6 ? delay : .infinity
+    }
+}
+
+private final class TimeDataFormattingStorage<Source, Format>: AnyTextStorage
+where Source: _TimeDataFormattingSource,
+      Format: _TimeDataFormat,
+      Source.Value == Format.Input {
+    let source: Source
+    let format: Format
+    let reducedLuminanceBudget: Double?
+
+    init(source: Source, format: Format, reducedLuminanceBudget: Double? = nil) {
+        self.source = source
+        self.format = format
+        self.reducedLuminanceBudget = reducedLuminanceBudget
+    }
+
+    override func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        resolve(typefaces: typefaces, context: context, referenceDate: Date())
+    }
+
+    override func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext,
+        referenceDate: Date
+    ) -> GraphicsContext.ResolvedText {
+        let value = source.value(referenceDate: referenceDate)
+        let output = format.format(
+            value,
+            unitsStyle: .wide,
+            referenceDate: referenceDate,
+            locale: context.environment.locale
+        )
+        return format.resolvedText(output, typefaces: typefaces, context: context)
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        resolveText(in: environment, referenceDate: Date())
+    }
+
+    override func resolveText(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> String {
+        format.plainText(format.format(
+            source.value(referenceDate: referenceDate),
+            unitsStyle: .wide,
+            referenceDate: referenceDate,
+            locale: environment.locale
+        ))
+    }
+
+    override func sizeVariantTexts(
+        in environment: EnvironmentValues
+    ) -> [(TextSizeVariant, String)]? {
+        sizeVariantTexts(in: environment, referenceDate: Date())
+    }
+
+    override func sizeVariantTexts(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> [(TextSizeVariant, String)]? {
+        guard format.producesRelativeSizeVariants else { return nil }
+        let value = source.value(referenceDate: referenceDate)
+        let regular = format.plainText(format.format(
+            value,
+            unitsStyle: .wide,
+            referenceDate: referenceDate,
+            locale: environment.locale
+        ))
+        let compact = format.plainText(format.format(
+            value,
+            unitsStyle: .narrow,
+            referenceDate: referenceDate,
+            locale: environment.locale
+        ))
+        guard regular != compact else {
+            return [(.regular, regular)]
+        }
+        return [(.regular, regular), (.compact, compact)]
+    }
+
+    override func nextUpdateDelay(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> TimeInterval? {
+        guard !source.pausesUpdates else { return nil }
+        let value = source.value(referenceDate: referenceDate)
+        let delay = format.nextUpdateDelay(
+            for: value,
+            referenceDate: referenceDate,
+            sourceDate: source.date(for:)
+        )
+        return delay.isFinite ? delay : nil
+    }
+
+    override func needsDynamicRenderingInArchive(in environment: EnvironmentValues) -> Bool {
+        true
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        guard let other = other as? TimeDataFormattingStorage<Source, Format> else {
+            return false
+        }
+        return source == other.source &&
+            format == other.format &&
+            reducedLuminanceBudget == other.reducedLuminanceBudget
+    }
+
+    override func contentHash(
+        into hasher: inout Hasher,
+        environment: EnvironmentValues,
+        referenceDate: Date
+    ) {
+        hasher.combine(format.format(
+            source.value(referenceDate: referenceDate),
+            unitsStyle: .wide,
+            referenceDate: referenceDate,
+            locale: environment.locale
+        ))
     }
 }
 
@@ -254,34 +832,88 @@ public struct Text: Equatable {
         case uppercase
     }
 
-    public struct LineStyle: Hashable {
+    public struct LineStyle: Hashable, Sendable {
         public struct Pattern: Equatable, Sendable {
-            enum UnderlineStyle {
-                case solid
-                case dot
-                case dash
-                case dashDot
-                case dashDotDot
-            }
-            let underlineStyle: UnderlineStyle
-            let color: Color?
+            let rawValue: Int
 
-            init(_ underlineStyle: UnderlineStyle) {
-                self.underlineStyle = underlineStyle
-                self.color = nil
+            private init(rawValue: Int) {
+                self.rawValue = rawValue
             }
 
-            public static let solid = Pattern(.solid)
-            public static let dot = Pattern(.dot)
-            public static let dash = Pattern(.dash)
-            public static let dashDot = Pattern(.dashDot)
-            public static let dashDotDot = Pattern(.dashDotDot)
+            public static let solid = Pattern(rawValue: 0)
+            public static let dot = Pattern(rawValue: 0x100)
+            public static let dash = Pattern(rawValue: 0x200)
+            public static let dashDot = Pattern(rawValue: 0x300)
+            public static let dashDotDot = Pattern(rawValue: 0x400)
+        }
 
-            public init(pattern: Text.LineStyle.Pattern = .solid,
-                        color: Color? = nil) {
-                self.underlineStyle = pattern.underlineStyle
-                self.color = color
+        let nsUnderlineStyleValue: Int
+        let color: Color?
+
+        public init(pattern: Text.LineStyle.Pattern = .solid, color: Color? = nil) {
+            self.nsUnderlineStyleValue = 1 | pattern.rawValue
+            self.color = color
+        }
+
+        public static let single = LineStyle()
+    }
+
+    public struct DateStyle: Equatable, Codable, Sendable {
+        fileprivate enum Storage: UInt8, Codable, Sendable {
+            case time
+            case date
+            case relative
+            case offset
+            case timer
+        }
+
+        private struct UnitsConfiguration: Equatable, Codable, @unchecked Sendable {
+            enum Style: UInt8, Codable, Sendable {
+                case short
+                case brief
+                case full
             }
+
+            var _units: CodableRawRepresentable<NSCalendar.Unit>
+            var style: Style
+        }
+
+        private var storage: Storage
+        private var unitConfiguration: UnitsConfiguration?
+
+        fileprivate var kind: Storage {
+            storage
+        }
+
+        private init(_ storage: Storage) {
+            self.storage = storage
+            self.unitConfiguration = nil
+        }
+
+        public static let time = DateStyle(.time)
+        public static let date = DateStyle(.date)
+        public static let relative = DateStyle(.relative)
+        public static let offset = DateStyle(.offset)
+        public static let timer = DateStyle(.timer)
+
+        private enum CodingKeys: String, CodingKey {
+            case storage
+            case unitConfiguration
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            storage = try container.decode(Storage.self, forKey: .storage)
+            unitConfiguration = try container.decodeIfPresent(
+                UnitsConfiguration.self,
+                forKey: .unitConfiguration
+            )
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(storage, forKey: .storage)
+            try container.encodeIfPresent(unitConfiguration, forKey: .unitConfiguration)
         }
     }
 
@@ -314,8 +946,100 @@ public struct Text: Equatable {
         self.modifiers = []
     }
 
+    @_disfavoredOverload
+    public init(_ attributedContent: AttributedString) {
+        self.storage = .anyTextStorage(AttributedStringTextStorage(attributedContent))
+        self.modifiers = []
+    }
+
     public init(_ image: Image) {
         self.storage = .anyTextStorage(AttachmentTextStorage(image))
+        self.modifiers = []
+    }
+
+    public init(_ date: Date, style: DateStyle) {
+        switch style.kind {
+        case .time:
+            self.storage = .anyTextStorage(
+                FormatStyleStorage(input: date, format: .time)
+            )
+        case .date:
+            self.storage = .anyTextStorage(
+                FormatStyleStorage(input: date, format: .date)
+            )
+        case .relative, .offset, .timer:
+            self.storage = .anyTextStorage(
+                TimeDataFormattingStorage(
+                    source: _DateTimeDataSourceStorage(date: date),
+                    format: _DateStyleTimeDataFormat(style: style)
+                )
+            )
+        }
+        self.modifiers = []
+    }
+
+    public init(
+        timerInterval: ClosedRange<Date>,
+        pauseTime: Date? = nil,
+        countsDown: Bool = true,
+        showsHours: Bool = true
+    ) {
+        let sourceStorage: _TimerIntervalTimeDataSourceStorage.Storage
+        if let pauseTime {
+            let resolvedPause: Date
+            if countsDown {
+                resolvedPause = timerInterval.lowerBound.addingTimeInterval(
+                    timerInterval.upperBound.timeIntervalSince(pauseTime)
+                )
+            } else {
+                resolvedPause = pauseTime
+            }
+            sourceStorage = .identityWithPause(resolvedPause)
+        } else {
+            sourceStorage = .identity
+        }
+        self.storage = .anyTextStorage(
+            TimeDataFormattingStorage(
+                source: _TimerIntervalTimeDataSourceStorage(storage: sourceStorage),
+                format: _TimerIntervalTimeDataFormat(
+                    interval: timerInterval,
+                    countsDown: countsDown,
+                    showsHours: showsHours
+                ),
+                reducedLuminanceBudget: 60
+            )
+        )
+        self.modifiers = []
+    }
+
+    @_disfavoredOverload
+    public init<Value, Format>(
+        _ source: TimeDataSource<Value>,
+        format: Format
+    ) where Value == Format.FormatInput,
+            Format: DiscreteFormatStyle,
+            Format.FormatOutput == String {
+        self.storage = .anyTextStorage(
+            TimeDataFormattingStorage(
+                source: _PublicTimeDataSourceStorage(source: source),
+                format: _DiscreteStringTimeDataFormat(style: format)
+            )
+        )
+        self.modifiers = []
+    }
+
+    public init<Value, Format>(
+        _ source: TimeDataSource<Value>,
+        format: Format
+    ) where Value == Format.FormatInput,
+            Format: DiscreteFormatStyle,
+            Format.FormatOutput == AttributedString {
+        self.storage = .anyTextStorage(
+            TimeDataFormattingStorage(
+                source: _PublicTimeDataSourceStorage(source: source),
+                format: _DiscreteAttributedTimeDataFormat(style: format)
+            )
+        )
         self.modifiers = []
     }
 
@@ -325,11 +1049,18 @@ public struct Text: Equatable {
     }
 
     public func _resolveText(in environment: EnvironmentValues) -> String {
+        _resolveText(in: environment, referenceDate: Date())
+    }
+
+    func _resolveText(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> String {
         if case let .verbatim(text) = self.storage {
             return text
         }
         if case let .anyTextStorage(storage) = self.storage {
-            return storage.resolveText(in: environment)
+            return storage.resolveText(in: environment, referenceDate: referenceDate)
         }
         return String()
     }
@@ -345,6 +1076,13 @@ public struct Text: Equatable {
     }
 
     func _resolve(context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        _resolve(context: context, referenceDate: Date())
+    }
+
+    func _resolve(
+        context: GraphicsContext,
+        referenceDate: Date
+    ) -> GraphicsContext.ResolvedText {
         let displayScale = context.sceneResources.contentScaleFactor
         var font = self.font ?? context.environment.font
         if font == nil {
@@ -366,7 +1104,11 @@ public struct Text: Equatable {
                 )
             }
             else if case let .anyTextStorage(text) = self.storage {
-                let resolved = text.resolve(typefaces: faces, context: context)
+                let resolved = text.resolve(
+                    typefaces: faces,
+                    context: context,
+                    referenceDate: referenceDate
+                )
                 guard !customAttributes.isEmpty else { return resolved }
                 return GraphicsContext.ResolvedText(
                     runs: resolved.runs.map { $0.applying(customAttributes) },
@@ -375,6 +1117,77 @@ public struct Text: Equatable {
             }
         }
         return .init(runs: [], scaleFactor: context.contentScaleFactor)
+    }
+
+    func _sizeVariantTexts(in environment: EnvironmentValues) -> [(TextSizeVariant, String)]? {
+        _sizeVariantTexts(in: environment, referenceDate: Date())
+    }
+
+    func _sizeVariantTexts(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> [(TextSizeVariant, String)]? {
+        guard case let .anyTextStorage(storage) = storage else { return nil }
+        return storage.sizeVariantTexts(in: environment, referenceDate: referenceDate)
+    }
+
+    func _nextUpdateDelay(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> TimeInterval? {
+        guard case let .anyTextStorage(storage) = storage else { return nil }
+        return storage.nextUpdateDelay(in: environment, referenceDate: referenceDate)
+    }
+
+    func _needsDynamicRenderingInArchive(in environment: EnvironmentValues) -> Bool {
+        guard case let .anyTextStorage(storage) = storage else { return false }
+        return storage.needsDynamicRenderingInArchive(in: environment)
+    }
+
+    func _contentHash(
+        into hasher: inout Hasher,
+        environment: EnvironmentValues,
+        referenceDate: Date
+    ) {
+        switch storage {
+        case let .verbatim(text):
+            hasher.combine(text)
+        case let .anyTextStorage(storage):
+            storage.contentHash(
+                into: &hasher,
+                environment: environment,
+                referenceDate: referenceDate
+            )
+        }
+    }
+
+    func _resolveSizeVariants(
+        context: GraphicsContext,
+        referenceDate: Date = Date()
+    ) -> [(TextSizeVariant, GraphicsContext.ResolvedText)]? {
+        guard let variants = _sizeVariantTexts(
+            in: context.environment,
+            referenceDate: referenceDate
+        ),
+              variants.count > 1 else {
+            return nil
+        }
+
+        let displayScale = context.sceneResources.contentScaleFactor
+        var font = self.font ?? context.environment.font ?? .system(.body)
+        font = font.resolved(in: context.environment).displayScale(displayScale)
+        let faces = ([font.typeface(forContext: context.sceneResources)] + font.fallbackTypefaces)
+            .compactMap { $0 }
+        guard !faces.isEmpty else { return nil }
+
+        return variants.map { variant, string in
+            let runs: [GraphicsContext.ResolvedText.Run] = [.text(faces, string)]
+            let resolved = GraphicsContext.ResolvedText(
+                runs: runs.map { $0.applying(customAttributes) },
+                scaleFactor: context.contentScaleFactor
+            )
+            return (variant, resolved)
+        }
     }
 }
 
@@ -502,6 +1315,8 @@ extension Text: View {
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
+        let environmentAttr = cachedEnvironmentAttr.value.environment
+        let timeAttr = inputs.base.time
         let animatedFrame = cachedEnvironmentAttr.value.animatedFrame
         let inbox = graph.inbox
         let sizeAttr = animatedFrame?._animatedSize ?? inputs.size
@@ -521,18 +1336,33 @@ extension Text: View {
         let resourceAttr: Attribute<ResourceList> = graph.makeRule {
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
+            let currentTime = timeAttr.value
+            let referenceDate = Date()
             let renderEnvironment = environment.untrackedCopy()
             let transitionText = text._resolveTransitionText(in: environment)
+            let needsDynamicArchive = text._needsDynamicRenderingInArchive(in: environment)
             let layoutProperties = TextLayoutProperties(environment)
 
             // Generate a unique hash (version) combining text content and environment factors.
             var hasher = Hasher()
-            hasher.combine(text._resolveText(in: environment))
+            text._contentHash(
+                into: &hasher,
+                environment: environment,
+                referenceDate: referenceDate
+            )
             hasher.combine(environment.font?.hashValue ?? 0)
             hasher.combine(environment.defaultFontRenderingMode)
             hasher.combine(environment.displayScale)
             text.customAttributes.hash(into: &hasher)
             let currentVersion = hasher.finalize()
+
+            if let delay = text._nextUpdateDelay(
+                in: environment,
+                referenceDate: referenceDate
+            ), delay.isFinite, delay > 0,
+               let viewGraph = _AGGraphContext.current?.context as? ViewGraph {
+                viewGraph.nextUpdate.views.at(currentTime + delay)
+            }
 
             // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
             let resolvedStyledText = resolvedStyledTextAttr.value
@@ -559,16 +1389,67 @@ extension Text: View {
                 var context = context
                 context.environment = renderEnvironment
                 // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
-                let resolved = text._resolve(context: context)
+                let resolved = text._resolve(
+                    context: context,
+                    referenceDate: referenceDate
+                )
                 let boxedResolved = UnsafeBox(resolved)
+                let boxedVariants = UnsafeBox(
+                    usesSizeFittingText ? text._resolveSizeVariants(
+                        context: context,
+                        referenceDate: referenceDate
+                    ) : nil
+                )
                 let boxedTransaction = UnsafeBox(publicationTransaction)
                 let boxedLayoutProperties = UnsafeBox(layoutProperties)
 
                 // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                 let publish: @Sendable () -> Void = {
+                    let variantValues = boxedVariants.value
+                    var styledVariants: [ResolvedStyledText] = []
+                    if let variantValues {
+                        styledVariants = variantValues.map { _, resolved in
+                            ResolvedStyledText(
+                                storage: _dynamicArchiveStorage(
+                                    for: resolved,
+                                    enabled: needsDynamicArchive
+                                ),
+                                layoutProperties: boxedLayoutProperties.value,
+                                archiveOptions: archiveOptions,
+                                features: resolved.resolvedFeatures.union(.isUniqueSizeVariant),
+                                resolvedText: resolved,
+                                version: currentVersion,
+                                transitionText: transitionText
+                            )
+                        }
+                        if let terminalResolved = variantValues.last?.1 {
+                            styledVariants.append(
+                                ResolvedStyledText(
+                                    storage: _dynamicArchiveStorage(
+                                        for: terminalResolved,
+                                        enabled: needsDynamicArchive
+                                    ),
+                                    layoutProperties: boxedLayoutProperties.value,
+                                    archiveOptions: archiveOptions,
+                                    features: terminalResolved.resolvedFeatures,
+                                    resolvedText: terminalResolved,
+                                    version: currentVersion,
+                                    transitionText: transitionText
+                                )
+                            )
+                        }
+                        if let first = styledVariants.first {
+                            first.setSizeVariantCandidates(styledVariants)
+                        }
+                    }
+
                     resolvedStyledTextTransactionAttr.setValue(boxedTransaction.value)
                     resolvedStyledTextAttr.setValue(
-                        ResolvedStyledText(
+                        styledVariants.first ?? ResolvedStyledText(
+                            storage: _dynamicArchiveStorage(
+                                for: boxedResolved.value,
+                                enabled: needsDynamicArchive
+                            ),
                             layoutProperties: boxedLayoutProperties.value,
                             archiveOptions: archiveOptions,
                             features: boxedResolved.value.resolvedFeatures,
@@ -605,12 +1486,15 @@ extension Text: View {
                 SizeFittingTextFilter(
                     size: sizeAttr,
                     text: resolvedStyledTextAttr,
+                    environment: environmentAttr,
+                    isArchived: archiveOptions.isArchived,
                     cache: cache
                 )
             )
             lcAttr = graph.makeStatefulRule(
                 SizeFittingTextLayoutComputer(
                     text: resolvedStyledTextAttr,
+                    environment: environmentAttr,
                     renderer: textRendererAttr?.asWeak() ?? WeakAttribute(),
                     cache: cache
                 )

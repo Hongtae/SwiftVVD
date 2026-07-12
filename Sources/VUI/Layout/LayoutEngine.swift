@@ -76,6 +76,7 @@ protocol LayoutEngine {
     func requiresSpacingProjection() -> Bool
     func spacing() -> ViewSpacing
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
+    func truncates(_ proposal: ProposedViewSize) -> Bool
     func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
@@ -91,6 +92,16 @@ extension LayoutEngine {
     func ignoresAutomaticPadding() -> Bool { false }
     func requiresSpacingProjection() -> Bool { false }
     func spacing() -> ViewSpacing { ViewSpacing() }
+    func truncates(_ proposal: ProposedViewSize) -> Bool {
+        let ideal = sizeThatFits(.unspecified)
+        if let width = proposal.width, ideal.width > width {
+            return true
+        }
+        if let height = proposal.height, ideal.height > height {
+            return true
+        }
+        return false
+    }
     func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat {
         let s = sizeThatFits(proposal)
         return axis == .horizontal ? s.width : s.height

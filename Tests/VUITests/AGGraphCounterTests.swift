@@ -84,6 +84,55 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testEagerSideEffectDoesNotReenterWhileDependencyMutatesDuringEvaluation() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 0)
+            let derived = graph.makeRule {
+                let value = source.value
+                if value == 0 {
+                    source.setValue(1)
+                }
+                return source.value + 10
+            }
+            var observed: [Int] = []
+
+            graph.makeSideEffectRule {
+                observed.append(derived.value)
+            }
+
+            XCTAssertEqual(observed, [11])
+            XCTAssertEqual(derived.value, 11)
+        }
+    }
+
+    func testRemovingKeyPathInputDetachesSideEffectFromRemainingParentDependencies() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(
+                value: KeyPathChangedInputPair(first: 1, second: 10)
+            )
+            let first = graph.subscriptNode(parent: source, keyPath: \.first)
+            let trigger = graph.makeInput(value: 100)
+            var observed: [Int] = []
+
+            graph.makeSideEffectRule {
+                observed.append(first.value + trigger.value)
+            }
+            XCTAssertEqual(observed, [101])
+
+            graph.removeNode(first.identifier)
+            trigger.setValue(200)
+            source.setValue(KeyPathChangedInputPair(first: 2, second: 20))
+
+            XCTAssertEqual(observed, [101])
+        }
+    }
+
     func testNestedDifferentGraphEvaluationAdvancesEachGraphCounter() {
         let outerGraph = _AGGraph()
         let outerRef = _AGGraphContext(graph: outerGraph)

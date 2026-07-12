@@ -1,0 +1,1116 @@
+//
+//  File: SystemScrollViewHost.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
+import Foundation
+
+/// Default anchors used for initial placement, size changes, and undersized alignment.
+struct ScrollAnchorStorage: Equatable {
+    enum Role: Hashable, Sendable {
+        case initialOffset
+        case sizeChanges
+        case alignment
+    }
+
+    var anchors: [Role: UnitPoint]
+    var defaultValue: UnitPoint?
+
+    init(
+        anchors: [Role: UnitPoint] = [:],
+        defaultValue: UnitPoint? = nil
+    ) {
+        self.anchors = anchors
+        self.defaultValue = defaultValue
+    }
+
+    var isEmpty: Bool {
+        anchors.isEmpty && defaultValue == nil
+    }
+
+    var initialOffset: UnitPoint {
+        anchor(role: .initialOffset)
+    }
+
+    var sizeChanges: UnitPoint {
+        anchor(role: .sizeChanges)
+    }
+
+    var alignment: UnitPoint {
+        anchor(role: .alignment)
+    }
+
+    func anchor(role: Role) -> UnitPoint {
+        anchors[role] ?? defaultValue ?? .zero
+    }
+
+    func adjustedAnchor(role: Role, layoutDirection: LayoutDirection) -> UnitPoint {
+        let anchor = anchor(role: role)
+        guard layoutDirection == .rightToLeft else {
+            return anchor
+        }
+        return UnitPoint(x: 1 - anchor.x, y: anchor.y)
+    }
+}
+
+/// Configuration carried with a graph-requested scroll target.
+struct ScrollTargetConfiguration: Equatable {
+    var animation: Animation?
+    var requiresVisibility: Bool
+    var preservesVelocity: Bool
+
+    init(
+        animation: Animation? = nil,
+        requiresVisibility: Bool = false,
+        preservesVelocity: Bool = false
+    ) {
+        self.animation = animation
+        self.requiresVisibility = requiresVisibility
+        self.preservesVelocity = preservesVelocity
+    }
+
+    init(transaction: Transaction) {
+        self.animation = transaction.isAnimated ? transaction.animation : nil
+        self.requiresVisibility = transaction.scrollToRequiresCompleteVisibility
+        self.preservesVelocity = transaction.scrollPositionUpdatePreservesVelocity
+    }
+}
+
+enum ScrollViewUtilities {
+    static func animationOffset(
+        targetFrame: CGRect,
+        anchor: UnitPoint?,
+        viewPortFrame: CGRect,
+        contentFrame: CGRect,
+        requiresVisibility: Bool
+    ) -> CGPoint {
+        CGPoint(
+            x: animationOffset(
+                targetMin: targetFrame.minX,
+                targetLength: targetFrame.width,
+                viewportMin: viewPortFrame.minX,
+                viewportLength: viewPortFrame.width,
+                contentMin: contentFrame.minX,
+                contentLength: contentFrame.width,
+                anchor: anchor?.x,
+                requiresVisibility: requiresVisibility
+            ),
+            y: animationOffset(
+                targetMin: targetFrame.minY,
+                targetLength: targetFrame.height,
+                viewportMin: viewPortFrame.minY,
+                viewportLength: viewPortFrame.height,
+                contentMin: contentFrame.minY,
+                contentLength: contentFrame.height,
+                anchor: anchor?.y,
+                requiresVisibility: requiresVisibility
+            )
+        )
+    }
+
+    private static func animationOffset(
+        targetMin: CGFloat,
+        targetLength: CGFloat,
+        viewportMin: CGFloat,
+        viewportLength: CGFloat,
+        contentMin: CGFloat,
+        contentLength: CGFloat,
+        anchor: CGFloat?,
+        requiresVisibility: Bool
+    ) -> CGFloat {
+        let targetMax = targetMin + targetLength
+        let viewportMax = viewportMin + viewportLength
+        let contentMax = max(contentMin + contentLength - viewportLength, contentMin)
+
+        let result: CGFloat
+        if let anchor {
+            result = targetMin + targetLength * anchor - viewportLength * anchor
+        } else {
+            let overlap = min(targetMax, viewportMax) - max(targetMin, viewportMin)
+            let hasVisibleArea = overlap > 0
+            let isCompletelyVisible = targetMin >= viewportMin && targetMax <= viewportMax
+            if hasVisibleArea && (!requiresVisibility || isCompletelyVisible || targetLength > viewportLength) {
+                result = viewportMin
+            } else {
+                let leading = targetMin
+                let trailing = targetMax - viewportLength
+                result = abs(leading - viewportMin) <= abs(trailing - viewportMin)
+                    ? leading
+                    : trailing
+            }
+        }
+        return min(max(result, contentMin), contentMax)
+    }
+}
+
+/// Graph-side state shared with the platform scroll host.
+struct SystemScrollLayoutState: Equatable {
+    enum ContentOffsetMode {
+        case adjustment(reason: ContentOffsetAdjustmentReason)
+        case target(
+            ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?,
+            config: ScrollTargetConfiguration
+        )
+        case system
+    }
+
+    var contentOffset: CGPoint
+    var contentInsets: EdgeInsets
+    var systemContentInsets: EdgeInsets
+    var systemTranslation: CGSize
+    var contentRectToPrepare: CGRect?
+    var contentOffsetMode: ContentOffsetMode
+    var contentOffsetSeed: VersionSeed
+
+    init(
+        contentOffset: CGPoint = .zero,
+        contentInsets: EdgeInsets = EdgeInsets(),
+        systemContentInsets: EdgeInsets = EdgeInsets(),
+        systemTranslation: CGSize = .zero,
+        contentRectToPrepare: CGRect? = nil,
+        contentOffsetMode: ContentOffsetMode = .system,
+        contentOffsetSeed: VersionSeed = VersionSeed()
+    ) {
+        self.contentOffset = contentOffset
+        self.contentInsets = contentInsets
+        self.systemContentInsets = systemContentInsets
+        self.systemTranslation = systemTranslation
+        self.contentRectToPrepare = contentRectToPrepare
+        self.contentOffsetMode = contentOffsetMode
+        self.contentOffsetSeed = contentOffsetSeed
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.contentOffset == rhs.contentOffset
+            && lhs.contentInsets == rhs.contentInsets
+            && lhs.systemContentInsets == rhs.systemContentInsets
+            && lhs.systemTranslation == rhs.systemTranslation
+            && lhs.contentRectToPrepare == rhs.contentRectToPrepare
+            && lhs.contentOffsetMode == rhs.contentOffsetMode
+            && lhs.contentOffsetSeed == rhs.contentOffsetSeed
+    }
+
+    mutating func updateContentOffset(
+        mode: ContentOffsetMode,
+        updateSeed: UInt32
+    ) {
+        contentOffsetMode = mode
+        contentOffsetSeed.mergeValue(updateSeed)
+        switch mode {
+        case let .adjustment(reason):
+            contentOffsetSeed.mergeValue(reason.rawValue)
+        case .target:
+            contentOffsetSeed.mergeValue(ContentOffsetAdjustmentReason.maxValue)
+        case .system:
+            break
+        }
+    }
+}
+
+extension SystemScrollLayoutState.ContentOffsetMode: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.adjustment(lhsReason), .adjustment(rhsReason)):
+            return lhsReason == rhsReason
+        case let (.target(_, lhsConfig), .target(_, rhsConfig)):
+            // The closure is an operation, not persistent value identity. The seed on
+            // SystemScrollLayoutState distinguishes successive target requests.
+            return lhsConfig == rhsConfig
+        case (.system, .system):
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+/// Narrow graph-to-host update payload.
+struct HostingScrollViewUpdateContext: Equatable {
+    var contentOffset: CGPoint
+    var contentFrame: CGRect
+    var containingSize: CGSize
+    var offsetMode: SystemScrollLayoutState.ContentOffsetMode
+    var safeInsets: EdgeInsets
+}
+
+/// Logical platform-host carrier. A backend can mirror this state while
+/// graph-side scroll ownership remains in the graph layer.
+class HostingScrollView {
+    final class PlatformContainer {
+        private(set) var safeAreaInsets = EdgeInsets()
+        private(set) var layoutDirection = LayoutDirection.leftToRight
+
+        func updateSafeArea(
+            _ safeAreaInsets: EdgeInsets,
+            layoutDirection: LayoutDirection
+        ) {
+            self.safeAreaInsets = safeAreaInsets
+            self.layoutDirection = layoutDirection
+        }
+    }
+
+    private let graphRef: _AGGraphContext
+    private let layoutState: WeakAttribute<SystemScrollLayoutState>
+
+    private(set) var pendingContext: HostingScrollViewUpdateContext?
+    private(set) var configuration = ScrollViewConfiguration()
+    private(set) var properties = ScrollEnvironmentProperties()
+    private(set) var contentMargins = ContentMarginProxy()
+    private(set) var environment = EnvironmentValues()
+    private(set) var safeAreaInsets = EdgeInsets()
+    private(set) var layoutDirection = LayoutDirection.leftToRight
+    private(set) var rtlAdjustment = CGSize.zero
+    private(set) var descendantScrollableAxes: Axis.Set?
+    private(set) var animationTarget: ScrollTarget?
+    private(set) var animationTargetConfig: ScrollTargetConfiguration?
+
+    init(
+        graphRef: _AGGraphContext,
+        layoutState: WeakAttribute<SystemScrollLayoutState>
+    ) {
+        self.graphRef = graphRef
+        self.layoutState = layoutState
+    }
+
+    @discardableResult
+    func updateContext(_ context: HostingScrollViewUpdateContext) -> Bool {
+        var context = context
+        switch context.offsetMode {
+        case let .target(targetProvider, config):
+            animationTargetConfig = config
+            let geometry = ScrollGeometry(
+                contentOffset: context.contentOffset,
+                contentSize: context.contentFrame.size,
+                contentInsets: context.safeInsets,
+                containerSize: context.containingSize
+            )
+            if let target = targetProvider?(geometry, layoutDirection) {
+                animationTarget = target
+                context.contentOffset = ScrollViewUtilities.animationOffset(
+                    targetFrame: target.rect,
+                    anchor: target.anchor,
+                    viewPortFrame: geometry.visibleRect,
+                    contentFrame: context.contentFrame,
+                    requiresVisibility: config.requiresVisibility
+                )
+            } else {
+                animationTarget = nil
+            }
+        case .adjustment, .system:
+            animationTarget = nil
+            animationTargetConfig = nil
+        }
+        pendingContext = context
+        return false
+    }
+
+    func updateConfiguration(_ configuration: ScrollViewConfiguration) {
+        self.configuration = configuration
+    }
+
+    func updateProperties(_ properties: ScrollEnvironmentProperties) {
+        self.properties = properties
+    }
+
+    func updateContentMargins(_ margins: ContentMarginProxy) {
+        contentMargins = margins
+    }
+
+    func adoptEnvironment(_ environment: EnvironmentValues) {
+        self.environment = environment.untrackedCopy()
+    }
+
+    func updateSafeArea(
+        _ safeAreaInsets: EdgeInsets,
+        layoutDirection: LayoutDirection
+    ) {
+        self.safeAreaInsets = safeAreaInsets
+        self.layoutDirection = layoutDirection
+    }
+
+    func updateRTLAdjustment(_ adjustment: CGSize) {
+        rtlAdjustment = adjustment
+    }
+
+    func updateDescendantScrollableAxes(_ axes: Axis.Set?) {
+        descendantScrollableAxes = axes
+    }
+
+    func makeLayoutState() -> SystemScrollLayoutState {
+        guard let context = pendingContext else {
+            return SystemScrollLayoutState()
+        }
+        return SystemScrollLayoutState(
+            contentOffset: context.contentOffset,
+            contentInsets: context.safeInsets,
+            systemContentInsets: context.safeInsets,
+            contentOffsetMode: .system,
+            contentOffsetSeed: VersionSeed()
+        )
+    }
+
+    /// Publishes a host-originated offset, such as a platform wheel or scrollbar update.
+    func publishSystemContentOffset(_ offset: CGPoint) {
+        graphRef.withCurrent {
+            guard let graph = _AGGraph.current,
+                  layoutState.isValid(in: graph) else {
+                return
+            }
+            let stateAttribute = layoutState.toStrong()
+            var state = stateAttribute.value
+            state.contentOffset = offset
+            state.contentOffsetMode = .system
+            state.contentOffsetSeed.value &+= 1
+            stateAttribute.setValue(state, transaction: Transaction.current)
+        }
+    }
+}
+
+/// Resolves the default anchor fallback once per axes/anchor input revision.
+struct ScrollViewDefaultAnchors: StatefulRule {
+    typealias Value = ScrollAnchorStorage
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _anchors: Attribute<ScrollAnchorStorage>
+    var oldAnchors: ScrollAnchorStorage
+    var oldAxes: Axis.Set
+
+    init(
+        _configuration: Attribute<ScrollViewConfiguration>,
+        _anchors: Attribute<ScrollAnchorStorage>,
+        oldAnchors: ScrollAnchorStorage = ScrollAnchorStorage(),
+        oldAxes: Axis.Set = []
+    ) {
+        self._configuration = _configuration
+        self._anchors = _anchors
+        self.oldAnchors = oldAnchors
+        self.oldAxes = oldAxes
+    }
+
+    mutating func updateValue() {
+        var anchors = _anchors.value
+        let axes = _configuration.value.axes
+        if anchors.defaultValue == nil {
+            anchors.defaultValue = Self.defaultValue(axes: axes)
+        }
+        let bothAxes: Axis.Set = [.horizontal, .vertical]
+        if !_SemanticFeature<Semantics_v8>.isEnabled,
+           axes == bothAxes,
+           anchors.anchors[.alignment] == nil {
+            anchors.anchors[.alignment] = .center
+        }
+        if _AGGraph.currentStatefulOutput(ScrollAnchorStorage.self) == nil
+            || oldAnchors != anchors
+            || oldAxes != axes {
+            _AGGraph.setStatefulOutput(anchors)
+        }
+        oldAnchors = anchors
+        oldAxes = axes
+    }
+
+    static func defaultValue(axes: Axis.Set) -> UnitPoint {
+        let bothAxes: Axis.Set = [.horizontal, .vertical]
+        if axes == bothAxes {
+            return _SemanticFeature<Semantics_v5>.isEnabled ? .topLeading : .center
+        }
+        if axes == .horizontal {
+            return .leading
+        }
+        return .top
+    }
+}
+
+/// Resolves target-behavior properties against only the environment values read by
+/// the behavior's properties callback.
+struct ScrollViewAdjustedBehaviorProperties: StatefulRule {
+    typealias Value = ScrollTargetBehaviorProperties
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _environment: Attribute<EnvironmentValues>
+    var _storage: Attribute<ScrollEnvironmentStorage>
+    var tracker: _PropertyListTracker
+    var oldBehavior: ResolvedScrollBehavior?
+    var oldAxes: Axis.Set
+
+    init(
+        _configuration: Attribute<ScrollViewConfiguration>,
+        _environment: Attribute<EnvironmentValues>,
+        _storage: Attribute<ScrollEnvironmentStorage>,
+        tracker: _PropertyListTracker = _PropertyListTracker(),
+        oldBehavior: ResolvedScrollBehavior? = nil,
+        oldAxes: Axis.Set = []
+    ) {
+        self._configuration = _configuration
+        self._environment = _environment
+        self._storage = _storage
+        self.tracker = tracker
+        self.oldBehavior = oldBehavior
+        self.oldAxes = oldAxes
+    }
+
+    mutating func updateValue() {
+        let environment = _environment.value
+        let behavior = _storage.value.properties.scrollBehavior
+        let axes = _configuration.value.axes
+        let environmentChanged = tracker.hasDifferentUsedValues(environment._plist)
+        guard _AGGraph.currentStatefulOutput(ScrollTargetBehaviorProperties.self) == nil
+                || behavior != oldBehavior
+                || axes != oldAxes
+                || environmentChanged else {
+            return
+        }
+
+        tracker.reset()
+        let trackedEnvironment = EnvironmentValues(environment._plist, tracker: tracker)
+        let properties = behavior?.base.properties(context: .init(
+            environment: trackedEnvironment,
+            axes: axes
+        )) ?? ScrollTargetBehaviorProperties()
+        _AGGraph.setStatefulOutput(properties)
+        oldBehavior = behavior
+        oldAxes = axes
+    }
+}
+
+/// Applies the configuration and inherited environment to the platform-facing
+/// scroll properties without changing target-behavior ownership.
+struct ScrollViewAdjustedProperties: Rule {
+    typealias Value = ScrollEnvironmentProperties
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _scrollStorage: Attribute<ScrollEnvironmentStorage>
+    var _behaviorProperties: Attribute<ScrollTargetBehaviorProperties>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _isEnabled: Attribute<Bool>
+    var _isContainedInPlatter: OptionalAttribute<Bool>
+
+    func updateValue() -> ScrollEnvironmentProperties {
+        let configuration = _configuration.value
+        var properties = _scrollStorage.value.properties
+        properties.layoutDirection = _layoutDirection.value
+        properties.isEnabled = _isEnabled.value && (configuration.isScrollEnabled ?? true)
+        if !properties.isEnabled {
+            properties.verticalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
+            properties.horizontalBounceBehavior = ScrollBounceBehavior.Role(rawValue: 3)
+        }
+        if let isContainedInPlatter = _isContainedInPlatter.attribute?.value {
+            properties.isContainedInPlatter = isContainedInPlatter
+        }
+        _ = _behaviorProperties.value
+        return properties
+    }
+}
+
+/// Aligns undersized content inside the scroll container along active axes.
+struct ScrollViewAlignmentAdjustment: Rule {
+    typealias Value = CGSize
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _scrollAnchors: Attribute<ScrollAnchorStorage>
+    var _contentFrame: Attribute<ViewFrame>
+    var _size: Attribute<ViewSize>
+
+    func updateValue() -> CGSize {
+        guard _SemanticFeature<Semantics_v6>.isEnabled else {
+            return .zero
+        }
+        let axes = _configuration.value.axes
+        let anchor = _scrollAnchors.value.alignment
+        let contentSize = _contentFrame.value.size.value
+        let containerSize = _size.value.value
+        var adjustment = CGSize.zero
+        if axes.contains(.horizontal), anchor.x != 0, contentSize.width < containerSize.width {
+            adjustment.width = (containerSize.width - contentSize.width) * anchor.x
+        }
+        if axes.contains(.vertical), anchor.y != 0, contentSize.height < containerSize.height {
+            adjustment.height = (containerSize.height - contentSize.height) * anchor.y
+        }
+        return adjustment
+    }
+}
+
+/// Adds the leading-edge free-space correction used by a horizontal RTL host.
+struct ScrollViewRTLAlignmentAdjustment: Rule {
+    typealias Value = CGSize
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _scrollAnchors: Attribute<ScrollAnchorStorage>
+    var _contentFrame: Attribute<ViewFrame>
+    var _size: Attribute<ViewSize>
+    var _layoutDirection: Attribute<LayoutDirection>
+
+    func updateValue() -> CGSize {
+        guard _SemanticFeature<Semantics_v6>.isEnabled,
+              _configuration.value.axes.contains(.horizontal),
+              _layoutDirection.value == .rightToLeft,
+              _scrollAnchors.value.alignment.x == 0 else {
+            return .zero
+        }
+        let contentWidth = _contentFrame.value.size.value.width
+        let containerWidth = _size.value.value.width
+        guard contentWidth < containerWidth else {
+            return .zero
+        }
+        return CGSize(width: containerWidth - contentWidth, height: 0)
+    }
+}
+
+/// Extends the leading/top safe area by the current undersized-content alignment.
+struct ScrollViewAdjustedSafeArea: Rule {
+    typealias Value = EdgeInsets
+
+    var _safeArea: Attribute<EdgeInsets>
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _alignmentAdjustment: Attribute<CGSize>
+    var _rtlAdjustment: Attribute<CGSize>
+
+    func updateValue() -> EdgeInsets {
+        var safeArea = _safeArea.value
+        guard _SemanticFeature<Semantics_v6>.isEnabled else {
+            return safeArea
+        }
+        let axes = _configuration.value.axes
+        let adjustment = _alignmentAdjustment.value
+        if axes.contains(.vertical) {
+            safeArea.top += adjustment.height
+        }
+        if axes.contains(.horizontal) {
+            safeArea.leading += adjustment.width
+        }
+        return safeArea
+    }
+}
+
+/// Preserves one hosting object for the lifetime of its graph node.
+struct MakeHostingScrollView: StatefulRule {
+    typealias Value = HostingScrollView
+
+    var _layoutState: Attribute<SystemScrollLayoutState>
+    var graphRef: _AGGraphContext
+
+    mutating func updateValue() {
+        if let existing = _AGGraph.currentStatefulOutput(HostingScrollView.self) {
+            _AGGraph.setStatefulOutput(existing)
+            return
+        }
+        _AGGraph.setStatefulOutput(HostingScrollView(
+            graphRef: graphRef,
+            layoutState: _layoutState.asWeak()
+        ))
+    }
+}
+
+/// Applies configuration-dependent insets while retaining host-originated state.
+struct ScrollViewAdjustedState: StatefulRule {
+    typealias Value = SystemScrollLayoutState
+
+    var _size: Attribute<ViewSize>
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _defaultAnchors: Attribute<ScrollAnchorStorage>
+    var _state: Attribute<SystemScrollLayoutState>
+    var _phaseState: Attribute<ScrollPhaseState>
+    var _contentFrame: Attribute<ViewFrame>
+    var _pixelLength: Attribute<CGFloat>
+    var _phase: Attribute<Phase>
+    var _transaction: Attribute<Transaction>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _positionBinding: Binding<ScrollPosition>?
+
+    var oldFrame: CGRect
+    var oldSize: CGSize
+    var oldOffset: CGPoint
+    var hasScrolled: Bool
+    var resetSeed: UInt32
+    var _lastUpdateSeed: MutableBox<UInt32>
+
+    init(
+        _size: Attribute<ViewSize>,
+        _configuration: Attribute<ScrollViewConfiguration>,
+        _defaultAnchors: Attribute<ScrollAnchorStorage>,
+        _state: Attribute<SystemScrollLayoutState>,
+        _phaseState: Attribute<ScrollPhaseState>,
+        _contentFrame: Attribute<ViewFrame>,
+        _pixelLength: Attribute<CGFloat>,
+        _phase: Attribute<Phase>,
+        _transaction: Attribute<Transaction>,
+        _layoutDirection: Attribute<LayoutDirection>,
+        _positionBinding: Binding<ScrollPosition>? = nil,
+        oldFrame: CGRect = .zero,
+        oldSize: CGSize = .zero,
+        oldOffset: CGPoint = .zero,
+        hasScrolled: Bool = false,
+        resetSeed: UInt32 = 0,
+        _lastUpdateSeed: MutableBox<UInt32> = MutableBox(0)
+    ) {
+        self._size = _size
+        self._configuration = _configuration
+        self._defaultAnchors = _defaultAnchors
+        self._state = _state
+        self._phaseState = _phaseState
+        self._contentFrame = _contentFrame
+        self._pixelLength = _pixelLength
+        self._phase = _phase
+        self._transaction = _transaction
+        self._layoutDirection = _layoutDirection
+        self._positionBinding = _positionBinding
+        self.oldFrame = oldFrame
+        self.oldSize = oldSize
+        self.oldOffset = oldOffset
+        self.hasScrolled = hasScrolled
+        self.resetSeed = resetSeed
+        self._lastUpdateSeed = _lastUpdateSeed
+    }
+
+    mutating func updateValue() {
+        let previous = _AGGraph.currentStatefulOutput(SystemScrollLayoutState.self)
+        let stateChanged = _AGGraph.currentStatefulInputChanged(_state.identifier)
+        var state = _state.value
+        let inputOffset = state.contentOffset
+        let stateChangedInSystemMode: Bool
+        if case .system = state.contentOffsetMode {
+            stateChangedInSystemMode = stateChanged
+        } else {
+            stateChangedInSystemMode = false
+        }
+        let configuration = _configuration.value
+        state.contentInsets = configuration.contentInsets
+
+        let rawSize = _size.value.value
+        let contentFrameValue = _contentFrame.value
+        let frame = CGRect(
+            origin: contentFrameValue.origin,
+            size: contentFrameValue.size.value
+        )
+        let phaseState = _phaseState.value
+        let currentResetSeed = _phase.value.resetSeed
+        let defaultAnchors = _defaultAnchors.value
+        let pixelLength = _pixelLength.value
+        let transaction = _transaction.value
+        let layoutDirection = _layoutDirection.value
+        let position = _positionBinding?.wrappedValue
+        var adjustmentReason: ContentOffsetAdjustmentReason?
+        var didReset = false
+
+        if previous == nil || resetSeed != currentResetSeed {
+            if let positionOffset = position?.initialContentOffset(
+                containerSize: rawSize,
+                contentFrame: frame,
+                axes: configuration.axes,
+                layoutDirection: layoutDirection
+            ) {
+                state.contentOffset = positionOffset
+                adjustmentReason = .resetPosition
+            } else {
+                state.contentOffset = Self.initialOffset(
+                    containerSize: rawSize,
+                    contentFrame: frame,
+                    axes: configuration.axes,
+                    anchors: defaultAnchors,
+                    layoutDirection: layoutDirection
+                )
+                adjustmentReason = .reset
+            }
+            resetSeed = currentResetSeed
+            oldFrame = .zero
+            oldSize = .zero
+            oldOffset = .zero
+            hasScrolled = false
+            didReset = true
+        }
+
+        let systemInsets = state.systemContentInsets
+        let size = CGSize(
+            width: rawSize.width - systemInsets.leading - systemInsets.trailing,
+            height: rawSize.height - systemInsets.top - systemInsets.bottom
+        )
+        let geometryChanged = oldSize != size || oldFrame != frame
+        var didAdjust = false
+        if geometryChanged && !transaction.scrollContentOffsetAdjustmentBehavior
+            .disablesContentOffsetAdjustment {
+            let alignHorizontal = configuration.axes != .horizontal || !defaultAnchors.isEmpty
+            let alignVertical = configuration.axes != .vertical || !defaultAnchors.isEmpty
+
+            if alignHorizontal {
+                didAdjust = Self.alignIfNeeded(
+                    &state.contentOffset,
+                    axis: .horizontal,
+                    newSize: size,
+                    newContentFrame: frame,
+                    anchors: defaultAnchors,
+                    layoutDirection: layoutDirection,
+                    oldFrame: oldFrame,
+                    oldSize: oldSize,
+                    oldOffset: oldOffset,
+                    hasScrolled: hasScrolled,
+                    pixelLength: pixelLength
+                )
+            }
+            if alignVertical {
+                didAdjust = Self.alignIfNeeded(
+                    &state.contentOffset,
+                    axis: .vertical,
+                    newSize: size,
+                    newContentFrame: frame,
+                    anchors: defaultAnchors,
+                    layoutDirection: layoutDirection,
+                    oldFrame: oldFrame,
+                    oldSize: oldSize,
+                    oldOffset: oldOffset,
+                    hasScrolled: hasScrolled,
+                    pixelLength: pixelLength
+                ) || didAdjust
+            }
+            if didAdjust {
+                adjustmentReason = .alignment
+            }
+        }
+
+        oldFrame = frame
+        oldSize = size
+        hasScrolled = hasScrolled
+            || phaseState.isScrolling
+            || (transaction.fromScrollView && stateChanged)
+
+        let offsetChanged = inputOffset != state.contentOffset
+        var didUpdateOffset = false
+        if offsetChanged, let adjustmentReason {
+            _lastUpdateSeed.value &+= 1
+            state.updateContentOffset(
+                mode: .adjustment(reason: adjustmentReason),
+                updateSeed: _lastUpdateSeed.value
+            )
+            didUpdateOffset = true
+        }
+        if (stateChangedInSystemMode || didUpdateOffset), oldOffset != state.contentOffset {
+            oldOffset = state.contentOffset
+        }
+
+        let contentInsetsChanged = previous?.contentInsets != state.contentInsets
+        if previous == nil || stateChanged || didReset || didAdjust || contentInsetsChanged {
+            _AGGraph.setStatefulOutput(state)
+        }
+    }
+
+    static func initialOffset(
+        containerSize: CGSize,
+        contentFrame: CGRect,
+        axes: Axis.Set,
+        anchors: ScrollAnchorStorage,
+        layoutDirection: LayoutDirection
+    ) -> CGPoint {
+        let anchor = anchors.adjustedAnchor(
+            role: .initialOffset,
+            layoutDirection: layoutDirection
+        )
+        var offset = CGPoint.zero
+        if axes.contains(.horizontal) {
+            offset.x = initialOffset(
+                contentLength: contentFrame.width,
+                containerLength: containerSize.width,
+                anchor: anchor.x
+            )
+        }
+        if axes.contains(.vertical) {
+            offset.y = initialOffset(
+                contentLength: contentFrame.height,
+                containerLength: containerSize.height,
+                anchor: anchor.y
+            )
+        }
+        return offset
+    }
+
+    private static func initialOffset(
+        contentLength: CGFloat,
+        containerLength: CGFloat,
+        anchor: CGFloat
+    ) -> CGFloat {
+        let anchoredOffset = contentLength * anchor - containerLength * anchor
+        return min(max(anchoredOffset, 0), max(contentLength - containerLength, 0))
+    }
+
+    static func alignIfNeeded(
+        _ offset: inout CGPoint,
+        axis: Axis,
+        newSize: CGSize,
+        newContentFrame: CGRect,
+        anchors: ScrollAnchorStorage,
+        layoutDirection: LayoutDirection,
+        oldFrame: CGRect,
+        oldSize: CGSize,
+        oldOffset: CGPoint,
+        hasScrolled: Bool,
+        pixelLength: CGFloat
+    ) -> Bool {
+        let initialAnchor = anchors.adjustedAnchor(
+            role: .initialOffset,
+            layoutDirection: layoutDirection
+        )[axis]
+        let sizeChangesAnchor = anchors.adjustedAnchor(
+            role: .sizeChanges,
+            layoutDirection: layoutDirection
+        )[axis]
+        let alignmentAnchor = anchors.adjustedAnchor(
+            role: .alignment,
+            layoutDirection: layoutDirection
+        )[axis]
+
+        let oldContentLength = oldFrame.size[axis]
+        let oldContainerLength = oldSize[axis]
+        let newContentLength = newContentFrame.size[axis]
+        let newContainerLength = newSize[axis]
+        let previousOffset = oldOffset[axis]
+
+        if initialAnchor != 0, !hasScrolled {
+            let oldSizeIsInvalid = oldSize.width == -.infinity
+                && oldSize.height == -.infinity
+            let contentSizeChanged = oldContentLength != newContentLength
+            if oldSizeIsInvalid
+                || (contentSizeChanged && _SemanticFeature<Semantics_v6>.isEnabled) {
+                return applyAlignedOffset(
+                    &offset,
+                    axis: axis,
+                    contentLength: newContentLength,
+                    containerLength: newContainerLength,
+                    anchor: initialAnchor,
+                    previousOffset: previousOffset,
+                    pixelLength: pixelLength
+                )
+            }
+        }
+
+        if alignmentAnchor != 0, oldContentLength < oldContainerLength {
+            return applyAlignedOffset(
+                &offset,
+                axis: axis,
+                contentLength: newContentLength,
+                containerLength: newContainerLength,
+                anchor: alignmentAnchor,
+                previousOffset: previousOffset,
+                pixelLength: pixelLength
+            )
+        }
+
+        let oldAnchoredOffset = clampedAnchorOffset(
+            contentLength: oldContentLength,
+            containerLength: oldContainerLength,
+            anchor: sizeChangesAnchor
+        )
+        if sizeChangesAnchor != 0,
+           abs(previousOffset - oldAnchoredOffset) < 0.5 {
+            return applyAlignedOffset(
+                &offset,
+                axis: axis,
+                contentLength: newContentLength,
+                containerLength: newContainerLength,
+                anchor: sizeChangesAnchor,
+                previousOffset: previousOffset,
+                pixelLength: pixelLength
+            )
+        }
+
+        if oldContentLength < oldContainerLength,
+           oldContentLength > 0,
+           sizeChangesAnchor == 0.5 {
+            setAxisValue(0, in: &offset, axis: axis)
+            roundAxisValue(in: &offset, axis: axis, pixelLength: pixelLength)
+            return abs(previousOffset - offset[axis]) >= 0.5
+        }
+        return false
+    }
+
+    private static func applyAlignedOffset(
+        _ offset: inout CGPoint,
+        axis: Axis,
+        contentLength: CGFloat,
+        containerLength: CGFloat,
+        anchor: CGFloat,
+        previousOffset: CGFloat,
+        pixelLength: CGFloat
+    ) -> Bool {
+        setAxisValue(
+            clampedAnchorOffset(
+                contentLength: contentLength,
+                containerLength: containerLength,
+                anchor: anchor
+            ),
+            in: &offset,
+            axis: axis
+        )
+        roundAxisValue(in: &offset, axis: axis, pixelLength: pixelLength)
+        return abs(previousOffset - offset[axis]) >= 0.5
+    }
+
+    private static func clampedAnchorOffset(
+        contentLength: CGFloat,
+        containerLength: CGFloat,
+        anchor: CGFloat
+    ) -> CGFloat {
+        let anchored = contentLength * anchor - containerLength * anchor
+        return min(max(anchored, 0), max(contentLength - containerLength, 0))
+    }
+
+    private static func roundAxisValue(
+        in offset: inout CGPoint,
+        axis: Axis,
+        pixelLength: CGFloat
+    ) {
+        let value = offset[axis] + pixelLength * 0.5
+        let rounded = pixelLength == 1
+            ? floor(value)
+            : floor(value / pixelLength) * pixelLength
+        setAxisValue(rounded, in: &offset, axis: axis)
+    }
+
+    private static func setAxisValue(
+        _ value: CGFloat,
+        in point: inout CGPoint,
+        axis: Axis
+    ) {
+        switch axis {
+        case .horizontal:
+            point.x = value
+        case .vertical:
+            point.y = value
+        }
+    }
+}
+
+private extension CGPoint {
+    subscript(axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: x
+        case .vertical: y
+        }
+    }
+}
+
+private extension CGSize {
+    subscript(axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: width
+        case .vertical: height
+        }
+    }
+}
+
+private extension UnitPoint {
+    subscript(axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: x
+        case .vertical: y
+        }
+    }
+}
+
+/// Pushes the adjusted graph state and current geometry into the hosting carrier.
+struct UpdatedHostingScrollView: StatefulRule {
+    typealias Value = HostingScrollView
+
+    var _descendantScrollViewsAxes: OptionalAttribute<Axis.Set?>
+    var _container: OptionalAttribute<HostingScrollView.PlatformContainer>
+    var _scrollView: Attribute<HostingScrollView>
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _properties: Attribute<ScrollEnvironmentProperties>
+    var _contentFrame: Attribute<ViewFrame>
+    var _size: Attribute<CGSize>
+    var _safeAreaInsets: Attribute<EdgeInsets>
+    var _rtlAdjustment: Attribute<CGSize>
+    var _adjustedState: Attribute<SystemScrollLayoutState>
+    var _environment: Attribute<EnvironmentValues>
+    var lastUpdateSeed: VersionSeed
+    var tracker: _PropertyListTracker
+    var oldProperties: ScrollEnvironmentProperties
+    var oldMargins: ContentMarginProxy
+
+    init(
+        _descendantScrollViewsAxes: OptionalAttribute<Axis.Set?> = OptionalAttribute(),
+        _container: OptionalAttribute<HostingScrollView.PlatformContainer> = OptionalAttribute(),
+        _scrollView: Attribute<HostingScrollView>,
+        _configuration: Attribute<ScrollViewConfiguration>,
+        _properties: Attribute<ScrollEnvironmentProperties>,
+        _contentFrame: Attribute<ViewFrame>,
+        _size: Attribute<CGSize>,
+        _safeAreaInsets: Attribute<EdgeInsets>,
+        _rtlAdjustment: Attribute<CGSize>,
+        _adjustedState: Attribute<SystemScrollLayoutState>,
+        _environment: Attribute<EnvironmentValues>,
+        lastUpdateSeed: VersionSeed = VersionSeed(),
+        tracker: _PropertyListTracker = _PropertyListTracker(),
+        oldProperties: ScrollEnvironmentProperties = ScrollEnvironmentProperties(),
+        oldMargins: ContentMarginProxy = ContentMarginProxy()
+    ) {
+        self._descendantScrollViewsAxes = _descendantScrollViewsAxes
+        self._container = _container
+        self._scrollView = _scrollView
+        self._configuration = _configuration
+        self._properties = _properties
+        self._contentFrame = _contentFrame
+        self._size = _size
+        self._safeAreaInsets = _safeAreaInsets
+        self._rtlAdjustment = _rtlAdjustment
+        self._adjustedState = _adjustedState
+        self._environment = _environment
+        self.lastUpdateSeed = lastUpdateSeed
+        self.tracker = tracker
+        self.oldProperties = oldProperties
+        self.oldMargins = oldMargins
+    }
+
+    mutating func updateValue() {
+        let previous = _AGGraph.currentStatefulOutput(HostingScrollView.self)
+        let scrollView = _scrollView.value
+        let configuration = _configuration.value
+        let properties = _properties.value
+        let frame = _contentFrame.value
+        let state = _adjustedState.value
+        let safeAreaInsets = _safeAreaInsets.value
+        let rtlAdjustment = _rtlAdjustment.value
+        let rawEnvironment = _environment.value
+        if tracker.hasDifferentUsedValues(rawEnvironment._plist) {
+            tracker.reset()
+        }
+        let trackedEnvironment = EnvironmentValues(rawEnvironment._plist, tracker: tracker)
+        let margins = trackedEnvironment.contentMarginProxy
+
+        if let descendantAxes = _descendantScrollViewsAxes.attribute?.value {
+            scrollView.updateDescendantScrollableAxes(descendantAxes)
+        }
+        scrollView.updateConfiguration(configuration)
+        if previous == nil || properties != oldProperties {
+            scrollView.updateProperties(properties)
+        }
+        if previous == nil || margins != oldMargins {
+            scrollView.updateContentMargins(margins)
+        }
+        scrollView.adoptEnvironment(trackedEnvironment)
+        scrollView.updateSafeArea(
+            safeAreaInsets,
+            layoutDirection: properties.layoutDirection
+        )
+        _container.attribute?.value.updateSafeArea(
+            safeAreaInsets,
+            layoutDirection: properties.layoutDirection
+        )
+        scrollView.updateRTLAdjustment(rtlAdjustment)
+
+        let offsetMode: SystemScrollLayoutState.ContentOffsetMode = lastUpdateSeed.matches(
+            state.contentOffsetSeed
+        ) ? .system : state.contentOffsetMode
+        let updateIsPending = scrollView.updateContext(HostingScrollViewUpdateContext(
+            contentOffset: state.contentOffset,
+            contentFrame: CGRect(origin: frame.origin, size: frame.size.value),
+            containingSize: _size.value,
+            offsetMode: offsetMode,
+            safeInsets: safeAreaInsets
+        ))
+        if !updateIsPending {
+            lastUpdateSeed = state.contentOffsetSeed
+        }
+        oldProperties = properties
+        oldMargins = margins
+        _AGGraph.setStatefulOutput(scrollView)
+    }
+}

@@ -11,21 +11,21 @@ import VVD
 // _EventDirections
 //
 // OptionSet controlling which drag directions are recognized.
-// Stored as UInt8. default rawValue=0x0F means all four directions.
+// Stored as Int8. default rawValue=0x0F means all four directions.
 public struct _EventDirections: OptionSet, Sendable {
-    public let rawValue: UInt8
+    public let rawValue: Int8
 
-    public init(rawValue: UInt8) {
+    public init(rawValue: Int8) {
         self.rawValue = rawValue
     }
 
-    public static let up         = _EventDirections(rawValue: 1 << 0)
-    public static let down       = _EventDirections(rawValue: 1 << 1)
-    public static let left       = _EventDirections(rawValue: 1 << 2)
-    public static let right      = _EventDirections(rawValue: 1 << 3)
+    public static let left       = _EventDirections(rawValue: 1 << 0)
+    public static let right      = _EventDirections(rawValue: 1 << 1)
+    public static let up         = _EventDirections(rawValue: 1 << 2)
+    public static let down       = _EventDirections(rawValue: 1 << 3)
     public static let all        = _EventDirections(rawValue: 0x0F)
-    public static let vertical   = _EventDirections(rawValue: 0x03)  // up | down
-    public static let horizontal = _EventDirections(rawValue: 0x0C)  // left | right
+    public static let horizontal = _EventDirections(rawValue: 0x03)  // left | right
+    public static let vertical   = _EventDirections(rawValue: 0x0C)  // up | down
 }
 
 // DragGesture

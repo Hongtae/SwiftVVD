@@ -593,8 +593,8 @@ final class ViewObservationTransactionTests: XCTestCase {
                     )
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialTransform = try XCTUnwrap(
-                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                let initialBounds = try XCTUnwrap(
+                    firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                 )
                 let toggle = try XCTUnwrap(probe.toggle)
 
@@ -604,30 +604,30 @@ final class ViewObservationTransactionTests: XCTestCase {
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
-                var sampledTransforms: [CGAffineTransform] = []
+                var sampledBounds: [CGRect] = []
                 for frame in 1...1_800 {
                     time.setValue(Time(seconds: Double(frame) / 60.0))
                     host.data.rootSubgraph.update()
-                    sampledTransforms.append(try XCTUnwrap(
-                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    sampledBounds.append(try XCTUnwrap(
+                        firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                     ))
                 }
 
-                let earlyTransform = sampledTransforms[60 - 1]
-                let finalTransform = try XCTUnwrap(sampledTransforms.last)
-                let intermediateTransform = try XCTUnwrap(
-                    sampledTransforms.first { transform in
-                        transform.a > initialTransform.a &&
-                            transform.a < finalTransform.a
+                let earlyBounds = sampledBounds[60 - 1]
+                let finalBounds = try XCTUnwrap(sampledBounds.last)
+                let intermediateBounds = try XCTUnwrap(
+                    sampledBounds.first { bounds in
+                        bounds.width > initialBounds.width &&
+                            bounds.width < finalBounds.width
                     }
                 )
 
-                XCTAssertEqual(initialTransform.a, 0.78, accuracy: 0.000_001)
-                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
-                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
-                XCTAssertGreaterThan(finalTransform.a, earlyTransform.a)
-                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
-                XCTAssertEqual(finalTransform.d, 1.08, accuracy: 0.000_001)
+                XCTAssertEqual(initialBounds.width, 15.6, accuracy: 0.000_001)
+                XCTAssertGreaterThan(intermediateBounds.width, initialBounds.width)
+                XCTAssertLessThan(intermediateBounds.width, finalBounds.width)
+                XCTAssertGreaterThan(finalBounds.width, earlyBounds.width)
+                XCTAssertEqual(finalBounds.width, 21.6, accuracy: 0.000_001)
+                XCTAssertEqual(finalBounds.height, 21.6, accuracy: 0.000_001)
             }
         }
     }
@@ -642,7 +642,7 @@ final class ViewObservationTransactionTests: XCTestCase {
         )
         rendererHost.storage = host
 
-        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+        func sampleBounds(at seconds: Double) throws -> CGRect {
             let time = Time(seconds: seconds)
             rendererHost.currentTimestamp = time
             host.updateOutputs(at: time)
@@ -657,41 +657,41 @@ final class ViewObservationTransactionTests: XCTestCase {
                     )
                     host.data.rootSubgraph.update()
                     return try XCTUnwrap(
-                        host.rootDisplayList?.value.itemRecords.first?.affineTransform
+                        firstItemBounds(in: try XCTUnwrap(host.rootDisplayList?.value))
                     )
                 }
             }
         }
 
-        let initialTransform = try sampleTransform(at: 0)
+        let initialBounds = try sampleBounds(at: 0)
         let toggle = try XCTUnwrap(probe.toggle)
 
         withAnimation(.spring(duration: 20.0, bounce: 0.35)) {
             toggle()
         }
 
-        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        var samples: [(time: Double, bounds: CGRect)] = []
         for frame in 1...1_800 {
             let sampleTime = Double(frame) / 60.0
-            let transform = try sampleTransform(at: sampleTime)
+            let bounds = try sampleBounds(at: sampleTime)
             if frame.isMultiple(of: 6) {
-                samples.append((sampleTime, transform))
+                samples.append((sampleTime, bounds))
             }
         }
 
-        let finalTransform = try XCTUnwrap(samples.last?.transform)
-        let intermediateTransform = try XCTUnwrap(
+        let finalBounds = try XCTUnwrap(samples.last?.bounds)
+        let intermediateBounds = try XCTUnwrap(
             samples.first { sample in
-                sample.transform.a > initialTransform.a &&
-                    sample.transform.a < finalTransform.a
-            }?.transform
+                sample.bounds.width > initialBounds.width &&
+                    sample.bounds.width < finalBounds.width
+            }?.bounds
         )
 
-        XCTAssertEqual(initialTransform.a, 0.78, accuracy: 0.000_001)
-        XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
-        XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
-        XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.001)
-        XCTAssertEqual(finalTransform.d, 1.08, accuracy: 0.001)
+        XCTAssertEqual(initialBounds.width, 15.6, accuracy: 0.000_001)
+        XCTAssertGreaterThan(intermediateBounds.width, initialBounds.width)
+        XCTAssertLessThan(intermediateBounds.width, finalBounds.width)
+        XCTAssertEqual(finalBounds.width, 21.6, accuracy: 0.001)
+        XCTAssertEqual(finalBounds.height, 21.6, accuracy: 0.001)
     }
 
     func testDefaultBodyStateActionRootOffsetEffectSamplesIntermediateTransform() throws {
@@ -704,40 +704,39 @@ final class ViewObservationTransactionTests: XCTestCase {
         )
         rendererHost.storage = host
 
-        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+        func sampleBounds(at seconds: Double) throws -> CGRect {
             let displayList = try sampleRootDisplayList(
                 host: host,
                 rendererHost: rendererHost,
                 at: seconds
             )
-            return try XCTUnwrap(displayList.itemRecords.first?.affineTransform)
+            return try XCTUnwrap(firstItemBounds(in: displayList))
         }
 
-        let initialTransform = try sampleTransform(at: 0)
+        let initialBounds = try sampleBounds(at: 0)
         let toggle = try XCTUnwrap(probe.toggle)
 
         withAnimation(.linear(duration: 1.0)) {
             toggle()
         }
 
-        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        var samples: [(time: Double, bounds: CGRect)] = []
         for step in 0...10 {
             let sampleTime = Double(step) / 10.0
-            samples.append((sampleTime, try sampleTransform(at: sampleTime)))
+            samples.append((sampleTime, try sampleBounds(at: sampleTime)))
         }
 
-        let finalTransform = try sampleTransform(at: 2.0)
-        let intermediateTransform = try XCTUnwrap(
+        let finalBounds = try sampleBounds(at: 2.0)
+        let intermediateBounds = try XCTUnwrap(
             samples.dropFirst().dropLast().first { sample in
-                sample.transform.tx > initialTransform.tx &&
-                    sample.transform.tx < finalTransform.tx
-            }?.transform
+                sample.bounds.minX > initialBounds.minX &&
+                    sample.bounds.minX < finalBounds.minX
+            }?.bounds
         )
 
-        XCTAssertEqual(initialTransform.tx, -42, accuracy: 0.001)
-        XCTAssertGreaterThan(intermediateTransform.tx, initialTransform.tx)
-        XCTAssertLessThan(intermediateTransform.tx, finalTransform.tx)
-        XCTAssertEqual(finalTransform.tx, 42, accuracy: 0.001)
+        XCTAssertGreaterThan(intermediateBounds.minX, initialBounds.minX)
+        XCTAssertLessThan(intermediateBounds.minX, finalBounds.minX)
+        XCTAssertEqual(finalBounds.minX - initialBounds.minX, 84, accuracy: 0.001)
     }
 
     func testDefaultBodyStateActionRootRotationEffectSamplesIntermediateTransform() throws {
@@ -750,40 +749,34 @@ final class ViewObservationTransactionTests: XCTestCase {
         )
         rendererHost.storage = host
 
-        func sampleTransform(at seconds: Double) throws -> CGAffineTransform {
+        func sampleBounds(at seconds: Double) throws -> CGRect {
             let displayList = try sampleRootDisplayList(
                 host: host,
                 rendererHost: rendererHost,
                 at: seconds
             )
-            return try XCTUnwrap(displayList.itemRecords.first?.affineTransform)
+            return try XCTUnwrap(firstItemBounds(in: displayList))
         }
 
-        let initialTransform = try sampleTransform(at: 0)
+        let initialBounds = try sampleBounds(at: 0)
         let toggle = try XCTUnwrap(probe.toggle)
 
         withAnimation(.linear(duration: 1.0)) {
             toggle()
         }
 
-        var samples: [(time: Double, transform: CGAffineTransform)] = []
+        var samples: [(time: Double, bounds: CGRect)] = []
         for step in 0...10 {
             let sampleTime = Double(step) / 10.0
-            samples.append((sampleTime, try sampleTransform(at: sampleTime)))
+            samples.append((sampleTime, try sampleBounds(at: sampleTime)))
         }
 
-        let finalTransform = try sampleTransform(at: 2.0)
-        let intermediateTransform = try XCTUnwrap(
-            samples.dropFirst().dropLast().first { sample in
-                sample.transform.b > initialTransform.b &&
-                    sample.transform.b < finalTransform.b
-            }?.transform
-        )
+        let finalBounds = try sampleBounds(at: 2.0)
+        let minimumBounds = try XCTUnwrap(samples.min { $0.bounds.width < $1.bounds.width }?.bounds)
 
-        XCTAssertLessThan(initialTransform.b, 0)
-        XCTAssertGreaterThan(intermediateTransform.b, initialTransform.b)
-        XCTAssertLessThan(intermediateTransform.b, finalTransform.b)
-        XCTAssertGreaterThan(finalTransform.b, 0)
+        XCTAssertLessThan(minimumBounds.width, initialBounds.width)
+        XCTAssertEqual(finalBounds.width, initialBounds.width, accuracy: 0.001)
+        XCTAssertEqual(finalBounds.height, initialBounds.height, accuracy: 0.001)
     }
 
     func testDefaultBodyStateActionRootOpacityEffectSamplesIntermediateOpacity() throws {
@@ -934,8 +927,8 @@ final class ViewObservationTransactionTests: XCTestCase {
                     )
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialTransform = try XCTUnwrap(
-                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                let initialBounds = try XCTUnwrap(
+                    firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                 )
                 let toggle = try XCTUnwrap(probe.toggle)
 
@@ -945,26 +938,26 @@ final class ViewObservationTransactionTests: XCTestCase {
 
                 XCTAssertTrue(host.hasScheduledViewUpdate)
 
-                var sampledTransforms: [CGAffineTransform] = []
+                var sampledBounds: [CGRect] = []
                 for frame in 1...1_800 {
                     time.setValue(Time(seconds: Double(frame) / 60.0))
                     host.data.rootSubgraph.update()
-                    sampledTransforms.append(try XCTUnwrap(
-                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    sampledBounds.append(try XCTUnwrap(
+                        firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                     ))
                 }
 
-                let finalTransform = try XCTUnwrap(sampledTransforms.last)
-                let intermediateTransform = try XCTUnwrap(
-                    sampledTransforms.first { transform in
-                        transform.a > initialTransform.a &&
-                            transform.a < finalTransform.a
+                let finalBounds = try XCTUnwrap(sampledBounds.last)
+                let intermediateBounds = try XCTUnwrap(
+                    sampledBounds.first { bounds in
+                        bounds.width > initialBounds.width &&
+                            bounds.width < finalBounds.width
                     }
                 )
 
-                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
-                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
-                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
+                XCTAssertGreaterThan(intermediateBounds.width, initialBounds.width)
+                XCTAssertLessThan(intermediateBounds.width, finalBounds.width)
+                XCTAssertEqual(finalBounds.width, 21.6, accuracy: 0.000_001)
             }
         }
     }
@@ -994,8 +987,8 @@ final class ViewObservationTransactionTests: XCTestCase {
                     )
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialTransform = try XCTUnwrap(
-                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                let initialBounds = try XCTUnwrap(
+                    firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                 )
                 let toggle = try XCTUnwrap(probe.toggle)
 
@@ -1005,26 +998,26 @@ final class ViewObservationTransactionTests: XCTestCase {
 
                 XCTAssertTrue(host.hasScheduledViewUpdate)
 
-                var sampledTransforms: [CGAffineTransform] = []
+                var sampledBounds: [CGRect] = []
                 for frame in 1...1_800 {
                     time.setValue(Time(seconds: Double(frame) / 60.0))
                     host.data.rootSubgraph.update()
-                    sampledTransforms.append(try XCTUnwrap(
-                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                    sampledBounds.append(try XCTUnwrap(
+                        firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                     ))
                 }
 
-                let finalTransform = try XCTUnwrap(sampledTransforms.last)
-                let intermediateTransform = try XCTUnwrap(
-                    sampledTransforms.first { transform in
-                        transform.a > initialTransform.a &&
-                            transform.a < finalTransform.a
+                let finalBounds = try XCTUnwrap(sampledBounds.last)
+                let intermediateBounds = try XCTUnwrap(
+                    sampledBounds.first { bounds in
+                        bounds.width > initialBounds.width &&
+                            bounds.width < finalBounds.width
                     }
                 )
 
-                XCTAssertGreaterThan(intermediateTransform.a, initialTransform.a)
-                XCTAssertLessThan(intermediateTransform.a, finalTransform.a)
-                XCTAssertEqual(finalTransform.a, 1.08, accuracy: 0.000_001)
+                XCTAssertGreaterThan(intermediateBounds.width, initialBounds.width)
+                XCTAssertLessThan(intermediateBounds.width, finalBounds.width)
+                XCTAssertEqual(finalBounds.width, 21.6, accuracy: 0.000_001)
             }
         }
     }
@@ -1054,8 +1047,8 @@ final class ViewObservationTransactionTests: XCTestCase {
                     )
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialTransform = try XCTUnwrap(
-                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                let initialBounds = try XCTUnwrap(
+                    firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                 )
                 let toggle = try XCTUnwrap(probe.toggle)
 
@@ -1068,36 +1061,36 @@ final class ViewObservationTransactionTests: XCTestCase {
                     host.data.rootSubgraph.update()
                     _ = Attribute<DisplayList>(displayID).value
                 }
-                let outboundTransform = try XCTUnwrap(
-                    Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                let outboundBounds = try XCTUnwrap(
+                    firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                 )
-                XCTAssertGreaterThan(outboundTransform.a, initialTransform.a)
-                XCTAssertLessThan(outboundTransform.a, 1.08)
+                XCTAssertGreaterThan(outboundBounds.width, initialBounds.width)
+                XCTAssertLessThan(outboundBounds.width, 21.6)
 
                 toggle()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
-                var retargetSamples: [CGAffineTransform] = []
+                var retargetSamples: [CGRect] = []
                 for frame in 121...1_920 {
                     time.setValue(Time(seconds: Double(frame) / 60.0))
                     host.data.rootSubgraph.update()
                     retargetSamples.append(try XCTUnwrap(
-                        Attribute<DisplayList>(displayID).value.itemRecords.first?.affineTransform
+                        firstItemBounds(in: Attribute<DisplayList>(displayID).value)
                     ))
                 }
 
-                let finalTransform = try XCTUnwrap(retargetSamples.last)
-                let intermediateTransform = try XCTUnwrap(
-                    retargetSamples.first { transform in
-                        transform.a < outboundTransform.a &&
-                            transform.a > finalTransform.a
+                let finalBounds = try XCTUnwrap(retargetSamples.last)
+                let intermediateBounds = try XCTUnwrap(
+                    retargetSamples.first { bounds in
+                        bounds.width < outboundBounds.width &&
+                            bounds.width > finalBounds.width
                     }
                 )
 
-                XCTAssertLessThan(intermediateTransform.a, outboundTransform.a)
-                XCTAssertGreaterThan(intermediateTransform.a, finalTransform.a)
-                XCTAssertEqual(finalTransform.a, 0.78, accuracy: 0.001)
+                XCTAssertLessThan(intermediateBounds.width, outboundBounds.width)
+                XCTAssertGreaterThan(intermediateBounds.width, finalBounds.width)
+                XCTAssertEqual(finalBounds.width, 15.6, accuracy: 0.02)
             }
         }
     }
@@ -1481,6 +1474,18 @@ final class ViewObservationTransactionTests: XCTestCase {
         for effect in displayList.effects {
             if let color = firstShapeFillColor(in: effect.contents) {
                 return color
+            }
+        }
+        return nil
+    }
+
+    private func firstItemBounds(in displayList: DisplayList) -> CGRect? {
+        if let bounds = displayList.itemRecords.compactMap(\.bounds).first {
+            return bounds
+        }
+        for effect in displayList.effects {
+            if let bounds = firstItemBounds(in: effect.contents) {
+                return bounds
             }
         }
         return nil

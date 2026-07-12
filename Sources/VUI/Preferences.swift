@@ -27,6 +27,110 @@ extension PreferenceKey where Self.Value: ExpressibleByNilLiteral {
     public static var defaultValue: Self.Value { nil }
 }
 
+/// A weak graph reference to a preference value produced by delayed content.
+public struct _PreferenceValue<Key> where Key: PreferenceKey {
+    let attribute: WeakAttribute<Key.Value>
+
+    init(attribute: WeakAttribute<Key.Value>) {
+        self.attribute = attribute
+    }
+}
+
+/// Defers construction of content until a weak preference-value attribute can
+/// be connected to the preferences produced by that content.
+public struct _DelayedPreferenceView<Key, Content>: View
+where Key: PreferenceKey, Content: View {
+    public var transform: (_PreferenceValue<Key>) -> Content
+
+    public init(transform: @escaping (_PreferenceValue<Key>) -> Content) {
+        self.transform = transform
+    }
+
+    public static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("_DelayedPreferenceView._makeView called outside an active _AGGraph context.")
+        }
+
+        var childInputs = inputs
+        childInputs.preferences.keys.insert(Key.self)
+
+        let preferenceValue: Attribute<Key.Value> = graph.makeStatefulRule(
+            PreferenceValueAttribute<Key>()
+        )
+        let child: Attribute<Content> = graph.makeRule(
+            DelayedPreferenceChild(
+                view: view._attribute,
+                preferenceValue: preferenceValue.asWeak()
+            )
+        )
+        let outputs = Content._makeView(
+            view: _GraphValue(_attribute: child),
+            inputs: childInputs
+        )
+
+        let source = outputs.preferences.value(for: Key.self).flatMap {
+            graph.weakAttributeIfValid(for: $0)
+        }
+        graph.mutateStatefulRule(
+            preferenceValue.identifier,
+            as: PreferenceValueAttribute<Key>.self
+        ) { rule in
+            rule.source = source.map(WeakAttribute<Key.Value>.init)
+        }
+        graph.invalidateAttribute(preferenceValue.identifier)
+        return outputs
+    }
+
+    public typealias Body = Never
+}
+
+extension _DelayedPreferenceView: PrimitiveView, UnaryView {
+}
+
+extension PreferenceKey {
+    public static func _delay<T>(
+        _ transform: @escaping (_PreferenceValue<Self>) -> T
+    ) -> some View where T: View {
+        _DelayedPreferenceView(transform: transform)
+    }
+}
+
+private struct PreferenceValueAttribute<Key: PreferenceKey>: StatefulRule {
+    typealias Value = Key.Value
+
+    var source: WeakAttribute<Key.Value>?
+
+    init(source: WeakAttribute<Key.Value>? = nil) {
+        self.source = source
+    }
+
+    mutating func updateValue() {
+        guard let graph = _AGGraph.current else {
+            fatalError("PreferenceValueAttribute.updateValue called outside an active _AGGraph context.")
+        }
+        let value: Key.Value
+        if let source, source.isValid(in: graph) {
+            value = source.toStrong().value
+        } else {
+            value = Key.defaultValue
+        }
+        _AGGraph.setStatefulOutput(value)
+    }
+}
+
+private struct DelayedPreferenceChild<Key, Content>: Rule
+where Key: PreferenceKey, Content: View {
+    var view: Attribute<_DelayedPreferenceView<Key, Content>>
+    var preferenceValue: WeakAttribute<Key.Value>
+
+    func updateValue() -> Content {
+        view.value.transform(_PreferenceValue(attribute: preferenceValue))
+    }
+}
+
 /// Sub-protocol of PreferenceKey whose _isReadableByHost is always true.
 /// Used for preference keys that the host can register, read, and remove.
 public protocol HostPreferenceKey: PreferenceKey {}
@@ -81,6 +185,30 @@ struct VersionSeed: Equatable, Hashable, Sendable {
 
     init(value: UInt32 = 0) {
         self.value = value
+    }
+
+    mutating func mergeValue(_ newValue: UInt32) {
+        guard value != .max else { return }
+        guard value != 0 else {
+            value = newValue
+            return
+        }
+
+        let allOnes = UInt64.max
+        var mixed = (allOnes ^ (UInt64(newValue) << 32)) &+ UInt64(newValue)
+        mixed = mixed &+ (UInt64(value) << 32)
+        mixed ^= mixed >> 22
+        mixed = mixed &+ (allOnes ^ (mixed << 13))
+        mixed ^= mixed >> 8
+        mixed = mixed &+ (mixed << 3)
+        mixed ^= mixed >> 15
+        mixed = mixed &+ (allOnes ^ (mixed << 27))
+        value = UInt32(truncatingIfNeeded: mixed >> 31)
+            ^ UInt32(truncatingIfNeeded: mixed)
+    }
+
+    func matches(_ other: VersionSeed) -> Bool {
+        self == other
     }
 }
 

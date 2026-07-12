@@ -16,6 +16,12 @@ extension GraphicsContext {
             case attachment([Typeface], ResolvedImage)
             case attributedText([Typeface], String, _TextAttributeValues)
             case attributedAttachment([Typeface], ResolvedImage, _TextAttributeValues)
+            case styledText(
+                [Typeface],
+                String,
+                _TextAttributeValues,
+                _ResolvedTextRunAttributes
+            )
 
             func applying(_ attributes: _TextAttributeValues) -> Run {
                 guard !attributes.isEmpty else { return self }
@@ -32,6 +38,10 @@ extension GraphicsContext {
                     var merged = existing
                     merged.merge(attributes)
                     return .attributedAttachment(faces, image, merged)
+                case let .styledText(faces, text, existing, style):
+                    var merged = existing
+                    merged.merge(attributes)
+                    return .styledText(faces, text, merged, style)
                 }
             }
         }
@@ -129,8 +139,14 @@ extension GraphicsContext {
             let result = NSMutableAttributedString(string: "")
             for run in runs {
                 switch run {
-                case let .text(_, text), let .attributedText(_, text, _):
+                case let .text(_, text),
+                     let .attributedText(_, text, _):
                     result.append(NSAttributedString(string: text))
+                case let .styledText(_, text, _, style):
+                    result.append(NSAttributedString(
+                        string: text,
+                        attributes: style.nsAttributes
+                    ))
                 case .attachment, .attributedAttachment:
                     result.append(NSAttributedString(
                         string: "\u{fffc}",
@@ -145,7 +161,7 @@ extension GraphicsContext {
             runs.contains { run in
                 switch run {
                 case .attachment, .attributedAttachment: true
-                case .text, .attributedText: false
+                case .text, .attributedText, .styledText: false
                 }
             }
         }
@@ -162,7 +178,8 @@ extension GraphicsContext {
                 case let .text(runFaces, _),
                      let .attachment(runFaces, _),
                      let .attributedText(runFaces, _, _),
-                     let .attributedAttachment(runFaces, _, _):
+                     let .attributedAttachment(runFaces, _, _),
+                     let .styledText(runFaces, _, _, _):
                     faces = runFaces
                 }
                 guard let face = faces.first else { continue }
@@ -260,6 +277,7 @@ extension GraphicsContext {
             var descender: CGFloat = .zero  // distance from the baseline to the lowest
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
             var attributes = _TextAttributeValues()
+            var foregroundColor: Color?
 
             var contentOffset: CGPoint {
                 switch content {
@@ -291,6 +309,7 @@ extension GraphicsContext {
                 var texture: Texture
                 var vertices: [Vertex]
                 var colorGlyphs: Bool
+                var foregroundColor: Color?
             }
 
             fileprivate struct Attachment {
@@ -429,6 +448,7 @@ extension GraphicsContext {
                 var vertices: [Drawing.Vertex]
                 var texture: Texture
                 var colorGlyphs: Bool
+                var foregroundColor: Color?
             }
 
             var quads: [Quad] = []
@@ -484,7 +504,8 @@ extension GraphicsContext {
                     quads.append(Quad(
                         vertices: [lb, lt, rb, rb, lt, rt],
                         texture: texture,
-                        colorGlyphs: colorGlyphs
+                        colorGlyphs: colorGlyphs,
+                        foregroundColor: glyph.foregroundColor
                     ))
 
                 case let .attachment(data):
@@ -519,13 +540,15 @@ extension GraphicsContext {
             for quad in quads {
                 if let last = batches.indices.last,
                    batches[last].texture === quad.texture,
-                   batches[last].colorGlyphs == quad.colorGlyphs {
+                   batches[last].colorGlyphs == quad.colorGlyphs,
+                   batches[last].foregroundColor == quad.foregroundColor {
                     batches[last].vertices.append(contentsOf: quad.vertices)
                 } else {
                     batches.append(Drawing.Batch(
                         texture: quad.texture,
                         vertices: quad.vertices,
-                        colorGlyphs: quad.colorGlyphs
+                        colorGlyphs: quad.colorGlyphs,
+                        foregroundColor: quad.foregroundColor
                     ))
                 }
             }
@@ -742,16 +765,23 @@ extension GraphicsContext {
             }
 
             for s in runs {
-                let textRun: ([Typeface], String, _TextAttributeValues)?
+                let textRun: (
+                    [Typeface],
+                    String,
+                    _TextAttributeValues,
+                    _ResolvedTextRunAttributes?
+                )?
                 switch s {
                 case let .text(faces, text):
-                    textRun = (faces, text, _TextAttributeValues())
+                    textRun = (faces, text, _TextAttributeValues(), nil)
                 case let .attributedText(faces, text, attributes):
-                    textRun = (faces, text, attributes)
+                    textRun = (faces, text, attributes, nil)
+                case let .styledText(faces, text, attributes, style):
+                    textRun = (faces, text, attributes, style)
                 case .attachment, .attributedAttachment:
                     textRun = nil
                 }
-                if let (faces, text, attributes) = textRun {
+                if let (faces, text, attributes, style) = textRun {
                     if faces.isEmpty || text.isEmpty { continue }
 
                     var components = text.components(separatedBy: newlines).map {
@@ -770,6 +800,7 @@ extension GraphicsContext {
                         glyphs.append(contentsOf: textGlyphs.glyphs.map { glyph in
                             var glyph = glyph
                             glyph.attributes = attributes
+                            glyph.foregroundColor = style?.foregroundColor
                             return glyph
                         })
                         ascender = max(ascender, textGlyphs.ascender)
@@ -791,7 +822,7 @@ extension GraphicsContext {
                     attachmentRun = (faces, image, _TextAttributeValues())
                 case let .attributedAttachment(faces, image, attributes):
                     attachmentRun = (faces, image, attributes)
-                case .text, .attributedText:
+                case .text, .attributedText, .styledText:
                     attachmentRun = nil
                 }
                 if let (faces, image, attributes) = attachmentRun {
@@ -915,28 +946,46 @@ extension GraphicsContext {
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
 
-        if let renderPass = self.beginRenderPass(enableStencil: false) {
+        var foregroundColors: [Color?] = []
+        for batch in drawing.batches where !batch.colorGlyphs {
+            if !foregroundColors.contains(batch.foregroundColor) {
+                foregroundColors.append(batch.foregroundColor)
+            }
+        }
+        for foregroundColor in foregroundColors {
+            guard let renderPass = self.beginRenderPass(enableStencil: false) else {
+                continue
+            }
             if let scissorRect {
                 renderPass.encoder.setScissorRect(scissorRect)
             }
-            // drawing text glyphs in the alpha channel of a RenderTarget
             self.encodeDrawTextCommand(renderPass: renderPass,
                                        drawing: drawing,
                                        transform: transform,
                                        color: .white,
-                                       colorGlyphs: false)
-            // applies shading to the RGB channels of the RenderTarget
+                                       colorGlyphs: false,
+                                       foregroundColor: foregroundColor,
+                                       filtersForegroundColor: true)
+            let runShading = foregroundColor.map(Shading.color) ?? shading
             self.encodeShadingBoxCommand(renderPass: renderPass,
-                                         shading: shading,
+                                         shading: runShading,
                                          stencil: .ignore,
                                          blendState: .multiply)
-            // color glyphs already carry premultiplied RGB values and should not be tinted by text shading.
+            renderPass.end()
+            self.drawSource()
+        }
+
+        let hasColorGlyphs = drawing.batches.contains { $0.colorGlyphs }
+        if hasColorGlyphs || !drawing.attachments.isEmpty,
+           let renderPass = self.beginRenderPass(enableStencil: false) {
+            if let scissorRect {
+                renderPass.encoder.setScissorRect(scissorRect)
+            }
             self.encodeDrawTextCommand(renderPass: renderPass,
                                        drawing: drawing,
                                        transform: transform,
                                        color: .white,
                                        colorGlyphs: true)
-            // draw attachments (scalar = 0)
             for attachment in drawing.attachments {
                 self.encodeDrawTextureCommand(renderPass: renderPass,
                                               texture: attachment.texture,
@@ -986,14 +1035,18 @@ extension GraphicsContext {
                                drawing: ResolvedText.Drawing,
                                transform: CGAffineTransform,
                                color: VVD.Color,
-                               colorGlyphs: Bool) {
+                               colorGlyphs: Bool,
+                               foregroundColor: Color? = nil,
+                               filtersForegroundColor: Bool = false) {
         if drawing.isEmpty { return }
         let c = color.float4
         let transform = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
 
-        for batch in drawing.batches where batch.colorGlyphs == colorGlyphs {
+        for batch in drawing.batches where
+            batch.colorGlyphs == colorGlyphs &&
+            (!filtersForegroundColor || batch.foregroundColor == foregroundColor) {
             let vertices = batch.vertices.map { vertex in
                 _Vertex(
                     position: Vector2(vertex.position).applying(transform).float2,

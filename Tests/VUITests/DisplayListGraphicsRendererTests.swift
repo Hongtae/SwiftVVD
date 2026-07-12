@@ -121,6 +121,49 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertEqual(renderer.textCallbackCount, 0)
     }
 
+    func testDynamicTextProducesPlaceholderAndBypassesStaticDrawingCache() throws {
+        let face = TextRendererTestTypeface()
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "dynamic")],
+            scaleFactor: 1
+        )
+        let storage = NSMutableAttributedString(attributedString: resolved.attributedStorage)
+        storage.addAttribute(
+            .updateSchedule,
+            value: true,
+            range: NSRange(location: 0, length: storage.length)
+        )
+        let styledText = ResolvedStyledText(
+            storage: storage,
+            resolvedText: resolved,
+            version: 1
+        )
+        let view = StyledTextContentView(text: styledText, renderer: nil)
+        let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+        var list = DisplayList()
+        list.appendTextItem(
+            view,
+            size: CGSize(width: 80, height: 20),
+            foreground: .color(.red),
+            bounds: CGRect(x: 0, y: 0, width: 80, height: 20),
+            seed: seed
+        )
+        let item = try XCTUnwrap(list.items.first)
+        guard case let .content(content) = item.value,
+              case let .text(text) = content.value else {
+            return XCTFail("missing typed text content")
+        }
+
+        let renderer = DisplayList.GraphicsRenderer()
+        renderer.beginPass(at: .zero)
+        let placeholder = try XCTUnwrap(renderer.resolveDynamicTextPlaceholder(text))
+        XCTAssertTrue(placeholder.text === styledText)
+        XCTAssertEqual(placeholder.size, CGSize(width: 80, height: 20))
+        XCTAssertNil(renderer.resolveTextCallback(text, seed: seed, scale: 2))
+        renderer.endPass()
+        XCTAssertEqual(renderer.textCallbackCount, 0)
+    }
+
     func testDisplayListVersionAllocatesMonotonicUpdateTokens() {
         let first = DisplayList.Version(forUpdate: ())
         let second = DisplayList.Version(forUpdate: ())

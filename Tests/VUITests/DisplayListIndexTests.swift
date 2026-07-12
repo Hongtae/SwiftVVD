@@ -246,4 +246,161 @@ final class DisplayListIndexTests: XCTestCase {
         XCTAssertEqual(index.identity, .none)
         XCTAssertEqual(index.serial, 0)
     }
+
+    func testDisplayListIndexSkipIgnoresUpdatedItemsAndTraversesFlattenedContent() {
+        var child = DisplayList()
+        child.items = [
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+        ]
+
+        let flattened = DisplayList.Content(
+            flattened: child,
+            origin: CGPoint(x: 3, y: 5),
+            options: RasterizationOptions()
+        )
+        let flattenedItem = DisplayList.Item(
+            content: flattened,
+            frame: .zero,
+            identity: _DisplayList_Identity(decodedValue: 99),
+            version: DisplayList.Version(value: 0)
+        )
+        let updatedItem = DisplayList.Item(
+            command: .closure(bounds: nil),
+            version: DisplayList.Version(value: 1)
+        ) { _ in }
+
+        var list = DisplayList()
+        list.items = [flattenedItem, updatedItem]
+
+        var index = DisplayList.Index()
+        index.skip(list: list)
+
+        XCTAssertEqual(index.identity, .none)
+        XCTAssertEqual(index.serial, 3)
+        XCTAssertEqual(index.archiveIdentity, .none)
+        XCTAssertEqual(index.archiveSerial, 0)
+    }
+
+    func testDisplayListIndexSkipDoesNotTraversePreparedDrawingContents() {
+        var nested = DisplayList()
+        nested.items = [
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+        ]
+        let prepared = DisplayList.LocalContents(list: nested)
+        let drawing = DisplayList.Content(
+            drawing: prepared,
+            origin: CGPoint(x: 2, y: 4),
+            options: RasterizationOptions()
+        )
+        var list = DisplayList()
+        list.items = [DisplayList.Item(
+            content: drawing,
+            frame: .zero,
+            identity: .none,
+            version: DisplayList.Version(value: 0)
+        )]
+
+        var index = DisplayList.Index()
+        index.skip(list: list)
+
+        XCTAssertEqual(index.serial, 1)
+    }
+
+    func testDisplayListIndexSkipTraversesEffectContentsThenMaskList() {
+        var contents = DisplayList()
+        contents.items = [
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+        ]
+        var mask = DisplayList()
+        mask.items = [
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+            DisplayList.Item(command: .closure(bounds: nil)) { _ in },
+        ]
+
+        var list = DisplayList()
+        list.items = [DisplayList.Item(
+            effect: .mask(mask, GraphicsContext.ClipOptions()),
+            contents: contents,
+            version: DisplayList.Version(value: 0)
+        )]
+
+        var index = DisplayList.Index()
+        index.skip(list: list)
+
+        XCTAssertEqual(index.identity, .none)
+        XCTAssertEqual(index.serial, 4)
+    }
+
+    func testDisplayListIndexSkipArchiveDirectionUsesOptionalPayload() {
+        let identity = _DisplayList_Identity(decodedValue: 73)
+        var stableIDs = _DisplayList_StableIdentityMap()
+        stableIDs[_DisplayList_Identity(decodedValue: 4)] = _DisplayList_StableIdentity(
+            hash: StrongHash(of: "archive"),
+            serial: 2
+        )
+        let archive = DisplayList.ArchiveIDs(
+            uuid: UUID(uuidString: "00000000-0000-0000-0000-000000000073")!,
+            stableIDs: stableIDs
+        )
+
+        var index = DisplayList.Index()
+        _ = index.enter(identity: identity)
+        index.skip(effect: .archive(archive))
+
+        XCTAssertEqual(index.identity, .none)
+        XCTAssertEqual(index.serial, 0)
+        XCTAssertEqual(index.archiveIdentity, identity)
+        XCTAssertEqual(index.archiveSerial, 0)
+
+        index.skip(effect: .archive(nil))
+
+        XCTAssertEqual(index.identity, identity)
+        XCTAssertEqual(index.serial, 0)
+        XCTAssertEqual(index.archiveIdentity, .none)
+        XCTAssertEqual(index.archiveSerial, 0)
+    }
+
+    func testDisplayListSkipPayloadCarrierShapes() {
+        var stableIDs = _DisplayList_StableIdentityMap()
+        let stableIdentity = _DisplayList_Identity(decodedValue: 8)
+        stableIDs[stableIdentity] = _DisplayList_StableIdentity(
+            hash: StrongHash(of: "stable"),
+            serial: 9
+        )
+        let uuid = UUID(uuidString: "00000000-0000-0000-0000-000000000008")!
+        let archive = DisplayList.ArchiveIDs(uuid: uuid, stableIDs: stableIDs)
+
+        XCTAssertEqual(archive.uuid, uuid)
+        XCTAssertEqual(archive.stableIDs[stableIdentity]?.serial, 9)
+        XCTAssertEqual(GraphicsContext.ClipOptions.inverse.rawValue, 1)
+
+        var nested = DisplayList()
+        nested.interpolationBounds = CGRect(x: 1, y: 2, width: 3, height: 4)
+        let content = DisplayList.Content(
+            flattened: nested,
+            origin: CGPoint(x: 5, y: 7),
+            options: RasterizationOptions()
+        )
+        guard case let .flattened(list, origin, options) = content.value else {
+            return XCTFail("expected flattened display-list content")
+        }
+        XCTAssertEqual(list.interpolationBounds, nested.interpolationBounds)
+        XCTAssertEqual(origin, CGPoint(x: 5, y: 7))
+        XCTAssertEqual(options, RasterizationOptions())
+
+        let prepared = DisplayList.LocalContents(list: nested)
+        let drawing = DisplayList.Content(
+            drawing: prepared,
+            origin: CGPoint(x: 11, y: 13),
+            options: RasterizationOptions()
+        )
+        guard case let .drawing(contents, drawingOrigin, drawingOptions) = drawing.value else {
+            return XCTFail("expected prepared drawing content")
+        }
+        XCTAssertTrue((contents as AnyObject) === prepared)
+        XCTAssertEqual(drawingOrigin, CGPoint(x: 11, y: 13))
+        XCTAssertEqual(drawingOptions, RasterizationOptions())
+    }
 }

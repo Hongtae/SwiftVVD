@@ -1834,6 +1834,121 @@ final class ScrollStateRequestTests: XCTestCase {
         }
     }
 
+    func testDelayedPreferenceViewConnectsWeakValueToChildPreference() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var capturedValue: _PreferenceValue<DelayedPreferenceTestKey>?
+            let delayed = _DelayedPreferenceView<DelayedPreferenceTestKey, DelayedPreferenceProbeContent> {
+                value in
+                capturedValue = value
+                return DelayedPreferenceProbeContent(value: 37)
+            }
+            let delayedAttr = graph.makeInput(value: delayed)
+            let outputs = _DelayedPreferenceView<
+                DelayedPreferenceTestKey,
+                DelayedPreferenceProbeContent
+            >._makeView(
+                view: _GraphValue(_attribute: delayedAttr),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let output = outputs.preferences.value(for: DelayedPreferenceTestKey.self)
+            XCTAssertNotNil(output)
+            XCTAssertEqual(output.map { Attribute<Int>($0).value }, 37)
+
+            let captured = capturedValue?.attribute
+            XCTAssertNotNil(captured)
+            XCTAssertEqual(captured.map { $0.toStrong().value }, 37)
+            XCTAssertEqual(
+                Mirror(reflecting: delayed).children.compactMap(\.label),
+                ["transform"]
+            )
+            XCTAssertEqual(
+                capturedValue.map { Mirror(reflecting: $0).children.compactMap(\.label) },
+                ["attribute"]
+            )
+        }
+    }
+
+    func testScrollViewReaderAndProxyStorageSurface() {
+        let reader = ScrollViewReader { _ in EmptyView() }
+        let body = reader.body
+
+        XCTAssertEqual(
+            Mirror(reflecting: reader).children.compactMap(\.label),
+            ["content"]
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: body).children.compactMap(\.label),
+            ["transform"]
+        )
+        XCTAssertTrue(
+            String(reflecting: type(of: body)).contains(
+                "_DelayedPreferenceView<VUI.ScrollablePreferenceKey, VUI.EmptyView>"
+            )
+        )
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        ref.withCurrent {
+            let values = graph.makeInput(value: [any Scrollable]())
+            let proxy = ScrollViewProxy(_values: values.asWeak())
+            XCTAssertEqual(
+                Mirror(reflecting: proxy).children.compactMap(\.label),
+                ["_values"]
+            )
+        }
+    }
+
+    func testScrollViewProxyStopsAtFirstHandledScrollableAndCarriesAnchor() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let first = RecordingScrollable(shouldScroll: false)
+            let second = RecordingScrollable(shouldScroll: true)
+            let third = RecordingScrollable(shouldScroll: true)
+            let values = graph.makeInput(value: [
+                first as any Scrollable,
+                second as any Scrollable,
+                third as any Scrollable,
+            ])
+            let proxy = ScrollViewProxy(_values: values.asWeak())
+
+            proxy.scrollTo("target", anchor: .bottom)
+
+            XCTAssertEqual(first.scrolledIDs, [AnyHashable("target")])
+            XCTAssertEqual(second.scrolledIDs, [AnyHashable("target")])
+            XCTAssertTrue(third.scrolledIDs.isEmpty)
+            XCTAssertEqual(first.observedTransactions.map(\.scrollTargetAnchor), [.bottom])
+            XCTAssertEqual(second.observedTransactions.map(\.scrollTargetAnchor), [.bottom])
+            XCTAssertNil(Transaction.current.scrollTargetAnchor)
+        }
+    }
+
+    func testScrollViewProxyNilAnchorPreservesCurrentTransactionAnchor() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let scrollable = RecordingScrollable(shouldScroll: true)
+            let values = graph.makeInput(value: [scrollable as any Scrollable])
+            let proxy = ScrollViewProxy(_values: values.asWeak())
+            var transaction = Transaction()
+            transaction.scrollTargetAnchor = .top
+
+            withTransaction(transaction) {
+                proxy.scrollTo(9)
+            }
+
+            XCTAssertEqual(scrollable.scrolledIDs, [AnyHashable(9)])
+            XCTAssertEqual(scrollable.observedTransactions.map(\.scrollTargetAnchor), [.top])
+            XCTAssertNil(Transaction.current.scrollTargetAnchor)
+        }
+    }
+
     private func makeViewInputs(
         graph: _AGGraph,
         environment: Attribute<EnvironmentValues>? = nil
@@ -1872,6 +1987,35 @@ final class ScrollStateRequestTests: XCTestCase {
             mergedInputs: []
         )
     }
+}
+
+private struct DelayedPreferenceTestKey: PreferenceKey {
+    static var defaultValue: Int { 0 }
+
+    static func reduce(value: inout Int, nextValue: () -> Int) {
+        value += nextValue()
+    }
+}
+
+private struct DelayedPreferenceProbeContent: View {
+    var value: Int
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        var preferences = PreferencesOutputs()
+        preferences.append(
+            DelayedPreferenceTestKey.self,
+            node: view[\.value]._attribute.identifier
+        )
+        return _ViewOutputs(preferences: preferences)
+    }
+
+    typealias Body = Never
+}
+
+extension DelayedPreferenceProbeContent: PrimitiveView, UnaryView {
 }
 
 private final class RecordingScrollable: Scrollable {

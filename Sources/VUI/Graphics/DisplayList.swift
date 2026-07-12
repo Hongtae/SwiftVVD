@@ -9,6 +9,9 @@ import Foundation
 
 nonisolated(unsafe) private var _displayListIdentityCounter: UInt32 = 0
 
+protocol RBDisplayListContents: AnyObject {
+}
+
 struct _DisplayList_Identity: Codable, Hashable, CustomStringConvertible {
     private(set) var value: UInt32
 
@@ -40,7 +43,7 @@ struct _DisplayList_StableIdentity: Codable, Hashable {
     }
 }
 
-struct _DisplayList_StableIdentityMap {
+struct _DisplayList_StableIdentityMap: Equatable {
     private var map: [_DisplayList_Identity: _DisplayList_StableIdentity]
 
     init() {
@@ -208,6 +211,24 @@ extension _DisplayList_StableIdentityMap: ProtobufEncodableMessage, ProtobufDeco
 // Propagated to the scene root via the DisplayList.Key preference.
 // TODO: Replace closure-backed draw bodies with backend commands as typed coverage is proven.
 struct DisplayList {
+    final class LocalContents: RBDisplayListContents {
+        var list: DisplayList
+
+        init(list: DisplayList) {
+            self.list = list
+        }
+    }
+
+    struct ArchiveIDs: Equatable {
+        var uuid: UUID
+        var stableIDs: _DisplayList_StableIdentityMap
+
+        init(uuid: UUID, stableIDs: _DisplayList_StableIdentityMap) {
+            self.uuid = uuid
+            self.stableIDs = stableIDs
+        }
+    }
+
     struct Version {
         let value: Int
 
@@ -361,6 +382,42 @@ struct DisplayList {
             )
         }
 
+        mutating func skip(list: DisplayList) {
+            for item in list.items {
+                skip(item: item)
+            }
+        }
+
+        mutating func skip(item: Item) {
+            guard item.version.value == 0 else { return }
+
+            let previous = enter(identity: .none)
+            defer { leave(index: previous) }
+
+            switch item.value {
+            case let .content(content):
+                if case let .flattened(list, _, _) = content.value {
+                    skip(list: list)
+                }
+            case let .effect(effect, contents):
+                skip(list: contents)
+                skip(effect: effect)
+            case .states, .empty:
+                break
+            }
+        }
+
+        mutating func skip(effect: Effect) {
+            switch effect {
+            case let .archive(ids):
+                updateArchive(entering: ids != nil)
+            case let .mask(list, _):
+                skip(list: list)
+            default:
+                break
+            }
+        }
+
         struct ID: Hashable {
             private var identity: _DisplayList_Identity
             private var serial: UInt32
@@ -385,8 +442,10 @@ struct DisplayList {
     // interpolator group routing.
     enum Effect {
         case identity
+        case archive(ArchiveIDs?)
         case opacity(Float)
         case transform(ProjectionTransform)
+        case mask(DisplayList, GraphicsContext.ClipOptions)
         case animation(any _DisplayList_AnyEffectAnimation)
         case state(StrongHash)
         case contentTransition(ContentTransition.State)
@@ -846,6 +905,8 @@ struct DisplayList {
         enum Value {
             case backend(ItemCommand, (GraphicsContext) -> Void)
             case text(TextValue)
+            case flattened(DisplayList, CGPoint, RasterizationOptions)
+            case drawing(any RBDisplayListContents, CGPoint, RasterizationOptions)
         }
 
         var value: Value
@@ -886,12 +947,43 @@ struct DisplayList {
             self.environment = environment
         }
 
+        init(
+            flattened list: DisplayList,
+            origin: CGPoint,
+            options: RasterizationOptions,
+            seed: Seed = Seed()
+        ) {
+            self.value = .flattened(list, origin, options)
+            self.seed = seed
+            self.environment = nil
+        }
+
+        init(
+            drawing: any RBDisplayListContents,
+            origin: CGPoint,
+            options: RasterizationOptions,
+            seed: Seed = Seed()
+        ) {
+            self.value = .drawing(drawing, origin, options)
+            self.seed = seed
+            self.environment = nil
+        }
+
         var command: ItemCommand {
             switch value {
             case let .backend(command, _):
                 return command
             case let .text(text):
                 return text.command
+            case let .flattened(list, origin, _):
+                return .closure(bounds: list.interpolationBounds.map {
+                    $0.offsetBy(dx: origin.x, dy: origin.y)
+                })
+            case let .drawing(contents, origin, _):
+                let list = (contents as? LocalContents)?.list
+                return .closure(bounds: list?.interpolationBounds.map {
+                    $0.offsetBy(dx: origin.x, dy: origin.y)
+                })
             }
         }
 
@@ -909,6 +1001,15 @@ struct DisplayList {
                 body(context)
             case let .text(text):
                 text.draw(in: context)
+            case let .flattened(list, origin, _):
+                var context = context
+                context.translateBy(x: origin.x, y: origin.y)
+                list.draw(in: context)
+            case let .drawing(contents, origin, _):
+                guard let list = (contents as? LocalContents)?.list else { return }
+                var context = context
+                context.translateBy(x: origin.x, y: origin.y)
+                list.draw(in: context)
             }
         }
 
@@ -931,6 +1032,16 @@ struct DisplayList {
                     command: transformedCommand,
                     by: affineTransform
                 ))
+                return copy
+            case let .flattened(list, origin, options):
+                var copy = self
+                let transformedOrigin = origin.applying(affineTransform)
+                copy.value = .flattened(list, transformedOrigin, options)
+                return copy
+            case let .drawing(contents, origin, options):
+                var copy = self
+                let transformedOrigin = origin.applying(affineTransform)
+                copy.value = .drawing(contents, transformedOrigin, options)
                 return copy
             }
         }
@@ -1587,6 +1698,7 @@ struct DisplayList {
 
         private var oldCache = Cache()
         private var newCache = Cache()
+        private(set) var dynamicTextPlaceholders: [DynamicTextPlaceholder] = []
         private(set) var index = Index()
         private(set) var time = Time.zero
         private(set) var nextTime = Time.infinity
@@ -1597,6 +1709,10 @@ struct DisplayList {
 
         var textCallbackCount: Int {
             oldCache.callbacks.count
+        }
+
+        var dynamicTextPlaceholderCount: Int {
+            dynamicTextPlaceholders.count
         }
 
         func render(
@@ -1626,6 +1742,7 @@ struct DisplayList {
             self.time = time
             nextTime = .infinity
             newCache = Cache()
+            dynamicTextPlaceholders.removeAll(keepingCapacity: true)
         }
 
         func endPass() {
@@ -1714,6 +1831,14 @@ struct DisplayList {
                         text.draw(in: context)
                         break
                     }
+                    if let placeholder = resolveDynamicTextPlaceholder(text) {
+                        dynamicTextPlaceholders.append(placeholder)
+                        // The immediate renderer cannot defer placeholder resolution,
+                        // so draw the current text while retaining the operation for
+                        // archive-backed consumers.
+                        text.draw(in: context)
+                        break
+                    }
                     guard let drawing = resolveTextCallback(
                         text,
                         seed: content.seed,
@@ -1722,6 +1847,15 @@ struct DisplayList {
                         return
                     }
                     text.draw(drawing, in: context)
+                case let .flattened(list, origin, _):
+                    var context = content.renderContext(from: context)
+                    context.translateBy(x: origin.x, y: origin.y)
+                    renderItems(in: list, context: context, includeDebug: includeDebug)
+                case let .drawing(contents, origin, _):
+                    guard let list = (contents as? LocalContents)?.list else { return }
+                    var context = content.renderContext(from: context)
+                    context.translateBy(x: origin.x, y: origin.y)
+                    renderItems(in: list, context: context, includeDebug: includeDebug)
                 }
 
             case let .effect(effect, contents):
@@ -1748,6 +1882,9 @@ struct DisplayList {
             seed: Seed,
             scale: CGFloat
         ) -> GraphicsContext.ResolvedText.Drawing? {
+            guard !text.view.text.needsDynamicRenderingInArchive else {
+                return nil
+            }
             let key = CallbackKey(
                 index: index.id,
                 seed: seed,
@@ -1760,6 +1897,15 @@ struct DisplayList {
             return drawing
         }
 
+        func resolveDynamicTextPlaceholder(
+            _ text: Content.TextValue
+        ) -> DynamicTextPlaceholder? {
+            guard text.view.text.needsDynamicRenderingInArchive else {
+                return nil
+            }
+            return DynamicTextPlaceholder(text: text.view.text, size: text.size)
+        }
+
         private func render(
             effect: Effect,
             contents: DisplayList,
@@ -1769,11 +1915,19 @@ struct DisplayList {
         ) {
             switch effect {
             case .identity,
+                 .archive,
                  .state,
                  .contentTransition,
                  .interpolatorRoot,
                  .interpolatorLayer,
                  .interpolatorAnimation:
+                renderItems(in: contents, context: context, includeDebug: includeDebug)
+
+            case let .mask(mask, options):
+                var context = context
+                context.clipToLayer(options: options) { layer in
+                    self.renderItems(in: mask, context: layer, includeDebug: includeDebug)
+                }
                 renderItems(in: contents, context: context, includeDebug: includeDebug)
 
             case let .opacity(opacity):
@@ -1858,9 +2012,27 @@ struct DisplayList {
             }
             switch (lhs.value, rhs.value) {
             case let (.content(lhs), .content(rhs)):
-                return lhs.seed == rhs.seed && lhs.command == rhs.command
+                guard lhs.seed == rhs.seed else { return false }
+                switch (lhs.value, rhs.value) {
+                case let (.flattened(lhsList, lhsOrigin, lhsOptions),
+                          .flattened(rhsList, rhsOrigin, rhsOptions)):
+                    return lhsOrigin == rhsOrigin &&
+                        lhsOptions == rhsOptions &&
+                        lhsList.hasSameInterpolationSurface(as: rhsList)
+                case (.flattened, _), (_, .flattened):
+                    return false
+                case let (.drawing(lhsContents, lhsOrigin, lhsOptions),
+                          .drawing(rhsContents, rhsOrigin, rhsOptions)):
+                    return (lhsContents as AnyObject) === (rhsContents as AnyObject) &&
+                        lhsOrigin == rhsOrigin &&
+                        lhsOptions == rhsOptions
+                case (.drawing, _), (_, .drawing):
+                    return false
+                default:
+                    return lhs.command == rhs.command
+                }
             case let (.effect(lhsEffect, lhsContents), .effect(rhsEffect, rhsContents)):
-                return lhsEffect.surfaceRecord == rhsEffect.surfaceRecord &&
+                return lhsEffect.hasSameSurface(as: rhsEffect) &&
                     lhsContents.hasSameInterpolationSurface(as: rhsContents)
             case let (.states(lhsStates), .states(rhsStates)):
                 guard lhsStates.count == rhsStates.count else { return false }
@@ -1886,8 +2058,10 @@ struct DisplayList {
 private struct DisplayListEffectSurfaceRecord: Equatable {
     enum Kind: UInt8, Equatable {
         case identity
+        case archive
         case opacity
         case transform
+        case mask
         case animation
         case state
         case contentTransition
@@ -1908,6 +2082,8 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     var opacity: Float?
     var transform: ProjectionTransform?
     var effectAnimation: DisplayListEffectAnimationSurfaceRecord?
+    var archiveIDs: DisplayList.ArchiveIDs?
+    var clipOptionsRawValue: UInt32?
 }
 
 private struct DisplayListEffectAnimationSurfaceRecord: Equatable {
@@ -1920,10 +2096,17 @@ private extension DisplayList.Effect {
         switch self {
         case .identity:
             return DisplayListEffectSurfaceRecord(kind: .identity)
+        case let .archive(ids):
+            return DisplayListEffectSurfaceRecord(kind: .archive, archiveIDs: ids)
         case let .opacity(opacity):
             return DisplayListEffectSurfaceRecord(kind: .opacity, opacity: opacity)
         case let .transform(transform):
             return DisplayListEffectSurfaceRecord(kind: .transform, transform: transform)
+        case let .mask(_, options):
+            return DisplayListEffectSurfaceRecord(
+                kind: .mask,
+                clipOptionsRawValue: options.rawValue
+            )
         case let .animation(animation):
             var encoder = ProtobufEncoder()
             let encodedValue: Data?
@@ -1972,7 +2155,13 @@ private extension DisplayList.Effect {
 
 extension DisplayList.Effect {
     func hasSameSurface(as other: Self) -> Bool {
-        surfaceRecord == other.surfaceRecord
+        guard surfaceRecord == other.surfaceRecord else { return false }
+        switch (self, other) {
+        case let (.mask(lhs, _), .mask(rhs, _)):
+            return lhs.hasSameInterpolationSurface(as: rhs)
+        default:
+            return true
+        }
     }
 }
 
@@ -2027,7 +2216,7 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .identity, .opacity, .transform, .animation, .contentTransition:
+        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
             break
@@ -2045,7 +2234,7 @@ private extension DisplayList.Item {
             body(self)
         case let .effect(effect, contents):
             switch effect {
-            case .identity, .opacity, .transform, .animation, .contentTransition:
+            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition:
                 contents.forEachRenderItem(includeDebug: includeDebug, body)
             case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
                 break

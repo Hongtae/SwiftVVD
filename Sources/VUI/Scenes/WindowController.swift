@@ -1306,7 +1306,34 @@ class WindowController: WindowDelegate,
                 return true
             }
         }
-        return false
+        guard let gestureGraph,
+              let binding = gestureGraph.eventBinding(
+                at: location,
+                accepting: WheelEvent.self
+              ) else { return false }
+
+        let eventID = EventID(type: WheelEvent.self, serial: nextEventSerial())
+        let time = currentTimestamp
+        let began = WheelEvent(
+            timestamp: time,
+            phase: .began,
+            binding: binding,
+            offset: Double(delta.y)
+        )
+        let beganPhase = sendRecognizerOwnedEvents([eventID: began], at: time)
+        let ended = WheelEvent(
+            timestamp: time,
+            phase: .ended,
+            binding: binding,
+            offset: Double(delta.y)
+        )
+        let endedPhase = sendRecognizerOwnedEvents([eventID: ended], at: time)
+        switch (beganPhase, endedPhase) {
+        case (.active, _), (.ended, _), (_, .active), (_, .ended):
+            return true
+        default:
+            return false
+        }
     }
 
     @discardableResult

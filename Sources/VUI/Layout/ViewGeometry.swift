@@ -348,8 +348,25 @@ struct ViewTransform: Equatable, Sendable {
         to space: CoordinateSpace,
         points: inout A
     ) where A.Element == CGPoint {
-        guard case .local = space else { return }
-        // Step 1: undo global translation.
+        switch space {
+        case .global:
+            return
+        case .local:
+            break
+        case .named(let name):
+            guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: name) else {
+                return
+            }
+            for i in points.indices {
+                points[i].x -= _globalPosition.x
+                points[i].y -= _globalPosition.y
+            }
+            let suffixStart = _transformItems.index(after: markerIndex)
+            for item in _transformItems[suffixStart...].reversed() {
+                _applyItem(item, inverted: true, to: &points)
+            }
+            return
+        }
         for i in points.indices {
             points[i].x -= _globalPosition.x
             points[i].y -= _globalPosition.y
@@ -486,6 +503,21 @@ struct ViewTransform: Equatable, Sendable {
             case .coordinateSpaceID(let candidate),
                  .sizedSpaceID(let candidate, _):
                 if candidate == id {
+                    return index
+                }
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    private func lastCoordinateSpaceMarkerIndex(matching name: AnyHashable) -> [Item].Index? {
+        for index in _transformItems.indices.reversed() {
+            switch _transformItems[index] {
+            case .coordinateSpaceName(let candidate),
+                 .sizedSpace(let candidate, _):
+                if candidate == name {
                     return index
                 }
             default:

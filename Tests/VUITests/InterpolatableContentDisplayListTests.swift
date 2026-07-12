@@ -85,13 +85,99 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(Set<LayerPhase>([.pending, .first, .second, .running]).count, 4)
     }
 
+    func testInterpolatorLayerContentsStoresPreparedDrawingCacheFields() {
+        var list = DisplayList()
+        list.appendDebugItem(bounds: CGRect(x: 1, y: 2, width: 3, height: 4)) { _ in }
+        var contents = DisplayList.InterpolatorLayer.Contents(
+            displayList: list,
+            origin: CGPoint(x: 5, y: 7)
+        )
+
+        XCTAssertTrue(contents.list.hasSameInterpolationSurface(as: list))
+        XCTAssertEqual(contents.origin, CGPoint(x: 5, y: 7))
+        XCTAssertNil(contents.rbList)
+        XCTAssertTrue(contents.nextTime.seconds.isInfinite)
+        XCTAssertNil(contents.numericValue)
+
+        let renderer = DisplayList.GraphicsRenderer()
+        let first = contents.preparedList(using: renderer, at: .zero)
+        let firstContents = contents.rbList
+        let second = contents.preparedList(
+            using: renderer,
+            at: Time(seconds: 10)
+        )
+
+        XCTAssertTrue(first.hasSameInterpolationSurface(as: list))
+        XCTAssertTrue(second.hasSameInterpolationSurface(as: list))
+        XCTAssertTrue((firstContents as AnyObject?) === (contents.rbList as AnyObject?))
+        XCTAssertTrue(contents.nextTime.seconds.isInfinite)
+    }
+
+    func testInterpolatorLayerPreparesCurrentAndRemovedContentsWithPersistentRenderer() {
+        var source = DisplayList()
+        source.appendDebugItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
+        var target = DisplayList()
+        target.appendDebugItem(bounds: CGRect(x: 20, y: 0, width: 10, height: 10)) { _ in }
+
+        var layer = DisplayList.InterpolatorLayer()
+        layer.setDisplayList(source, origin: .zero)
+        layer.setDisplayList(
+            target,
+            origin: .zero,
+            state: ContentTransition.State(transition: .opacity),
+            animation: .linear(duration: 0.25)
+        )
+        layer.updateInterpolators(
+            contentsScale: 1,
+            maxDuration: 1,
+            time: .zero
+        )
+
+        XCTAssertNotNil(layer.renderer)
+        XCTAssertNotNil(layer.contents.rbList)
+        XCTAssertNotNil(layer.removed.first?.contents.rbList)
+        XCTAssertTrue(layer.contents.nextTime.seconds.isInfinite)
+        XCTAssertTrue(layer.removed.first?.contents.nextTime.seconds.isInfinite == true)
+    }
+
+    func testInterpolatorLayerContentsRefreshesAtRendererDeadlineThenReusesFinishedContents() {
+        var body = DisplayList()
+        body.appendDebugItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
+        let animation = DisplayList.OpacityAnimation(
+            from: _OpacityEffect(opacity: 0),
+            to: _OpacityEffect(opacity: 1),
+            animation: .linear(duration: 1)
+        )
+        let list = DisplayList.effect(.animation(animation), contents: body)
+        var contents = DisplayList.InterpolatorLayer.Contents(displayList: list)
+        let renderer = DisplayList.GraphicsRenderer()
+
+        _ = contents.preparedList(using: renderer, at: .zero)
+        let first = contents.rbList
+        XCTAssertEqual(contents.nextTime.seconds, 0)
+
+        _ = contents.preparedList(using: renderer, at: .zero)
+        let refreshed = contents.rbList
+        XCTAssertFalse((first as AnyObject?) === (refreshed as AnyObject?))
+
+        for time in [0.1, 0.2, 0.3, 1.4] {
+            _ = contents.preparedList(using: renderer, at: Time(seconds: time))
+        }
+        let finished = contents.rbList
+        XCTAssertTrue(contents.nextTime.seconds.isInfinite)
+        _ = contents.preparedList(using: renderer, at: Time(seconds: 2))
+        XCTAssertTrue((finished as AnyObject?) === (contents.rbList as AnyObject?))
+    }
+
     func testPrivateColorMatrixSurface() throws {
         XCTAssertEqual(_ColorMatrix(), _ColorMatrix(_ColorMatrix().colorMatrix))
 
-        var color = _ColorMatrix(color: Color(red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6), in: EnvironmentValues())
-        XCTAssertEqual(color.m11, 0.25)
-        XCTAssertEqual(color.m22, 0.5)
-        XCTAssertEqual(color.m33, 0.75)
+        let sourceColor = Color(red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6)
+        let resolvedColor = sourceColor.resolve(in: EnvironmentValues())
+        var color = _ColorMatrix(color: sourceColor, in: EnvironmentValues())
+        XCTAssertEqual(color.m11, resolvedColor.linearRed)
+        XCTAssertEqual(color.m22, resolvedColor.linearGreen)
+        XCTAssertEqual(color.m33, resolvedColor.linearBlue)
         XCTAssertEqual(color.m44, 0.6)
         XCTAssertEqual(color.m15, 0)
         XCTAssertEqual(color.m25, 0)
@@ -1702,11 +1788,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             to: source
         )
         let geometryContents = try contentTransitionContents(in: geometryOutput)
-        XCTAssertEqual(geometryContents.itemRecords.first?.kind, .effect)
-        XCTAssertEqual(geometryContents.itemRecords.first?.effectKind, .geometry)
-        let transform = try XCTUnwrap(geometryContents.itemRecords.first?.affineTransform)
-        XCTAssertEqual(transform.tx, 3, accuracy: 0.000001)
-        XCTAssertEqual(transform.ty, 4, accuracy: 0.000001)
+        XCTAssertEqual(geometryContents.itemRecords.first?.kind, .text)
+        XCTAssertEqual(geometryContents.itemRecords.first?.bounds, CGRect(x: 3, y: 4, width: 10, height: 10))
         XCTAssertEqual(
             geometryContents.interpolationBounds,
             CGRect(x: 3, y: 4, width: 10, height: 10)

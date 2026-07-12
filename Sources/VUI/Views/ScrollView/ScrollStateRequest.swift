@@ -162,8 +162,24 @@ public struct ScrollTarget: Hashable {
 }
 
 /// Reason code passed to scrollable hosts when content offset is adjusted.
-enum ContentOffsetAdjustmentReason {
-    case scrollPosition
+enum ContentOffsetAdjustmentReason: Equatable {
+    case translation
+    case positionTranslation
+    case alignment
+    case reset
+    case resetPosition
+
+    var rawValue: UInt32 {
+        switch self {
+        case .translation: 1
+        case .positionTranslation: 2
+        case .alignment: 3
+        case .reset: 4
+        case .resetPosition: 5
+        }
+    }
+
+    static var maxValue: UInt32 { 5 }
 }
 
 /// Stable classification used to coalesce compatible scroll state requests.

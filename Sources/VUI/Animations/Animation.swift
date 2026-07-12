@@ -1153,19 +1153,23 @@ func combineAnimation<Value>(
     newAnimation: Animation,
     newValue: Value
 ) where Value: VectorArithmetic {
-    let previousState = state
-    var combinedState = previousState.combinedState
     var replacementValue = value
     replacementValue += newValue
 
     if animation.box is CustomAnimationBox<DefaultCombiningAnimation> {
+        var combinedState = state.combinedState
         combinedState.entries.append(
             CombinedAnimationState<Value>.Entry(
                 value: replacementValue,
                 state: AnimationState()
             )
         )
+        // An existing combining animation keeps its outer state dictionary;
+        // only the child-entry array grows on a later false-merge retarget.
+        state.combinedState = combinedState
     } else {
+        let previousState = state
+        var combinedState = CombinedAnimationState<Value>()
         combinedState.entries.append(
             CombinedAnimationState<Value>.Entry(
                 value: value,
@@ -1178,13 +1182,11 @@ func combineAnimation<Value>(
                 state: AnimationState()
             )
         )
+        // The first conversion moves the prior animation state into the first
+        // child and installs the combined state into a fresh outer dictionary.
+        state = AnimationState()
+        state.combinedState = combinedState
     }
-
-    // The previous animation state moves into the first child entry. Keep the
-    // outer combined state fresh so child keys cannot be reused by a later
-    // replacement animation.
-    state = AnimationState()
-    state.combinedState = combinedState
     animation = Animation(
         DefaultCombiningAnimation(
             first: animation,

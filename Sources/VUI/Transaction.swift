@@ -372,6 +372,10 @@ private struct ScrollPositionUpdatePreservesVelocityKey: TransactionKey {
     static let defaultValue: Bool = false
 }
 
+private struct ScrollToRequiresCompleteVisibilityKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
+
 private struct ScrollContentOffsetAdjustmentBehaviorKey: TransactionKey {
     static var defaultValue: ScrollContentOffsetAdjustmentBehavior { .automatic }
 }
@@ -437,6 +441,11 @@ extension Transaction {
         set { self[ScrollPositionUpdatePreservesVelocityKey.self] = newValue }
     }
 
+    var scrollToRequiresCompleteVisibility: Bool {
+        get { self[ScrollToRequiresCompleteVisibilityKey.self] }
+        set { self[ScrollToRequiresCompleteVisibilityKey.self] = newValue }
+    }
+
     public var scrollContentOffsetAdjustmentBehavior: ScrollContentOffsetAdjustmentBehavior {
         get { self[ScrollContentOffsetAdjustmentBehaviorKey.self] }
         set { self[ScrollContentOffsetAdjustmentBehaviorKey.self] = newValue }
@@ -458,7 +467,7 @@ extension Transaction {
         }
     }
 
-    var isAnimated: Bool { animation != nil }
+    var isAnimated: Bool { animation != nil && !disablesAnimations }
 
     var effectiveAnimation: Animation? {
         animation ?? (tracksVelocity ? .velocityTracking : nil)

@@ -276,7 +276,7 @@ public struct AnimatableValuesMacro: MemberMacro, ExtensionMacro {
         return [
             DeclSyntax(stringLiteral:
                 """
-                #_SwiftUIAnimatableDataProperty(animatableMacroContext: #"\(payloadString)"#, kind: VUI._animatableMacroKind())
+                #_UIAnimatableDataProperty(animatableMacroContext: #"\(payloadString)"#, kind: VUI._animatableMacroKind())
 
                 \(accessPrefix)nonisolated var animatableData: some VUI.VectorArithmetic {
                     get {
@@ -328,7 +328,7 @@ public struct AnimatableValuesDataPropertyMacro: DeclarationMacro {
         }
 
         let declarations = payload.varDecls.map { varDecl in
-            let declaration = "let \(varDecl.name) = #_SwiftUIAnimatableProperty(\(payload.selfName)[_animatableType: \\.\(varDecl.name)])"
+            let declaration = "let \(varDecl.name) = #_UIAnimatableProperty(\(payload.selfName)[_animatableType: \\.\(varDecl.name)])"
             guard let fileName = payload.fileName,
                   let line = varDecl.line else {
                 return declaration

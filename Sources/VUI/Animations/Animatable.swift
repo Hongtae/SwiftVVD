@@ -196,7 +196,7 @@ public macro AnimatableIgnored() = #externalMacro(
 )
 
 @freestanding(declaration)
-public macro _SwiftUIAnimatableDataProperty(
+public macro _UIAnimatableDataProperty(
     animatableMacroContext: String,
     kind: AnimatableValues<>
 ) = #externalMacro(
@@ -217,13 +217,13 @@ public macro _AnimatablePairData() = #externalMacro(
 )
 
 @freestanding(expression)
-public macro _SwiftUIAnimatableProperty<T>(_ t: T.Type) -> T.Type = #externalMacro(
+public macro _UIAnimatableProperty<T>(_ t: T.Type) -> T.Type = #externalMacro(
     module: "VUIMacros",
     type: "AnimatablePropertyMacro"
 ) where T: VectorArithmetic
 
 @freestanding(expression)
-public macro _SwiftUIAnimatableProperty<T>(_ t: T.Type) -> EmptyAnimatableData.Type = #externalMacro(
+public macro _UIAnimatableProperty<T>(_ t: T.Type) -> EmptyAnimatableData.Type = #externalMacro(
     module: "VUIMacros",
     type: "InvalidAnimatablePropertyMacro"
 )
@@ -429,10 +429,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
     // Forks are old logical-completion routes. They no longer affect output,
     // but still sample until their own logical completion boundary is reached.
     private var forks: [Fork] = []
-    // VUI-only merge and presentation-base state extends the SwiftUI-shaped
-    // storage above without changing the helper's ownership boundary.
-    private var mergeState = AnimationState<AnimatedValue.AnimatableData>()
-    private var updatesMergeStateWithAnimation = true
     // Base layers preserve visual continuity across false retargets. The active
     // route samples against their stacked presentation output instead of the raw
     // model start value.
@@ -539,10 +535,8 @@ final class AnimatorState<AnimatedValue: Animatable> {
     struct RetargetStateSnapshot {
         let animation: Animation?
         let state: AnimationState<AnimatedValue.AnimatableData>
-        let mergeState: AnimationState<AnimatedValue.AnimatableData>
         let beginTime: Time
         let isLogicallyComplete: Bool
-        let updatesMergeStateWithAnimation: Bool
         let baseLayers: [PresentationLayer]
         let baseLayerStartValue: AnimatedValue?
     }
@@ -785,9 +779,7 @@ final class AnimatorState<AnimatedValue: Animatable> {
         sampleTime: Time,
         transaction: Transaction,
         state: AnimationState<AnimatedValue.AnimatableData>,
-        mergeState: AnimationState<AnimatedValue.AnimatableData>,
-        isLogicallyComplete: Bool,
-        updatesMergeStateWithAnimation: Bool
+        isLogicallyComplete: Bool
     ) {
         if self.animation == nil {
             phase = .pending
@@ -798,10 +790,8 @@ final class AnimatorState<AnimatedValue: Animatable> {
         self.beginTime = beginTime
         self.nextTime = sampleTime
         self.state = state
-        self.mergeState = mergeState
         self.isLogicallyComplete = isLogicallyComplete
         self.finishingDefinition = Self.defaultFinishingDefinition
-        self.updatesMergeStateWithAnimation = updatesMergeStateWithAnimation
         reason = transaction.animationReason
         updateFrameInterval(from: transaction)
     }
@@ -812,7 +802,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
 
     func resetForReplacement() {
         state = AnimationState()
-        mergeState = AnimationState()
         isLogicallyComplete = false
     }
 
@@ -825,10 +814,8 @@ final class AnimatorState<AnimatedValue: Animatable> {
         RetargetStateSnapshot(
             animation: animation,
             state: state,
-            mergeState: mergeState,
             beginTime: beginTime,
             isLogicallyComplete: isLogicallyComplete,
-            updatesMergeStateWithAnimation: updatesMergeStateWithAnimation,
             baseLayers: baseLayers,
             baseLayerStartValue: baseLayerStartValue
         )
@@ -910,7 +897,10 @@ final class AnimatorState<AnimatedValue: Animatable> {
         }
         let elapsed = max(time.seconds - beginTime.seconds, 0)
         var context = makeAnimationContext(
-            state: mergeState,
+            // Build the merge query from the active animation state.
+            // A true result commits the mutated copy; a false result leaves the
+            // active state for combineAnimation to consume unchanged.
+            state: state,
             isLogicallyComplete: false,
             environment: resolvedAnimationEnvironment(environment),
             finishingDefinition: finishingDefinition
@@ -939,7 +929,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
         )
         if shouldMerge {
             state = context.state
-            mergeState = context.state
             isLogicallyComplete = context.isLogicallyComplete
             animation = newAnimation
             interval += newInterval
@@ -960,7 +949,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
                 // side effects if needed.
                 animation = conversion.animation
                 state = conversion.state
-                mergeState = AnimationState()
                 isLogicallyComplete = false
                 interval = Self.animatableDelta(
                     from: conversion.start,
@@ -1147,9 +1135,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
                 animationValue: output
             )
             recordSampledAnimationValue(output, at: time)
-            if updatesMergeStateWithAnimation {
-                mergeState = context.state
-            }
         }
         return (
             output: output,
@@ -1605,7 +1590,6 @@ final class AnimatorState<AnimatedValue: Animatable> {
         )
         animation = combinedAnimation
         state = combinedState
-        mergeState = AnimationState()
         isLogicallyComplete = false
         interval += newInterval
     }
@@ -2112,10 +2096,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             helper.removeBaseLayers()
         }
         let activeAnimationState = activeRetargetState.state
-        let activeMergeState = activeRetargetState.mergeState
         var activeContextIsLogicallyComplete = activeRetargetState.isLogicallyComplete
-        let activeUpdatesMergeStateWithAnimation =
-            previousAnimation == nil || merged || skipsVelocityTrackingPreviousMerge
         let completionStart = now
         let deadlineStartValue = merged ? mergedStart : start
         let deadlineInterval = animatableDelta(from: deadlineStartValue, to: target)
@@ -2247,7 +2228,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 replacementAnimation: animation,
                 previousSamplingLayers: previousSamplingLayers,
                 value: deadlineInterval
-            ) {
+            ) && combinedResidualCompletionGroup?.prefersSourceLogicalBeforeReplacement != true {
                 // Keep context from draining the replacement logical callback
                 // early; residual finalization releases it with the grouped
                 // removed/source callbacks.
@@ -2582,9 +2563,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             sampleTime: now,
             transaction: effectiveTransaction,
             state: activeAnimationState,
-            mergeState: activeMergeState,
-            isLogicallyComplete: activeContextIsLogicallyComplete,
-            updatesMergeStateWithAnimation: activeUpdatesMergeStateWithAnimation
+            isLogicallyComplete: activeContextIsLogicallyComplete
         )
         // ListenerRegistration comes from the live AnimatorState. The records
         // copied here become the outer rule's durable sorter; later helper clears
@@ -5499,9 +5478,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         sampleTime: Time,
         transaction: Transaction,
         state: AnimationState<AnimatedValue.AnimatableData>,
-        mergeState: AnimationState<AnimatedValue.AnimatableData>,
-        isLogicallyComplete: Bool,
-        updatesMergeStateWithAnimation: Bool
+        isLogicallyComplete: Bool
     ) {
         if animatorState == nil {
             animatorState = AnimatorState(
@@ -5518,9 +5495,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             sampleTime: sampleTime,
             transaction: transaction,
             state: state,
-            mergeState: mergeState,
-            isLogicallyComplete: isLogicallyComplete,
-            updatesMergeStateWithAnimation: updatesMergeStateWithAnimation
+            isLogicallyComplete: isLogicallyComplete
         )
     }
 
@@ -5532,9 +5507,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         sampleTime: Time,
         transaction: Transaction,
         state: AnimationState<AnimatedValue.AnimatableData>,
-        mergeState: AnimationState<AnimatedValue.AnimatableData>,
-        isLogicallyComplete: Bool,
-        updatesMergeStateWithAnimation: Bool
+        isLogicallyComplete: Bool
     ) -> AnimatorState<AnimatedValue>.ListenerRegistration {
         updatePreviousModelData(target.animatableData)
         activate(
@@ -5544,9 +5517,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             sampleTime: sampleTime,
             transaction: transaction,
             state: state,
-            mergeState: mergeState,
-            isLogicallyComplete: isLogicallyComplete,
-            updatesMergeStateWithAnimation: updatesMergeStateWithAnimation
+            isLogicallyComplete: isLogicallyComplete
         )
         return addListenersForCompletionRecords(transaction: transaction)
     }
@@ -5588,9 +5559,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             sampleTime: time,
             transaction: transaction,
             state: AnimationState(),
-            mergeState: AnimationState(),
-            isLogicallyComplete: false,
-            updatesMergeStateWithAnimation: true
+            isLogicallyComplete: false
         )
         animatorState?.addListeners(transaction: transaction)
     }
@@ -5603,10 +5572,8 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         animatorState?.retargetStateSnapshot() ?? AnimatorState.RetargetStateSnapshot(
             animation: nil,
             state: AnimationState(),
-            mergeState: AnimationState(),
             beginTime: .zero,
             isLogicallyComplete: false,
-            updatesMergeStateWithAnimation: true,
             baseLayers: [],
             baseLayerStartValue: nil
         )

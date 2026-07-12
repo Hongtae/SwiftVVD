@@ -3,6 +3,31 @@ import XCTest
 @testable import VUI
 
 final class ResolvedStyledTextStorageTests: XCTestCase {
+    private struct ResolvedArchiveFields {
+        var fields: [UInt] = []
+        var smaller: [ResolvedArchiveFields] = []
+    }
+
+    private func decodeResolvedArchiveFields(
+        _ decoder: inout ProtobufDecoder
+    ) throws -> ResolvedArchiveFields {
+        var result = ResolvedArchiveFields()
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            let fieldNumber = tag >> 3
+            let wireType = tag & 0x7
+            result.fields.append(fieldNumber)
+            if fieldNumber == 8, wireType == 2 {
+                result.smaller.append(try decoder.decodeLengthDelimited { nested in
+                    try decodeResolvedArchiveFields(&nested)
+                })
+            } else {
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        return result
+    }
+
     func testResolvedRunsProduceCrossPlatformAttributedStorage() throws {
         let face = ResolvedStorageTestTypeface()
         let image = GraphicsContext.ResolvedImage(
@@ -46,6 +71,52 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         let decoded = try JSONDecoder().decode(_ResolvedAttributedStringArchive.self, from: encoded)
         XCTAssertEqual(decoded, archive)
         XCTAssertEqual(decoded.attributedString, storage)
+    }
+
+    func testStyledRunsProjectObservedSwiftUIAttributeKeysWithoutFlattening() throws {
+        let face = ResolvedStorageTestTypeface()
+        let lineStyle = Text.LineStyle(pattern: .dash, color: .green)
+        let style = _ResolvedTextRunAttributes(
+            font: .system(size: 18, weight: .bold),
+            foregroundColor: .red,
+            backgroundColor: .blue,
+            strikethroughStyle: .single,
+            underlineStyle: lineStyle,
+            kern: 2,
+            tracking: 1,
+            baselineOffset: 3
+        )
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.styledText([face], "styled", _TextAttributeValues(), style)],
+            scaleFactor: 1
+        )
+
+        let storage = resolved.attributedStorage
+        XCTAssertEqual(storage.string, "styled")
+        let attributes = storage.attributes(at: 0, effectiveRange: nil)
+        XCTAssertEqual(attributes[NSAttributedString.Key("VUI.Font")] as? Font, style.font)
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.ForegroundColor")] as? Color,
+            .red
+        )
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.BackgroundColor")] as? Color,
+            .blue
+        )
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.StrikethroughStyle")] as? Text.LineStyle,
+            .single
+        )
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.UnderlineStyle")] as? Text.LineStyle,
+            lineStyle
+        )
+        XCTAssertEqual(attributes[NSAttributedString.Key("VUI.Kern")] as? CGFloat, 2)
+        XCTAssertEqual(attributes[NSAttributedString.Key("VUI.Tracking")] as? CGFloat, 1)
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.BaselineOffset")] as? CGFloat,
+            3
+        )
     }
 
     func testResolvedStyledTextReusesExistingFontMetricsAndRunStorage() throws {
@@ -94,6 +165,91 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertEqual(Text.ResolvedProperties.Features.checkInterpolationStrategy.rawValue, 0x080)
         XCTAssertEqual(Text.ResolvedProperties.Features.isUniqueSizeVariant.rawValue, 0x100)
         XCTAssertEqual(Text.ResolvedProperties.Features.isStandaloneSizeVariant.rawValue, 0x200)
+    }
+
+    func testDynamicArchivePredicateUsesDirectStorageAndFlaggedLargerVariant() {
+        let dynamicStorage = NSAttributedString(
+            string: "dynamic",
+            attributes: [.updateSchedule: true]
+        )
+        let dynamic = ResolvedStyledText(storage: dynamicStorage)
+        XCTAssertTrue(dynamic.needsDynamicRenderingInArchive)
+
+        let lateSchedule = NSMutableAttributedString(string: "late")
+        lateSchedule.addAttribute(
+            .updateSchedule,
+            value: true,
+            range: NSRange(location: 1, length: 1)
+        )
+        XCTAssertFalse(
+            ResolvedStyledText(storage: lateSchedule).needsDynamicRenderingInArchive
+        )
+        let firstSchedule = NSMutableAttributedString(string: "first")
+        firstSchedule.addAttribute(
+            .updateSchedule,
+            value: false,
+            range: NSRange(location: 0, length: 1)
+        )
+        XCTAssertTrue(
+            ResolvedStyledText(storage: firstSchedule).needsDynamicRenderingInArchive
+        )
+
+        let larger = ResolvedStyledText(storage: dynamicStorage)
+        let attachmentRoot = ResolvedStyledText(features: [.attachments])
+        attachmentRoot.largerSizeVariant = larger
+        XCTAssertTrue(attachmentRoot.needsDynamicRenderingInArchive)
+
+        let unflaggedRoot = ResolvedStyledText()
+        unflaggedRoot.largerSizeVariant = larger
+        XCTAssertFalse(unflaggedRoot.needsDynamicRenderingInArchive)
+        XCTAssertFalse(ResolvedStyledText().needsDynamicRenderingInArchive)
+    }
+
+    func testDynamicPlaceholderEncodesMultiSizeVariantChain() throws {
+        func text(_ value: String, features: Text.ResolvedProperties.Features) -> ResolvedStyledText {
+            ResolvedStyledText(
+                storage: NSAttributedString(
+                    string: value,
+                    attributes: [.updateSchedule: true]
+                ),
+                features: features
+            )
+        }
+
+        let regular = text("regular", features: [.isUniqueSizeVariant])
+        let compact = text("compact", features: [.isUniqueSizeVariant])
+        let terminal = text("terminal", features: [])
+        regular.setSizeVariantCandidates([regular, compact, terminal])
+
+        let placeholder = DynamicTextPlaceholder(
+            text: regular,
+            size: CGSize(width: 120, height: 24)
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: placeholder).children.compactMap(\.label),
+            ["text", "size"]
+        )
+        XCTAssertEqual(placeholder.identifier, "VUI.DynamicText")
+        XCTAssertEqual(
+            placeholder.boundingRect,
+            CGRect(x: 0, y: 0, width: 120, height: 24)
+        )
+
+        var decoder = ProtobufDecoder(try placeholder.encodedData())
+        XCTAssertEqual(try decoder.decodeVarint(), (1 << 3) | 2)
+        let fields = try decoder.decodeLengthDelimited { nested in
+            try decodeResolvedArchiveFields(&nested)
+        }
+        XCTAssertTrue(fields.fields.contains(1))
+        XCTAssertTrue(fields.fields.contains(5))
+        XCTAssertTrue(fields.fields.contains(7))
+        XCTAssertTrue(fields.fields.contains(8))
+        XCTAssertTrue(fields.smaller.first?.fields.contains(8) == true)
+
+        XCTAssertEqual(try decoder.decodeVarint(), (2 << 3) | 2)
+        let size = try decoder.decodeMessage(CGSize.self)
+        XCTAssertEqual(size, CGSize(width: 120, height: 24))
+        XCTAssertTrue(decoder.isAtEnd)
     }
 
     func testResolvedPropertiesSupplementalCarrierDefaultsAndAttachmentRegistration() throws {

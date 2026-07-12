@@ -2442,6 +2442,394 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         )
     }
 
+    func testEventDirectionsRawValuesMatchSwiftUIAxisBits() {
+        XCTAssertTrue(type(of: _EventDirections.left.rawValue) == Int8.self)
+        XCTAssertEqual(_EventDirections.left.rawValue, 1)
+        XCTAssertEqual(_EventDirections.right.rawValue, 2)
+        XCTAssertEqual(_EventDirections.up.rawValue, 4)
+        XCTAssertEqual(_EventDirections.down.rawValue, 8)
+        XCTAssertEqual(_EventDirections.horizontal.rawValue, 3)
+        XCTAssertEqual(_EventDirections.vertical.rawValue, 12)
+        XCTAssertEqual(_EventDirections.all.rawValue, 15)
+    }
+
+    func testScrollViewProxyNextPageUsesInsetViewportAndClampsToContent() {
+        var config = _ScrollViewConfig()
+        config.contentInsets = EdgeInsets(top: 10, leading: 20, bottom: 30, trailing: 40)
+        var proxy = _ScrollViewProxy(
+            config: config,
+            contentOffset: CGPoint(x: 300, y: 300),
+            contentSize: CGSize(width: 1_000, height: 800),
+            pageSize: CGSize(width: 300, height: 200)
+        )
+
+        XCTAssertEqual(proxy.contentOffsetOfNextPage(.left), CGPoint(x: 60, y: 300))
+        XCTAssertEqual(proxy.contentOffsetOfNextPage(.right), CGPoint(x: 540, y: 300))
+        XCTAssertEqual(proxy.contentOffsetOfNextPage(.up), CGPoint(x: 300, y: 140))
+        XCTAssertEqual(proxy.contentOffsetOfNextPage(.down), CGPoint(x: 300, y: 460))
+        XCTAssertEqual(
+            proxy.contentOffsetOfNextPage([.right, .down]),
+            CGPoint(x: 540, y: 460)
+        )
+
+        proxy.contentOffset = CGPoint(x: 900, y: 700)
+        XCTAssertEqual(proxy.contentOffsetOfNextPage([.right, .down]), proxy.maxContentOffset)
+    }
+
+    func testScrollViewProxyScrollRectUsesMinimalInsetViewportAdjustment() {
+        var config = _ScrollViewConfig()
+        config.contentInsets = EdgeInsets(top: 10, leading: 20, bottom: 30, trailing: 40)
+        let proxy = _ScrollViewProxy(
+            config: config,
+            contentOffset: CGPoint(x: 100, y: 100),
+            contentSize: CGSize(width: 1_000, height: 800),
+            pageSize: CGSize(width: 300, height: 200)
+        )
+        var completions: [Bool] = []
+
+        proxy.scrollRectToVisible(
+            CGRect(x: 100, y: 120, width: 40, height: 40),
+            animated: false
+        ) { completions.append($0) }
+        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 100))
+        XCTAssertEqual(completions, [true])
+
+        proxy.scrollRectToVisible(
+            CGRect(x: 400, y: 300, width: 50, height: 40),
+            animated: false
+        ) { completions.append($0) }
+        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 210, y: 180))
+        XCTAssertEqual(completions, [true, false])
+
+        proxy.scrollRectToVisible(
+            CGRect(x: 100, y: 50, width: 400, height: 300),
+            animated: false
+        )
+        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 50))
+    }
+
+    func testScrollViewProxyLiveNodeRoutesAnimatedAndDiscreteCommits() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let offset = graph.makeInput(value: CGPoint.zero)
+            let pixelLength = graph.makeInput(value: CGFloat(1))
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: offset,
+                config: _ScrollViewConfig(),
+                pixelLength: pixelLength
+            )
+            node.containerSize = CGSize(width: 100, height: 80)
+            node.contentSize = CGSize(width: 100, height: 500)
+            let proxy = _ScrollViewProxy(
+                config: node.config,
+                contentOffset: .zero,
+                contentSize: node.contentSize!,
+                pageSize: node.containerSize!,
+                node: node
+            )
+            XCTAssertEqual(proxy, _ScrollViewProxy(node: node))
+            var completions: [Bool] = []
+
+            proxy.setContentOffset(CGPoint(x: 0, y: 180), animated: false) {
+                completions.append($0)
+            }
+            XCTAssertEqual(proxy.contentOffset, CGPoint(x: 0, y: 180))
+            XCTAssertEqual(offset.value, CGPoint(x: 0, y: 180))
+            XCTAssertEqual(completions, [false])
+
+            proxy.setContentOffset(CGPoint(x: 0, y: 180), animated: false) {
+                completions.append($0)
+            }
+            XCTAssertEqual(completions, [false, true])
+
+            proxy.setContentOffset(CGPoint(x: 0, y: 300), animated: true) {
+                completions.append($0)
+            }
+            guard case .decelerating(let state) = node.behavior.phase else {
+                XCTFail("expected animated proxy commit to enter deceleration")
+                return
+            }
+            XCTAssertEqual(state.targetOffset, CGPoint(x: 0, y: 300))
+            XCTAssertEqual(completions, [false, true])
+
+            proxy.setContentOffset(CGPoint(x: 0, y: 200), animated: false) {
+                completions.append($0)
+            }
+            XCTAssertEqual(proxy.contentOffset, CGPoint(x: 0, y: 200))
+            XCTAssertEqual(offset.value, CGPoint(x: 0, y: 200))
+            XCTAssertEqual(completions, [false, true, false, false])
+        }
+    }
+
+    func testScrollGestureWheelPhaseSelectionMatchesSwiftUIBranching() {
+        let panValue = PanGesture.Value(
+            timestamp: Time(seconds: 1),
+            translation: CGSize(width: 4, height: 8),
+            touchType: .indirect,
+            velocity: _Velocity(valuePerSecond: CGSize(width: 40, height: 80))
+        )
+        let wheel = WheelEvent(
+            timestamp: Time(seconds: 2),
+            phase: .moved,
+            binding: nil,
+            offset: 12
+        )
+
+        XCTAssertEqual(
+            ScrollGesture.selectPhase(
+                pan: .active(panValue),
+                wheel: .possible(nil)
+            ),
+            .active(.pan(panValue))
+        )
+        XCTAssertEqual(
+            ScrollGesture.selectPhase(
+                pan: .failed,
+                wheel: .possible(wheel)
+            ),
+            .possible(.wheel(CGSize(width: 0, height: -12)))
+        )
+        XCTAssertEqual(
+            ScrollGesture.selectPhase(
+                pan: .failed,
+                wheel: .active(wheel)
+            ),
+            .active(.wheel(CGSize(width: 0, height: -12)))
+        )
+        XCTAssertEqual(
+            ScrollGesture.selectPhase(
+                pan: .failed,
+                wheel: .ended(wheel)
+            ),
+            .ended(.wheel(CGSize(width: 0, height: -12)))
+        )
+        XCTAssertEqual(
+            ScrollGesture.selectPhase(
+                pan: .ended(panValue),
+                wheel: .failed
+            ),
+            .ended(.pan(panValue))
+        )
+    }
+
+    func testScrollViewGestureDispatchTracksDragAndStartsDeceleration() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let initial = CGPoint(x: 0, y: 100)
+            let offset = graph.makeInput(value: initial)
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: offset,
+                config: _ScrollViewConfig(),
+                pixelLength: graph.makeInput(value: CGFloat(1))
+            )
+            node.isInitialized = true
+            node.modelOffset = initial
+            node.presentationOffset = initial
+            node.containerSize = CGSize(width: 200, height: 100)
+            node.contentSize = CGSize(width: 200, height: 800)
+            let proxy = _ScrollViewProxy(
+                config: node.config,
+                contentOffset: initial,
+                contentSize: node.contentSize!,
+                pageSize: node.containerSize!,
+                node: node
+            )
+            let active = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: 0, height: -30),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
+            )
+
+            proxy._dispatchScrollGesturePhase(.active(.pan(active)))
+
+            XCTAssertTrue(proxy.isDragging)
+            XCTAssertFalse(proxy.isDecelerating)
+            XCTAssertFalse(proxy.isScrollingHorizontally)
+            XCTAssertTrue(proxy.isScrollingVertically)
+            XCTAssertEqual(node.presentationOffset, CGPoint(x: 0, y: 130))
+            XCTAssertEqual(node.modelOffset, CGPoint(x: 0, y: 130))
+            XCTAssertEqual(offset.value, CGPoint(x: 0, y: 130))
+
+            proxy._dispatchScrollGesturePhase(.ended(.pan(active)))
+
+            XCTAssertFalse(proxy.isDragging)
+            XCTAssertTrue(proxy.isDecelerating)
+            guard case .decelerating(let deceleration) = node.behavior.phase else {
+                XCTFail("expected terminal pan to start deceleration")
+                return
+            }
+            XCTAssertNotNil(deceleration.targetOffset)
+            XCTAssertEqual(
+                deceleration.simulation.velocity.valuePerSecond.height,
+                300,
+                accuracy: 0.001
+            )
+        }
+    }
+
+    func testScrollViewGestureTerminalUsesContentProviderDecelerationTarget() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var config = _ScrollViewConfig()
+            config.contentInsets = EdgeInsets(
+                top: 10,
+                leading: 20,
+                bottom: 30,
+                trailing: 40
+            )
+            let offset = graph.makeInput(value: CGPoint(x: 50, y: 60))
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: offset,
+                config: config,
+                pixelLength: graph.makeInput(value: CGFloat(1))
+            )
+            node.isInitialized = true
+            node.modelOffset = CGPoint(x: 50, y: 60)
+            node.presentationOffset = CGPoint(x: 50, y: 60)
+            node.containerSize = CGSize(width: 300, height: 200)
+            node.contentSize = CGSize(width: 1_000, height: 800)
+
+            var calls: [(CGPoint, CGPoint, CGSize, CGSize)] = []
+            node.decelerationTarget = { current, original, velocity, size in
+                calls.append((current, original, velocity.valuePerSecond, size))
+                return CGPoint(x: 400, y: 500)
+            }
+            let proxy = _ScrollViewProxy(node: node)
+            let active = PanGesture.Value(
+                timestamp: Time(seconds: 1),
+                translation: CGSize(width: -30, height: -40),
+                touchType: .indirect,
+                velocity: _Velocity(valuePerSecond: CGSize(width: -200, height: -300))
+            )
+
+            proxy._dispatchScrollGesturePhase(.active(.pan(active)))
+            proxy._dispatchScrollGesturePhase(.ended(.pan(active)))
+
+            XCTAssertEqual(calls.count, 1)
+            XCTAssertEqual(calls[0].0, CGPoint(x: 80, y: 100))
+            XCTAssertEqual(calls[0].1, CGPoint(x: 50, y: 60))
+            XCTAssertEqual(calls[0].2, CGSize(width: -200, height: -300))
+            XCTAssertEqual(calls[0].3, CGSize(width: 240, height: 160))
+            guard case .decelerating(let state) = node.behavior.phase else {
+                return XCTFail("expected provider target to start deceleration")
+            }
+            XCTAssertEqual(state.targetOffset, CGPoint(x: 400, y: 500))
+        }
+    }
+
+    func testScrollViewProxyAnimatedCommitSeparatesBindingAndPresentationUntilCompletion() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var bindingValue = CGPoint(x: 0, y: 490)
+            let binding = Binding<CGPoint>(
+                get: { bindingValue },
+                set: { value, _ in bindingValue = value }
+            )
+            var config = _ScrollViewConfig()
+            config.contentOffset = .binding(binding)
+            let offset = graph.makeInput(value: bindingValue)
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: offset,
+                config: config,
+                pixelLength: graph.makeInput(value: CGFloat(1))
+            )
+            node.isInitialized = true
+            node.containerSize = CGSize(width: 240, height: 140)
+            node.contentSize = CGSize(width: 240, height: 2_720)
+            node.modelOffset = bindingValue
+            node.presentationOffset = bindingValue
+            let proxy = _ScrollViewProxy(node: node)
+            var completions: [Bool] = []
+
+            proxy.setContentOffset(CGPoint(x: 0, y: 900), animated: true) {
+                completions.append($0)
+            }
+
+            XCTAssertEqual(bindingValue, CGPoint(x: 0, y: 900))
+            XCTAssertEqual(node.modelOffset, CGPoint(x: 0, y: 900))
+            XCTAssertEqual(node.presentationOffset, CGPoint(x: 0, y: 490))
+            XCTAssertTrue(completions.isEmpty)
+
+            guard case .decelerating(let state) = node.behavior.phase,
+                  let beginTime = state.beginTime else {
+                return XCTFail("expected a time-based animated proxy commit")
+            }
+
+            var maxPresentationY = node.presentationOffset.y
+            var completionElapsed: Double?
+            for step in 1...60 {
+                var behavior = node.behavior
+                var presentation = node.presentationOffset
+                let elapsed = Double(step) * 0.05
+                _ = behavior.iterateDeceleration(
+                    node: node,
+                    time: Time(seconds: beginTime.seconds + elapsed),
+                    offset: &presentation,
+                    estimatedTarget: nil
+                )
+                node.behavior = behavior
+                node.presentationOffset = presentation
+                maxPresentationY = max(maxPresentationY, presentation.y)
+                if completionElapsed == nil, !completions.isEmpty {
+                    completionElapsed = elapsed
+                }
+            }
+
+            XCTAssertEqual(node.presentationOffset.y, 900, accuracy: 0.001)
+            XCTAssertGreaterThan(maxPresentationY, 900)
+            XCTAssertEqual(completions, [true])
+            XCTAssertGreaterThanOrEqual(completionElapsed ?? 0, 0.5)
+            XCTAssertLessThanOrEqual(completionElapsed ?? .infinity, 1.5)
+        }
+    }
+
+    func testScrollViewProxyLiveDragRejectsProgrammaticOffset() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let offset = graph.makeInput(value: CGPoint(x: 20, y: 30))
+            let pixelLength = graph.makeInput(value: CGFloat(1))
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: offset,
+                config: _ScrollViewConfig(),
+                pixelLength: pixelLength
+            )
+            node.isInitialized = true
+            node.containerSize = CGSize(width: 100, height: 80)
+            node.contentSize = CGSize(width: 300, height: 500)
+            node.behavior.phase = .dragging(ScrollViewBehavior.DragState(
+                offset: CGPoint(x: 20, y: 30),
+                beganOffset: CGPoint(x: 20, y: 30),
+                translation: .zero,
+                velocity: _Velocity(valuePerSecond: .zero),
+                scrollingVertically: false,
+                scrollingHorizontally: false,
+                ended: false
+            ))
+            let proxy = _ScrollViewProxy(node: node)
+            var completions: [Bool] = []
+
+            proxy.setContentOffset(CGPoint(x: 70, y: 90), animated: false) {
+                completions.append($0)
+            }
+
+            XCTAssertEqual(node.modelOffset, CGPoint(x: 20, y: 30))
+            XCTAssertEqual(node.presentationOffset, CGPoint(x: 20, y: 30))
+            XCTAssertEqual(offset.value, CGPoint(x: 20, y: 30))
+            XCTAssertEqual(completions, [false])
+        }
+    }
+
     func testScrollViewMainContentSizeChangeClampsContentOffset() throws {
         let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
