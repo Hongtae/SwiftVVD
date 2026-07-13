@@ -547,12 +547,16 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         // geometry (e.g. during animations). Fall back to snapshot copies otherwise.
         let sourceGraph = rendererHost?.viewGraph.data.graph
         var localViewInputs = responder.inputs
-        if let tAttr = responder.transformAttr, let sAttr = responder.sizeAttr,
+        if let tAttr = responder.transformAttr,
+           let pAttr = responder.positionAttr,
+           let sAttr = responder.sizeAttr,
            let sourceGraph {
             localViewInputs.transform = graph.makeCrossGraphRef(source: tAttr, in: sourceGraph)
+            localViewInputs.position  = graph.makeCrossGraphRef(source: pAttr, in: sourceGraph)
             localViewInputs.size      = graph.makeCrossGraphRef(source: sAttr, in: sourceGraph)
         } else {
             localViewInputs.transform = graph.makeInput(value: responder.snapshotTransform)
+            localViewInputs.position  = graph.makeInput(value: responder.snapshotPosition)
             localViewInputs.size      = graph.makeInput(value: responder.snapshotSize)
         }
         localViewInputs.base.time = timeAttr
@@ -689,11 +693,84 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         }
     }
 
-    /// Delivers the current batch to the responder-local inputs of active sessions.
-    private func publishEvents(to sessions: [ActiveGestureSession]) {
+    private func priorityOrdered(
+        _ sessions: [ActiveGestureSession]
+    ) -> [ActiveGestureSession] {
+        var remaining = sessions
+        var ordered: [ActiveGestureSession] = []
+        ordered.reserveCapacity(sessions.count)
+        while !remaining.isEmpty {
+            let index = remaining.firstIndex { candidate in
+                guard let candidateResponder = candidate.responder as? any ViewResponder else {
+                    return true
+                }
+                return !remaining.contains { other in
+                    guard other !== candidate,
+                          let otherResponder = other.responder else { return false }
+                    return otherResponder.isPrioritized(
+                        over: candidateResponder,
+                        otherExclusionPolicy: candidate.responder?.exclusionPolicy ?? .default
+                    )
+                }
+            } ?? remaining.startIndex
+            ordered.append(remaining.remove(at: index))
+        }
+        return ordered
+    }
+
+    private func cancelSession(
+        _ session: ActiveGestureSession,
+        for eventID: EventID
+    ) {
+        var cancelledEvents = currentEvents
+        cancelledEvents.removeValue(forKey: eventID)
+        session.eventsAttr.setValue(cancelledEvents)
+        if session.isTerminal {
+            finishTerminalSession(session)
+        } else {
+            teardownSessionTree(session)
+        }
+    }
+
+    /// Publishes one physical stream in recognizer-priority order. A successful
+    /// terminal recognizer prevents lower-priority peers before they consume the
+    /// same terminal sample. Continuous active-session prevention remains a
+    /// separate recognition-state boundary.
+    private func publishEventsWithTerminalArbitration() {
         var published: Set<AGAttribute> = []
-        for session in sessions where published.insert(session.eventsAttr.identifier).inserted {
-            session.eventsAttr.setValue(currentEvents)
+        for eventID in Array(activeSessions.keys) {
+            guard let sessions = activeSessions[eventID] else { continue }
+            let ordered = priorityOrdered(sessions)
+            var prevented: Set<ObjectIdentifier> = []
+
+            for session in ordered {
+                let sessionID = ObjectIdentifier(session)
+                guard !prevented.contains(sessionID) else { continue }
+                if published.insert(session.eventsAttr.identifier).inserted {
+                    session.eventsAttr.setValue(currentEvents)
+                }
+                guard case .ended = session.phase,
+                      let winner = session.responder else { continue }
+
+                for other in ordered where other !== session {
+                    let otherID = ObjectIdentifier(other)
+                    guard !prevented.contains(otherID),
+                          let otherResponder = other.responder as? any ViewResponder,
+                          winner.canPrevent(
+                            otherResponder,
+                            otherExclusionPolicy: other.responder?.exclusionPolicy ?? .default
+                          ) else { continue }
+                    cancelSession(other, for: eventID)
+                    prevented.insert(otherID)
+                }
+            }
+
+            let survivors = ordered.filter { !prevented.contains(ObjectIdentifier($0)) }
+            if survivors.isEmpty {
+                activeSessions.removeValue(forKey: eventID)
+            } else {
+                activeSessions[eventID] = survivors
+            }
         }
     }
 
@@ -794,68 +871,57 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             // Sessions must be wired BEFORE publishing so gesture nodes are ready.
             for (eventID, event) in events where activeSessions[eventID] == nil {
                 guard event.eventPhase == .began else { continue }
-                let responders: [any AnyGestureResponder]
                 let candidates: [any AnyGestureResponder]
                 if let boundEvent = event as? any ResponderBoundEvent,
                    let binding = boundEvent.binding,
                    let responder = binding.responder as? any AnyGestureResponder,
                    responder.accepts(eventType: eventID.type) {
-                    responders = [responder]
-                    candidates = responders
+                    candidates = [responder]
                 } else if let location = event.location {
                     candidates = hitTestCandidateResponders(
                         at: location,
                         accepting: eventID.type
                     )
-                    responders = selectHitResponders(from: candidates)
                 } else {
-                    responders = []
                     candidates = []
                 }
-                guard !responders.isEmpty else { continue }
-                var sessions: [ActiveGestureSession] = []
-                for responder in responders {
+                guard !candidates.isEmpty else { continue }
+                var candidateSessions: [ActiveGestureSession] = []
+                candidateSessions.reserveCapacity(candidates.count)
+                for responder in candidates {
                     let session = sessionContinuing(for: responder) ?? createSession(for: responder)
                     if session.beganEvents.isEmpty {
                         session.beganEvents = events
                     }
-                    sessions.append(session)
+                    candidateSessions.append(session)
                 }
 
                 // A recognizer host delays a lower tap-count recognizer through
                 // a failure relation. Raw-event hosts keep the same recognizer
                 // dormant and replay the retained input only if the selected
                 // recognizer later fails.
-                let selectedIDs = Set(responders.map { ObjectIdentifier($0) })
-                for candidate in candidates where !selectedIDs.contains(ObjectIdentifier(candidate)) {
-                    let alreadyWaiting = sessions.contains { session in
-                        session.failureFallbacks.contains { fallback in
-                            guard let fallbackResponder = fallback.responder else { return false }
-                            return fallbackResponder === candidate
-                        }
-                    }
-                    guard !alreadyWaiting else {
-                        continue
-                    }
-                    let fallback = createSession(for: candidate)
-                    if let owner = sessions.first(where: { selected in
-                        guard let selectedResponder = selected.responder else { return false }
-                        return candidate.shouldRequireFailure(of: selectedResponder)
-                    }) {
-                        fallback.beganEvents = events
-                        owner.failureFallbacks.append(fallback)
-                    } else {
-                        teardownSessionTree(fallback)
-                    }
+                var waiting: Set<ObjectIdentifier> = []
+                for fallback in candidateSessions {
+                    guard let candidate = fallback.responder,
+                          let owner = candidateSessions.first(where: { selected in
+                            guard selected !== fallback,
+                                  let selectedResponder = selected.responder else { return false }
+                            return candidate.shouldRequireFailure(of: selectedResponder)
+                          }) else { continue }
+                    owner.failureFallbacks.append(fallback)
+                    waiting.insert(ObjectIdentifier(fallback))
+                }
+                let sessions = candidateSessions.filter {
+                    !waiting.contains(ObjectIdentifier($0))
                 }
                 activeSessions[eventID] = sessions
                 eventBindingManager.rebindEvent(eventID, to: rootResponder as ResponderNode?)
             }
 
-            // Publish only to recognizers selected for this event. Failure
-            // fallbacks remain dormant until the preferred recognizer fails.
+            // Publish to independent recognizers while keeping explicit failure
+            // fallbacks dormant until the preferred recognizer fails.
             currentEvents = events
-            publishEvents(to: activeSessions.values.flatMap { $0 })
+            publishEventsWithTerminalArbitration()
 
             // Session lifecycle after publishing.
             // For .ended/.cancelled: evaluate gesture chains first so dispatch() fires.
@@ -898,8 +964,10 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             func refresh(_ responder: any ViewResponder) {
                 if let gesture = responder as? any AnyGestureResponder,
                    let transformAttr = gesture.transformAttr,
+                   let positionAttr = gesture.positionAttr,
                    let sizeAttr = gesture.sizeAttr {
                     gesture.snapshotTransform = transformAttr.value
+                    gesture.snapshotPosition = positionAttr.value
                     gesture.snapshotSize = sizeAttr.value
                 }
                 if let multi = responder as? MultiViewResponder {

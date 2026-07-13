@@ -222,7 +222,8 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
 
     mutating func updateValue() {
         let currentModifier = modifierAttr.value
-        if _responder == nil {
+        let isInitialEvaluation = _responder == nil
+        if isInitialEvaluation {
             // First evaluation: create the GestureResponder inside the dedicated subgraph.
             // The responder is born in ViewGraph's AG context (GestureFilter runs in ViewGraph's AG).
             AGSubgraph.withCurrent(subgraph) {
@@ -234,27 +235,34 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
                     inputs: viewInputs
                 )
             }
-            _AGGraph.setStatefulOutput([_responder!])
+        }
+        guard let responder = _responder else {
+            fatalError("GestureFilter failed to create its gesture responder")
+        }
+        if isInitialEvaluation {
+            _AGGraph.setStatefulOutput([responder])
         } else {
             // Subsequent evaluation: modifier may have changed.
             // Update the snapshot and flag the gesture chain for rebuild.
-            _responder!.currentModifier = currentModifier
-            _responder!.needsRebuild = true
+            responder.currentModifier = currentModifier
+            responder.needsRebuild = true
         }
         // Refresh geometry snapshots (used for synchronous hit-testing in GestureGraph context).
         // Also store the raw ViewGraph AG attributes so createSession can wire cross-graph refs
         // and gesture coordinate-transform nodes read the latest ViewGraph geometry.
-        _responder!.snapshotTransform = viewInputs.transform.value
-        _responder!.snapshotSize = viewInputs.size.value
-        _responder!.snapshotPreferenceKeys = viewInputs.preferences.hostKeys.value
-        _responder!.transformAttr = viewInputs.transform
-        _responder!.sizeAttr = viewInputs.size
-        _responder!.mask = currentModifier.gestureMask
+        responder.snapshotTransform = viewInputs.transform.value
+        responder.snapshotSize = viewInputs.size.value
+        responder.snapshotPosition = viewInputs.position.value
+        responder.snapshotPreferenceKeys = viewInputs.preferences.hostKeys.value
+        responder.transformAttr = viewInputs.transform
+        responder.sizeAttr = viewInputs.size
+        responder.positionAttr = viewInputs.position
+        responder.mask = currentModifier.gestureMask
         let innerResponders = innerRespondersAttr.value
-        _responder!.responders = innerResponders
+        responder.responders = innerResponders
         // Wire nextResponder so that isDescendant() can traverse the chain upward.
         for r in innerResponders where r.nextResponder == nil {
-            r.nextResponder = _responder!
+            r.nextResponder = responder
         }
     }
 }

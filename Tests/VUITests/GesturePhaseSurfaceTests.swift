@@ -353,9 +353,11 @@ private final class ArbitrationTestResponder: ResponderNode, ViewResponder, AnyG
     let gestureGraph: GestureGraph
     var transformAttr: Attribute<ViewTransform>?
     var sizeAttr: Attribute<ViewSize>?
+    var positionAttr: Attribute<CGPoint>?
     var needsRebuild = false
     var snapshotTransform: ViewTransform = .identity
     var snapshotSize = ViewSize(.zero)
+    var snapshotPosition: CGPoint = .zero
     var snapshotPreferenceKeys = PreferenceKeys()
 
     init(

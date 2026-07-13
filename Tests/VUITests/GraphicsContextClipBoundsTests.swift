@@ -407,6 +407,76 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertEqual(pixel(x: 0, y: 0), [0, 0, 255, 255])
     }
 
+    func testIncompatibleMaskCoverageKeepsSourcePixelsOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let width = 80
+        let height = 80
+        let maskBounds = CGRect(x: 10, y: 15, width: 30, height: 20)
+        let contentBounds = CGRect(x: 0, y: 0, width: width, height: height)
+
+        func shapeList(path: Path, bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: path,
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let sourceMask = shapeList(
+            path: Path(maskBounds),
+            bounds: maskBounds,
+            color: .white
+        )
+        let targetMask = shapeList(
+            path: Path(ellipseIn: maskBounds),
+            bounds: maskBounds,
+            color: .white
+        )
+        let contents = shapeList(
+            path: Path(contentBounds),
+            bounds: contentBounds,
+            color: VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+        )
+        let sampled = RBDisplayListInterpolator(
+            from: .effect(.mask(sourceMask, []), contents: contents),
+            to: .effect(.mask(targetMask, []), contents: contents)
+        ).copyContents(withProgress: 0.5)
+
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(
+            GraphicsContext(
+                sceneResources: SceneResources(),
+                environment: EnvironmentValues(),
+                viewport: contentBounds,
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: contentBounds.size,
+                commandBuffer: commandBuffer
+            )
+        )
+        context.clear(with: .clear)
+        sampled.draw(in: context)
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(deviceContext.makeCPUAccessible(texture: context.backdrop))
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(start: pointer, count: width * height * 4)
+        func pixel(x: Int, y: Int) -> [UInt8] {
+            let offset = (y * width + x) * 4
+            return Array(bytes[offset..<(offset + 4)])
+        }
+
+        XCTAssertEqual(pixel(x: 25, y: 25), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(x: 11, y: 16), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(x: 0, y: 0), [0, 0, 0, 0])
+    }
+
     func testDisplayListItemOpacityAppliesAtRendererAndImmediateReplayBoundaries() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

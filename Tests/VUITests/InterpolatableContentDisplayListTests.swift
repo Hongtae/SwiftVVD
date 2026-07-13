@@ -2368,6 +2368,58 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(effect.contents.interpolationBounds, contentBounds)
     }
 
+    func testRBDisplayListInterpolatorKeepsSourceMaskForIncompatibleCoverageFamily() throws {
+        let maskBounds = CGRect(x: 10, y: 15, width: 30, height: 20)
+        let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(path: Path, bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: path,
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let sourceMask = shapeList(
+            path: Path(maskBounds),
+            bounds: maskBounds,
+            color: .white
+        )
+        let targetMask = shapeList(
+            path: Path(ellipseIn: maskBounds),
+            bounds: maskBounds,
+            color: .white
+        )
+        let contents = shapeList(
+            path: Path(contentBounds),
+            bounds: contentBounds,
+            color: .red
+        )
+        let interpolator = RBDisplayListInterpolator(
+            from: .effect(.mask(sourceMask, []), contents: contents),
+            to: .effect(.mask(targetMask, []), contents: contents)
+        )
+
+        for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+            XCTAssertEqual(interpolator.boundingRect(withProgress: progress), maskBounds)
+            let sampled = interpolator.copyContents(withProgress: progress)
+            let effect = try XCTUnwrap(sampled.effects.first)
+            guard case let .mask(mask, options) = effect.effect else {
+                return XCTFail("incompatible child coverage should remain a mask effect")
+            }
+            XCTAssertEqual(options.rawValue, 0)
+            XCTAssertEqual(mask.items.count, 1)
+            guard case let .content(maskContent) = try XCTUnwrap(mask.items.first).value,
+                  case let .shape(maskShape) = maskContent.value else {
+                return XCTFail("incompatible child coverage should retain the source shape")
+            }
+            XCTAssertEqual(maskShape.path, Path(maskBounds))
+        }
+    }
+
     func testRBDisplayListInterpolatorMergesSameMaskAcrossDifferentModes() throws {
         let maskBounds = CGRect(x: 10, y: 15, width: 30, height: 20)
         let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)

@@ -1964,16 +1964,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             if case let .mask(sourceMask, sourceOptions) = source.effect,
                case let .mask(targetMask, targetOptions) = target.effect {
                 if sourceOptions.rawValue == targetOptions.rawValue {
+                    let mask = preservesSourceMaskForIncompatibleCoverageFamily(
+                        from: sourceMask,
+                        to: targetMask
+                    ) ? sourceMask : interpolatedContents(
+                        from: sourceMask,
+                        to: targetMask,
+                        progress: progress,
+                        transition: transition
+                    )
                     contents.appendEffect(
-                        .mask(
-                            interpolatedContents(
-                                from: sourceMask,
-                                to: targetMask,
-                                progress: progress,
-                                transition: transition
-                            ),
-                            sourceOptions
-                        ),
+                        .mask(mask, sourceOptions),
                         contents: interpolatedContents(
                             from: source.contents,
                             to: target.contents,
@@ -2313,6 +2314,55 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) -> Bool {
         source.hasSameInterpolationSurface(as: target) ||
             canMaterializeInterpolatedContents(from: source, to: target)
+    }
+
+    // A single incompatible coverage pair remains source-owned for the
+    // interpolator lifetime instead of becoming a child-mask cross-fade.
+    private static func preservesSourceMaskForIncompatibleCoverageFamily(
+        from source: DisplayList,
+        to target: DisplayList
+    ) -> Bool {
+        guard source.effects.isEmpty,
+              target.effects.isEmpty,
+              source.renderItems.count == 1,
+              target.renderItems.count == 1,
+              source.itemCommands.count == 1,
+              target.itemCommands.count == 1,
+              case let .shape(
+                sourceRole,
+                .some(.color(sourceColor)),
+                sourceFillStyle,
+                sourceStrokeStyle,
+                sourceBounds
+              ) = source.itemCommands[0],
+              case let .shape(
+                targetRole,
+                .some(.color(targetColor)),
+                targetFillStyle,
+                targetStrokeStyle,
+                targetBounds
+              ) = target.itemCommands[0],
+              sourceRole == targetRole,
+              sourceColor == targetColor,
+              sourceFillStyle == targetFillStyle,
+              sourceStrokeStyle == targetStrokeStyle,
+              sourceBounds == targetBounds,
+              case let .content(sourceContent) = source.renderItems[0].value,
+              case let .shape(sourceShape) = sourceContent.value,
+              case let .content(targetContent) = target.renderItems[0].value,
+              case let .shape(targetShape) = targetContent.value,
+              sameSingleColor(sourceShape.shading, sourceColor),
+              sameSingleColor(targetShape.shading, targetColor),
+              sourceShape.fillStyle == targetShape.fillStyle,
+              sourceShape.strokeStyle == targetShape.strokeStyle,
+              sourceShape.transform == targetShape.transform else {
+            return false
+        }
+        return interpolatedPath(
+            from: sourceShape.path,
+            to: targetShape.path,
+            progress: 0.5
+        ) == nil
     }
 
     private static func interpolatedRecordedItemBounds(

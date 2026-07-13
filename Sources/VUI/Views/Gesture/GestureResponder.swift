@@ -67,6 +67,9 @@ protocol AnyGestureResponder: AnyObject {
     /// ViewGraph AG attribute for the view's proposed size.
     var sizeAttr: Attribute<ViewSize>? { get set }
 
+    /// ViewGraph AG attribute for the view's placed position.
+    var positionAttr: Attribute<CGPoint>? { get set }
+
     /// Set to true when the modifier changes mid-life. makeWrappedGesture invalidates
     /// the old childSubgraph and rebuilds when this flag is set.
     var needsRebuild: Bool { get set }
@@ -76,6 +79,9 @@ protocol AnyGestureResponder: AnyObject {
 
     /// Snapshot of the view's proposed size (written by GestureFilter).
     var snapshotSize: ViewSize { get set }
+
+    /// Snapshot of the view's placed position (written by GestureFilter).
+    var snapshotPosition: CGPoint { get set }
 
     /// Snapshot of the gesture host's registered preference keys (written by GestureFilter).
     var snapshotPreferenceKeys: PreferenceKeys { get set }
@@ -803,6 +809,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
     var gestureGraph: GestureGraph
     var transformAttr: Attribute<ViewTransform>? = nil
     var sizeAttr: Attribute<ViewSize>? = nil
+    var positionAttr: Attribute<CGPoint>? = nil
 
     // Snapshot fields written by GestureFilter (ViewGraph AG context),
     // read by GestureGraph.createSession to construct GestureGraph-local input attrs.
@@ -819,6 +826,8 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
 
     /// Last-known proposed size (written by GestureFilter).
     var snapshotSize: ViewSize = ViewSize(.zero)
+
+    var snapshotPosition: CGPoint = .zero
 
     /// Last-known host preference keys (written by GestureFilter).
     var snapshotPreferenceKeys: PreferenceKeys = PreferenceKeys()

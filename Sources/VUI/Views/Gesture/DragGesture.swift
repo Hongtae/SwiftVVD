@@ -124,6 +124,7 @@ extension DragGesture: GestureEventTypeAccepting {
 ///   -> EventFilter<TappableEvent>       (event.button == .primary)
 ///   -> CoordinateSpaceGesture<TappableEvent>
 ///   -> StateContainerGesture<InternalState, TappableEvent, DragGesture.Value>
+///   -> DependentGesture<DragGesture.Value> (.pausedUntilFailed)
 struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
     var minimumDistance: CGFloat
     var coordinateSpace: CoordinateSpace
@@ -140,7 +141,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
         var isDragging: Bool = false
     }
 
-    typealias Body = ModifierGesture<
+    typealias RecognitionBody = ModifierGesture<
         StateContainerGesture<InternalState, TappableEvent, DragGesture.Value>,
         ModifierGesture<
             CoordinateSpaceGesture<TappableEvent>,
@@ -150,6 +151,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
             >
         >
     >
+    typealias Body = ModifierGesture<DependentGesture<DragGesture.Value>, RecognitionBody>
 
     var body: Body {
         let minDist = minimumDistance
@@ -158,7 +160,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
         let transform: (inout InternalState, GesturePhase<TappableEvent>) -> GesturePhase<DragGesture.Value> = {
             SpatialDragGesture.applyPhase(minimumDistance: minDist, allowedDirections: allowed, state: &$0, phase: $1)
         }
-        return ModifierGesture(
+        let recognitionBody = RecognitionBody(
             modifier: StateContainerGesture(
                 initialState: InternalState(),
                 transform: transform
@@ -171,6 +173,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
                 )
             )
         )
+        return recognitionBody.dependency(.pausedUntilFailed)
     }
 
     /// StateContainerGesture.transform closure.
@@ -221,7 +224,17 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
             )
             return .active(value)
         case .ended(let event):
-            guard let location = event.location else { return .failed }
+            guard state.isDragging else {
+                state.startLocation = .zero
+                state.currentLocation = .zero
+                return .failed
+            }
+            guard let location = event.location else {
+                state.isDragging = false
+                state.startLocation = .zero
+                state.currentLocation = .zero
+                return .failed
+            }
             let value = DragGesture.Value(
                 time: state.startTime,
                 location: location,
@@ -229,9 +242,13 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
                 _velocity: state.velocity
             )
             state.isDragging = false
+            state.startLocation = .zero
+            state.currentLocation = .zero
             return .ended(value)
         case .failed:
             state.isDragging = false
+            state.startLocation = .zero
+            state.currentLocation = .zero
             return .failed
         }
     }
