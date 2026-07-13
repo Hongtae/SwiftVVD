@@ -2,7 +2,7 @@
 //  File: RenderPass.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public enum RenderPassAttachmentLoadAction {
@@ -35,13 +35,15 @@ public struct RenderPassColorAttachmentDescriptor: RenderPassAttachmentDescripto
     public var storeAction: RenderPassAttachmentStoreAction
     public var resolveTarget: Texture?
 
-    public var clearColor: Color
+    // The attachment format defines how these already-prepared components are
+    // interpreted by the backend clear operation.
+    public var clearColor: AnyColor
 
     public init(renderTarget: Texture? = nil,
                 loadAction: RenderPassAttachmentLoadAction = .dontCare,
                 storeAction: RenderPassAttachmentStoreAction = .dontCare,
                 resolveTarget: Texture? = nil,
-                clearColor: Color = .clear) {
+                clearColor: AnyColor = .clear) {
         self.renderTarget = renderTarget
         self.loadAction = loadAction
         self.storeAction = storeAction

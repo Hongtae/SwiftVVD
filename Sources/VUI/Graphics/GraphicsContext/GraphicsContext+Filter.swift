@@ -374,7 +374,7 @@ extension GraphicsContext {
                                          textureFrame: CGRect,
                                          projectionTransform: ProjectionTransform,
                                          blendState: BlendState,
-                                         color: VVD.Color) -> Bool {
+                                         color: BackendColor) -> Bool {
 
         let invW = 1.0 / CGFloat(texture.width)
         let invH = 1.0 / CGFloat(texture.height)
@@ -440,7 +440,7 @@ extension GraphicsContext {
                                  textureFrame: CGRect,
                                  colorMatrix: ColorMatrix,
                                  blendState: BlendState,
-                                 color: VVD.Color) -> Bool {
+                                 color: BackendColor) -> Bool {
         let invW = 1.0 / CGFloat(texture.width)
         let invH = 1.0 / CGFloat(texture.height)
         let uvMinX = Float(textureFrame.minX * invW)
@@ -508,7 +508,7 @@ extension GraphicsContext {
                           options: BlurOptions,
                           blurPass: Int,
                           blendState: BlendState,
-                          color: VVD.Color) -> Bool {
+                          color: BackendColor) -> Bool {
         struct PushConstant {
             var resolution: Float2
             var direction: Float2

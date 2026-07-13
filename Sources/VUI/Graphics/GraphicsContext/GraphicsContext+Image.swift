@@ -100,7 +100,7 @@ extension GraphicsContext {
                                   textureFrame: CGRect,
                                   textureTransform: CGAffineTransform = .identity,
                                   blendState: BlendState,
-                                  color: VVD.Color) {
+                                  color: BackendColor) {
         let trans = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
@@ -137,14 +137,14 @@ extension GraphicsContext {
 }
 
 private extension GraphicsContext.ResolvedImage {
-    func premultipliedTintColor(in environment: EnvironmentValues) -> VVD.Color {
+    func premultipliedTintColor(in environment: EnvironmentValues) -> BackendColor {
         guard let shading,
               shading.properties.count == 1,
               case let .color(color) = shading.properties[0] else {
             return .white
         }
         let backendColor = color.backendColor(in: environment)
-        return VVD.Color(
+        return BackendColor(
             backendColor.r * backendColor.a,
             backendColor.g * backendColor.a,
             backendColor.b * backendColor.a,

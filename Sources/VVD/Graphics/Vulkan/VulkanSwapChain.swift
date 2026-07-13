@@ -2,7 +2,7 @@
 //  File: VulkanSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -593,7 +593,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             renderTarget: renderTarget,
             loadAction: .clear,
             storeAction: .store,
-            clearColor: Color(r: 0, g: 0, b: 0, a:0))
+            clearColor: .clear)
 
         self.renderPassDescriptor = RenderPassDescriptor(
             colorAttachments: [colorAttachment],

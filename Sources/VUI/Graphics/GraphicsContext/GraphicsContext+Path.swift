@@ -9,7 +9,7 @@ import Foundation
 import VVD
 
 @inline(__always)
-private func _premultipliedVertexColor(_ color: VVD.Color) -> Float4 {
+private func _premultipliedVertexColor(_ color: BackendColor) -> Float4 {
     let alpha = Float32(color.a)
     return (Float32(color.r) * alpha,
             Float32(color.g) * alpha,
@@ -852,7 +852,7 @@ extension GraphicsContext {
                 let gradientToViewportTransform = gradientTransform
                     .concatenating(self.viewTransform)
 
-                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: VVD.Color, c2: VVD.Color) in
+                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: BackendColor, c2: BackendColor) in
                     let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
                                          color: _premultipliedVertexColor(c1)),

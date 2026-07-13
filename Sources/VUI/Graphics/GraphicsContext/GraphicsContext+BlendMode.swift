@@ -65,7 +65,7 @@ extension GraphicsContext {
         //let blendResult = self.renderTargets.composited
 
         let opacity = opacity ?? self.opacity
-        let color = VVD.Color(white: opacity, opacity: opacity)
+        let color = BackendColor(white: opacity, opacity: opacity)
 
         if let renderPass = self.beginRenderPassCompositionTarget() {
             if self.encodeBlendTexturesCommand(renderPass: renderPass,
@@ -93,7 +93,7 @@ extension GraphicsContext {
                                     backdrop: Texture,
                                     textureFrame: CGRect,
                                     blendMode: BlendMode,
-                                    color: VVD.Color) -> Bool {
+                                    color: BackendColor) -> Bool {
         if source.dimensions != backdrop.dimensions {
             Log.error("GraphicsContext.encodeBlendTexturesCommand failed.")
             return false

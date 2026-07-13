@@ -1035,7 +1035,7 @@ extension GraphicsContext {
     func encodeDrawTextCommand(renderPass: RenderPass,
                                drawing: ResolvedText.Drawing,
                                transform: CGAffineTransform,
-                               color: VVD.Color,
+                               color: BackendColor,
                                colorGlyphs: Bool,
                                foregroundColor: Color? = nil,
                                filtersForegroundColor: Bool = false) {

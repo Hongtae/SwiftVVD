@@ -324,7 +324,12 @@ func loadModel(from path: String, shader: MaterialShaderMap? = nil, queue: Comma
     }
 
     if result == TG3_OK {
-        let defaultImage = Image(width: 1, height: 1, pixelFormat: .rgba8, content: Color(1, 0, 1, 1).rgba8)
+        let defaultImage = Image(
+            width: 1,
+            height: 1,
+            pixelFormat: .rgba8,
+            content: Color<SRGB>(1, 0, 1, 1).rgba8
+        )
         let defaultTexture = defaultImage.makeTexture(commandQueue: queue, usage: [.sampled, .storage])
         guard let defaultTexture else {
             Log.error("Image.makeTexture failed")
@@ -1071,7 +1076,7 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                 let material = Material(shaderMap: context.shader, name: "default")
                 material.defaultTexture = context.defaultTexture
                 material.defaultSampler = context.defaultSampler
-                material.properties[.baseColor] = .color(.white)
+                material.properties[.baseColor] = .color(Color<LinearSRGB>.white)
                 material.properties[.metallic] = .scalar(1.0)
                 material.properties[.roughness] = .scalar(1.0)
                 mesh.material = material

@@ -82,7 +82,9 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
         let item = SceneList.Item(windowKey: windowKey, kind: .main) {
             let wc = WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
             var cfg = wc.config
-            cfg.backgroundColor = VVD.Color(rgba8: (255, 255, 241, 255))
+            cfg.backgroundColor = BackendColor(
+                rgba8: .init(r: 255, g: 255, b: 241, a: 255)
+            )
             wc.config = cfg
             return wc
         }
@@ -93,4 +95,3 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
         return _SceneOutputs(preferences: outputs)
     }
 }
-

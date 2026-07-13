@@ -33,7 +33,9 @@ class WindowContext: @unchecked Sendable {
         var activeFrameInterval = 1.0 / 60.0
         var inactiveFrameInterval = 1.0 / 30.0
         var drawEveryFrames: Bool = true
-        var backgroundColor: VVD.Color = VVD.Color(rgba8: (255, 255, 241, 255))
+        var backgroundColor = BackendColor(
+            rgba8: .init(r: 255, g: 255, b: 241, a: 255)
+        )
         var drawDebugInfo: _DrawDebug.Info = []
     }
 
@@ -319,7 +321,7 @@ class WindowContext: @unchecked Sendable {
                     } else {
                         let clearColor = config.backgroundColor
                         if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                            renderPass.colorAttachments[0].clearColor = clearColor
+                            renderPass.colorAttachments[0].clearColor = clearColor.anyColor
                             renderPass.colorAttachments[0].loadAction = .clear
                             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
                                 encoder.endEncoding()

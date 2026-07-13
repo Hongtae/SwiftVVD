@@ -205,7 +205,7 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
                                                                 depth: 1)
             }
 
-            rp.colorAttachments[0].clearColor = .nonLinearMint
+            rp.colorAttachments[0].clearColor = AnyColor(Color<SRGB>.mint)
             rp.depthStencilAttachment.renderTarget = depthTexture
             rp.depthStencilAttachment.loadAction = .clear
             rp.depthStencilAttachment.storeAction = .dontCare

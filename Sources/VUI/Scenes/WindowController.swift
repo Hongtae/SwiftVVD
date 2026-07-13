@@ -1865,7 +1865,7 @@ class WindowController: WindowDelegate,
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
         context.contentsScale = sceneResources.contentScaleFactor
         // backgroundColor.opacity is 0.0-1.0. Treat >= 1.0 as fully opaque.
-        // backgroundColor is VVD.Color. .a is the alpha Scalar (0.0-1.0).
+        // The backend color alpha is stored as a normalized Scalar.
         context.opaqueBackground = (config.backgroundColor.a >= 1.0)
     }
 

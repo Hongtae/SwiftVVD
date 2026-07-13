@@ -42,7 +42,7 @@ extension GraphicsContext {
                     let makeVertex = { (x: Scalar, y: Scalar) in
                         _Vertex(position: Vector2(x, y).float2,
                                 texcoord: Vector2.zero.float2,
-                                color: VVD.Color.white.float4)
+                                color: BackendColor.white.float4)
                     }
                     let vertices: [_Vertex] = [
                         makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
@@ -252,7 +252,7 @@ extension GraphicsContext {
         opacity: Double,
         blendState: BlendState
     ) {
-        let color = VVD.Color(white: 1, opacity: opacity).float4
+        let color = BackendColor(white: 1, opacity: opacity).float4
         let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(
                 position: Vector2(x, y).float2,

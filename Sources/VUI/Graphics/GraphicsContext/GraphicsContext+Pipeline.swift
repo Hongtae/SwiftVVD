@@ -517,7 +517,7 @@ extension GraphicsContext {
     }
 
     func beginRenderPassBackdropTarget(clear: Bool = false,
-                                       clearColor: VVD.Color = .clear) -> RenderPass? {
+                                       clearColor: BackendColor = .clear) -> RenderPass? {
         let loadAction: RenderPassAttachmentLoadAction = clear ? .clear : .load
         return beginRenderPass(viewport: self.viewport,
                                renderTarget: self.renderTargets.backdrop,
@@ -530,7 +530,7 @@ extension GraphicsContext {
     func beginRenderPass(viewport: CGRect,
                          renderTarget: Texture,
                          loadAction: RenderPassAttachmentLoadAction,
-                         clearColor: VVD.Color,
+                         clearColor: BackendColor,
                          useStencil: Bool,
                          useMSAA: Bool) -> RenderPass? {
         let useMSAA = useMSAA && loadAction != .load
@@ -541,13 +541,13 @@ extension GraphicsContext {
                 loadAction: .clear,
                 storeAction: .dontCare,
                 resolveTarget: renderTarget,
-                clearColor: clearColor)
+                clearColor: clearColor.anyColor)
         } else {
             RenderPassColorAttachmentDescriptor(
                 renderTarget: renderTarget,
                 loadAction: loadAction,
                 storeAction: .store,
-                clearColor: clearColor)
+                clearColor: clearColor.anyColor)
         }
 
         var descriptor = RenderPassDescriptor(colorAttachments: [colorAttachment])
@@ -599,7 +599,7 @@ extension GraphicsContext {
                           sampleCount: sampleCount)
     }
 
-    func clear(with color: VVD.Color) {
+    func clear(with color: BackendColor) {
         if let renderPass = self.beginRenderPassBackdropTarget(
             clear: true,
             clearColor: color) {

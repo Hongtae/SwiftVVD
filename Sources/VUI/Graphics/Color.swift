@@ -8,6 +8,9 @@
 import Foundation
 import VVD
 
+// The current non-linear renderer consumes encoded sRGB components.
+typealias BackendColor = VVD.Color<VVD.SRGB>
+
 private struct ColorComponents: Hashable, Sendable {
     var colorSpace: Color.RGBColorSpace
     var red: Double
@@ -229,13 +232,13 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
     let provider: AnyColorBox
     public var description: String { provider.description }
 
-    var backendColor: VVD.Color {
+    var backendColor: BackendColor {
         backendColor(in: EnvironmentValues())
     }
 
-    func backendColor(in environment: EnvironmentValues) -> VVD.Color {
+    func backendColor(in environment: EnvironmentValues) -> BackendColor {
         let resolved = resolve(in: environment)
-        return VVD.Color(
+        return BackendColor(
             Double(resolved.red),
             Double(resolved.green),
             Double(resolved.blue),
