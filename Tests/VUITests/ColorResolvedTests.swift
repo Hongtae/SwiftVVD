@@ -2,6 +2,30 @@ import XCTest
 @testable import VUI
 
 final class ColorResolvedTests: XCTestCase {
+    private func environment(
+        _ scheme: ColorScheme,
+        contrast: ColorSchemeContrast = .standard
+    ) -> EnvironmentValues {
+        var environment = EnvironmentValues()
+        environment.colorScheme = scheme
+        environment._colorSchemeContrast = contrast
+        return environment
+    }
+
+    private func assertEncoded(
+        _ color: Color,
+        _ rgba: (Int, Int, Int, Int),
+        environment: EnvironmentValues,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let resolved = color.resolve(in: environment)
+        XCTAssertEqual(resolved.red, Float(rgba.0) / 255, accuracy: 0.000001, file: file, line: line)
+        XCTAssertEqual(resolved.green, Float(rgba.1) / 255, accuracy: 0.000001, file: file, line: line)
+        XCTAssertEqual(resolved.blue, Float(rgba.2) / 255, accuracy: 0.000001, file: file, line: line)
+        XCTAssertEqual(resolved.opacity, Float(rgba.3) / 255, accuracy: 0.000001, file: file, line: line)
+    }
+
     func testSRGBColorResolvesToLinearStorageAndPreservesSRGBAccessors() {
         let resolved = Color(
             .sRGB,
@@ -44,4 +68,217 @@ final class ColorResolvedTests: XCTestCase {
         XCTAssertEqual(color.backendColor.a, Double(resolved.opacity), accuracy: 0.000001)
     }
 
+    func testDisplayP3ResolvesThroughObservedLinearSRGBMatrix() {
+        let red = Color.Resolved(
+            colorSpace: .displayP3,
+            red: 1,
+            green: 0,
+            blue: 0,
+            opacity: 0.6
+        )
+        XCTAssertEqual(red.linearRed, 1.2249, accuracy: 0.000001)
+        XCTAssertEqual(red.linearGreen, -0.042, accuracy: 0.000001)
+        XCTAssertEqual(red.linearBlue, -0.0197, accuracy: 0.000001)
+        XCTAssertEqual(red.red, 1.0930507, accuracy: 0.000001)
+        XCTAssertEqual(red.green, -0.22658291, accuracy: 0.000001)
+        XCTAssertEqual(red.blue, -0.15040612, accuracy: 0.000001)
+
+        let sample = Color.Resolved(
+            colorSpace: .displayP3,
+            red: 0.25,
+            green: 0.5,
+            blue: 0.75,
+            opacity: 0.6
+        )
+        XCTAssertEqual(sample.linearRed, 0.014223073, accuracy: 0.000001)
+        XCTAssertEqual(sample.linearGreen, 0.22087269, accuracy: 0.000001)
+        XCTAssertEqual(sample.linearBlue, 0.5558506, accuracy: 0.000001)
+        XCTAssertEqual(sample.red, 0.12433555, accuracy: 0.000001)
+        XCTAssertEqual(sample.green, 0.5073132, accuracy: 0.000001)
+        XCTAssertEqual(sample.blue, 0.7710093, accuracy: 0.000001)
+
+        let backend = Color(
+            .displayP3,
+            red: 1,
+            green: 0,
+            blue: 0,
+            opacity: 0.6
+        ).backendColor
+        XCTAssertEqual(backend.r, Double(red.red), accuracy: 0.000001)
+        XCTAssertEqual(backend.g, Double(red.green), accuracy: 0.000001)
+        XCTAssertEqual(backend.b, Double(red.blue), accuracy: 0.000001)
+        XCTAssertEqual(backend.a, 0.6, accuracy: 0.000001)
+    }
+
+    func testExtendedRGBTransferFunctionsPreserveSign() {
+        let encoded = Color(
+            .sRGB,
+            red: -0.25,
+            green: 1.25,
+            blue: -1.5,
+            opacity: 0.6
+        ).resolve(in: EnvironmentValues())
+        XCTAssertEqual(encoded.linearRed, -0.05087609, accuracy: 0.000001)
+        XCTAssertEqual(encoded.linearGreen, 1.66594, accuracy: 0.000001)
+        XCTAssertEqual(encoded.linearBlue, -2.5371556, accuracy: 0.000001)
+        XCTAssertEqual(encoded.red, -0.25, accuracy: 0.000001)
+        XCTAssertEqual(encoded.green, 1.25, accuracy: 0.000001)
+        XCTAssertEqual(encoded.blue, -1.5, accuracy: 0.000001)
+
+        let linear = Color(
+            .sRGBLinear,
+            red: -0.25,
+            green: 1.25,
+            blue: -1.5,
+            opacity: 0.6
+        ).resolve(in: EnvironmentValues())
+        XCTAssertEqual(linear.red, -0.5370987, accuracy: 0.000001)
+        XCTAssertEqual(linear.green, 1.1027949, accuracy: 0.000001)
+        XCTAssertEqual(linear.blue, -1.1941764, accuracy: 0.000001)
+    }
+
+    func testHSBUsesSixSectorsWithoutClampingExtendedInputs() {
+        let sectorColors = [
+            Color(hue: 0, saturation: 1, brightness: 1),
+            Color(hue: 1.0 / 6.0, saturation: 1, brightness: 1),
+            Color(hue: 1.0 / 3.0, saturation: 1, brightness: 1),
+            Color(hue: 0.5, saturation: 1, brightness: 1),
+            Color(hue: 2.0 / 3.0, saturation: 1, brightness: 1),
+            Color(hue: 5.0 / 6.0, saturation: 1, brightness: 1),
+            Color(hue: 1, saturation: 1, brightness: 1),
+        ].map { $0.resolve(in: EnvironmentValues()) }
+        let expected: [(Float, Float, Float)] = [
+            (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 1, 1),
+            (0, 0, 1), (1, 0, 1), (1, 0, 0),
+        ]
+        for (resolved, expected) in zip(sectorColors, expected) {
+            XCTAssertEqual(resolved.red, expected.0, accuracy: 0.000001)
+            XCTAssertEqual(resolved.green, expected.1, accuracy: 0.000001)
+            XCTAssertEqual(resolved.blue, expected.2, accuracy: 0.000001)
+        }
+
+        let fractional = Color(
+            hue: 0.125,
+            saturation: 0.75,
+            brightness: 0.8,
+            opacity: 0.4
+        ).resolve(in: EnvironmentValues())
+        XCTAssertEqual(fractional.red, 0.8, accuracy: 0.000001)
+        XCTAssertEqual(fractional.green, 0.65, accuracy: 0.000001)
+        XCTAssertEqual(fractional.blue, 0.2, accuracy: 0.000001)
+        XCTAssertEqual(fractional.opacity, 0.4, accuracy: 0.000001)
+
+        let negativeHue = Color(
+            hue: -0.25,
+            saturation: 1,
+            brightness: 1
+        ).resolve(in: EnvironmentValues())
+        XCTAssertEqual(negativeHue.red, 1, accuracy: 0.000001)
+        XCTAssertEqual(negativeHue.green, 0, accuracy: 0.000001)
+        XCTAssertEqual(negativeHue.blue, 1.5, accuracy: 0.000001)
+
+        let extendedComponents = Color(
+            hue: 0.125,
+            saturation: 1.5,
+            brightness: -0.25,
+            opacity: 1.5
+        ).resolve(in: EnvironmentValues())
+        XCTAssertEqual(extendedComponents.red, -0.25, accuracy: 0.000001)
+        XCTAssertEqual(extendedComponents.green, -0.15625, accuracy: 0.000001)
+        XCTAssertEqual(extendedComponents.blue, 0.125, accuracy: 0.000001)
+        XCTAssertEqual(extendedComponents.opacity, 1.5, accuracy: 0.000001)
+    }
+
+    func testOpacityWrapsAndMultipliesBaseResolution() {
+        let base = Color(.sRGB, red: 0.2, green: 0.4, blue: 0.6, opacity: 0.4)
+        XCTAssertEqual(base.opacity(0.5).resolve(in: EnvironmentValues()).opacity, 0.2, accuracy: 0.000001)
+        XCTAssertEqual(base.opacity(-0.5).resolve(in: EnvironmentValues()).opacity, -0.2, accuracy: 0.000001)
+        XCTAssertEqual(base.opacity(1.5).resolve(in: EnvironmentValues()).opacity, 0.6, accuracy: 0.000001)
+        XCTAssertEqual(base.opacity(0.5).opacity(0.25).resolve(in: EnvironmentValues()).opacity, 0.05, accuracy: 0.000001)
+        XCTAssertEqual(base.opacity(0.5).description, "50% #33669966")
+        XCTAssertEqual(base.opacity(0.5).opacity(0.25).description, "25% 50% #33669966")
+    }
+
+    func testSystemColorsResolveBySchemeAndContrast() {
+        // ASSERTIONS colorRuntimeSemanticsObserved
+        let standardColors: [(Color, (Int, Int, Int), (Int, Int, Int))] = [
+            (.red, (255, 56, 60), (255, 66, 69)),
+            (.orange, (255, 141, 40), (255, 146, 48)),
+            (.yellow, (255, 204, 0), (255, 214, 0)),
+            (.green, (52, 199, 89), (48, 209, 88)),
+            (.mint, (0, 200, 179), (0, 218, 195)),
+            (.teal, (0, 195, 208), (0, 210, 224)),
+            (.cyan, (0, 192, 232), (60, 211, 254)),
+            (.blue, (0, 136, 255), (0, 145, 255)),
+            (.indigo, (97, 85, 245), (109, 124, 255)),
+            (.purple, (203, 48, 224), (219, 52, 242)),
+            (.pink, (255, 45, 85), (255, 55, 95)),
+            (.brown, (172, 127, 94), (183, 138, 102)),
+            (.gray, (142, 142, 147), (152, 152, 157)),
+        ]
+        for (color, light, dark) in standardColors {
+            assertEncoded(color, (light.0, light.1, light.2, 255), environment: environment(.light))
+            assertEncoded(color, (dark.0, dark.1, dark.2, 255), environment: environment(.dark))
+        }
+
+        let increasedColors: [(Color, (Int, Int, Int), (Int, Int, Int))] = [
+            (.red, (233, 21, 45), (255, 97, 101)),
+            (.orange, (197, 83, 0), (255, 160, 86)),
+            (.yellow, (161, 106, 0), (254, 223, 67)),
+            (.green, (0, 137, 50), (74, 217, 104)),
+            (.mint, (0, 133, 117), (84, 223, 203)),
+            (.teal, (0, 129, 152), (59, 221, 236)),
+            (.cyan, (0, 126, 174), (109, 217, 255)),
+            (.blue, (30, 110, 244), (92, 184, 255)),
+            (.indigo, (86, 74, 222), (167, 170, 255)),
+            (.purple, (176, 47, 194), (234, 141, 255)),
+            (.pink, (231, 18, 77), (255, 138, 196)),
+            (.brown, (149, 109, 81), (219, 166, 121)),
+            (.gray, (105, 105, 110), (152, 152, 157)),
+        ]
+        for (color, light, dark) in increasedColors {
+            assertEncoded(
+                color,
+                (light.0, light.1, light.2, 255),
+                environment: environment(.light, contrast: .increased)
+            )
+            assertEncoded(
+                color,
+                (dark.0, dark.1, dark.2, 255),
+                environment: environment(.dark, contrast: .increased)
+            )
+        }
+
+        assertEncoded(.primary, (0, 0, 0, 216), environment: environment(.light))
+        assertEncoded(.primary, (255, 255, 255, 216), environment: environment(.dark))
+        assertEncoded(.secondary, (0, 0, 0, 127), environment: environment(.light))
+        assertEncoded(.secondary, (255, 255, 255, 140), environment: environment(.dark))
+        assertEncoded(
+            .primary,
+            (0, 0, 0, 255),
+            environment: environment(.light, contrast: .increased)
+        )
+        assertEncoded(
+            .secondary,
+            (255, 255, 255, 178),
+            environment: environment(.dark, contrast: .increased)
+        )
+    }
+
+    func testColorAndResolvedDescriptionsUseObservedRepresentations() {
+        XCTAssertEqual(Color(.sRGB, red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6).description, "#4080BF99")
+        XCTAssertEqual(Color(.sRGBLinear, red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6).description, "#89BCE199")
+        XCTAssertEqual(
+            Color(.displayP3, red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6).description,
+            "DisplayP3(red: 0.25, green: 0.5, blue: 0.75, opacity: 0.6)"
+        )
+        XCTAssertEqual(Color.red.description, "red")
+        XCTAssertEqual(
+            Color(.sRGB, red: 0.2, green: 0.4, blue: 0.6, opacity: 0.4)
+                .opacity(0.5)
+                .resolve(in: EnvironmentValues())
+                .description,
+            "#33669933"
+        )
+    }
 }

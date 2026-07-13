@@ -72,7 +72,7 @@ extension GraphicsContext {
                                               textureFrame: textureFrame,
                                               textureTransform: textureTransform,
                                               blendState: .opaque,
-                                              color: image.premultipliedTintColor)
+                                              color: image.premultipliedTintColor(in: self.environment))
                 renderPass.end()
                 self.drawSource()
                 self.recordContentBounds(rect)
@@ -137,13 +137,13 @@ extension GraphicsContext {
 }
 
 private extension GraphicsContext.ResolvedImage {
-    var premultipliedTintColor: VVD.Color {
+    func premultipliedTintColor(in environment: EnvironmentValues) -> VVD.Color {
         guard let shading,
               shading.properties.count == 1,
               case let .color(color) = shading.properties[0] else {
             return .white
         }
-        let backendColor = color.backendColor
+        let backendColor = color.backendColor(in: environment)
         return VVD.Color(
             backendColor.r * backendColor.a,
             backendColor.g * backendColor.a,

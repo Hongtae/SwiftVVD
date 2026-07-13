@@ -13,6 +13,7 @@ extension GraphicsContext {
         enum FilterStyle {
             case projectionTransform(matrix: ProjectionTransform)
             case colorMatrix(matrix: ColorMatrix)
+            case colorMultiply(color: Color)
             case blur(radius: CGFloat, options: BlurOptions)
             case shadow(color: Color, radius: CGFloat, offset: CGPoint, blendMode: BlendMode, options: ShadowOptions)
         }
@@ -36,13 +37,7 @@ extension GraphicsContext {
         }
 
         public static func colorMultiply(_ color: Color) -> Filter {
-            let cc = color.backendColor
-            var cm = ColorMatrix.identity
-            cm.r1 = Float(cc.r)
-            cm.g2 = Float(cc.g)
-            cm.b3 = Float(cc.b)
-            cm.a4 = Float(cc.a)
-            return Filter(style: .colorMatrix(matrix: cm))
+            Filter(style: .colorMultiply(color: color))
         }
 
         public static func colorMatrix(_ matrix: ColorMatrix) -> Filter {
@@ -258,6 +253,31 @@ extension GraphicsContext {
             } else {
                 Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
             }
+        case let .colorMultiply(color):
+            let color = color.backendColor(in: self.environment)
+            var matrix = ColorMatrix.identity
+            matrix.r1 = Float(color.r)
+            matrix.g2 = Float(color.g)
+            matrix.b3 = Float(color.b)
+            matrix.a4 = Float(color.a)
+            if let renderPass = self.beginRenderPassCompositionTarget() {
+                if self.encodeColorMatrixFilter(
+                    renderPass: renderPass,
+                    frame: frame,
+                    texture: self.sourceTexture,
+                    textureFrame: texFrame,
+                    colorMatrix: matrix,
+                    blendState: .opaque,
+                    color: .white
+                ) {
+                    renderPass.end()
+                    self.renderTargets.switchSourceToComposited()
+                } else {
+                    Log.error("GraphicsContext.encodeColorMatrixFilter failed.")
+                }
+            } else {
+                Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
+            }
         case let .blur(radius, options):
             if radius < .ulpOfOne { break }
             for pass in 0..<(maxBlurIteration*2) {
@@ -284,7 +304,7 @@ extension GraphicsContext {
             }
         case let .shadow(color, radius, offset, blendMode, options):
             var colorMatrix = ColorMatrix.zero
-            let color = color.backendColor
+            let color = color.backendColor(in: self.environment)
             colorMatrix.a4 = Float(color.a) // alpha factor (multiply)
             colorMatrix.r5 = Float(color.r) // constant
             colorMatrix.g5 = Float(color.g) // constant

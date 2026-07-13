@@ -807,7 +807,7 @@ extension GraphicsContext {
                 let makeVertex = { (x: Scalar, y: Scalar) in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
-                            color: _premultipliedVertexColor(c.backendColor))
+                            color: _premultipliedVertexColor(c.backendColor(in: self.environment)))
                 }
                 vertices = [
                     makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
@@ -883,8 +883,8 @@ extension GraphicsContext {
                                 if loc2 + pos < minX { continue }
                                 addGradientBox(loc1 + pos,
                                                loc2 + pos,
-                                               s1.color.backendColor,
-                                               s2.color.backendColor)
+                                               s1.color.backendColor(in: self.environment),
+                                               s2.color.backendColor(in: self.environment))
                             }
                         } else {
                             for i in 0..<(stops.count-1) {
@@ -895,8 +895,8 @@ extension GraphicsContext {
                                 if s2.location + pos < minX { continue }
                                 addGradientBox(s1.location + pos,
                                                s2.location + pos,
-                                               s1.color.backendColor,
-                                               s2.color.backendColor)
+                                               s1.color.backendColor(in: self.environment),
+                                               s2.color.backendColor(in: self.environment))
                             }
                         }
                         pos += 1
@@ -912,8 +912,8 @@ extension GraphicsContext {
                             if s2.location + pos < minX { continue }
                             addGradientBox(s1.location + pos,
                                            s2.location + pos,
-                                           s1.color.backendColor,
-                                           s2.color.backendColor)
+                                           s1.color.backendColor(in: self.environment),
+                                           s2.color.backendColor(in: self.environment))
                         }
                         pos += 1
                     }
@@ -923,15 +923,18 @@ extension GraphicsContext {
                         let s2 = stops[i+1]
 
                         addGradientBox(s1.location, s2.location,
-                                       s1.color.backendColor, s2.color.backendColor)
+                                       s1.color.backendColor(in: self.environment),
+                                       s2.color.backendColor(in: self.environment))
                     }
                     if let first = stops.first, first.location > minX {
                         addGradientBox(minX, first.location,
-                                       first.color.backendColor, first.color.backendColor)
+                                       first.color.backendColor(in: self.environment),
+                                       first.color.backendColor(in: self.environment))
                     }
                     if let last = stops.last, last.location < maxX {
                         addGradientBox(last.location, maxX,
-                                       last.color.backendColor, last.color.backendColor)
+                                       last.color.backendColor(in: self.environment),
+                                       last.color.backendColor(in: self.environment))
                     }
                 }
             case let .radialGradient(gradient, center, startRadius, endRadius, options):
@@ -1012,7 +1015,9 @@ extension GraphicsContext {
                         for (i, p) in verts.enumerated() {
                             vertices.append(_Vertex(position: p.rotated(by: progress).applying(transform).float2,
                                                     texcoord: texCoord,
-                                                    color: _premultipliedVertexColor(colors[i].backendColor)))
+                                                    color: _premultipliedVertexColor(
+                                                        colors[i].backendColor(in: self.environment)
+                                                    )))
                         }
                         progress += step
                     }
@@ -1134,13 +1139,19 @@ extension GraphicsContext {
 
                     vertices.append(_Vertex(position: center.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(color1.backendColor)))
+                                            color: _premultipliedVertexColor(
+                                                color1.backendColor(in: self.environment)
+                                            )))
                     vertices.append(_Vertex(position: p0.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(color1.backendColor)))
+                                            color: _premultipliedVertexColor(
+                                                color1.backendColor(in: self.environment)
+                                            )))
                     vertices.append(_Vertex(position: p1.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(color2.backendColor)))
+                                            color: _premultipliedVertexColor(
+                                                color2.backendColor(in: self.environment)
+                                            )))
 
                     progress += step
                 }
