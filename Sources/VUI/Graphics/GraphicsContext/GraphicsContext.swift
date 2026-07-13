@@ -2,7 +2,7 @@
 //  File: GraphicsContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,15 @@ public struct GraphicsContext {
     public var opacity: Double
     public var blendMode: BlendMode
     public internal(set) var environment: EnvironmentValues
-    public var transform: CGAffineTransform
+    public var transform: CGAffineTransform {
+        didSet {
+            self.clipBoundingRect = Self.remappedClipBoundingRect(
+                self.clipBoundingRect,
+                from: oldValue,
+                to: self.transform
+            )
+        }
+    }
 
     // MARK: -
     var viewTransform: CGAffineTransform
@@ -46,6 +54,12 @@ public struct GraphicsContext {
 
     let bindingSet1: ShaderBindingSet // for 1-texture
     let bindingSet2: ShaderBindingSet // for 2-textures
+    // Value copies share this reference so nonmutating draw calls accumulate visible content bounds.
+    let contentBoundsState: ContentBoundsState
+
+    final class ContentBoundsState {
+        var bounds: CGRect = .null
+    }
 
     init?(sceneResources: SceneResources,
           environment: EnvironmentValues,
@@ -69,10 +83,12 @@ public struct GraphicsContext {
         self.opacity = 1
         self.blendMode = .normal
         self.transform = .identity
+        self.clipBoundingRect = viewport
         self.environment = environment
         self.commandBuffer = commandBuffer
         self.contentScaleFactor = contentScaleFactor
         self.renderTargets = renderTargets
+        self.contentBoundsState = ContentBoundsState()
 
         let queue = commandBuffer.commandQueue
         guard let pipeline = GraphicsPipelineStates.sharedInstance(
@@ -121,7 +137,41 @@ public struct GraphicsContext {
         self.transform = matrix.concatenating(self.transform)
     }
 
+    static func remappedClipBoundingRect(
+        _ bounds: CGRect,
+        from oldTransform: CGAffineTransform,
+        to newTransform: CGAffineTransform
+    ) -> CGRect {
+        guard !bounds.isNull, oldTransform != newTransform else {
+            return bounds
+        }
+        return bounds.applying(oldTransform.concatenating(newTransform.inverted()))
+    }
+
     public internal(set) var clipBoundingRect: CGRect = .zero
+
+    func recordContentBounds(_ bounds: CGRect) {
+        guard self.opacity > 0,
+              !bounds.isNull,
+              !bounds.isEmpty,
+              !self.clipBoundingRect.isNull else {
+            return
+        }
+        let transformedBounds = bounds.applying(self.transform)
+        let transformedClip = self.clipBoundingRect.applying(self.transform)
+        let visibleBounds = transformedBounds.intersection(transformedClip)
+        guard !visibleBounds.isNull, !visibleBounds.isEmpty else { return }
+        if self.contentBoundsState.bounds.isNull {
+            self.contentBoundsState.bounds = visibleBounds
+        } else {
+            self.contentBoundsState.bounds = self.contentBoundsState.bounds.union(visibleBounds)
+        }
+    }
+
+    var contentBoundingRect: CGRect {
+        guard !self.contentBoundsState.bounds.isNull else { return .null }
+        return self.contentBoundsState.bounds.applying(self.transform.inverted())
+    }
 
     var filters: [(Filter, FilterOptions)] = []
 

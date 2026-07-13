@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Path.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -96,6 +96,7 @@ extension GraphicsContext {
                                              blendState: .opaque)
                 renderPass.end()
                 self.drawSource()
+                self.recordContentBounds(path.boundingBoxOfPath)
             } else {
                 renderPass.end()
             }
@@ -116,6 +117,10 @@ extension GraphicsContext {
                                              blendState: .opaque)
                 renderPass.end()
                 self.drawSource()
+                let halfWidth = style.lineWidth * 0.5
+                self.recordContentBounds(
+                    path.boundingBoxOfPath.insetBy(dx: -halfWidth, dy: -halfWidth)
+                )
             } else {
                 renderPass.end()
             }

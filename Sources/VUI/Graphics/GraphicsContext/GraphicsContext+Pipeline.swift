@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Pipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -413,7 +413,7 @@ class GraphicsPipelineStates {
                 throw LoadError(message: "makeBuffer failed.")
             }
             if let ptr = stgBuffer.contents() {
-                let pixelData = [UInt8](repeating: 1, count: bufferLength)
+                let pixelData = [UInt8](repeating: 255, count: bufferLength)
                 pixelData.withUnsafeBytes {
                     assert($0.count == bufferLength)
                     ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)

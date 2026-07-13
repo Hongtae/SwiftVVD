@@ -72,9 +72,10 @@ extension GraphicsContext {
                                               textureFrame: textureFrame,
                                               textureTransform: textureTransform,
                                               blendState: .opaque,
-                                              color: .white)
+                                              color: image.premultipliedTintColor)
                 renderPass.end()
                 self.drawSource()
+                self.recordContentBounds(rect)
             }
         }
     }
@@ -132,6 +133,23 @@ extension GraphicsContext {
                                vertices: vertices,
                                texture: texture,
                                blendState: blendState)
+    }
+}
+
+private extension GraphicsContext.ResolvedImage {
+    var premultipliedTintColor: VVD.Color {
+        guard let shading,
+              shading.properties.count == 1,
+              case let .color(color) = shading.properties[0] else {
+            return .white
+        }
+        let backendColor = color.backendColor
+        return VVD.Color(
+            backendColor.r * backendColor.a,
+            backendColor.g * backendColor.a,
+            backendColor.b * backendColor.a,
+            backendColor.a
+        )
     }
 }
 

@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Layer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,15 +10,19 @@ import VVD
 
 extension GraphicsContext {
     func makeLayerContext() -> Self? {
-        let context = GraphicsContext(
+        guard var context = GraphicsContext(
             sceneResources: self.sceneResources,
             environment: self.environment,
             viewport: self.viewport,
             contentOffset: self.contentOffset,
             contentScaleFactor: self.contentScaleFactor,
             resolution: self.resolution,
-            commandBuffer: self.commandBuffer)
-        context?.clear(with: .clear)
+            commandBuffer: self.commandBuffer) else {
+            return nil
+        }
+        context.transform = self.transform
+        context.clipBoundingRect = self.clipBoundingRect
+        context.clear(with: .clear)
         return context
     }
 
@@ -62,6 +66,7 @@ extension GraphicsContext {
                                               color: .white)
                 renderPass.end()
                 self.drawSource()
+                self.recordContentBounds(frame)
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")
@@ -85,6 +90,7 @@ extension GraphicsContext {
                                               color: .white)
                 renderPass.end()
                 self.drawSource()
+                self.recordContentBounds(context.contentBoundingRect)
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")

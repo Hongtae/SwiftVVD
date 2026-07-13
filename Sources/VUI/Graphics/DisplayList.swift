@@ -556,6 +556,7 @@ struct DisplayList {
         struct ImageRecord: Equatable {
             var baseline: CGFloat
             var textureID: ObjectIdentifier?
+            var placementRect: CGRect
             var textureTransform: CGAffineTransform
             var scaleFactor: CGFloat
             var hasShading: Bool
@@ -564,6 +565,7 @@ struct DisplayList {
             init(
                 baseline: CGFloat,
                 textureID: ObjectIdentifier?,
+                placementRect: CGRect,
                 textureTransform: CGAffineTransform,
                 scaleFactor: CGFloat,
                 hasShading: Bool,
@@ -571,6 +573,7 @@ struct DisplayList {
             ) {
                 self.baseline = baseline
                 self.textureID = textureID
+                self.placementRect = placementRect
                 self.textureTransform = textureTransform
                 self.scaleFactor = scaleFactor
                 self.hasShading = hasShading
@@ -579,10 +582,12 @@ struct DisplayList {
 
             init(
                 _ image: GraphicsContext.ResolvedImage,
+                placementRect: CGRect,
                 shading: ShadingRecord?
             ) {
                 baseline = image.baseline
                 textureID = image.texture.map { ObjectIdentifier($0) }
+                self.placementRect = placementRect
                 textureTransform = image.textureTransform
                 scaleFactor = image.scaleFactor
                 hasShading = image.shading != nil
@@ -920,6 +925,10 @@ struct DisplayList {
             func draw(in context: GraphicsContext) {
                 guard frame.width > 0, frame.height > 0 else { return }
                 var context = context
+                if let coverageBounds = command.bounds,
+                   coverageBounds != frame {
+                    context.clip(to: Path(coverageBounds))
+                }
                 if !transform.isIdentity {
                     context.concatenate(transform)
                 }
@@ -1449,6 +1458,7 @@ struct DisplayList {
         var version: Version
         var value: Value
         var identity: _DisplayList_Identity
+        var opacity: Float
         var styleChain = StyleChain()
 
         init(
@@ -1456,6 +1466,7 @@ struct DisplayList {
             identity: _DisplayList_Identity = .none,
             version: Version = Version(value: 0),
             seed: Seed = Seed(),
+            opacity: Float = 1,
             environment: EnvironmentValues? = nil,
             _ body: @escaping (GraphicsContext) -> Void
         ) {
@@ -1468,6 +1479,7 @@ struct DisplayList {
                 body: body
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1475,12 +1487,14 @@ struct DisplayList {
             contents: DisplayList,
             frame: CGRect? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version(value: 0)
+            version: Version = Version(value: 0),
+            opacity: Float = 1
         ) {
             self.frame = frame ?? contents.interpolationBounds ?? .zero
             self.version = version
             self.value = .effect(effect, contents)
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1491,7 +1505,8 @@ struct DisplayList {
             command: ItemCommand,
             environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version(value: 0)
+            version: Version = Version(value: 0),
+            opacity: Float = 1
         ) {
             self.frame = command.bounds ?? .zero
             self.version = version
@@ -1504,6 +1519,7 @@ struct DisplayList {
                 environment: environment
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1512,7 +1528,8 @@ struct DisplayList {
             command: ItemCommand,
             environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version(value: 0)
+            version: Version = Version(value: 0),
+            opacity: Float = 1
         ) {
             self.frame = command.bounds ?? frame
             self.version = version
@@ -1523,6 +1540,7 @@ struct DisplayList {
                 environment: environment
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1531,7 +1549,8 @@ struct DisplayList {
             command: ItemCommand,
             environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version(value: 0)
+            version: Version = Version(value: 0),
+            opacity: Float = 1
         ) {
             self.frame = command.bounds ?? contents.interpolationBounds ?? .zero
             self.version = version
@@ -1542,6 +1561,7 @@ struct DisplayList {
                 environment: environment
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1550,7 +1570,8 @@ struct DisplayList {
             command: ItemCommand,
             environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version(value: 0)
+            version: Version = Version(value: 0),
+            opacity: Float = 1
         ) {
             self.frame = command.bounds ?? .zero
             self.version = version
@@ -1561,6 +1582,7 @@ struct DisplayList {
                 environment: environment
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1572,7 +1594,8 @@ struct DisplayList {
             seed: Seed,
             environment: EnvironmentValues? = nil,
             identity: _DisplayList_Identity = .none,
-            version: Version = Version()
+            version: Version = Version(),
+            opacity: Float = 1
         ) {
             self.frame = command.bounds ?? frame
             self.version = version
@@ -1586,6 +1609,7 @@ struct DisplayList {
                 environment: environment
             ))
             self.identity = identity
+            self.opacity = opacity
         }
 
         init(
@@ -1593,12 +1617,14 @@ struct DisplayList {
             frame: CGRect,
             identity: _DisplayList_Identity,
             version: Version,
+            opacity: Float = 1,
             styleChain: StyleChain = StyleChain()
         ) {
             self.frame = frame
             self.version = version
             self.value = .content(content)
             self.identity = identity
+            self.opacity = opacity
             self.styleChain = styleChain
         }
 
@@ -1619,6 +1645,9 @@ struct DisplayList {
         }
 
         func callAsFunction(_ context: GraphicsContext) {
+            var context = context
+            context.opacity *= Double(opacity)
+            guard context.opacity > 0 else { return }
             switch value {
             case let .content(content):
                 content.draw(in: context)
@@ -1786,6 +1815,7 @@ struct DisplayList {
     mutating func appendImageItem(
         _ image: GraphicsContext.ResolvedImage,
         bounds: CGRect? = nil,
+        opacity: Float = 1,
         environment: EnvironmentValues? = nil,
         _ item: @escaping (GraphicsContext) -> Void
     ) {
@@ -1793,32 +1823,43 @@ struct DisplayList {
         let command = ItemCommand.image(
             ItemRecord.ImageRecord(
                 image,
+                placementRect: bounds ?? .zero,
                 shading: image.shading.flatMap(Self.shadingRecord(for:))
             ),
             bounds: bounds
         )
-        appendRecordedItem(Item(command: command, environment: environment, item))
+        appendRecordedItem(Item(
+            command: command,
+            opacity: opacity,
+            environment: environment,
+            item
+        ))
         recordInterpolationBounds(bounds)
     }
 
     mutating func appendImageItem(
         _ image: GraphicsContext.ResolvedImage,
         bounds: CGRect,
+        placementRect: CGRect? = nil,
+        opacity: Float = 1,
         environment: EnvironmentValues? = nil
     ) {
         let commandBounds = Self.itemRecordBounds(bounds)
+        let placementRect = placementRect ?? bounds
         let command = ItemCommand.image(
             ItemRecord.ImageRecord(
                 image,
+                placementRect: placementRect,
                 shading: image.shading.flatMap(Self.shadingRecord(for:))
             ),
             bounds: commandBounds
         )
         appendRecordedItem(Item(
             image: image,
-            frame: bounds,
+            frame: placementRect,
             command: command,
-            environment: environment
+            environment: environment,
+            opacity: opacity
         ))
         recordInterpolationBounds(commandBounds)
     }
@@ -1975,6 +2016,7 @@ struct DisplayList {
             frame: frame,
             identity: item.identity,
             version: item.version,
+            opacity: item.opacity,
             styleChain: item.styleChain
         ))
         recordInterpolationBounds(transformedContent.command.bounds)
@@ -1994,6 +2036,7 @@ struct DisplayList {
             frame: frame,
             identity: item.identity,
             version: item.version,
+            opacity: item.opacity,
             styleChain: item.styleChain
         ))
         recordInterpolationBounds(transformedContent.command.bounds)
@@ -2223,6 +2266,7 @@ struct DisplayList {
                 ItemRecord.ImageRecord(
                     baseline: 0,
                     textureID: nil,
+                    placementRect: bounds ?? .zero,
                     textureTransform: .identity,
                     scaleFactor: 1,
                     hasShading: false,
@@ -2528,6 +2572,9 @@ struct DisplayList {
             context: GraphicsContext,
             includeDebug: Bool
         ) {
+            var context = context
+            context.opacity *= Double(item.opacity)
+            guard context.opacity > 0 else { return }
             switch item.value {
             case let .content(content):
                 switch content.value {
@@ -2746,7 +2793,7 @@ struct DisplayList {
             otherCommands: other.debugItemCommands
         ) &&
             zip(debugItems, other.debugItems).allSatisfy { lhs, rhs in
-                lhs.styleChain == rhs.styleChain
+                lhs.opacity == rhs.opacity && lhs.styleChain == rhs.styleChain
             } &&
             interpolationBounds == other.interpolationBounds
     }
@@ -2760,6 +2807,7 @@ struct DisplayList {
             guard lhs.frame == rhs.frame,
                   lhs.version.value == rhs.version.value,
                   lhs.identity == rhs.identity,
+                  lhs.opacity == rhs.opacity,
                   lhs.styleChain == rhs.styleChain else {
                 return false
             }
@@ -2772,6 +2820,10 @@ struct DisplayList {
                         lhsShape.fillStyle == rhsShape.fillStyle &&
                         lhsShape.strokeStyle == rhsShape.strokeStyle &&
                         lhsShape.transform == rhsShape.transform &&
+                        explicitGradientSurfaceMatches(
+                            lhsShape.shading,
+                            rhsShape.shading
+                        ) &&
                         lhsShape.command == rhsShape.command
                 case (.shape, _), (_, .shape):
                     return false
@@ -2838,6 +2890,75 @@ struct DisplayList {
         otherCommands: [ItemCommand]
     ) -> Bool {
         commands == otherCommands
+    }
+
+    private func explicitGradientSurfaceMatches(
+        _ lhs: GraphicsContext.Shading,
+        _ rhs: GraphicsContext.Shading
+    ) -> Bool {
+        let lhsHasGradient = lhs.properties.contains { property in
+            switch property {
+            case .linearGradient, .radialGradient, .conicGradient:
+                return true
+            default:
+                return false
+            }
+        }
+        let rhsHasGradient = rhs.properties.contains { property in
+            switch property {
+            case .linearGradient, .radialGradient, .conicGradient:
+                return true
+            default:
+                return false
+            }
+        }
+        guard lhsHasGradient || rhsHasGradient else { return true }
+        guard lhs.properties.count == 1,
+              rhs.properties.count == 1 else {
+            return false
+        }
+
+        switch (lhs.properties[0], rhs.properties[0]) {
+        case let (
+            .linearGradient(lhsGradient, lhsStart, lhsEnd, lhsOptions),
+            .linearGradient(rhsGradient, rhsStart, rhsEnd, rhsOptions)
+        ):
+            return lhsGradient == rhsGradient &&
+                lhsStart == rhsStart &&
+                lhsEnd == rhsEnd &&
+                lhsOptions == rhsOptions
+        case let (
+            .radialGradient(
+                lhsGradient,
+                lhsCenter,
+                lhsStartRadius,
+                lhsEndRadius,
+                lhsOptions
+            ),
+            .radialGradient(
+                rhsGradient,
+                rhsCenter,
+                rhsStartRadius,
+                rhsEndRadius,
+                rhsOptions
+            )
+        ):
+            return lhsGradient == rhsGradient &&
+                lhsCenter == rhsCenter &&
+                lhsStartRadius == rhsStartRadius &&
+                lhsEndRadius == rhsEndRadius &&
+                lhsOptions == rhsOptions
+        case let (
+            .conicGradient(lhsGradient, lhsCenter, lhsAngle, lhsOptions),
+            .conicGradient(rhsGradient, rhsCenter, rhsAngle, rhsOptions)
+        ):
+            return lhsGradient == rhsGradient &&
+                lhsCenter == rhsCenter &&
+                lhsAngle == rhsAngle &&
+                lhsOptions == rhsOptions
+        default:
+            return false
+        }
     }
 
     private func crossFadeBranchesHaveSameSurface(

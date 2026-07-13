@@ -2,7 +2,7 @@
 //  File: GraphicsContext+BlendMode.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -54,6 +54,11 @@ extension GraphicsContext {
                         opacity: Double? = nil,
                         applyMask: Bool) -> Bool {
         let blendMode = blendMode ?? self.blendMode
+
+        if applyMask && !self.applyMaskToSource() {
+            Log.error("GraphicsContext.applyMaskToSource failed.")
+            return false
+        }
 
         let blendSrc = self.renderTargets.source
         let blendDst = self.renderTargets.backdrop

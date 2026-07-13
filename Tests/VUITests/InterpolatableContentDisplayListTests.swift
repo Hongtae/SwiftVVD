@@ -780,6 +780,547 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
+    func testRBDisplayListInterpolatorMixesCompatibleTypedColorShapeGeometry() throws {
+        let sourceBounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let targetBounds = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let midpointBounds = CGRect(x: 10, y: 5, width: 30, height: 25)
+
+        var source = DisplayList()
+        source.appendShapeItem(
+            path: Path(sourceBounds),
+            role: .fill,
+            style: Color.red,
+            bounds: sourceBounds
+        )
+        var target = DisplayList()
+        target.appendShapeItem(
+            path: Path(targetBounds),
+            role: .fill,
+            style: Color.red,
+            bounds: targetBounds
+        )
+
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        )
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+
+        XCTAssertEqual(midpoint.items.count, 1)
+        XCTAssertEqual(midpoint.interpolationBounds, midpointBounds)
+        XCTAssertEqual(midpoint.itemRecords.first?.kind, .shapeFill)
+        XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+        XCTAssertEqual(midpoint.itemRecords.first?.bounds, midpointBounds)
+        XCTAssertEqual(midpoint.itemRecords.first?.shapeStyle, .color(.red))
+
+        let item = try XCTUnwrap(midpoint.items.first)
+        guard case let .content(content) = item.value,
+              case let .shape(shape) = content.value else {
+            return XCTFail("compatible shape geometry should use one typed mixed item")
+        }
+        XCTAssertEqual(shape.path, Path(midpointBounds))
+        XCTAssertEqual(shape.command.bounds, midpointBounds)
+        XCTAssertTrue(shape.transform.isIdentity)
+
+        XCTAssertEqual(
+            interpolator.copyContents(withProgress: 0).items.first?.command,
+            source.items.first?.command
+        )
+        XCTAssertEqual(
+            interpolator.copyContents(withProgress: 1).items.first?.command,
+            target.items.first?.command
+        )
+
+        var changedColor = DisplayList()
+        changedColor.appendShapeItem(
+            path: Path(targetBounds),
+            role: .fill,
+            style: Color.blue,
+            bounds: targetBounds
+        )
+        XCTAssertNil(
+            RBDisplayListInterpolator(
+                from: source,
+                to: changedColor,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind
+        )
+
+        var incompatiblePath = DisplayList()
+        incompatiblePath.appendShapeItem(
+            path: Path(ellipseIn: targetBounds),
+            role: .fill,
+            style: Color.red,
+            bounds: targetBounds
+        )
+        XCTAssertEqual(
+            RBDisplayListInterpolator(
+                from: source,
+                to: incompatiblePath,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind,
+            .crossFade
+        )
+    }
+
+    func testRBDisplayListInterpolatorMixesTypedShapeColorInOklabAcrossColorSpacesAndAlpha() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+
+        func midpointColor(
+            from sourceColor: VUI.Color,
+            to targetColor: VUI.Color
+        ) throws -> VUI.Color {
+            var source = DisplayList()
+            source.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: sourceColor,
+                bounds: bounds
+            )
+            var target = DisplayList()
+            target.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: targetColor,
+                bounds: bounds
+            )
+            let contents = RBDisplayListInterpolator(
+                from: source,
+                to: target,
+                options: [:]
+            ).copyContents(withProgress: 0.5)
+            XCTAssertEqual(contents.items.count, 1)
+            XCTAssertNil(contents.itemRecords.first?.effectKind)
+            let color = contents.items.first.flatMap { item -> VUI.Color? in
+                guard case let .shape(_, .some(.color(color)), _, _, _) = item.command else {
+                    return nil
+                }
+                return color
+            }
+            return try XCTUnwrap(color)
+        }
+
+        let red = VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+        let blue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1)
+        let sRGBMidpoint = try midpointColor(from: red, to: blue)
+        XCTAssertEqual(sRGBMidpoint.provider.colorSpace, .sRGB)
+        XCTAssertEqual(sRGBMidpoint.provider.red, 0.5504410671, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.provider.green, 0.3256206847, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.provider.blue, 0.6365006535, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+
+        let linearRed = VUI.Color(.sRGBLinear, red: 1, green: 0, blue: 0)
+        let linearBlue = VUI.Color(.sRGBLinear, red: 0, green: 0, blue: 1)
+        let linearMidpoint = try midpointColor(from: linearRed, to: linearBlue)
+        XCTAssertEqual(linearMidpoint.provider.colorSpace, .sRGBLinear)
+        XCTAssertEqual(linearMidpoint.provider.red, 0.2637342898, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.provider.green, 0.0865716757, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.provider.blue, 0.3628242654, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+
+        let p3Red = VUI.Color(.displayP3, red: 1, green: 0, blue: 0)
+        let p3Blue = VUI.Color(.displayP3, red: 0, green: 0, blue: 1)
+        let p3Midpoint = try midpointColor(from: p3Red, to: p3Blue)
+        XCTAssertEqual(p3Midpoint.provider.colorSpace, .displayP3)
+        XCTAssertEqual(p3Midpoint.provider.red, 0.5674134830, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.provider.green, 0.3382744906, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.provider.blue, 0.6287854995, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.provider.alpha, 1, accuracy: 0.000_001)
+
+        let sRGBToP3Midpoint = try midpointColor(from: red, to: p3Blue)
+        XCTAssertEqual(sRGBToP3Midpoint.provider.colorSpace, .sRGB)
+        XCTAssertEqual(sRGBToP3Midpoint.provider.red, 0.5552106371, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.provider.green, 0.3330116465, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.provider.blue, 0.6563702302, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.provider.alpha, 1, accuracy: 0.000_001)
+
+        let p3ToSRGBMidpoint = try midpointColor(from: p3Red, to: blue)
+        XCTAssertEqual(p3ToSRGBMidpoint.provider.colorSpace, .displayP3)
+        XCTAssertEqual(p3ToSRGBMidpoint.provider.red, 0.5621900129, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.provider.green, 0.3308116657, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.provider.blue, 0.6096897172, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+
+        let transparentBlue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0)
+        let opaqueToTransparent = try midpointColor(from: red, to: transparentBlue)
+        XCTAssertEqual(opaqueToTransparent.provider.red, 1, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.provider.green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.provider.blue, 0, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.provider.alpha, 0.5, accuracy: 0.000_001)
+
+        let transparentRed = VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0)
+        let transparentToOpaque = try midpointColor(from: transparentRed, to: blue)
+        XCTAssertEqual(transparentToOpaque.provider.red, 0, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.provider.green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.provider.blue, 1, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.provider.alpha, 0.5, accuracy: 0.000_001)
+
+        let quarterRed = VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0.25)
+        let threeQuarterBlue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0.75)
+        let alphaMidpoint = try midpointColor(from: quarterRed, to: threeQuarterBlue)
+        XCTAssertEqual(alphaMidpoint.provider.red, 0.3164174757, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.provider.green, 0.2788379121, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.provider.blue, 0.8218085756, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.provider.alpha, 0.5, accuracy: 0.000_001)
+    }
+
+    func testRBDisplayListInterpolatorMixesTypedLinearGradientStopsGeometryAndFallback() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let red = Color(.sRGB, red: 1, green: 0, blue: 0)
+        let green = Color(.sRGB, red: 0, green: 1, blue: 0)
+        let blue = Color(.sRGB, red: 0, green: 0, blue: 1)
+        let yellow = Color(.sRGB, red: 1, green: 1, blue: 0)
+        let magenta = Color(.sRGB, red: 1, green: 0, blue: 1)
+
+        func makeList(
+            gradient: Gradient,
+            startPoint: CGPoint,
+            endPoint: CGPoint,
+            options: GraphicsContext.GradientOptions = []
+        ) -> DisplayList {
+            let command = DisplayList.ItemCommand.shape(
+                role: .fill,
+                style: .gradient(gradient),
+                fillStyle: FillStyle(),
+                strokeStyle: nil,
+                bounds: bounds
+            )
+            let content = DisplayList.Content(
+                path: Path(bounds),
+                shading: .linearGradient(
+                    gradient,
+                    startPoint: startPoint,
+                    endPoint: endPoint,
+                    options: options
+                ),
+                fillStyle: FillStyle(),
+                strokeStyle: nil,
+                command: command
+            )
+            var list = DisplayList()
+            list.items.append(DisplayList.Item(
+                content: content,
+                frame: bounds,
+                identity: .none,
+                version: DisplayList.Version(value: 0)
+            ))
+            list.recordInterpolationBounds(bounds)
+            return list
+        }
+
+        func mixedShape(in list: DisplayList) throws -> DisplayList.Content.ShapeValue {
+            let item = try XCTUnwrap(list.items.first)
+            guard case let .content(content) = item.value,
+                  case let .shape(shape) = content.value else {
+                throw NSError(domain: "VUITests", code: 1)
+            }
+            return shape
+        }
+
+        func assertColor(
+            _ color: VUI.Color,
+            red: Double,
+            green: Double,
+            blue: Double,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            XCTAssertEqual(color.provider.colorSpace, .sRGB, file: file, line: line)
+            XCTAssertEqual(color.provider.red, red, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.provider.green, green, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.provider.blue, blue, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.provider.alpha, 1, accuracy: 0.000_001, file: file, line: line)
+        }
+
+        let sourceGradient = Gradient(stops: [
+            .init(color: red, location: 0),
+            .init(color: blue, location: 0.6),
+        ])
+        let targetGradient = Gradient(stops: [
+            .init(color: green, location: 0.2),
+            .init(color: yellow, location: 1),
+        ])
+        let source = makeList(
+            gradient: sourceGradient,
+            startPoint: CGPoint(x: 0, y: 10),
+            endPoint: CGPoint(x: 20, y: 10)
+        )
+        let target = makeList(
+            gradient: targetGradient,
+            startPoint: CGPoint(x: 10, y: 0),
+            endPoint: CGPoint(x: 10, y: 20)
+        )
+        let midpoint = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+
+        XCTAssertEqual(midpoint.items.count, 1)
+        XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+        let midpointShape = try mixedShape(in: midpoint)
+        guard case let .linearGradient(
+            midpointGradient,
+            midpointStart,
+            midpointEnd,
+            midpointOptions
+        ) = try XCTUnwrap(midpointShape.shading.properties.first) else {
+            return XCTFail("midpoint should retain typed linear-gradient shading")
+        }
+        XCTAssertEqual(midpointStart, CGPoint(x: 5, y: 5))
+        XCTAssertEqual(midpointEnd, CGPoint(x: 15, y: 15))
+        XCTAssertEqual(midpointOptions, [])
+        XCTAssertEqual(midpointGradient.stops.map(\.location), [0.1, 0.8])
+        assertColor(midpointGradient.stops[0].color, red: 0.5, green: 0.5, blue: 0)
+        assertColor(midpointGradient.stops[1].color, red: 0.5, green: 0.5, blue: 0.5)
+        guard case let .shape(_, .some(.gradient(commandGradient)), _, _, _) = midpointShape.command else {
+            return XCTFail("midpoint command should retain its typed gradient")
+        }
+        XCTAssertEqual(commandGradient, midpointGradient)
+
+        let threeStopTarget = Gradient(stops: [
+            .init(color: green, location: 0),
+            .init(color: magenta, location: 0.5),
+            .init(color: yellow, location: 1),
+        ])
+        let countMismatchMidpoint = RBDisplayListInterpolator(
+            from: makeList(
+                gradient: Gradient(colors: [red, blue]),
+                startPoint: .zero,
+                endPoint: CGPoint(x: 20, y: 0)
+            ),
+            to: makeList(
+                gradient: threeStopTarget,
+                startPoint: .zero,
+                endPoint: CGPoint(x: 20, y: 0)
+            ),
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+        let countMismatchShape = try mixedShape(in: countMismatchMidpoint)
+        guard case let .linearGradient(countMismatchGradient, _, _, _) = try XCTUnwrap(
+            countMismatchShape.shading.properties.first
+        ) else {
+            return XCTFail("different stop counts should produce a typed union gradient")
+        }
+        XCTAssertEqual(countMismatchGradient.stops.map(\.location), [0, 0.5, 1])
+        assertColor(countMismatchGradient.stops[0].color, red: 0.5, green: 0.5, blue: 0)
+        assertColor(countMismatchGradient.stops[1].color, red: 0.75, green: 0, blue: 0.75)
+        assertColor(countMismatchGradient.stops[2].color, red: 0.5, green: 0.5, blue: 0.5)
+
+        let optionsMismatch = RBDisplayListInterpolator(
+            from: source,
+            to: makeList(
+                gradient: targetGradient,
+                startPoint: CGPoint(x: 10, y: 0),
+                endPoint: CGPoint(x: 10, y: 20),
+                options: [.repeat]
+            ),
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(optionsMismatch.itemRecords.first?.effectKind, .crossFade)
+    }
+
+    func testRBDisplayListInterpolatorMixesTypedRadialAndConicGradientGeometryAndRejectsKindMismatch() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let gradient = Gradient(colors: [
+            Color(.sRGB, red: 1, green: 0, blue: 0),
+            Color(.sRGB, red: 0, green: 0, blue: 1),
+        ])
+
+        func makeList(
+            shading: GraphicsContext.Shading,
+            commandGradient: Gradient = gradient
+        ) -> DisplayList {
+            let command = DisplayList.ItemCommand.shape(
+                role: .fill,
+                style: .gradient(commandGradient),
+                fillStyle: FillStyle(),
+                strokeStyle: nil,
+                bounds: bounds
+            )
+            let content = DisplayList.Content(
+                path: Path(bounds),
+                shading: shading,
+                fillStyle: FillStyle(),
+                strokeStyle: nil,
+                command: command
+            )
+            var list = DisplayList()
+            list.items.append(DisplayList.Item(
+                content: content,
+                frame: bounds,
+                identity: .none,
+                version: DisplayList.Version(value: 0)
+            ))
+            list.recordInterpolationBounds(bounds)
+            return list
+        }
+
+        func mixedShading(from source: DisplayList, to target: DisplayList) throws -> GraphicsContext.Shading {
+            let midpoint = RBDisplayListInterpolator(
+                from: source,
+                to: target,
+                options: [:]
+            ).copyContents(withProgress: 0.5)
+            XCTAssertEqual(midpoint.items.count, 1)
+            XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+            let item = try XCTUnwrap(midpoint.items.first)
+            guard case let .content(content) = item.value,
+                  case let .shape(shape) = content.value else {
+                throw NSError(domain: "VUITests", code: 2)
+            }
+            return shape.shading
+        }
+
+        let radialSource = makeList(shading: .radialGradient(
+            gradient,
+            center: CGPoint(x: 5, y: 10),
+            startRadius: 0,
+            endRadius: 15
+        ))
+        let radialTarget = makeList(shading: .radialGradient(
+            gradient,
+            center: CGPoint(x: 15, y: 10),
+            startRadius: 2,
+            endRadius: 10
+        ))
+        let radialMidpoint = try mixedShading(from: radialSource, to: radialTarget)
+        guard case let .radialGradient(
+            radialGradient,
+            radialCenter,
+            radialStartRadius,
+            radialEndRadius,
+            radialOptions
+        ) = try XCTUnwrap(radialMidpoint.properties.first) else {
+            return XCTFail("radial gradients should retain their typed shading kind")
+        }
+        XCTAssertEqual(radialGradient, gradient)
+        XCTAssertEqual(radialCenter, CGPoint(x: 10, y: 10))
+        XCTAssertEqual(radialStartRadius, 1)
+        XCTAssertEqual(radialEndRadius, 12.5)
+        XCTAssertEqual(radialOptions, [])
+
+        let conicSource = makeList(shading: .conicGradient(
+            gradient,
+            center: CGPoint(x: 6, y: 10),
+            angle: .radians(0)
+        ))
+        let conicTarget = makeList(shading: .conicGradient(
+            gradient,
+            center: CGPoint(x: 14, y: 10),
+            angle: .radians(.pi / 2)
+        ))
+        let conicMidpoint = try mixedShading(from: conicSource, to: conicTarget)
+        guard case let .conicGradient(
+            conicGradient,
+            conicCenter,
+            conicAngle,
+            conicOptions
+        ) = try XCTUnwrap(conicMidpoint.properties.first) else {
+            return XCTFail("conic gradients should retain their typed shading kind")
+        }
+        XCTAssertEqual(conicGradient, gradient)
+        XCTAssertEqual(conicCenter, CGPoint(x: 10, y: 10))
+        XCTAssertEqual(conicAngle.radians, .pi / 4, accuracy: 0.000_001)
+        XCTAssertEqual(conicOptions, [])
+
+        let linearTarget = makeList(shading: .linearGradient(
+            gradient,
+            startPoint: CGPoint(x: 0, y: 10),
+            endPoint: CGPoint(x: 20, y: 10)
+        ))
+        let kindMismatch = RBDisplayListInterpolator(
+            from: linearTarget,
+            to: radialTarget,
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(kindMismatch.itemRecords.first?.effectKind, .crossFade)
+
+        let radialOptionsMismatch = makeList(shading: .radialGradient(
+            gradient,
+            center: CGPoint(x: 15, y: 10),
+            startRadius: 2,
+            endRadius: 10,
+            options: [.repeat]
+        ))
+        XCTAssertEqual(
+            RBDisplayListInterpolator(
+                from: radialSource,
+                to: radialOptionsMismatch,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind,
+            .crossFade
+        )
+    }
+
+    func testRBDisplayListInterpolatorMixesCompatibleTypedStrokeGeometry() throws {
+        let sourceBounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let targetBounds = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let midpointBounds = CGRect(x: 10, y: 5, width: 30, height: 25)
+        let sourcePathBounds = CGRect(x: 1, y: 1, width: 18, height: 18)
+        let targetPathBounds = CGRect(x: 21, y: 11, width: 38, height: 28)
+        let midpointPathBounds = CGRect(x: 11, y: 6, width: 28, height: 23)
+        let strokeStyle = StrokeStyle(lineWidth: 2)
+
+        var source = DisplayList()
+        source.appendShapeItem(
+            path: Path(sourcePathBounds),
+            role: .stroke,
+            style: Color.red,
+            bounds: sourceBounds,
+            strokeStyle: strokeStyle
+        )
+        var target = DisplayList()
+        target.appendShapeItem(
+            path: Path(targetPathBounds),
+            role: .stroke,
+            style: Color.red,
+            bounds: targetBounds,
+            strokeStyle: strokeStyle
+        )
+
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        )
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+
+        XCTAssertEqual(midpoint.items.count, 1)
+        XCTAssertEqual(midpoint.interpolationBounds, midpointBounds)
+        XCTAssertEqual(midpoint.itemRecords.first?.kind, .shapeStroke)
+        XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+        XCTAssertEqual(midpoint.itemRecords.first?.bounds, midpointBounds)
+        XCTAssertEqual(midpoint.itemRecords.first?.strokeStyle, strokeStyle)
+
+        let item = try XCTUnwrap(midpoint.items.first)
+        guard case let .content(content) = item.value,
+              case let .shape(shape) = content.value else {
+            return XCTFail("compatible stroke geometry should use one typed mixed item")
+        }
+        XCTAssertEqual(shape.path, Path(midpointPathBounds))
+        XCTAssertEqual(shape.strokeStyle, strokeStyle)
+        XCTAssertEqual(shape.command.bounds, midpointBounds)
+
+        var changedLineWidth = DisplayList()
+        changedLineWidth.appendShapeItem(
+            path: Path(targetPathBounds),
+            role: .stroke,
+            style: Color.red,
+            bounds: targetBounds,
+            strokeStyle: StrokeStyle(lineWidth: 4)
+        )
+        XCTAssertEqual(
+            RBDisplayListInterpolator(
+                from: source,
+                to: changedLineWidth,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind,
+            .crossFade
+        )
+    }
+
     func testDisplayListImagePayloadParticipatesInSurfaceMatching() {
         let bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
 
@@ -850,7 +1391,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let bounds = CGRect(x: 2, y: 3, width: 10, height: 12)
         let image = makeResolvedImage(baseline: 4, shading: .color(.red))
         var source = DisplayList()
-        source.appendImageItem(image, bounds: bounds)
+        source.appendImageItem(image, bounds: bounds, opacity: 0.25)
 
         let item = try XCTUnwrap(source.items.first)
         guard case let .content(content) = item.value,
@@ -873,10 +1414,215 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(transformedImage.image.baseline, 4)
         XCTAssertEqual(transformedImage.frame, bounds)
         XCTAssertEqual(transformedImage.transform, transform)
+        XCTAssertEqual(transformedItem.opacity, 0.25)
         XCTAssertEqual(
             transformedImage.command.bounds,
             bounds.applying(transform).standardized
         )
+    }
+
+    func testRBDisplayListInterpolatorMixesCompatibleImageGeometryAsOneItem() throws {
+        let sourceBounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let targetBounds = CGRect(x: 20, y: 5, width: 30, height: 40)
+        let midpointBounds = CGRect(x: 10, y: 2.5, width: 25, height: 30)
+        let texture = ProbeTexture()
+        let image = makeResolvedImage(texture: texture)
+
+        var source = DisplayList()
+        source.appendImageItem(image, bounds: sourceBounds, opacity: 0.25)
+        var target = DisplayList()
+        target.appendImageItem(image, bounds: targetBounds, opacity: 0.75)
+
+        var sameGeometryDifferentAlpha = DisplayList()
+        sameGeometryDifferentAlpha.appendImageItem(
+            image,
+            bounds: sourceBounds,
+            opacity: 0.75
+        )
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: sameGeometryDifferentAlpha))
+
+        XCTAssertEqual(
+            RBDisplayListInterpolator(from: source, to: target, options: [:])
+                .copyContents(withProgress: 0).items.first?.opacity,
+            0.25
+        )
+        XCTAssertEqual(
+            RBDisplayListInterpolator(from: source, to: target, options: [:])
+                .copyContents(withProgress: 1).items.first?.opacity,
+            0.75
+        )
+
+        let midpoint = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+
+        XCTAssertEqual(midpoint.items.count, 1)
+        XCTAssertEqual(midpoint.interpolationBounds, midpointBounds)
+        XCTAssertEqual(midpoint.itemRecords.first?.kind, .image)
+        XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+        XCTAssertEqual(midpoint.itemRecords.first?.bounds, midpointBounds)
+
+        let item = try XCTUnwrap(midpoint.items.first)
+        guard case let .content(content) = item.value,
+              case let .image(imageValue) = content.value else {
+            return XCTFail("compatible image geometry should use one typed mixed item")
+        }
+        XCTAssertEqual(imageValue.frame, midpointBounds)
+        XCTAssertEqual(imageValue.transform, .identity)
+        XCTAssertEqual(imageValue.command.bounds, midpointBounds)
+        XCTAssertEqual(item.opacity, 0.5)
+
+        var differentTexture = DisplayList()
+        differentTexture.appendImageItem(
+            makeResolvedImage(texture: ProbeTexture()),
+            bounds: targetBounds
+        )
+        XCTAssertEqual(
+            RBDisplayListInterpolator(
+                from: source,
+                to: differentTexture,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind,
+            .crossFade
+        )
+    }
+
+    func testRBDisplayListInterpolatorMixesCompatibleImageTintAsOneItem() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let texture = ProbeTexture()
+        let sourceImage = makeResolvedImage(
+            shading: .color(VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0.25)),
+            texture: texture
+        )
+        let targetImage = makeResolvedImage(
+            shading: .color(VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0.75)),
+            texture: texture
+        )
+        var source = DisplayList()
+        source.appendImageItem(sourceImage, bounds: bounds)
+        var target = DisplayList()
+        target.appendImageItem(targetImage, bounds: bounds)
+
+        let midpoint = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.items.count, 1)
+        guard case let .color(recordedTint)? = midpoint.itemRecords.first?.image?.shading,
+              case let .content(content) = midpoint.items[0].value,
+              case let .image(imageValue) = content.value,
+              let shading = imageValue.image.shading,
+              case let .color(renderedTint) = shading.properties.first else {
+            return XCTFail("compatible image tint should remain one typed image item")
+        }
+        XCTAssertEqual(recordedTint.provider.red, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.provider.green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.provider.blue, 0.75, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(renderedTint, recordedTint)
+
+        var untinted = DisplayList()
+        untinted.appendImageItem(
+            makeResolvedImage(texture: texture),
+            bounds: bounds
+        )
+        var opaqueBlue = DisplayList()
+        opaqueBlue.appendImageItem(
+            makeResolvedImage(
+                shading: .color(VUI.Color(.sRGB, red: 0, green: 0, blue: 1)),
+                texture: texture
+            ),
+            bounds: bounds
+        )
+        let whiteToBlue = RBDisplayListInterpolator(
+            from: untinted,
+            to: opaqueBlue,
+            options: [:]
+        ).copyContents(withProgress: 0.5)
+        guard case let .color(whiteToBlueTint)? =
+            whiteToBlue.itemRecords.first?.image?.shading else {
+            return XCTFail("missing identity-white to blue tint mix")
+        }
+        XCTAssertEqual(whiteToBlueTint.provider.red, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.provider.green, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.provider.blue, 1, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.provider.alpha, 1, accuracy: 0.000_001)
+
+        var differentColorSpace = DisplayList()
+        differentColorSpace.appendImageItem(
+            makeResolvedImage(
+                shading: .color(VUI.Color(.displayP3, red: 0, green: 0, blue: 1)),
+                texture: texture
+            ),
+            bounds: bounds
+        )
+        XCTAssertEqual(
+            RBDisplayListInterpolator(
+                from: source,
+                to: differentColorSpace,
+                options: [:]
+            ).copyContents(withProgress: 0.5).itemRecords.first?.effectKind,
+            .crossFade
+        )
+    }
+
+    func testRBDisplayListInterpolatorMixesImagePlacementInsideFixedCoverage() throws {
+        let coverage = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let sourcePlacement = coverage
+        let targetPlacement = CGRect(x: 10, y: 0, width: 20, height: 20)
+        let midpointPlacement = CGRect(x: 5, y: 0, width: 20, height: 20)
+        let image = makeResolvedImage(texture: ProbeTexture())
+
+        var source = DisplayList()
+        source.appendImageItem(
+            image,
+            bounds: coverage,
+            placementRect: sourcePlacement
+        )
+        var target = DisplayList()
+        target.appendImageItem(
+            image,
+            bounds: coverage,
+            placementRect: targetPlacement
+        )
+
+        XCTAssertFalse(source.hasSameInterpolationSurface(as: target))
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [:]
+        )
+        XCTAssertEqual(
+            interpolator.copyContents(withProgress: 0)
+                .itemRecords.first?.image?.placementRect,
+            sourcePlacement
+        )
+        XCTAssertEqual(
+            interpolator.copyContents(withProgress: 1)
+                .itemRecords.first?.image?.placementRect,
+            targetPlacement
+        )
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.items.count, 1)
+        XCTAssertEqual(midpoint.itemRecords.first?.bounds, coverage)
+        XCTAssertEqual(
+            midpoint.itemRecords.first?.image?.placementRect,
+            midpointPlacement
+        )
+        XCTAssertNil(midpoint.itemRecords.first?.effectKind)
+
+        let item = try XCTUnwrap(midpoint.items.first)
+        guard case let .content(content) = item.value,
+              case let .image(imageValue) = content.value else {
+            return XCTFail("compatible placement should remain one typed image item")
+        }
+        XCTAssertEqual(imageValue.frame, midpointPlacement)
+        XCTAssertEqual(imageValue.command.bounds, coverage)
+        XCTAssertEqual(imageValue.image.textureTransform, .identity)
     }
 
     func testDisplayListTextForegroundPayloadParticipatesInSurfaceMatching() {
@@ -1556,6 +2302,191 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         XCTAssertEqual(transformedCrossFade.source?.sourceBounds, crossFade.source?.sourceBounds)
         XCTAssertEqual(transformedCrossFade.target?.sourceBounds, crossFade.target?.sourceBounds)
+    }
+
+    func testRBDisplayListInterpolatorMixesCompatibleMaskGeometryAndAlpha() throws {
+        let sourceMaskBounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        let targetMaskBounds = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let midpointMaskBounds = CGRect(x: 10, y: 5, width: 30, height: 25)
+        let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let sourceMask = shapeList(
+            bounds: sourceMaskBounds,
+            color: VUI.Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 0.25)
+        )
+        let targetMask = shapeList(
+            bounds: targetMaskBounds,
+            color: VUI.Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 0.75)
+        )
+        let source = DisplayList.effect(
+            .mask(sourceMask, []),
+            contents: shapeList(
+                bounds: contentBounds,
+                color: VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+            )
+        )
+        let target = DisplayList.effect(
+            .mask(targetMask, []),
+            contents: shapeList(
+                bounds: contentBounds,
+                color: VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+            )
+        )
+        let interpolator = RBDisplayListInterpolator(from: source, to: target)
+
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0), sourceMaskBounds)
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 0.5), midpointMaskBounds)
+        XCTAssertEqual(interpolator.boundingRect(withProgress: 1), targetMaskBounds)
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        XCTAssertEqual(midpoint.interpolationBounds, midpointMaskBounds)
+        let effect = try XCTUnwrap(midpoint.effects.first)
+        guard case let .mask(mask, options) = effect.effect else {
+            return XCTFail("compatible layer clip should retain one mask effect")
+        }
+        XCTAssertEqual(options.rawValue, 0)
+        XCTAssertEqual(mask.items.count, 1)
+        XCTAssertEqual(mask.interpolationBounds, midpointMaskBounds)
+        guard case let .content(maskContent) = try XCTUnwrap(mask.items.first).value,
+              case let .shape(maskShape) = maskContent.value,
+              case let .color(maskColor)? = maskShape.command.record.shapeStyle else {
+            return XCTFail("mixed mask should retain typed color shape content")
+        }
+        XCTAssertEqual(maskShape.path, Path(midpointMaskBounds))
+        XCTAssertEqual(maskColor.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(effect.contents.interpolationBounds, contentBounds)
+    }
+
+    func testRBDisplayListInterpolatorMergesSameMaskAcrossDifferentModes() throws {
+        let maskBounds = CGRect(x: 10, y: 15, width: 30, height: 20)
+        let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let mask = shapeList(bounds: maskBounds, color: .white)
+        let source = DisplayList.effect(
+            .mask(mask, []),
+            contents: shapeList(
+                bounds: contentBounds,
+                color: VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+            )
+        )
+        let target = DisplayList.effect(
+            .mask(mask, .inverse),
+            contents: shapeList(
+                bounds: contentBounds,
+                color: VUI.Color(.sRGB, red: 0, green: 0, blue: 1)
+            )
+        )
+        let interpolator = RBDisplayListInterpolator(from: source, to: target)
+
+        for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+            XCTAssertEqual(interpolator.boundingRect(withProgress: progress), contentBounds)
+            let sampled = interpolator.copyContents(withProgress: progress)
+            XCTAssertEqual(sampled.interpolationBounds, contentBounds)
+            XCTAssertEqual(sampled.effects.count, 2)
+            guard sampled.effects.count == 2 else { continue }
+            guard case let .mask(_, sourceOptions) = sampled.effects[0].effect,
+                  case let .mask(_, targetOptions) = sampled.effects[1].effect else {
+                return XCTFail("different clip modes should retain both ordered mask effects")
+            }
+            XCTAssertEqual(sourceOptions.rawValue, 0)
+            XCTAssertEqual(targetOptions, .inverse)
+        }
+    }
+
+    func testRBDisplayListInterpolatorPreservesDifferentModeMaskGeometryAndAlpha() throws {
+        let sourceMaskBounds = CGRect(x: 10, y: 15, width: 30, height: 20)
+        let targetMaskBounds = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let source = DisplayList.effect(
+            .mask(
+                shapeList(
+                    bounds: sourceMaskBounds,
+                    color: VUI.Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 0.25)
+                ),
+                []
+            ),
+            contents: shapeList(bounds: contentBounds, color: .red)
+        )
+        let target = DisplayList.effect(
+            .mask(
+                shapeList(
+                    bounds: targetMaskBounds,
+                    color: VUI.Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 0.75)
+                ),
+                .inverse
+            ),
+            contents: shapeList(
+                bounds: contentBounds,
+                color: VUI.Color(.sRGB, red: 0, green: 0, blue: 1)
+            )
+        )
+        let interpolator = RBDisplayListInterpolator(from: source, to: target)
+
+        for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+            XCTAssertEqual(interpolator.boundingRect(withProgress: progress), contentBounds)
+            let sampled = interpolator.copyContents(withProgress: progress)
+            XCTAssertEqual(sampled.interpolationBounds, contentBounds)
+            XCTAssertEqual(sampled.effects.count, 2)
+        }
+
+        let midpoint = interpolator.copyContents(withProgress: 0.5)
+        let sourceEffect = try XCTUnwrap(midpoint.effects.first)
+        let targetEffect = try XCTUnwrap(midpoint.effects.last)
+        guard case let .mask(sourceMask, sourceOptions) = sourceEffect.effect,
+              case let .mask(targetMask, targetOptions) = targetEffect.effect else {
+            return XCTFail("different clip modes should preserve both mask branches")
+        }
+        XCTAssertEqual(sourceOptions.rawValue, 0)
+        XCTAssertEqual(targetOptions, .inverse)
+        XCTAssertEqual(sourceMask.interpolationBounds, sourceMaskBounds)
+        XCTAssertEqual(targetMask.interpolationBounds, targetMaskBounds)
+
+        guard case let .content(sourceMaskContent) = try XCTUnwrap(sourceMask.items.first).value,
+              case let .shape(sourceMaskShape) = sourceMaskContent.value,
+              case let .color(sourceMaskColor)? = sourceMaskShape.command.record.shapeStyle,
+              case let .content(targetMaskContent) = try XCTUnwrap(targetMask.items.first).value,
+              case let .shape(targetMaskShape) = targetMaskContent.value,
+              case let .color(targetMaskColor)? = targetMaskShape.command.record.shapeStyle else {
+            return XCTFail("different-mode branches should retain typed mask geometry and alpha")
+        }
+        XCTAssertEqual(sourceMaskShape.path, Path(sourceMaskBounds))
+        XCTAssertEqual(targetMaskShape.path, Path(targetMaskBounds))
+        XCTAssertEqual(sourceMaskColor.provider.alpha, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(targetMaskColor.provider.alpha, 0.75, accuracy: 0.000_001)
     }
 
     func testRBDisplayListInterpolatorEndpointPreservesTargetEffectFallback() throws {

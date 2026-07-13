@@ -999,6 +999,7 @@ extension GraphicsContext {
             renderPass.end()
             self.drawSource()
         }
+        self.recordContentBounds(rect)
     }
 
     public func resolve(_ text: Text) -> ResolvedText {

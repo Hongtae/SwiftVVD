@@ -233,6 +233,33 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         ) {
             switch kind {
             case let .paired(source, target):
+                if let mixedImage = RBDisplayListInterpolator.mixedImageItem(
+                    from: source,
+                    to: target,
+                    progress: progress
+                ) {
+                    contents.items.append(mixedImage)
+                    contents.recordInterpolationBounds(mixedImage.command.bounds)
+                    return
+                }
+                if let mixedShape = RBDisplayListInterpolator.mixedShapeItem(
+                    from: source,
+                    to: target,
+                    progress: progress
+                ) {
+                    contents.items.append(mixedShape)
+                    contents.recordInterpolationBounds(mixedShape.command.bounds)
+                    return
+                }
+                if let mixedGradientShape = RBDisplayListInterpolator.mixedGradientShapeItem(
+                    from: source,
+                    to: target,
+                    progress: progress
+                ) {
+                    contents.items.append(mixedGradientShape)
+                    contents.recordInterpolationBounds(mixedGradientShape.command.bounds)
+                    return
+                }
                 if RBDisplayListInterpolator.isTextItemPair(
                     source.command,
                     target.command
@@ -831,6 +858,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             transition: transition,
             into: &contents
         )
+        contents.interpolationBounds = outputBounds
         return contents
     }
 
@@ -900,6 +928,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             into: &contents
         )
 
+        contents.interpolationBounds = outputBounds
         return contents
     }
 
@@ -945,6 +974,903 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) -> Bool {
         guard case .text = source, case .text = target else { return false }
         return true
+    }
+
+    private static func mixedImageItem(
+        from source: ItemInterpolationInput,
+        to target: ItemInterpolationInput,
+        progress: CGFloat
+    ) -> DisplayList.Item? {
+        guard case let .content(sourceContent) = source.item.value,
+              case let .image(sourceImage) = sourceContent.value,
+              case let .content(targetContent) = target.item.value,
+              case let .image(targetImage) = targetContent.value,
+              case let .image(sourceRecord, _) = source.command,
+              case let .image(targetRecord, _) = target.command,
+              sourceRecord.textureID != nil,
+              imageRecordsMatchExceptShading(sourceRecord, targetRecord),
+              sourceImage.frame == sourceRecord.placementRect,
+              targetImage.frame == targetRecord.placementRect,
+              let shadingMix = interpolatedImageShading(
+                from: sourceRecord,
+                to: targetRecord,
+                progress: progress
+              ),
+              source.item.styleChain == target.item.styleChain else {
+            return nil
+        }
+        if progress == 0 { return source.item }
+        if progress == 1 { return target.item }
+
+        let bounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: progress
+        )
+        let placementRect = interpolatedBounds(
+            from: sourceRecord.placementRect,
+            to: targetRecord.placementRect,
+            progress: progress
+        )
+        var mixedRecord = sourceRecord
+        mixedRecord.placementRect = placementRect
+        mixedRecord.hasShading = shadingMix.shading != nil
+        mixedRecord.shading = shadingMix.record
+        let command = DisplayList.ItemCommand.image(mixedRecord, bounds: bounds)
+        var content = sourceContent
+        var image = sourceImage.image
+        image.shading = shadingMix.shading
+        content.value = .image(DisplayList.Content.ImageValue(
+            image: image,
+            frame: placementRect,
+            transform: interpolatedTransform(
+                from: sourceImage.transform,
+                to: targetImage.transform,
+                progress: progress
+            ),
+            command: command
+        ))
+        return DisplayList.Item(
+            content: content,
+            frame: bounds,
+            identity: source.item.identity,
+            version: source.item.version,
+            opacity: interpolatedItemOpacity(
+                from: source.item,
+                to: target.item,
+                progress: progress
+            ),
+            styleChain: source.item.styleChain
+        )
+    }
+
+    private struct ImageShadingMix {
+        var shading: GraphicsContext.Shading?
+        var record: DisplayList.ItemRecord.ShadingRecord?
+    }
+
+    private static func imageRecordsMatchExceptShading(
+        _ source: DisplayList.ItemRecord.ImageRecord,
+        _ target: DisplayList.ItemRecord.ImageRecord
+    ) -> Bool {
+        source.baseline == target.baseline &&
+            source.textureID == target.textureID &&
+            source.textureTransform == target.textureTransform &&
+            source.scaleFactor == target.scaleFactor
+    }
+
+    private static func interpolatedImageShading(
+        from source: DisplayList.ItemRecord.ImageRecord,
+        to target: DisplayList.ItemRecord.ImageRecord,
+        progress: CGFloat
+    ) -> ImageShadingMix? {
+        let sourceTint: Color?
+        switch (source.hasShading, source.shading) {
+        case (false, _):
+            sourceTint = nil
+        case let (true, .some(.color(color))):
+            sourceTint = color
+        case (true, .none):
+            return nil
+        }
+
+        let targetTint: Color?
+        switch (target.hasShading, target.shading) {
+        case (false, _):
+            targetTint = nil
+        case let (true, .some(.color(color))):
+            targetTint = color
+        case (true, .none):
+            return nil
+        }
+
+        guard sourceTint != nil || targetTint != nil else {
+            return ImageShadingMix(shading: nil, record: nil)
+        }
+        if let sourceTint, let targetTint,
+           sourceTint.provider.colorSpace != targetTint.provider.colorSpace {
+            return nil
+        }
+        let colorSpace = sourceTint?.provider.colorSpace ??
+            targetTint?.provider.colorSpace ?? .sRGB
+        let identityTint = Color(colorSpace, white: 1)
+        guard let tint = interpolatedGradientColor(
+            from: sourceTint ?? identityTint,
+            to: targetTint ?? identityTint,
+            progress: progress
+        ) else {
+            return nil
+        }
+        return ImageShadingMix(
+            shading: .color(tint),
+            record: .color(tint)
+        )
+    }
+
+    private static func mixedShapeItem(
+        from source: ItemInterpolationInput,
+        to target: ItemInterpolationInput,
+        progress: CGFloat
+    ) -> DisplayList.Item? {
+        guard case let .content(sourceContent) = source.item.value,
+              case let .shape(sourceShape) = sourceContent.value,
+              case let .content(targetContent) = target.item.value,
+              case let .shape(targetShape) = targetContent.value,
+              case let .shape(
+                sourceRole,
+                .some(.color(sourceColor)),
+                sourceFillStyle,
+                sourceStrokeStyle,
+                _
+              ) = source.command,
+              case let .shape(
+                targetRole,
+                .some(.color(targetColor)),
+                targetFillStyle,
+                targetStrokeStyle,
+                _
+              ) = target.command,
+              sourceRole == targetRole,
+              sourceFillStyle == targetFillStyle,
+              sourceStrokeStyle == targetStrokeStyle,
+              sourceShape.fillStyle == targetShape.fillStyle,
+              sourceShape.strokeStyle == targetShape.strokeStyle,
+              (sourceRole == .stroke) == (sourceStrokeStyle != nil),
+              source.item.styleChain == target.item.styleChain,
+              sameSingleColor(sourceShape.shading, sourceColor),
+              sameSingleColor(targetShape.shading, targetColor),
+              let mixedColor = interpolatedShapeColor(
+                from: sourceColor,
+                to: targetColor,
+                progress: progress
+              ),
+              let path = interpolatedPath(
+                from: sourceShape.path,
+                to: targetShape.path,
+                progress: progress
+              ) else {
+            return nil
+        }
+        if progress == 0 { return source.item }
+        if progress == 1 { return target.item }
+
+        let bounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: progress
+        )
+        let command = DisplayList.ItemCommand.shape(
+            role: sourceRole,
+            style: .color(mixedColor),
+            fillStyle: sourceFillStyle,
+            strokeStyle: sourceStrokeStyle,
+            bounds: bounds
+        )
+        var content = sourceContent
+        content.value = .shape(DisplayList.Content.ShapeValue(
+            path: path,
+            shading: .color(mixedColor),
+            fillStyle: sourceShape.fillStyle,
+            strokeStyle: sourceShape.strokeStyle,
+            transform: interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
+            ),
+            command: command
+        ))
+        return DisplayList.Item(
+            content: content,
+            frame: bounds,
+            identity: source.item.identity,
+            version: source.item.version,
+            opacity: interpolatedItemOpacity(
+                from: source.item,
+                to: target.item,
+                progress: progress
+            ),
+            styleChain: source.item.styleChain
+        )
+    }
+
+    private static func interpolatedShapeColor(
+        from source: Color,
+        to target: Color,
+        progress: CGFloat
+    ) -> Color? {
+        if source == target { return source }
+        guard let sourceLinear = linearSRGBComponents(of: source),
+              let targetLinear = linearSRGBComponents(of: target),
+              source.provider.alpha.isFinite,
+              target.provider.alpha.isFinite else {
+            return nil
+        }
+
+        let sourceAlpha = source.provider.alpha
+        let targetAlpha = target.provider.alpha
+        let fraction = Double(progress)
+        let mixedAlpha = sourceAlpha + (targetAlpha - sourceAlpha) * fraction
+        let sourceLab = oklabComponents(fromLinearSRGB: sourceLinear)
+        let targetLab = oklabComponents(fromLinearSRGB: targetLinear)
+        let mixedLab: SIMD3<Double>
+        if sourceAlpha == targetAlpha {
+            mixedLab = sourceLab + (targetLab - sourceLab) * fraction
+        } else {
+            let premultiplied = sourceLab * sourceAlpha
+                + (targetLab * targetAlpha - sourceLab * sourceAlpha) * fraction
+            if mixedAlpha == 0 || mixedAlpha == 1 {
+                mixedLab = premultiplied
+            } else {
+                mixedLab = premultiplied / mixedAlpha
+            }
+        }
+
+        let linearSRGB = linearSRGBComponents(fromOklab: mixedLab)
+        let output = encodedComponents(
+            linearSRGB,
+            in: source.provider.colorSpace
+        )
+        return Color(
+            source.provider.colorSpace,
+            red: output.x,
+            green: output.y,
+            blue: output.z,
+            opacity: mixedAlpha
+        )
+    }
+
+    private static func mixedGradientShapeItem(
+        from source: ItemInterpolationInput,
+        to target: ItemInterpolationInput,
+        progress: CGFloat
+    ) -> DisplayList.Item? {
+        guard case let .content(sourceContent) = source.item.value,
+              case let .shape(sourceShape) = sourceContent.value,
+              case let .content(targetContent) = target.item.value,
+              case let .shape(targetShape) = targetContent.value,
+              case let .shape(
+                sourceRole,
+                .some(.gradient(sourceCommandGradient)),
+                sourceFillStyle,
+                sourceStrokeStyle,
+                _
+              ) = source.command,
+              case let .shape(
+                targetRole,
+                .some(.gradient(targetCommandGradient)),
+                targetFillStyle,
+                targetStrokeStyle,
+                _
+              ) = target.command,
+              sourceRole == targetRole,
+              sourceFillStyle == targetFillStyle,
+              sourceStrokeStyle == targetStrokeStyle,
+              sourceShape.fillStyle == targetShape.fillStyle,
+              sourceShape.strokeStyle == targetShape.strokeStyle,
+              (sourceRole == .stroke) == (sourceStrokeStyle != nil),
+              source.item.styleChain == target.item.styleChain,
+              let sourceGradientShading = singleGradientShading(sourceShape.shading),
+              let targetGradientShading = singleGradientShading(targetShape.shading),
+              sourceCommandGradient == sourceGradientShading.gradient,
+              targetCommandGradient == targetGradientShading.gradient,
+              let mixedGradientShading = interpolatedGradientShading(
+                from: sourceGradientShading,
+                to: targetGradientShading,
+                progress: progress
+              ),
+              let path = interpolatedPath(
+                from: sourceShape.path,
+                to: targetShape.path,
+                progress: progress
+              ) else {
+            return nil
+        }
+        if progress == 0 { return source.item }
+        if progress == 1 { return target.item }
+
+        let bounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: progress
+        )
+        let command = DisplayList.ItemCommand.shape(
+            role: sourceRole,
+            style: .gradient(mixedGradientShading.gradient),
+            fillStyle: sourceFillStyle,
+            strokeStyle: sourceStrokeStyle,
+            bounds: bounds
+        )
+        var content = sourceContent
+        content.value = .shape(DisplayList.Content.ShapeValue(
+            path: path,
+            shading: mixedGradientShading.shading,
+            fillStyle: sourceShape.fillStyle,
+            strokeStyle: sourceShape.strokeStyle,
+            transform: interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
+            ),
+            command: command
+        ))
+        return DisplayList.Item(
+            content: content,
+            frame: bounds,
+            identity: source.item.identity,
+            version: source.item.version,
+            opacity: interpolatedItemOpacity(
+                from: source.item,
+                to: target.item,
+                progress: progress
+            ),
+            styleChain: source.item.styleChain
+        )
+    }
+
+    private static func interpolatedItemOpacity(
+        from source: DisplayList.Item,
+        to target: DisplayList.Item,
+        progress: CGFloat
+    ) -> Float {
+        source.opacity + (target.opacity - source.opacity) * Float(progress)
+    }
+
+    private enum GradientShadingPayload {
+        case linear(
+            gradient: Gradient,
+            startPoint: CGPoint,
+            endPoint: CGPoint,
+            options: GraphicsContext.GradientOptions
+        )
+        case radial(
+            gradient: Gradient,
+            center: CGPoint,
+            startRadius: CGFloat,
+            endRadius: CGFloat,
+            options: GraphicsContext.GradientOptions
+        )
+        case conic(
+            gradient: Gradient,
+            center: CGPoint,
+            angle: Angle,
+            options: GraphicsContext.GradientOptions
+        )
+
+        var gradient: Gradient {
+            switch self {
+            case let .linear(gradient, _, _, _),
+                 let .radial(gradient, _, _, _, _),
+                 let .conic(gradient, _, _, _):
+                return gradient
+            }
+        }
+    }
+
+    private static func singleGradientShading(
+        _ shading: GraphicsContext.Shading
+    ) -> GradientShadingPayload? {
+        guard shading.properties.count == 1 else { return nil }
+        switch shading.properties[0] {
+        case let .linearGradient(gradient, startPoint, endPoint, options):
+            return .linear(
+                gradient: gradient,
+                startPoint: startPoint,
+                endPoint: endPoint,
+                options: options
+            )
+        case let .radialGradient(gradient, center, startRadius, endRadius, options):
+            return .radial(
+                gradient: gradient,
+                center: center,
+                startRadius: startRadius,
+                endRadius: endRadius,
+                options: options
+            )
+        case let .conicGradient(gradient, center, angle, options):
+            return .conic(
+                gradient: gradient,
+                center: center,
+                angle: angle,
+                options: options
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func interpolatedGradientShading(
+        from source: GradientShadingPayload,
+        to target: GradientShadingPayload,
+        progress: CGFloat
+    ) -> (gradient: Gradient, shading: GraphicsContext.Shading)? {
+        switch (source, target) {
+        case let (
+            .linear(sourceGradient, sourceStart, sourceEnd, sourceOptions),
+            .linear(targetGradient, targetStart, targetEnd, targetOptions)
+        ):
+            guard sourceOptions == targetOptions,
+                  let gradient = interpolatedGradient(
+                    from: sourceGradient,
+                    to: targetGradient,
+                    progress: progress
+                  ) else {
+                return nil
+            }
+            return (
+                gradient,
+                .linearGradient(
+                    gradient,
+                    startPoint: interpolatedPoint(
+                        from: sourceStart,
+                        to: targetStart,
+                        progress: progress
+                    ),
+                    endPoint: interpolatedPoint(
+                        from: sourceEnd,
+                        to: targetEnd,
+                        progress: progress
+                    ),
+                    options: sourceOptions
+                )
+            )
+        case let (
+            .radial(
+                sourceGradient,
+                sourceCenter,
+                sourceStartRadius,
+                sourceEndRadius,
+                sourceOptions
+            ),
+            .radial(
+                targetGradient,
+                targetCenter,
+                targetStartRadius,
+                targetEndRadius,
+                targetOptions
+            )
+        ):
+            guard sourceOptions == targetOptions,
+                  let gradient = interpolatedGradient(
+                    from: sourceGradient,
+                    to: targetGradient,
+                    progress: progress
+                  ) else {
+                return nil
+            }
+            return (
+                gradient,
+                .radialGradient(
+                    gradient,
+                    center: interpolatedPoint(
+                        from: sourceCenter,
+                        to: targetCenter,
+                        progress: progress
+                    ),
+                    startRadius: interpolate(
+                        sourceStartRadius,
+                        targetStartRadius,
+                        by: progress
+                    ),
+                    endRadius: interpolate(
+                        sourceEndRadius,
+                        targetEndRadius,
+                        by: progress
+                    ),
+                    options: sourceOptions
+                )
+            )
+        case let (
+            .conic(sourceGradient, sourceCenter, sourceAngle, sourceOptions),
+            .conic(targetGradient, targetCenter, targetAngle, targetOptions)
+        ):
+            guard sourceOptions == targetOptions,
+                  let gradient = interpolatedGradient(
+                    from: sourceGradient,
+                    to: targetGradient,
+                    progress: progress
+                  ) else {
+                return nil
+            }
+            return (
+                gradient,
+                .conicGradient(
+                    gradient,
+                    center: interpolatedPoint(
+                        from: sourceCenter,
+                        to: targetCenter,
+                        progress: progress
+                    ),
+                    angle: Angle(radians: interpolate(
+                        sourceAngle.radians,
+                        targetAngle.radians,
+                        by: progress
+                    )),
+                    options: sourceOptions
+                )
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func interpolatedGradient(
+        from source: Gradient,
+        to target: Gradient,
+        progress: CGFloat
+    ) -> Gradient? {
+        let sourceStops = source.stops.sorted { $0.location < $1.location }
+        let targetStops = target.stops.sorted { $0.location < $1.location }
+        guard !sourceStops.isEmpty,
+              !targetStops.isEmpty,
+              sourceStops.allSatisfy({ $0.location.isFinite }),
+              targetStops.allSatisfy({ $0.location.isFinite }) else {
+            return nil
+        }
+
+        if sourceStops.count == targetStops.count {
+            var stops: [Gradient.Stop] = []
+            stops.reserveCapacity(sourceStops.count)
+            for (sourceStop, targetStop) in zip(sourceStops, targetStops) {
+                guard let color = interpolatedGradientColor(
+                    from: sourceStop.color,
+                    to: targetStop.color,
+                    progress: progress
+                ) else {
+                    return nil
+                }
+                stops.append(Gradient.Stop(
+                    color: color,
+                    location: interpolate(
+                        sourceStop.location,
+                        targetStop.location,
+                        by: progress
+                    )
+                ))
+            }
+            return Gradient(stops: stops)
+        }
+
+        var locations = (sourceStops.map(\.location) + targetStops.map(\.location)).sorted()
+        locations = locations.enumerated().compactMap { index, location in
+            index == 0 || location != locations[index - 1] ? location : nil
+        }
+        var stops: [Gradient.Stop] = []
+        stops.reserveCapacity(locations.count)
+        for location in locations {
+            guard let sourceColor = gradientColor(in: sourceStops, at: location),
+                  let targetColor = gradientColor(in: targetStops, at: location),
+                  let color = interpolatedGradientColor(
+                    from: sourceColor,
+                    to: targetColor,
+                    progress: progress
+                  ) else {
+                return nil
+            }
+            stops.append(Gradient.Stop(color: color, location: location))
+        }
+        return Gradient(stops: stops)
+    }
+
+    private static func gradientColor(
+        in stops: [Gradient.Stop],
+        at location: CGFloat
+    ) -> Color? {
+        guard var lower = stops.first else { return nil }
+        if location <= lower.location { return lower.color }
+        for upper in stops.dropFirst() {
+            if location < upper.location {
+                guard upper.location > lower.location else { return upper.color }
+                return interpolatedGradientColor(
+                    from: lower.color,
+                    to: upper.color,
+                    progress: (location - lower.location) / (upper.location - lower.location)
+                )
+            }
+            lower = upper
+        }
+        return lower.color
+    }
+
+    private static func interpolatedGradientColor(
+        from source: Color,
+        to target: Color,
+        progress: CGFloat
+    ) -> Color? {
+        if source == target { return source }
+        guard let sourceLinear = linearSRGBComponents(of: source),
+              let targetLinear = linearSRGBComponents(of: target),
+              source.provider.alpha.isFinite,
+              target.provider.alpha.isFinite else {
+            return nil
+        }
+
+        let workingSpace = target.provider.colorSpace
+        let sourceComponents = encodedComponents(sourceLinear, in: workingSpace)
+        let targetComponents = encodedComponents(targetLinear, in: workingSpace)
+        let sourceAlpha = source.provider.alpha
+        let targetAlpha = target.provider.alpha
+        let fraction = Double(progress)
+        let mixedAlpha = sourceAlpha + (targetAlpha - sourceAlpha) * fraction
+        let mixedComponents: SIMD3<Double>
+        if sourceAlpha == targetAlpha {
+            mixedComponents = sourceComponents + (targetComponents - sourceComponents) * fraction
+        } else {
+            let premultiplied = sourceComponents * sourceAlpha
+                + (targetComponents * targetAlpha - sourceComponents * sourceAlpha) * fraction
+            if mixedAlpha == 0 || mixedAlpha == 1 {
+                mixedComponents = premultiplied
+            } else {
+                mixedComponents = premultiplied / mixedAlpha
+            }
+        }
+
+        let workingColor = Color(
+            workingSpace,
+            red: mixedComponents.x,
+            green: mixedComponents.y,
+            blue: mixedComponents.z,
+            opacity: mixedAlpha
+        )
+        guard let mixedLinear = linearSRGBComponents(of: workingColor) else { return nil }
+        let output = encodedComponents(mixedLinear, in: source.provider.colorSpace)
+        return Color(
+            source.provider.colorSpace,
+            red: output.x,
+            green: output.y,
+            blue: output.z,
+            opacity: mixedAlpha
+        )
+    }
+
+    private static func linearSRGBComponents(of color: Color) -> SIMD3<Double>? {
+        var components = SIMD3(
+            color.provider.red,
+            color.provider.green,
+            color.provider.blue
+        )
+        guard components.x.isFinite,
+              components.y.isFinite,
+              components.z.isFinite else {
+            return nil
+        }
+        switch color.provider.colorSpace {
+        case .sRGB:
+            components = mappedComponents(components, decodeRGBComponent)
+        case .sRGBLinear:
+            break
+        case .displayP3:
+            components = mappedComponents(components, decodeRGBComponent)
+            let xyz = SIMD3(
+                0.4865709486482162 * components.x + 0.2656676931690931 * components.y + 0.1982172852343625 * components.z,
+                0.2289745640697488 * components.x + 0.6917385218365064 * components.y + 0.0792869140937450 * components.z,
+                0.0000000000000000 * components.x + 0.0451133818589026 * components.y + 1.0439443689009760 * components.z
+            )
+            components = SIMD3(
+                3.2409699419045226 * xyz.x - 1.5373831775700940 * xyz.y - 0.4986107602930034 * xyz.z,
+                -0.9692436362808796 * xyz.x + 1.8759675015077202 * xyz.y + 0.0415550574071756 * xyz.z,
+                0.0556300796969937 * xyz.x - 0.2039769588889765 * xyz.y + 1.0569715142428786 * xyz.z
+            )
+        }
+        return components
+    }
+
+    private static func encodedComponents(
+        _ linearSRGB: SIMD3<Double>,
+        in colorSpace: Color.RGBColorSpace
+    ) -> SIMD3<Double> {
+        switch colorSpace {
+        case .sRGB:
+            return mappedComponents(linearSRGB, encodeRGBComponent)
+        case .sRGBLinear:
+            return linearSRGB
+        case .displayP3:
+            let xyz = SIMD3(
+                0.4123907992659595 * linearSRGB.x + 0.3575843393838780 * linearSRGB.y + 0.1804807884018343 * linearSRGB.z,
+                0.2126390058715104 * linearSRGB.x + 0.7151686787677559 * linearSRGB.y + 0.0721923153607337 * linearSRGB.z,
+                0.0193308187155919 * linearSRGB.x + 0.1191947797946260 * linearSRGB.y + 0.9505321522496607 * linearSRGB.z
+            )
+            return mappedComponents(SIMD3(
+                2.4934969119414250 * xyz.x - 0.9313836179191240 * xyz.y - 0.4027107844507170 * xyz.z,
+                -0.8294889695615750 * xyz.x + 1.7626640603183460 * xyz.y + 0.0236246858419440 * xyz.z,
+                0.0358458302437840 * xyz.x - 0.0761723892680410 * xyz.y + 0.9568845240076870 * xyz.z
+            ), encodeRGBComponent)
+        }
+    }
+
+    private static func mappedComponents(
+        _ components: SIMD3<Double>,
+        _ transform: (Double) -> Double
+    ) -> SIMD3<Double> {
+        SIMD3(
+            transform(components.x),
+            transform(components.y),
+            transform(components.z)
+        )
+    }
+
+    private static func oklabComponents(
+        fromLinearSRGB color: SIMD3<Double>
+    ) -> SIMD3<Double> {
+        let l = signedCubeRoot(
+            0.4122214708 * color.x + 0.5363325363 * color.y + 0.0514459929 * color.z
+        )
+        let m = signedCubeRoot(
+            0.2119034982 * color.x + 0.6806995451 * color.y + 0.1073969566 * color.z
+        )
+        let s = signedCubeRoot(
+            0.0883024619 * color.x + 0.2817188376 * color.y + 0.6299787005 * color.z
+        )
+        return SIMD3(
+            0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+        )
+    }
+
+    private static func linearSRGBComponents(
+        fromOklab color: SIMD3<Double>
+    ) -> SIMD3<Double> {
+        let l = pow(color.x + 0.3963377774 * color.y + 0.2158037573 * color.z, 3)
+        let m = pow(color.x - 0.1055613458 * color.y - 0.0638541728 * color.z, 3)
+        let s = pow(color.x - 0.0894841775 * color.y - 1.2914855480 * color.z, 3)
+        return SIMD3(
+            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+        )
+    }
+
+    private static func signedCubeRoot(_ value: Double) -> Double {
+        value.sign == .minus ? -pow(-value, 1.0 / 3.0) : pow(value, 1.0 / 3.0)
+    }
+
+    private static func decodeRGBComponent(_ value: Double) -> Double {
+        let magnitude = abs(value)
+        let decoded = magnitude <= 0.04045
+            ? magnitude / 12.92
+            : pow((magnitude + 0.055) / 1.055, 2.4)
+        return value.sign == .minus ? -decoded : decoded
+    }
+
+    private static func encodeRGBComponent(_ value: Double) -> Double {
+        let magnitude = abs(value)
+        let encoded = magnitude <= 0.0031308
+            ? magnitude * 12.92
+            : 1.055 * pow(magnitude, 1.0 / 2.4) - 0.055
+        return value.sign == .minus ? -encoded : encoded
+    }
+
+    private static func sameSingleColor(
+        _ shading: GraphicsContext.Shading,
+        _ color: Color
+    ) -> Bool {
+        guard shading.properties.count == 1 else { return false }
+        switch shading.properties[0] {
+        case let .color(value):
+            return value == color
+        case let .style(style):
+            return (style as? Color) == color
+        default:
+            return false
+        }
+    }
+
+    private static func interpolatedPath(
+        from source: Path,
+        to target: Path,
+        progress: CGFloat
+    ) -> Path? {
+        var sourceElements: [Path.Element] = []
+        var targetElements: [Path.Element] = []
+        source.forEach { sourceElements.append($0) }
+        target.forEach { targetElements.append($0) }
+        guard sourceElements.count == targetElements.count else { return nil }
+
+        var output = Path()
+        for (sourceElement, targetElement) in zip(sourceElements, targetElements) {
+            switch (sourceElement, targetElement) {
+            case let (.move(sourcePoint), .move(targetPoint)):
+                output.move(to: interpolatedPoint(
+                    from: sourcePoint,
+                    to: targetPoint,
+                    progress: progress
+                ))
+            case let (.line(sourcePoint), .line(targetPoint)):
+                output.addLine(to: interpolatedPoint(
+                    from: sourcePoint,
+                    to: targetPoint,
+                    progress: progress
+                ))
+            case let (
+                .quadCurve(sourcePoint, sourceControl),
+                .quadCurve(targetPoint, targetControl)
+            ):
+                output.addQuadCurve(
+                    to: interpolatedPoint(
+                        from: sourcePoint,
+                        to: targetPoint,
+                        progress: progress
+                    ),
+                    control: interpolatedPoint(
+                        from: sourceControl,
+                        to: targetControl,
+                        progress: progress
+                    )
+                )
+            case let (
+                .curve(sourcePoint, sourceControl1, sourceControl2),
+                .curve(targetPoint, targetControl1, targetControl2)
+            ):
+                output.addCurve(
+                    to: interpolatedPoint(
+                        from: sourcePoint,
+                        to: targetPoint,
+                        progress: progress
+                    ),
+                    control1: interpolatedPoint(
+                        from: sourceControl1,
+                        to: targetControl1,
+                        progress: progress
+                    ),
+                    control2: interpolatedPoint(
+                        from: sourceControl2,
+                        to: targetControl2,
+                        progress: progress
+                    )
+                )
+            case (.closeSubpath, .closeSubpath):
+                output.closeSubpath()
+            default:
+                return nil
+            }
+        }
+        return output
+    }
+
+    private static func interpolatedPoint(
+        from source: CGPoint,
+        to target: CGPoint,
+        progress: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: interpolate(source.x, target.x, by: progress),
+            y: interpolate(source.y, target.y, by: progress)
+        )
+    }
+
+    private static func interpolatedTransform(
+        from source: CGAffineTransform,
+        to target: CGAffineTransform,
+        progress: CGFloat
+    ) -> CGAffineTransform {
+        CGAffineTransform(
+            a: interpolate(source.a, target.a, by: progress),
+            b: interpolate(source.b, target.b, by: progress),
+            c: interpolate(source.c, target.c, by: progress),
+            d: interpolate(source.d, target.d, by: progress),
+            tx: interpolate(source.tx, target.tx, by: progress),
+            ty: interpolate(source.ty, target.ty, by: progress)
+        )
     }
 
     private static func centeredBounds(size: CGSize, at center: CGPoint) -> CGRect {
@@ -1035,6 +1961,43 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
 
         for (source, target) in zip(sourceEffects, targetEffects) {
+            if case let .mask(sourceMask, sourceOptions) = source.effect,
+               case let .mask(targetMask, targetOptions) = target.effect {
+                if sourceOptions.rawValue == targetOptions.rawValue {
+                    contents.appendEffect(
+                        .mask(
+                            interpolatedContents(
+                                from: sourceMask,
+                                to: targetMask,
+                                progress: progress,
+                                transition: transition
+                            ),
+                            sourceOptions
+                        ),
+                        contents: interpolatedContents(
+                            from: source.contents,
+                            to: target.contents,
+                            progress: progress,
+                            transition: transition
+                        )
+                    )
+                    continue
+                }
+
+                if canPreserveDifferentModeMaskBranches(
+                    from: sourceMask,
+                    to: targetMask
+                ) {
+                    var sourceBranch = DisplayList()
+                    sourceBranch.appendEffect(source.effect, contents: source.contents)
+                    var targetBranch = DisplayList()
+                    targetBranch.appendEffect(target.effect, contents: target.contents)
+                    contents.append(contentsOf: sourceBranch)
+                    contents.append(contentsOf: targetBranch)
+                    continue
+                }
+            }
+
             guard source.effect.hasSameSurface(as: target.effect) else {
                 let fallback = progress >= 1 ? target : source
                 contents.appendEffect(fallback.effect, contents: fallback.contents)
@@ -1196,6 +2159,48 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
         var bounds: CGRect?
         for (source, target) in zip(sourceEffects, targetEffects) {
+            if case let .mask(sourceMask, sourceOptions) = source.effect,
+               case let .mask(targetMask, targetOptions) = target.effect {
+                let effectBounds: CGRect
+                if sourceOptions.rawValue == targetOptions.rawValue {
+                    guard let maskBounds = interpolatedBounds(
+                        from: sourceMask,
+                        to: targetMask,
+                        progress: Float(progress),
+                        transition: transition
+                    ), let contentBounds = interpolatedBounds(
+                        from: source.contents,
+                        to: target.contents,
+                        progress: Float(progress),
+                        transition: transition
+                    ) else {
+                        return nil
+                    }
+                    effectBounds = sourceOptions.contains(.inverse)
+                        ? contentBounds
+                        : contentBounds.intersection(maskBounds)
+                } else {
+                    guard canPreserveDifferentModeMaskBranches(
+                        from: sourceMask,
+                        to: targetMask
+                    ),
+                          let sourceBounds = maskEffectBounds(
+                            mask: sourceMask,
+                            contents: source.contents,
+                            options: sourceOptions
+                          ), let targetBounds = maskEffectBounds(
+                            mask: targetMask,
+                            contents: target.contents,
+                            options: targetOptions
+                          ) else {
+                        return nil
+                    }
+                    effectBounds = sourceBounds.union(targetBounds)
+                }
+                bounds = union(bounds, effectBounds)
+                continue
+            }
+
             guard source.effect.hasSameSurface(as: target.effect),
                   let effectBounds = interpolatedRecordedBounds(
                     from: source.contents,
@@ -1213,6 +2218,23 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             bounds = union(bounds, effectBounds)
         }
         return bounds
+    }
+
+    private static func maskEffectBounds(
+        mask: DisplayList,
+        contents: DisplayList,
+        options: GraphicsContext.ClipOptions
+    ) -> CGRect? {
+        guard let contentBounds = contents.interpolationBounds else {
+            return nil
+        }
+        guard !options.contains(.inverse) else {
+            return contentBounds
+        }
+        guard let maskBounds = mask.interpolationBounds else {
+            return .null
+        }
+        return contentBounds.intersection(maskBounds)
     }
 
     private static func canMaterializeInterpolatedContents(
@@ -1261,12 +2283,36 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         }
 
         return zip(sourceEffects, targetEffects).contains { source, target in
-            source.effect.hasSameSurface(as: target.effect) &&
+            if case let .mask(sourceMask, sourceOptions) = source.effect,
+               case let .mask(targetMask, targetOptions) = target.effect {
+                if sourceOptions.rawValue == targetOptions.rawValue {
+                    return canMaterializeInterpolatedContents(
+                        from: sourceMask,
+                        to: targetMask
+                    ) || canMaterializeInterpolatedContents(
+                        from: source.contents,
+                        to: target.contents
+                    )
+                }
+                return canPreserveDifferentModeMaskBranches(
+                    from: sourceMask,
+                    to: targetMask
+                )
+            }
+            return source.effect.hasSameSurface(as: target.effect) &&
                 canMaterializeInterpolatedContents(
                     from: source.contents,
                     to: target.contents
                 )
         }
+    }
+
+    private static func canPreserveDifferentModeMaskBranches(
+        from source: DisplayList,
+        to target: DisplayList
+    ) -> Bool {
+        source.hasSameInterpolationSurface(as: target) ||
+            canMaterializeInterpolatedContents(from: source, to: target)
     }
 
     private static func interpolatedRecordedItemBounds(
