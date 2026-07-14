@@ -514,6 +514,50 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
     }
 
+    func testAnimatableFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget() {
+        assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
+            supportsVFD: false
+        )
+    }
+
+    func testAnimatableFrameAttributeVFDSameTimeRetargetDoesNotCombineIntermediateTarget() {
+        assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
+            supportsVFD: true
+        )
+    }
+
+    private func assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
+        supportsVFD: Bool
+    ) {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: CGPoint(x: 100, y: 171),
+            initialSize: ViewSize(width: 190, height: 150),
+            supportsVFD: supportsVFD
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 186),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .easeInOut(duration: 5))
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 180),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .easeInOut(duration: 5))
+        )
+        _ = harness.currentFrame()
+
+        var maximumY = harness.currentPosition().y
+        for step in 1...330 {
+            harness.setTime(Double(step) / 60.0)
+            maximumY = max(maximumY, harness.currentFrame().origin.y)
+        }
+
+        XCTAssertLessThanOrEqual(maximumY, 180.001)
+        XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
+    }
+
     func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
         assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
             supportsVFD: false

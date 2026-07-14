@@ -620,19 +620,28 @@ extension Font {
     static func pointSize(for style: TextStyle) -> CGFloat {
         switch style {
         case .largeTitle:   return 26
-        case .title:        return 24
-        case .headline:     return 21
-        case .subheadline:  return 18
-        case .body:         return 14
+        case .title:        return 22
+        case .headline:     return 13
+        case .subheadline:  return 11
+        case .body:         return 13
         case .callout:      return 12
-        case .footnote:     return 8
-        case .caption:      return 8
+        case .footnote:     return 10
+        case .caption:      return 10
+        }
+    }
+
+    static func weight(for style: TextStyle) -> Weight {
+        switch style {
+        case .headline:
+            return .bold
+        case .largeTitle, .title, .subheadline, .body, .callout, .footnote, .caption:
+            return .regular
         }
     }
 
     public static func system(_ style: Font.TextStyle, design: Font.Design = .default) -> Font {
         let provider = SystemFontProvider(size: pointSize(for: style),
-                                          weight: .regular,
+                                          weight: weight(for: style),
                                           design: design,
                                           renderingMode: .automatic)
         return Font(provider: AnyFontBox(provider), displayScale: 1)
@@ -652,6 +661,7 @@ extension Font {
                               isBitmapPreferred: Bool = false,
                               isColorEnabled: Bool = true) -> Font {
         bitmap(size: pointSize(for: style),
+               weight: weight(for: style),
                design: design,
                outlineThickness: outlineThickness,
                isBitmapPreferred: isBitmapPreferred,
@@ -679,6 +689,7 @@ extension Font {
                               design: Font.Design = .default,
                               outlineThickness: CGFloat = 0) -> Font {
         vector(size: pointSize(for: style),
+               weight: weight(for: style),
                design: design,
                outlineThickness: outlineThickness)
     }

@@ -257,6 +257,53 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertTrue(zeroMaskOpacity.clipBounds.isNull)
     }
 
+    func testDrawLayerAppliesCallerTransformExactlyOnceOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let width = 48
+        let height = 32
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        var context = try XCTUnwrap(
+            GraphicsContext(
+                sceneResources: SceneResources(),
+                environment: EnvironmentValues(),
+                viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: width, height: height),
+                commandBuffer: commandBuffer
+            )
+        )
+        context.clear(with: .clear)
+        context.translateBy(x: 10, y: 5)
+        context.drawLayer { layer in
+            layer.fill(
+                Path(CGRect(x: 2, y: 3, width: 8, height: 6)),
+                with: .color(.red)
+            )
+        }
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(deviceContext.makeCPUAccessible(texture: context.backdrop))
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(start: pointer, count: width * height * 4)
+        var occupiedBounds = CGRect.null
+        for y in 0..<height {
+            for x in 0..<width where bytes[(y * width + x) * 4 + 3] > 0 {
+                occupiedBounds = occupiedBounds.union(
+                    CGRect(x: x, y: y, width: 1, height: 1)
+                )
+            }
+        }
+
+        XCTAssertEqual(
+            occupiedBounds,
+            CGRect(x: 12, y: 8, width: 8, height: 6)
+        )
+    }
+
     func testDifferentModeDisplayListMasksMergeComplementaryBranchesOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

@@ -20,7 +20,9 @@ extension GraphicsContext {
             commandBuffer: self.commandBuffer) else {
             return nil
         }
-        context.transform = self.transform
+        // Layer contents stay in the caller's current user space. The caller's transform is
+        // applied when the completed layer texture is composited, so copying it here would
+        // apply the same transform twice.
         context.clipBoundingRect = self.clipBoundingRect
         context.clear(with: .clear)
         return context

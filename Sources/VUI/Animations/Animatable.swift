@@ -853,8 +853,10 @@ final class AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
-    var isPending: Bool {
-        phase == .pending
+    func hasElapsedSinceActivation(at time: Time) -> Bool {
+        // A target written at the activation timestamp has not established an
+        // elapsed presentation interval and can still be replaced directly.
+        phase != .pending && beginTime.seconds < time.seconds
     }
 
     func combine(
@@ -5535,7 +5537,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         // AnimatorState before control returns to the rule.
         if let previousModelData,
            let animatorState,
-           !animatorState.isPending {
+           animatorState.hasElapsedSinceActivation(at: time) {
             var newInterval = target.animatableData
             newInterval -= previousModelData
             updatePreviousModelData(target.animatableData)
