@@ -159,9 +159,6 @@ let package = Package(
             resources: [
                 .copy("Resources/Shaders"),
                 .copy("Resources/glTF"),
-            ],
-            swiftSettings: [
-                .interoperabilityMode(.Cxx),
             ]
         ),
     ],

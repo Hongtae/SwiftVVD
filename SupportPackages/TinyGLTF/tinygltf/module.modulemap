@@ -1,4 +1,4 @@
 module TinyGLTF {
-    header "tiny_gltf.h"
-    requires cplusplus14
+    header "tiny_gltf_v3.h"
+    export *
 }

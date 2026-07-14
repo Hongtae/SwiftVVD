@@ -1,14 +1,78 @@
 # Header only C++ tiny glTF library(loader/saver).
 
-`TinyGLTF` is a header only C++11 glTF 2.0 https://github.com/KhronosGroup/glTF library.
+`TinyGLTF` is a header only C++ glTF 2.0 https://github.com/KhronosGroup/glTF library.
 
-`TinyGLTF` uses Niels Lohmann's json library (https://github.com/nlohmann/json), so now it requires C++11 compiler.
-(Also, you can use RadpidJSON as an JSON backend)
-If you are looking for old, C++03 version, please use `devel-picojson` branch (but not maintained anymore).
+## TinyGLTF v3 (new major release)
+
+**`tiny_gltf_v3.h`** is the new major version of TinyGLTF.
+The new C implementation (`tiny_gltf_v3.c` + `tinygltf_json_c.h`) is currently **experimental**.
+
+### What's new in v3
+
+v3 is a ground-up rewrite with a C-centric, low-overhead design:
+
+- **Pure C POD structs** — no STL containers in the public API; easy to bind to other languages.
+- **Arena-based memory management** — all parse-time allocations come from a single arena; a single `tg3_model_free()` frees everything.
+- **Structured error reporting** — `tg3_error_stack` provides machine-readable errors with severity levels and source locations.
+- **Custom JSON backend** — backed by `tinygltf_json_c.h`, a locale-independent pure-C JSON parser/serializer used by the v3 runtime.
+- **Streaming callbacks** — opt-in streaming parse/write via user-supplied callbacks.
+- **No RTTI, no exceptions required** — suitable for embedded and game-engine use.
+- **Opt-in filesystem and image I/O** — `TINYGLTF3_ENABLE_FS` / `TINYGLTF3_ENABLE_STB_IMAGE` are off by default; you control when and how assets are loaded.
+- **C++20 coroutine facade** (optional, auto-detected). C17/C++17 default.
+- **Hardened against untrusted input** — URI sanitization, post-parse index-bounds validation (default-on, opt-out via `tg3_parse_options.validate_indices = 0`), strict numeric range checks; exercised by a libFuzzer harness and by a cross-version verifier that compares parsed output against the v1 C++ reference loader. See the `Security Considerations` block at the top of `tiny_gltf_v3.h`.
+
+### Quick start (v3)
+
+Copy `tiny_gltf_v3.h`, `tiny_gltf_v3.c`, and `tinygltf_json_c.h` to your project.
+Compile `tiny_gltf_v3.c` as C11 or newer. Define `TINYGLTF3_ENABLE_FS` when
+building `tiny_gltf_v3.c` if you want `tg3_parse_file()` to use stdio-backed
+filesystem helpers. The legacy `TINYGLTF3_IMPLEMENTATION` include path remains
+available for compatibility.
+
+```c
+#include "tiny_gltf_v3.h"
+```
+
+Loading a glTF file:
+
+```c
+tg3_parse_options opts;
+tg3_error_stack errors;
+tg3_model model;
+
+tg3_parse_options_init(&opts);
+tg3_error_stack_init(&errors);
+
+tg3_error_code err = tg3_parse_file(&model, &errors, "scene.gltf", 10, &opts);
+if (err != TG3_OK) {
+    for (uint32_t i = 0; i < errors.count; i++) {
+        fprintf(stderr, "[%d] %s\n", (int)errors.entries[i].severity,
+                errors.entries[i].message ? errors.entries[i].message : "(null)");
+    }
+}
+// ... use model ...
+tg3_model_free(&model);
+tg3_error_stack_free(&errors);
+```
+
+### Testing & verification
+
+The v3 C runtime ships with three layers of automated coverage:
+
+- **`tests/tester_v3_c.c`** — internal unit checks plus security regression tests (path traversal, negative `byteStride`, OOB indices, error-message lifetime, …). Build via `make` in `tests/`; run `./tester_v3_c` for the internal suite or `./tester_v3_c <file.gltf|file.glb>` to parse a single asset.
+- **`test_runner.py`** — a cross-version verifier that runs the v1 C++ reference loader (`loader_example`) and the v3 C tester against every model in `glTF-Sample-Models/2.0`, then diffs a structured DIGEST block (buffer FNV64 hashes, accessor/bufferView fields, primitive attribute maps, node TRS, material PBR factors, skin/animation/scene topology, …). v1 is the ground truth.
+- **`tests/v3/fuzzer/`** — libFuzzer harness with ASan + UBSan (`make run` builds and runs `fuzz_gltf_v3_c`). Crafted regression inputs live in `tests/v3/security/` and are seeded into `tests/v3/fuzzer/corpus/`.
 
 ## Status
 
-Currently TinyGLTF is stable and maintenance mode. No drastic changes and feature additions planned.
+> ⚠️ **v2 deprecation notice:** `tiny_gltf.h` (v2) remains fully functional and is still supported,
+> but it is now in **maintenance mode only** — no new features will be added.
+> v2 will be **sunset after mid-2026**. `tiny_gltf_v3.h` is the intended successor, but the new C v3 runtime is still **experimental**.
+
+TinyGLTF v3's C runtime (`tiny_gltf_v3.h` + `tiny_gltf_v3.c`) is available for evaluation and early adoption,
+but its API/behavior may still change while the implementation matures.
+
+Currently TinyGLTF v2 is stable and in maintenance mode. No drastic changes and feature additions planned.
  - v2.9.0 Various fixes and improvements. Filesystem callback API change.
  - v2.8.0 Add URICallbacks for custom URI handling in Buffer and Image. PR#397
  - v2.7.0 Change WriteImageDataFunction user callback function signature. PR#393
@@ -25,8 +89,6 @@ Currently TinyGLTF is stable and maintenance mode. No drastic changes and featur
 * `sajson` : Use sajson to parse JSON. Parsing only but faster compile time(2x reduction compared to json.hpp and RapidJson), but not well maintained.
 
 ## Builds
-
-[![Build status](https://ci.appveyor.com/api/projects/status/warngenu9wjjhlm8?svg=true)](https://ci.appveyor.com/project/syoyo/tinygltf)
 
 ![C/C++ CI](https://github.com/syoyo/tinygltf/workflows/C/C++%20CI/badge.svg)
 
@@ -92,23 +154,6 @@ Users who want to run TinyGLTF securely and safely(e.g. need to handle malcious 
 I recommend to build TinyGLTF for WASM target.
 WASI build example is located in [wasm](wasm) .
 
-## Projects using TinyGLTF
-
-* px_render Single header C++ Libraries for Thread Scheduling, Rendering, and so on... https://github.com/pplux/px
-* Physical based rendering with Vulkan using glTF 2.0 models https://github.com/SaschaWillems/Vulkan-glTF-PBR
-* GLTF loader plugin for OGRE 2.1. Support for PBR materials via HLMS/PBS https://github.com/Ybalrid/Ogre_glTF
-* [TinyGltfImporter](http://doc.magnum.graphics/magnum/classMagnum_1_1Trade_1_1TinyGltfImporter.html) plugin for [Magnum](https://github.com/mosra/magnum), a lightweight and modular C++11/C++14 graphics middleware for games and data visualization.
-* [Diligent Engine](https://github.com/DiligentGraphics/DiligentEngine) - A modern cross-platform low-level graphics library and rendering framework
-* Lighthouse 2: a rendering framework for real-time ray tracing / path tracing experiments. https://github.com/jbikker/lighthouse2
-* [QuickLook GLTF](https://github.com/toshiks/glTF-quicklook) - quicklook plugin for macos. Also SceneKit wrapper for tinygltf.
-* [GlslViewer](https://github.com/patriciogonzalezvivo/glslViewer) - live GLSL coding for MacOS and Linux
-* [Vulkan-Samples](https://github.com/KhronosGroup/Vulkan-Samples) - The Vulkan Samples is collection of resources to help you develop optimized Vulkan applications.
-* [TDME2](https://github.com/andreasdr/tdme2) - TDME2 - ThreeDeeMiniEngine2 is a lightweight 3D engine including tools suited for 3D game development using C++11
-* [SanityEngine](https://github.com/DethRaid/SanityEngine) - A C++/D3D12 renderer focused on the personal and professional development of its developer
-* [Open3D](http://www.open3d.org/) - A Modern Library for 3D Data Processing
-* [Supernova Engine](https://github.com/supernovaengine/supernova) - Game engine for 2D and 3D projects with Lua or C++ in data oriented design.
-* [Wicked Engine<img src="https://github.com/turanszkij/WickedEngine/blob/master/Content/logo_small.png" width="28px" align="center"/>](https://github.com/turanszkij/WickedEngine) - 3D engine with modern graphics
-* Your projects here! (Please send PR)
 
 ## TODOs
 
@@ -159,9 +204,10 @@ Model model;
 TinyGLTF loader;
 std::string err;
 std::string warn;
+std::string filename = "input.gltf";
 
-bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, argv[1]);
-//bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, argv[1]); // for binary glTF(.glb)
+bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, filename);
+//bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename); // for binary glTF(.glb)
 
 if (!warn.empty()) {
   printf("Warn: %s\n", warn.c_str());
@@ -172,8 +218,7 @@ if (!err.empty()) {
 }
 
 if (!ret) {
-  printf("Failed to parse glTF\n");
-  return -1;
+  printf("Failed to parse glTF: %s\n", filename.c_str());
 }
 ```
 
@@ -194,7 +239,6 @@ if (!ret) {
 * `TINYGLTF_NO_INCLUDE_STB_IMAGE `: Disable including `stb_image.h` from within `tiny_gltf.h` because it has been already included before or you want to include it using custom path before including `tiny_gltf.h`.
 * `TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE `: Disable including `stb_image_write.h` from within `tiny_gltf.h` because it has been already included before or you want to include it using custom path before including `tiny_gltf.h`.
 * `TINYGLTF_USE_RAPIDJSON` : Use RapidJSON as a JSON parser/serializer. RapidJSON files are not included in TinyGLTF repo. Please set an include path to RapidJSON if you enable this feature.
-* `TINYGLTF_USE_CPP14` : Use C++14 feature(requires C++14 compiler). This may give better performance than C++11.
 
 
 ## CMake options
@@ -211,6 +255,11 @@ set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(/path/to/tinygltf)
 ```
 
+NOTE: Using tinygltf as a submodule doesn't automatically add the headers to your include path (as standard for many libraries). To get this functionality, add the following to the CMakeLists.txt file from above:
+
+```
+target_include_directories(${PROJECT_NAME} PRIVATE "/path/to/tinygltf")
+```
 
 ### Saving gltTF 2.0 model
 

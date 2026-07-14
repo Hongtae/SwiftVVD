@@ -18,14 +18,13 @@ let package = Package(
         .target(
             name: "TinyGLTF",
             path: "tinygltf",
-            sources: ["tiny_gltf.cc"],
+            sources: ["tiny_gltf_v3.c"],
             publicHeadersPath: ".",
-            cxxSettings: [
-                .define("__STDC_LIB_EXT1__", .when(platforms: [.windows])),
-                .define("NOMINMAX", .when(platforms: [.windows])),
-                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
+            cSettings: [
+                .define("TINYGLTF3_ENABLE_FS"),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
             ]
         ),
     ],
-    cxxLanguageStandard: .cxx17
+    cLanguageStandard: .c11
 )

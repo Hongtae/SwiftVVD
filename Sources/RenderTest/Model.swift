@@ -288,24 +288,42 @@ extension SceneNode {
 }
 
 func loadModel(from path: String, shader: MaterialShaderMap? = nil, queue: CommandQueue) -> Model? {
-    var loader = tinygltf.TinyGLTF()
-    var model = tinygltf.Model()
-    var err = std.string()
-    var warn = std.string()
-    let result: Bool
-    if path.lowercased().hasSuffix(".gltf") {  // text-format
-        result = loader.LoadASCIIFromFile(&model, &err, &warn, std.string(path))
-    } else { // binary-format
-        result = loader.LoadBinaryFromFile(&model, &err, &warn, std.string(path))
-    }
-    if warn.empty() == false {
-        Log.warning("glTF warning: \(warn)")
-    }
-    if err.empty() == false {
-        Log.error("glTF error: \(err)")
+    guard path.utf8.count <= UInt32.max else {
+        Log.error("glTF path is too long")
+        return nil
     }
 
-    if result {
+    var model = tg3_model()
+    var errors = tg3_error_stack()
+    var options = tg3_parse_options()
+    tg3_error_stack_init(&errors)
+    tg3_parse_options_init(&options)
+    defer { tg3_error_stack_free(&errors) }
+
+    let result = path.utf8CString.withUnsafeBufferPointer { pathBuffer in
+        tg3_parse_file(&model,
+                       &errors,
+                       pathBuffer.baseAddress,
+                       UInt32(pathBuffer.count - 1),
+                       &options)
+    }
+    unsafeBuffer(errors.entries, count: errors.count).forEach { entry in
+        let message = entry.message.map { String(cString: $0) } ?? "Unknown TinyGLTF error"
+        if entry.severity == TG3_SEVERITY_WARNING {
+            Log.warning("glTF warning: \(message)")
+        } else if entry.severity == TG3_SEVERITY_ERROR {
+            Log.error("glTF error: \(message)")
+        }
+    }
+
+    var ownsModel = true
+    defer {
+        if ownsModel {
+            tg3_model_free(&model)
+        }
+    }
+
+    if result == TG3_OK {
         let defaultImage = Image(width: 1, height: 1, pixelFormat: .rgba8, content: Color(1, 0, 1, 1).rgba8)
         let defaultTexture = defaultImage.makeTexture(commandQueue: queue, usage: [.sampled, .storage])
         guard let defaultTexture else {
@@ -322,10 +340,12 @@ func loadModel(from path: String, shader: MaterialShaderMap? = nil, queue: Comma
         }
         let shaderMap = shader ?? MaterialShaderMap(functions: [], resourceSemantics: [:], inputAttributeSemantics: [:])
         let context = LoaderContext(model: model,
+                                    modelPath: path,
                                     queue: queue,
                                     shader: shaderMap,
                                     defaultTexture: defaultTexture,
                                     defaultSampler: defaultSampler)
+        ownsModel = false
         loadBuffers(context)
         loadImages(context)
         loadSamplerDescriptors(context)
@@ -333,17 +353,18 @@ func loadModel(from path: String, shader: MaterialShaderMap? = nil, queue: Comma
         loadMeshes(context)
 
         var scenes: [Model.Scene] = []
-        context.model.scenes.forEach {
+        context.scenes.forEach {
             let scene = loadScene(context, scene: $0)
             scenes.append(scene)
         }
-        return Model(scenes: scenes, defaultSceneIndex: Int(context.model.defaultScene))
+        return Model(scenes: scenes, defaultSceneIndex: Int(context.model.default_scene))
     }
     return nil
 }
 
 fileprivate class LoaderContext {
-    let model: tinygltf.Model
+    var model: tg3_model
+    let modelDirectory: URL
     let queue: CommandQueue
     let shader: MaterialShaderMap
 
@@ -356,12 +377,69 @@ fileprivate class LoaderContext {
     var meshes: [SceneNode] = []
     var samplerDescriptors: [SamplerDescriptor] = []
 
-    init(model: tinygltf.Model, queue: CommandQueue, shader: MaterialShaderMap, defaultTexture: Texture, defaultSampler: SamplerState) {
+    var accessors: UnsafeBufferPointer<tg3_accessor> {
+        unsafeBuffer(model.accessors, count: model.accessors_count)
+    }
+    var sourceBuffers: UnsafeBufferPointer<tg3_buffer> {
+        unsafeBuffer(model.buffers, count: model.buffers_count)
+    }
+    var bufferViews: UnsafeBufferPointer<tg3_buffer_view> {
+        unsafeBuffer(model.buffer_views, count: model.buffer_views_count)
+    }
+    var sourceImages: UnsafeBufferPointer<tg3_image> {
+        unsafeBuffer(model.images, count: model.images_count)
+    }
+    var sourceMaterials: UnsafeBufferPointer<tg3_material> {
+        unsafeBuffer(model.materials, count: model.materials_count)
+    }
+    var sourceMeshes: UnsafeBufferPointer<tg3_mesh> {
+        unsafeBuffer(model.meshes, count: model.meshes_count)
+    }
+    var nodes: UnsafeBufferPointer<tg3_node> {
+        unsafeBuffer(model.nodes, count: model.nodes_count)
+    }
+    var samplers: UnsafeBufferPointer<tg3_sampler> {
+        unsafeBuffer(model.samplers, count: model.samplers_count)
+    }
+    var scenes: UnsafeBufferPointer<tg3_scene> {
+        unsafeBuffer(model.scenes, count: model.scenes_count)
+    }
+    var textures: UnsafeBufferPointer<tg3_texture> {
+        unsafeBuffer(model.textures, count: model.textures_count)
+    }
+
+    init(model: tg3_model, modelPath: String, queue: CommandQueue, shader: MaterialShaderMap, defaultTexture: Texture, defaultSampler: SamplerState) {
         self.model = model
+        self.modelDirectory = URL(fileURLWithPath: modelPath).deletingLastPathComponent()
         self.queue = queue
         self.shader = shader
         self.defaultTexture = defaultTexture
         self.defaultSampler = defaultSampler
+    }
+
+    deinit {
+        tg3_model_free(&model)
+    }
+}
+
+fileprivate func unsafeBuffer<Element>(_ pointer: UnsafePointer<Element>?, count: UInt32) -> UnsafeBufferPointer<Element> {
+    UnsafeBufferPointer(start: pointer, count: Int(count))
+}
+
+fileprivate func unsafeBuffer<Element>(_ pointer: UnsafePointer<Element>?, count: UInt64) -> UnsafeBufferPointer<Element> {
+    UnsafeBufferPointer(start: pointer, count: Int(count))
+}
+
+fileprivate func doubles<Storage>(from storage: Storage, count: Int) -> [Double] {
+    withUnsafeBytes(of: storage) {
+        Array($0.bindMemory(to: Double.self).prefix(count))
+    }
+}
+
+fileprivate extension tg3_str {
+    var swiftString: String {
+        guard let data else { return "" }
+        return String(decoding: UnsafeRawBufferPointer(start: data, count: Int(len)), as: UTF8.self)
     }
 }
 
@@ -444,79 +522,125 @@ fileprivate func loadBuffers(_ context: LoaderContext) {
         fatalError("CommandQueue.makeCommandBuffer failed.")
     }
 
-    context.buffers = context.model.buffers.map {
-        guard let buffer = makeBuffer(cbuffer, length: $0.data.count, data: $0.data.__dataUnsafe())
+    context.buffers = context.sourceBuffers.map {
+        guard let buffer = makeBuffer(cbuffer, length: Int($0.data.count), data: $0.data.data)
         else { fatalError("makeBuffer failed") }
         return buffer
     }
-    assert(context.buffers.count == context.model.buffers.count)
+    assert(context.buffers.count == context.sourceBuffers.count)
     cbuffer.commit()
 }
 
+fileprivate func encodedImageData(_ image: tg3_image, context: LoaderContext) -> Data? {
+    if image.buffer_view >= 0 {
+        let bufferViewIndex = Int(image.buffer_view)
+        guard context.bufferViews.indices.contains(bufferViewIndex) else { return nil }
+        let bufferView = context.bufferViews[bufferViewIndex]
+        let bufferIndex = Int(bufferView.buffer)
+        guard context.sourceBuffers.indices.contains(bufferIndex) else { return nil }
+        let buffer = context.sourceBuffers[bufferIndex]
+        guard let data = buffer.data.data,
+              bufferView.byte_offset <= buffer.data.count,
+              bufferView.byte_length <= buffer.data.count - bufferView.byte_offset else { return nil }
+        return Data(bytes: data + Int(bufferView.byte_offset), count: Int(bufferView.byte_length))
+    }
+
+    let uri = image.uri.swiftString
+    guard uri.isEmpty == false else { return nil }
+    if uri.hasPrefix("data:") {
+        guard let comma = uri.firstIndex(of: ",") else { return nil }
+        let metadata = uri[..<comma]
+        let payload = String(uri[uri.index(after: comma)...])
+        if metadata.hasSuffix(";base64") {
+            return Data(base64Encoded: payload)
+        }
+        return payload.removingPercentEncoding.map { Data($0.utf8) }
+    }
+
+    let relativePath = uri.removingPercentEncoding ?? uri
+    return try? Data(contentsOf: context.modelDirectory.appendingPathComponent(relativePath))
+}
+
 fileprivate func loadImages(_ context: LoaderContext) {
-    context.images = context.model.images.map {
+    context.images = context.sourceImages.map {
         let width = Int($0.width)
         let height = Int($0.height)
         let component = Int($0.component)
         let bits = Int($0.bits)
 
-        var imageFormat = ImagePixelFormat.invalid
-        switch (component, bits) {
-        case (1, 8):    imageFormat = .r8
-        case (1, 16):   imageFormat = .r16
-        case (1, 32):   imageFormat = .r32
-        case (2, 8):    imageFormat = .rg8
-        case (2, 16):   imageFormat = .rg16
-        case (2, 32):   imageFormat = .rg32
-        case (3, 8):    imageFormat = .rgb8
-        case (3, 16):   imageFormat = .rgb16
-        case (3, 32):   imageFormat = .rgb32
-        case (4, 8):    imageFormat = .rgba8
-        case (4, 16):   imageFormat = .rgba16
-        case (4, 32):   imageFormat = .rgba32        
-        default:
-            Log.error("Unsupported image pixel format.")
+        let image: Image?
+        if let pixels = $0.image.data, width > 0, height > 0, component > 0, bits > 0 {
+            let imageFormat: ImagePixelFormat
+            switch (component, bits) {
+            case (1, 8):    imageFormat = .r8
+            case (1, 16):   imageFormat = .r16
+            case (1, 32):   imageFormat = .r32
+            case (2, 8):    imageFormat = .rg8
+            case (2, 16):   imageFormat = .rg16
+            case (2, 32):   imageFormat = .rg32
+            case (3, 8):    imageFormat = .rgb8
+            case (3, 16):   imageFormat = .rgb16
+            case (3, 32):   imageFormat = .rgb32
+            case (4, 8):    imageFormat = .rgba8
+            case (4, 16):   imageFormat = .rgba16
+            case (4, 32):   imageFormat = .rgba32
+            default:
+                Log.error("Unsupported image pixel format.")
+                return nil
+            }
+            let requiredLength = (bits >> 3) * width * height * component
+            guard $0.image.count >= requiredLength else {
+                Log.error("Invalid image pixel data.")
+                return nil
+            }
+            image = Image(width: width,
+                          height: height,
+                          pixelFormat: imageFormat,
+                          data: UnsafeRawBufferPointer(start: pixels, count: requiredLength))
+        } else if let data = encodedImageData($0, context: context) {
+            image = data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+                Image(data: buffer)
+            }
+        } else {
+            image = nil
+        }
+
+        guard let image else {
+            Log.error("Failed to decode image: \($0.name.swiftString)")
             return nil
         }
-        let reqLength = (bits >> 3) * width * height * component
-        if $0.image.count < reqLength {
-            Log.error("Invalid image pixel data.")
-            return nil
-        }
-        let data = UnsafeBufferPointer(start: $0.image.__dataUnsafe(), count: $0.image.count)
-        let image = Image(width: width, height: height, pixelFormat: imageFormat, data: UnsafeRawBufferPointer(data))
         if let texture = image.makeTexture(commandQueue: context.queue) {
             return texture
         }
-        Log.error("Failed to load image: \($0.name)")
+        Log.error("Failed to load image: \($0.name.swiftString)")
         return nil
     }
-    assert(context.images.count == context.model.images.count)
+    assert(context.images.count == context.sourceImages.count)
 }
 
 fileprivate func loadSamplerDescriptors(_ context: LoaderContext) {
-    context.samplerDescriptors = context.model.samplers.map {
+    context.samplerDescriptors = context.samplers.map {
         var desc = SamplerDescriptor()
-        switch $0.minFilter {
-        case TINYGLTF_TEXTURE_FILTER_NEAREST,
-        TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
+        switch $0.min_filter {
+        case TG3_TEXTURE_FILTER_NEAREST,
+             TG3_TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST:
             desc.minFilter = .nearest
             desc.mipFilter = .nearest
-        case TINYGLTF_TEXTURE_FILTER_LINEAR,
-        TINYGLTF_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+        case TG3_TEXTURE_FILTER_LINEAR,
+             TG3_TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
             desc.minFilter = .linear
             desc.mipFilter = .nearest
-        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+        case TG3_TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
             desc.minFilter = .linear
             desc.mipFilter = .nearest
-        case TINYGLTF_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+        case TG3_TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
             desc.minFilter = .linear
             desc.mipFilter = .linear
         default:
             desc.minFilter = .linear
             desc.mipFilter = .linear
         }
-        if $0.magFilter == TINYGLTF_TEXTURE_FILTER_NEAREST {
+        if $0.mag_filter == TG3_TEXTURE_FILTER_NEAREST {
             desc.magFilter = .nearest
         } else {
             desc.magFilter = .linear
@@ -524,33 +648,33 @@ fileprivate func loadSamplerDescriptors(_ context: LoaderContext) {
 
         let samplerAddressMode = { (wrap: Int32) -> SamplerAddressMode in
             switch wrap {
-            case TINYGLTF_TEXTURE_WRAP_REPEAT:
+            case TG3_TEXTURE_WRAP_REPEAT:
                 return .repeat
-            case TINYGLTF_TEXTURE_WRAP_CLAMP_TO_EDGE:
+            case TG3_TEXTURE_WRAP_CLAMP_TO_EDGE:
                 return .clampToEdge
-            case TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT:
+            case TG3_TEXTURE_WRAP_MIRRORED_REPEAT:
                 return .mirrorRepeat
             default:
                 Log.error("Unknown address mode!")
                 return .repeat;
             }
         }
-        desc.addressModeU = samplerAddressMode($0.wrapS)
-        desc.addressModeV = samplerAddressMode($0.wrapT)
-        desc.addressModeV = samplerAddressMode(TINYGLTF_TEXTURE_WRAP_REPEAT)
+        desc.addressModeU = samplerAddressMode($0.wrap_s)
+        desc.addressModeV = samplerAddressMode($0.wrap_t)
+        desc.addressModeW = samplerAddressMode(TG3_TEXTURE_WRAP_REPEAT)
         desc.lodMaxClamp = 256;
         return desc
     }
 }
 
 fileprivate func loadMaterials(_ context: LoaderContext) {
-    context.materials = context.model.materials.map {
-        let name = String($0.name)
+    context.materials = context.sourceMaterials.map {
+        let name = $0.name.swiftString
         let material = Material(shaderMap: context.shader, name: name)
         material.defaultTexture = context.defaultTexture
         material.defaultSampler = context.defaultSampler
 
-        if String($0.alphaMode) == "BLEND" {
+        if $0.alpha_mode.swiftString == "BLEND" {
             material.attachments[0].blendState = .alphaBlend
         } else {
             material.attachments[0].blendState = .opaque
@@ -560,20 +684,22 @@ fileprivate func loadMaterials(_ context: LoaderContext) {
         material.cullMode = .none
         material.frontFace = .counterClockwise
 
-        material.properties[.baseColor] = .scalars($0.pbrMetallicRoughness.baseColorFactor[0...3])
+        material.properties[.baseColor] = .scalars(doubles(from: $0.pbr_metallic_roughness.base_color_factor, count: 4))
 
         let textureSampler = { (index: Int32) -> MaterialProperty.CombinedTextureSampler? in
             let index = Int(index)
-            if index >= 0 && index < context.model.textures.count {
-                let texture = context.model.textures[index]
+            if context.textures.indices.contains(index) {
+                let texture = context.textures[index]
                 var image: Texture? = nil
-                if texture.source >= 0 && texture.source < context.images.count {
-                    image = context.images[texture.source]
+                let source = Int(texture.source)
+                if context.images.indices.contains(source) {
+                    image = context.images[source]
                 }
                 if let image {
                     var sampler: SamplerState? = nil
-                    if texture.sampler >= 0 && texture.sampler < context.samplerDescriptors.count {
-                        let samplerDesc = context.samplerDescriptors[texture.sampler]
+                    let samplerIndex = Int(texture.sampler)
+                    if context.samplerDescriptors.indices.contains(samplerIndex) {
+                        let samplerDesc = context.samplerDescriptors[samplerIndex]
                         sampler = context.queue.device.makeSamplerState(descriptor: samplerDesc)
                     }
                     return (texture: image, sampler: sampler ?? context.defaultSampler)
@@ -582,28 +708,58 @@ fileprivate func loadMaterials(_ context: LoaderContext) {
             return nil
         }
 
-        if let ts = textureSampler($0.pbrMetallicRoughness.baseColorTexture.index) {
+        if let ts = textureSampler($0.pbr_metallic_roughness.base_color_texture.index) {
             material.properties[.baseColorTexture] = .combinedTextureSampler(ts)
         }
-        if let ts = textureSampler($0.pbrMetallicRoughness.metallicRoughnessTexture.index) {
+        if let ts = textureSampler($0.pbr_metallic_roughness.metallic_roughness_texture.index) {
             material.properties[.metallicRoughnessTexture] = .combinedTextureSampler(ts)
         }
-        material.properties[.metallic] = .scalar($0.pbrMetallicRoughness.metallicFactor)
-        material.properties[.roughness] = .scalar($0.pbrMetallicRoughness.roughnessFactor)
-        if let ts = textureSampler($0.normalTexture.index) {
+        material.properties[.metallic] = .scalar($0.pbr_metallic_roughness.metallic_factor)
+        material.properties[.roughness] = .scalar($0.pbr_metallic_roughness.roughness_factor)
+        if let ts = textureSampler($0.normal_texture.index) {
             material.properties[.normalTexture] = .combinedTextureSampler(ts)
         }
-        material.properties[.normalScaleFactor] = .scalar($0.normalTexture.scale)
-        if let ts = textureSampler($0.occlusionTexture.index) {
+        material.properties[.normalScaleFactor] = .scalar($0.normal_texture.scale)
+        if let ts = textureSampler($0.occlusion_texture.index) {
             material.properties[.occlusionTexture] = .combinedTextureSampler(ts)
         }
-        material.properties[.occlusionScale] = .scalar($0.occlusionTexture.strength)
-        material.properties[.emissiveFactor] = .scalars($0.emissiveFactor[0...2])
-        if let ts = textureSampler($0.emissiveTexture.index) {
+        material.properties[.occlusionScale] = .scalar($0.occlusion_texture.strength)
+        material.properties[.emissiveFactor] = .scalars(doubles(from: $0.emissive_factor, count: 3))
+        if let ts = textureSampler($0.emissive_texture.index) {
             material.properties[.emissiveTexture] = .combinedTextureSampler(ts)
         }
         return material
     }
+}
+
+fileprivate func byteStride(of accessor: tg3_accessor, in bufferView: tg3_buffer_view) -> Int {
+    if bufferView.byte_stride > 0 {
+        return Int(bufferView.byte_stride)
+    }
+
+    let componentSize: Int
+    switch accessor.component_type {
+    case TG3_COMPONENT_TYPE_BYTE, TG3_COMPONENT_TYPE_UNSIGNED_BYTE:
+        componentSize = 1
+    case TG3_COMPONENT_TYPE_SHORT, TG3_COMPONENT_TYPE_UNSIGNED_SHORT:
+        componentSize = 2
+    case TG3_COMPONENT_TYPE_INT, TG3_COMPONENT_TYPE_UNSIGNED_INT, TG3_COMPONENT_TYPE_FLOAT:
+        componentSize = 4
+    case TG3_COMPONENT_TYPE_DOUBLE:
+        componentSize = 8
+    default:
+        return 0
+    }
+
+    let componentCount: Int
+    switch accessor.type {
+    case TG3_TYPE_SCALAR: componentCount = 1
+    case TG3_TYPE_VEC2: componentCount = 2
+    case TG3_TYPE_VEC3: componentCount = 3
+    case TG3_TYPE_VEC4: componentCount = 4
+    default: return 0
+    }
+    return componentSize * componentCount
 }
 
 fileprivate func loadMeshes(_ context: LoaderContext) {
@@ -611,11 +767,11 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
         fatalError("makeCommandBuffer failed")
     }
 
-    context.meshes = context.model.meshes.map { mesh in
-        let meshName = String(mesh.name)
+    context.meshes = context.sourceMeshes.map { mesh in
+        let meshName = mesh.name.swiftString
         var node = SceneNode(name: meshName)
 
-        mesh.primitives.forEach { primitive in
+        unsafeBuffer(mesh.primitives, count: mesh.primitives_count).forEach { primitive in
             let mesh = Mesh()
 
             var positions: [Vector3] = []
@@ -623,28 +779,28 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
             var hasVertexNormal = false
             var hasVertexColor = false
 
-            primitive.attributes.forEach { attr in
-                let attributeName = String(attr.first)
-                let accessorIndex = Int(attr.second)
+            unsafeBuffer(primitive.attributes, count: primitive.attributes_count).forEach { attr in
+                let attributeName = attr.key.swiftString
+                let accessorIndex = Int(attr.value)
 
-                let accessor = context.model.accessors[accessorIndex]
-                let bufferView = context.model.bufferViews[accessor.bufferView]
-                let buffer = context.model.buffers[bufferView.buffer]
+                let accessor = context.accessors[accessorIndex]
+                let bufferView = context.bufferViews[accessor.buffer_view]
+                let buffer = context.sourceBuffers[bufferView.buffer]
 
-                let vertexStride = accessor.ByteStride(bufferView)
-                var bufferOffset = bufferView.byteOffset
+                let vertexStride = byteStride(of: accessor, in: bufferView)
+                var bufferOffset = Int(bufferView.byte_offset)
                 var attribOffset = 0
-                if bufferView.byteStride > 0 {
+                if bufferView.byte_stride > 0 {
                     // separate
-                    bufferOffset += accessor.byteOffset
+                    bufferOffset += Int(accessor.byte_offset)
                 } else {
                     // packed (interleaved)
-                    attribOffset = accessor.byteOffset
+                    attribOffset = Int(accessor.byte_offset)
                 }
                 assert(vertexStride > 0)
                 assert(attribOffset < vertexStride)
 
-                if accessor.componentType == TINYGLTF_COMPONENT_TYPE_DOUBLE {
+                if accessor.component_type == TG3_COMPONENT_TYPE_DOUBLE {
                     Log.error("Vertex component type for Double(Float64) is not supported!")
                     return
                 }
@@ -654,66 +810,66 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                                                      offset: attribOffset,
                                                      name: attributeName)
 
-                switch (accessor.type, accessor.componentType) {
+                switch (accessor.type, accessor.component_type) {
                     // scalar
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_BYTE):
-                    attribute.format = accessor.normalized ? .charNormalized : .char
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE):
-                    attribute.format = accessor.normalized ? .ucharNormalized : .uchar
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_SHORT):
-                    attribute.format = accessor.normalized ? .shortNormalized : .short
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT):
-                    attribute.format = accessor.normalized ? .ushortNormalized : .ushort
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_INT):
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .charNormalized : .char
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_UNSIGNED_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .ucharNormalized : .uchar
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .shortNormalized : .short
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_UNSIGNED_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .ushortNormalized : .ushort
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_INT):
                     attribute.format = .int
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT):
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_UNSIGNED_INT):
                     attribute.format = .uint
-                case (TINYGLTF_TYPE_SCALAR, TINYGLTF_COMPONENT_TYPE_FLOAT):
+                case (TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_FLOAT):
                     attribute.format = .float
                     // vec2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_BYTE):
-                    attribute.format = accessor.normalized ? .char2Normalized : .char2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE):
-                    attribute.format = accessor.normalized ? .uchar2Normalized : .uchar2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_SHORT):
-                    attribute.format = accessor.normalized ? .short2Normalized : .short2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT):
-                    attribute.format = accessor.normalized ? .ushort2Normalized : .ushort2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_INT):
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .char2Normalized : .char2
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_UNSIGNED_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .uchar2Normalized : .uchar2
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .short2Normalized : .short2
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_UNSIGNED_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .ushort2Normalized : .ushort2
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_INT):
                     attribute.format = .int2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT):
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_UNSIGNED_INT):
                     attribute.format = .uint2
-                case (TINYGLTF_TYPE_VEC2, TINYGLTF_COMPONENT_TYPE_FLOAT):
+                case (TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_FLOAT):
                     attribute.format = .float2
                     // vec3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_BYTE):
-                    attribute.format = accessor.normalized ? .char3Normalized : .char3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE):
-                    attribute.format = accessor.normalized ? .uchar3Normalized : .uchar3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_SHORT):
-                    attribute.format = accessor.normalized ? .short3Normalized : .short3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT):
-                    attribute.format = accessor.normalized ? .ushort3Normalized : .ushort3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_INT):
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .char3Normalized : .char3
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_UNSIGNED_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .uchar3Normalized : .uchar3
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .short3Normalized : .short3
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_UNSIGNED_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .ushort3Normalized : .ushort3
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_INT):
                     attribute.format = .int3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT):
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_UNSIGNED_INT):
                     attribute.format = .uint3
-                case (TINYGLTF_TYPE_VEC3, TINYGLTF_COMPONENT_TYPE_FLOAT):
+                case (TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_FLOAT):
                     attribute.format = .float3
                     // vec4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_BYTE):
-                    attribute.format = accessor.normalized ? .char4Normalized : .char4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE):
-                    attribute.format = accessor.normalized ? .uchar4Normalized : .uchar4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_SHORT):
-                    attribute.format = accessor.normalized ? .short4Normalized : .short4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT):
-                    attribute.format = accessor.normalized ? .ushort4Normalized : .ushort4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_INT):
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .char4Normalized : .char4
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_UNSIGNED_BYTE):
+                    attribute.format = accessor.normalized != 0 ? .uchar4Normalized : .uchar4
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .short4Normalized : .short4
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_UNSIGNED_SHORT):
+                    attribute.format = accessor.normalized != 0 ? .ushort4Normalized : .ushort4
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_INT):
                     attribute.format = .int4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT):
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_UNSIGNED_INT):
                     attribute.format = .uint4
-                case (TINYGLTF_TYPE_VEC4, TINYGLTF_COMPONENT_TYPE_FLOAT):
+                case (TG3_TYPE_VEC4, TG3_COMPONENT_TYPE_FLOAT):
                     attribute.format = .float4
                 default:
                     Log.error("Unhandled vertex attribute type: \(accessor.type)")
@@ -727,12 +883,12 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                     attribute.semantic = .position
                     if attribute.format == .float3 {
                         // get AABB
-                        var ptr = UnsafeRawPointer(buffer.data.__dataUnsafe()!)
+                        guard var ptr = buffer.data.data.map(UnsafeRawPointer.init) else { return }
                         ptr += bufferOffset + attribOffset
                         var aabb = AABB()
                         positions.removeAll(keepingCapacity: true)
-                        positions.reserveCapacity(accessor.count)
-                        for _ in 0..<accessor.count {
+                        positions.reserveCapacity(Int(accessor.count))
+                        for _ in 0..<Int(accessor.count) {
                             let float3 = ptr.assumingMemoryBound(to: Float3.self).pointee
                             let p = Vector3(float3)
                             positions.append(p)
@@ -757,23 +913,23 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                 }
 
                 let vertexBuffer = Mesh.VertexBuffer(byteOffset: bufferOffset,
-                                                     byteStride: Int(vertexStride),
-                                                     vertexCount: accessor.count,
+                                                     byteStride: vertexStride,
+                                                     vertexCount: Int(accessor.count),
                                                      buffer: context.buffers[bufferView.buffer],
                                                      attributes: [attribute])
                 mesh.vertexBuffers.append(vertexBuffer)
             }
 
             switch primitive.mode {
-            case TINYGLTF_MODE_POINTS:
+            case TG3_MODE_POINTS:
                 mesh.primitiveType = .point
-            case TINYGLTF_MODE_LINE, TINYGLTF_MODE_LINE_LOOP:
+            case TG3_MODE_LINE, TG3_MODE_LINE_LOOP:
                 mesh.primitiveType = .line
-            case TINYGLTF_MODE_LINE_STRIP:
+            case TG3_MODE_LINE_STRIP:
                 mesh.primitiveType = .lineStrip
-            case TINYGLTF_MODE_TRIANGLES:
+            case TG3_MODE_TRIANGLES:
                 mesh.primitiveType = .triangle
-            case TINYGLTF_MODE_TRIANGLE_STRIP:
+            case TG3_MODE_TRIANGLE_STRIP:
                 mesh.primitiveType = .triangleStrip
             default:
                 Log.error("Unsupported primitive type: \(primitive.mode)")
@@ -781,25 +937,27 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
             }
 
             if primitive.indices >= 0 {
-                let accessor = context.model.accessors[primitive.indices]
-                let bufferView = context.model.bufferViews[accessor.bufferView]
-                let buffer = context.model.buffers[bufferView.buffer]
+                let accessor = context.accessors[primitive.indices]
+                let bufferView = context.bufferViews[accessor.buffer_view]
+                let buffer = context.sourceBuffers[bufferView.buffer]
+                let accessorCount = Int(accessor.count)
 
-                mesh.indexBufferByteOffset = bufferView.byteOffset + accessor.byteOffset
-                mesh.indexCount = accessor.count
+                mesh.indexBufferByteOffset = Int(bufferView.byte_offset + accessor.byte_offset)
+                mesh.indexCount = accessorCount
                 mesh.indexBuffer = context.buffers[bufferView.buffer]
                 mesh.indexBufferBaseVertexIndex = 0
 
-                indices.reserveCapacity(accessor.count)
-                let ptr = UnsafeRawPointer(buffer.data.__dataUnsafe()!) + mesh.indexBufferByteOffset
+                indices.reserveCapacity(accessorCount)
+                guard let data = buffer.data.data else { return }
+                let ptr = UnsafeRawPointer(data) + mesh.indexBufferByteOffset
 
-                switch accessor.componentType {
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: // convert to UInt16
+                switch accessor.component_type {
+                case TG3_COMPONENT_TYPE_UNSIGNED_BYTE: // convert to UInt16
                     assert(accessor.count > 0)
                     let p = ptr.assumingMemoryBound(to: UInt8.self)
                     var indexData: [UInt16] = []
-                    indexData.reserveCapacity(accessor.count)
-                    for i in 0..<accessor.count {
+                    indexData.reserveCapacity(accessorCount)
+                    for i in 0..<accessorCount {
                         let index = p[i]
                         indexData.append(UInt16(index))
                         indices.append(Int(index))
@@ -811,17 +969,17 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                     mesh.indexBuffer = buffer
                     mesh.indexType = .uint16
                     mesh.indexBufferByteOffset = 0
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+                case TG3_COMPONENT_TYPE_UNSIGNED_SHORT:
                     let p = ptr.assumingMemoryBound(to: UInt16.self)
                     mesh.indexType = .uint16
-                    for i in 0..<accessor.count {
+                    for i in 0..<accessorCount {
                         let index = p[i]
                         indices.append(Int(index))
                     }
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+                case TG3_COMPONENT_TYPE_UNSIGNED_INT:
                     let p = ptr.assumingMemoryBound(to: UInt32.self)
                     mesh.indexType = .uint32
-                    for i in 0..<accessor.count {
+                    for i in 0..<accessorCount {
                         let index = p[i]
                         indices.append(Int(index))
                     }
@@ -908,7 +1066,7 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
             }
 
             if primitive.material >= 0 {
-                mesh.material = context.materials[primitive.material]
+                mesh.material = context.materials[Int(primitive.material)]
             } else {
                 let material = Material(shaderMap: context.shader, name: "default")
                 material.defaultTexture = context.defaultTexture
@@ -931,8 +1089,8 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
     cbuffer.commit()
 }
 
-fileprivate func loadNode(_ context: LoaderContext, node: tinygltf.Node, transform baseTM: Matrix4) -> SceneNode {
-    var output = SceneNode(name: String(node.name))
+fileprivate func loadNode(_ context: LoaderContext, node: tg3_node, transform baseTM: Matrix4) -> SceneNode {
+    var output = SceneNode(name: node.name.swiftString)
     if node.mesh >= 0 {
         var mesh = context.meshes[node.mesh]
         while mesh.mesh == nil && mesh.children.count == 1 {
@@ -946,28 +1104,24 @@ fileprivate func loadNode(_ context: LoaderContext, node: tinygltf.Node, transfo
     }
 
     var nodeTM = Matrix4.identity
-    if node.matrix.count == 16 {
+    if node.has_matrix != 0 {
+        let matrix = doubles(from: node.matrix, count: 16)
         for i in 0..<16 {
-            nodeTM[i / 4, i % 4] = Scalar(node.matrix[i])
+            nodeTM[i / 4, i % 4] = Scalar(matrix[i])
         }
     } else {
+        let rotationValues = doubles(from: node.rotation, count: 4)
+        let scaleValues = doubles(from: node.scale, count: 3)
+        let translationValues = doubles(from: node.translation, count: 3)
         var rotation = Quaternion.identity
         var scale = Vector3(1, 1, 1)
         var translation = Vector3.zero
-        if node.rotation.count == 4 {
-            for i in 0..<4 {
-                rotation[i] = Scalar(node.rotation[i])
-            }
+        for i in 0..<4 {
+            rotation[i] = Scalar(rotationValues[i])
         }
-        if node.scale.count == 3 {
-            for i in 0..<3 {
-                scale[i] = Scalar(node.scale[i])
-            }
-        }
-        if node.translation.count == 3 {
-            for i in 0..<3 {
-                translation[i] = Scalar(node.translation[i])
-            }
+        for i in 0..<3 {
+            scale[i] = Scalar(scaleValues[i])
+            translation[i] = Scalar(translationValues[i])
         }
         // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#transformations
         nodeTM = AffineTransform3.identity
@@ -1005,22 +1159,21 @@ fileprivate func loadNode(_ context: LoaderContext, node: tinygltf.Node, transfo
         }
     }
     
-    node.children.forEach { index in
-        let child = context.model.nodes[index]
+    unsafeBuffer(node.children, count: node.children_count).forEach { index in
+        let child = context.nodes[index]
         let node = loadNode(context, node: child, transform: worldTM)
         output.children.append(node)
     }
     return output
 }
 
-fileprivate func loadScene(_ context: LoaderContext, scene: tinygltf.Scene) -> Model.Scene {
-    var output = Model.Scene(name: String(scene.name), nodes: [])
-    output.nodes.reserveCapacity(scene.nodes.count)
-    scene.nodes.forEach { index in
-        let child = context.model.nodes[index]
+fileprivate func loadScene(_ context: LoaderContext, scene: tg3_scene) -> Model.Scene {
+    var output = Model.Scene(name: scene.name.swiftString, nodes: [])
+    output.nodes.reserveCapacity(Int(scene.nodes_count))
+    unsafeBuffer(scene.nodes, count: scene.nodes_count).forEach { index in
+        let child = context.nodes[index]
         let node = loadNode(context, node: child, transform: .identity)
         output.nodes.append(node)
     }
     return output
 }
-
