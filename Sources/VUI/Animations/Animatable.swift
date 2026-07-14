@@ -5407,7 +5407,7 @@ func makeAnimatableFrameAttributes(
 // Thin owner for live animation state. Callers keep policy-heavy completion
 // sorting outside this helper, while this type tracks source model changes,
 // phase resets, and the currently active AnimatorState.
-private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
+struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     struct UpdateInputs {
         let didReset: Bool
         let target: AnimatedValue

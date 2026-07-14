@@ -480,6 +480,16 @@ struct ViewTransform: Equatable, Sendable {
         }
     }
 
+    func size(ofNamedCoordinateSpace name: AnyHashable) -> CGSize? {
+        for item in _transformItems.reversed() {
+            if case let .sizedSpace(candidate, size) = item,
+               candidate == name {
+                return size
+            }
+        }
+        return nil
+    }
+
     // Global position (read-only)
 
     /// The accumulated global position of this view (the origin in window coordinates).

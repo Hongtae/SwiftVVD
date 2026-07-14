@@ -1082,7 +1082,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             [ContentTransition.Effect(type: .scale(0.4))]
         )
 
-        let offset = OffsetTransition(offset: CGSize(width: 3, height: -4))
+        let offset = OffsetTransition(CGSize(width: 3, height: -4))
         XCTAssertTrue(offset.hasContentTransition)
         XCTAssertEqual(
             offset.contentTransitionEffects(
@@ -1179,6 +1179,18 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             ).last?.flags,
             1
         )
+    }
+
+    func testTypedOffsetTransitionPublicSurfaceMatchesObservedAPI() {
+        // ASSERTIONS transitionOffsetPublicSurfaceObserved
+        let direct = OffsetTransition(CGSize(width: 3, height: -4))
+        XCTAssertEqual(direct.offset, CGSize(width: 3, height: -4))
+
+        let sized: OffsetTransition = .offset(CGSize(width: 5, height: 7))
+        XCTAssertEqual(sized.offset, CGSize(width: 5, height: 7))
+
+        let components: OffsetTransition = .offset(x: -2, y: 9)
+        XCTAssertEqual(components.offset, CGSize(width: -2, height: 9))
     }
 
     func testBlurReplaceTransitionBodyShape() throws {

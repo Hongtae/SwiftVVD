@@ -2201,6 +2201,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 label = "interpolatorLayer"
             case .interpolatorAnimation:
                 label = "interpolatorAnimation"
+            case .shader:
+                label = "shader"
             }
             lines.append("\(prefix)effect \(label)")
             lines.append(displayListTreeDescription(effect.contents, depth: depth + 1))

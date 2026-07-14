@@ -271,6 +271,7 @@ public struct ContentTransition: Equatable, Sendable {
     private enum Storage: Equatable, Sendable {
         case named(NamedTransition)
         case custom(CustomTransition)
+        case symbolEffect(SymbolEffectConfiguration, SymbolEffectOptions)
     }
 
     // Named transition storage used by public factories and lowered into RBTransition on demand.
@@ -350,6 +351,17 @@ public struct ContentTransition: Equatable, Sendable {
         )
     }
 
+    public static func symbolEffect<Effect>(
+        _ effect: Effect,
+        options: SymbolEffectOptions = .default
+    ) -> ContentTransition where Effect: SymbolEffect & ContentTransitionSymbolEffect {
+        ContentTransition(storage: .symbolEffect(effect.configuration, options))
+    }
+
+    public static var symbolEffect: ContentTransition {
+        .symbolEffect(.automatic)
+    }
+
     private init(named name: NamedTransition.Name) {
         self.init(
             storage: .named(
@@ -383,6 +395,8 @@ public struct ContentTransition: Equatable, Sendable {
         case var .custom(custom):
             custom.layoutDirection = layoutDirection
             storage = .custom(custom)
+        case .symbolEffect:
+            break
         }
     }
 
@@ -391,7 +405,7 @@ public struct ContentTransition: Equatable, Sendable {
             switch storage {
             case let .named(named):
                 named.style
-            case .custom:
+            case .custom, .symbolEffect:
                 nil
             }
         }
@@ -400,7 +414,7 @@ public struct ContentTransition: Equatable, Sendable {
             case var .named(named):
                 named.style = newValue
                 storage = .named(named)
-            case .custom:
+            case .custom, .symbolEffect:
                 break
             }
         }
@@ -410,7 +424,7 @@ public struct ContentTransition: Equatable, Sendable {
         switch storage {
         case let .named(named):
             named.name == .identity
-        case .custom:
+        case .custom, .symbolEffect:
             false
         }
     }
@@ -426,6 +440,8 @@ public struct ContentTransition: Equatable, Sendable {
             for effect in custom.effects {
                 transition.addEffect(RBTransitionEffect(effect))
             }
+        case .symbolEffect:
+            transition = RBTransition()
         }
         transition.isReplaceable = isReplaceable
         return transition

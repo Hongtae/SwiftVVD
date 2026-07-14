@@ -970,7 +970,8 @@ extension GraphicsContext {
             self.encodeShadingBoxCommand(renderPass: renderPass,
                                          shading: runShading,
                                          stencil: .ignore,
-                                         blendState: .multiply)
+                                         blendState: .multiply,
+                                         bounds: rect)
             renderPass.end()
             self.drawSource()
         }

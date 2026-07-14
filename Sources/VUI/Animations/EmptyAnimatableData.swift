@@ -25,4 +25,4 @@ public struct EmptyAnimatableData: VectorArithmetic, Equatable {
     }
 }
 
-extension EmptyAnimatableData: Sendable {}
+extension EmptyAnimatableData: Sendable, BitwiseCopyable {}

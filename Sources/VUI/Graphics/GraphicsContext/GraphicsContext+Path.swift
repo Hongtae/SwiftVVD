@@ -26,6 +26,8 @@ extension GraphicsContext {
             case radialGradient(gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GradientOptions)
             case conicGradient(gradient: Gradient, center: CGPoint, angle: Angle, options: GradientOptions)
             case tiledImage(image: Image, origin: CGPoint, sourceRect: CGRect, scale: CGFloat)
+            case shader(shader: Shader, bounds: CGRect)
+            case meshGradient(mesh: MeshGradient)
         }
         let properties: [Property]
 
@@ -66,6 +68,12 @@ extension GraphicsContext {
         public static func tiledImage(_ image: Image, origin: CGPoint = .zero, sourceRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1), scale: CGFloat = 1) -> Shading {
             Shading(property: .tiledImage(image: image, origin: origin, sourceRect: sourceRect, scale: scale))
         }
+        public static func shader(_ shader: Shader, bounds: CGRect = .zero) -> Shading {
+            Shading(property: .shader(shader: shader, bounds: bounds))
+        }
+        public static func meshGradient(_ mesh: MeshGradient) -> Shading {
+            Shading(property: .meshGradient(mesh: mesh))
+        }
     }
 
     public func resolve(_ shading: Shading) -> Shading {
@@ -93,7 +101,8 @@ extension GraphicsContext {
                 self.encodeShadingBoxCommand(renderPass: renderPass,
                                              shading: shading,
                                              stencil: stencil,
-                                             blendState: .opaque)
+                                             blendState: .opaque,
+                                             bounds: path.boundingBoxOfPath)
                 renderPass.end()
                 self.drawSource()
                 self.recordContentBounds(path.boundingBoxOfPath)
@@ -114,7 +123,8 @@ extension GraphicsContext {
                 self.encodeShadingBoxCommand(renderPass: renderPass,
                                              shading: shading,
                                              stencil: .testNonZero,
-                                             blendState: .opaque)
+                                             blendState: .opaque,
+                                             bounds: path.boundingBoxOfPath)
                 renderPass.end()
                 self.drawSource()
                 let halfWidth = style.lineWidth * 0.5
@@ -786,7 +796,8 @@ extension GraphicsContext {
     func encodeShadingBoxCommand(renderPass: RenderPass,
                                  shading: GraphicsContext.Shading,
                                  stencil: _Stencil,
-                                 blendState: BlendState) {
+                                 blendState: BlendState,
+                                 bounds: CGRect = .null) {
 
         if shading.properties.isEmpty { return }
 
@@ -826,7 +837,8 @@ extension GraphicsContext {
                     return self.encodeShadingBoxCommand(renderPass: renderPass,
                                                         shading: .color(stops[0].color),
                                                         stencil: stencil,
-                                                        blendState: blendState)
+                                                        blendState: blendState,
+                                                        bounds: bounds)
                 }
                 let dir = gradientVector.normalized()
                 // transform gradient space to world space
@@ -948,13 +960,15 @@ extension GraphicsContext {
                             renderPass: renderPass,
                             shading: .color(stops.last!.color),
                             stencil: stencil,
-                            blendState: blendState)
+                            blendState: blendState,
+                            bounds: bounds)
                     } else {
                         return self.encodeShadingBoxCommand(
                             renderPass: renderPass,
                             shading: .color(stops.first!.color),
                             stencil: stencil,
-                            blendState: blendState)
+                            blendState: blendState,
+                            bounds: bounds)
                     }
                 }
                 let invViewTransform = self.viewTransform.inverted()
@@ -1155,6 +1169,17 @@ extension GraphicsContext {
 
                     progress += step
                 }
+            case let .shader(shader, shaderBounds):
+                _ = encodeCustomShaderShadingCommand(
+                    renderPass: renderPass,
+                    shader: shader,
+                    boundingRect: shaderBounds.isNull ? bounds : shaderBounds,
+                    stencil: stencil,
+                    blendState: blendState
+                )
+                return
+            case let .meshGradient(mesh):
+                vertices = meshGradientVertices(mesh, bounds: bounds)
             default:
                 Log.err("Not implemented yet (\(property))")
                 fatalError("Not implemented yet")

@@ -251,6 +251,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     contents.recordInterpolationBounds(mixedShape.command.bounds)
                     return
                 }
+                if let mixedShaderShape = RBDisplayListInterpolator.mixedShaderShapeItem(
+                    from: source,
+                    to: target,
+                    progress: progress
+                ) {
+                    contents.items.append(mixedShaderShape)
+                    contents.recordInterpolationBounds(mixedShaderShape.command.bounds)
+                    return
+                }
                 if let mixedGradientShape = RBDisplayListInterpolator.mixedGradientShapeItem(
                     from: source,
                     to: target,
@@ -258,6 +267,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 ) {
                     contents.items.append(mixedGradientShape)
                     contents.recordInterpolationBounds(mixedGradientShape.command.bounds)
+                    return
+                }
+                if let mixedMeshGradientShape = RBDisplayListInterpolator.mixedMeshGradientShapeItem(
+                    from: source,
+                    to: target,
+                    progress: progress
+                ) {
+                    contents.items.append(mixedMeshGradientShape)
+                    contents.recordInterpolationBounds(mixedMeshGradientShape.command.bounds)
                     return
                 }
                 if RBDisplayListInterpolator.isTextItemPair(
@@ -1239,6 +1257,147 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         )
     }
 
+    private static func mixedShaderShapeItem(
+        from source: ItemInterpolationInput,
+        to target: ItemInterpolationInput,
+        progress: CGFloat
+    ) -> DisplayList.Item? {
+        guard case let .content(sourceContent) = source.item.value,
+              case let .shape(sourceShape) = sourceContent.value,
+              case let .content(targetContent) = target.item.value,
+              case let .shape(targetShape) = targetContent.value,
+              case let .shape(
+                sourceRole,
+                .some(.shader(sourceShader)),
+                sourceFillStyle,
+                sourceStrokeStyle,
+                _
+              ) = source.command,
+              case let .shape(
+                targetRole,
+                .some(.shader(targetShader)),
+                targetFillStyle,
+                targetStrokeStyle,
+                _
+              ) = target.command,
+              sourceRole == targetRole,
+              sourceFillStyle == targetFillStyle,
+              sourceStrokeStyle == targetStrokeStyle,
+              sourceShape.fillStyle == targetShape.fillStyle,
+              sourceShape.strokeStyle == targetShape.strokeStyle,
+              (sourceRole == .stroke) == (sourceStrokeStyle != nil),
+              source.item.styleChain == target.item.styleChain,
+              let mixedShader = interpolatedShader(
+                from: sourceShader,
+                to: targetShader,
+                progress: progress
+              ),
+              let shader = mixedShader.shader,
+              let path = interpolatedPath(
+                from: sourceShape.path,
+                to: targetShape.path,
+                progress: progress
+              ) else {
+            return nil
+        }
+        if progress == 0 { return source.item }
+        if progress == 1 { return target.item }
+
+        let bounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: progress
+        )
+        let command = DisplayList.ItemCommand.shape(
+            role: sourceRole,
+            style: .shader(mixedShader),
+            fillStyle: sourceFillStyle,
+            strokeStyle: sourceStrokeStyle,
+            bounds: bounds
+        )
+        var content = sourceContent
+        content.value = .shape(DisplayList.Content.ShapeValue(
+            path: path,
+            shading: .shader(shader, bounds: .null),
+            fillStyle: sourceShape.fillStyle,
+            strokeStyle: sourceShape.strokeStyle,
+            transform: interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
+            ),
+            command: command
+        ))
+        return DisplayList.Item(
+            content: content,
+            frame: bounds,
+            identity: source.item.identity,
+            version: source.item.version,
+            opacity: interpolatedItemOpacity(
+                from: source.item,
+                to: target.item,
+                progress: progress
+            ),
+            styleChain: source.item.styleChain
+        )
+    }
+
+    private static func interpolatedShader(
+        from source: Shader.ResolvedShader,
+        to target: Shader.ResolvedShader,
+        progress: CGFloat
+    ) -> Shader.ResolvedShader? {
+        guard let sourceValue = source.shader,
+              let targetValue = target.shader,
+              sourceValue.function == targetValue.function,
+              source.options == target.options,
+              source.maxSampleOffset == target.maxSampleOffset,
+              shaderArgumentsAreInterpolationCompatible(
+                sourceValue.arguments,
+                targetValue.arguments
+              ) else {
+            return nil
+        }
+        var result = source
+        result.animatableData.interpolate(
+            towards: target.animatableData,
+            amount: Double(progress)
+        )
+        return result
+    }
+
+    private static func shaderArgumentsAreInterpolationCompatible(
+        _ source: [Shader.Argument],
+        _ target: [Shader.Argument]
+    ) -> Bool {
+        guard source.count == target.count else { return false }
+        return zip(source, target).allSatisfy { source, target in
+            switch (source.storage, target.storage) {
+            case (.float, .float),
+                 (.float2, .float2),
+                 (.float3, .float3),
+                 (.float4, .float4),
+                 (.boundsRect, .boundsRect):
+                return true
+            case let (.floatArray(source), .floatArray(target)):
+                return source.count == target.count
+            case (.color, .color),
+                 (.resolvedColor, .resolvedColor),
+                 (.color, .resolvedColor),
+                 (.resolvedColor, .color):
+                return true
+            case let (.colorArray(source), .colorArray(target)):
+                return source.count == target.count
+            case let (.image(source), .image(target)):
+                return source == target
+            case let (.data(source), .data(target)):
+                return source == target
+            default:
+                return false
+            }
+        }
+    }
+
     private static func mixedGradientShapeItem(
         from source: ItemInterpolationInput,
         to target: ItemInterpolationInput,
@@ -1324,6 +1483,250 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 progress: progress
             ),
             styleChain: source.item.styleChain
+        )
+    }
+
+    private static func mixedMeshGradientShapeItem(
+        from source: ItemInterpolationInput,
+        to target: ItemInterpolationInput,
+        progress: CGFloat
+    ) -> DisplayList.Item? {
+        guard case let .content(sourceContent) = source.item.value,
+              case let .shape(sourceShape) = sourceContent.value,
+              case let .content(targetContent) = target.item.value,
+              case let .shape(targetShape) = targetContent.value,
+              case let .shape(
+                sourceRole,
+                .some(.meshGradient(sourceCommandMesh)),
+                sourceFillStyle,
+                sourceStrokeStyle,
+                _
+              ) = source.command,
+              case let .shape(
+                targetRole,
+                .some(.meshGradient(targetCommandMesh)),
+                targetFillStyle,
+                targetStrokeStyle,
+                _
+              ) = target.command,
+              sourceRole == targetRole,
+              sourceFillStyle == targetFillStyle,
+              sourceStrokeStyle == targetStrokeStyle,
+              sourceShape.fillStyle == targetShape.fillStyle,
+              sourceShape.strokeStyle == targetShape.strokeStyle,
+              (sourceRole == .stroke) == (sourceStrokeStyle != nil),
+              source.item.styleChain == target.item.styleChain,
+              let sourceMesh = singleMeshGradientShading(sourceShape.shading),
+              let targetMesh = singleMeshGradientShading(targetShape.shading),
+              sourceCommandMesh == sourceMesh,
+              targetCommandMesh == targetMesh,
+              let mixedMesh = interpolatedMeshGradient(
+                from: sourceMesh,
+                sourceEnvironment: sourceContent.environment ?? EnvironmentValues(),
+                to: targetMesh,
+                targetEnvironment: targetContent.environment ?? EnvironmentValues(),
+                progress: progress
+              ),
+              let path = interpolatedPath(
+                from: sourceShape.path,
+                to: targetShape.path,
+                progress: progress
+              ) else {
+            return nil
+        }
+        if progress == 0 { return source.item }
+        if progress == 1 { return target.item }
+
+        let bounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: progress
+        )
+        let command = DisplayList.ItemCommand.shape(
+            role: sourceRole,
+            style: .meshGradient(mixedMesh),
+            fillStyle: sourceFillStyle,
+            strokeStyle: sourceStrokeStyle,
+            bounds: bounds
+        )
+        var content = sourceContent
+        content.value = .shape(DisplayList.Content.ShapeValue(
+            path: path,
+            shading: .meshGradient(mixedMesh),
+            fillStyle: sourceShape.fillStyle,
+            strokeStyle: sourceShape.strokeStyle,
+            transform: interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
+            ),
+            command: command
+        ))
+        return DisplayList.Item(
+            content: content,
+            frame: bounds,
+            identity: source.item.identity,
+            version: source.item.version,
+            opacity: interpolatedItemOpacity(
+                from: source.item,
+                to: target.item,
+                progress: progress
+            ),
+            styleChain: source.item.styleChain
+        )
+    }
+
+    private static func singleMeshGradientShading(
+        _ shading: GraphicsContext.Shading
+    ) -> MeshGradient? {
+        guard shading.properties.count == 1 else { return nil }
+        switch shading.properties[0] {
+        case let .meshGradient(mesh):
+            return mesh
+        case let .style(style):
+            if let mesh = style as? MeshGradient {
+                return mesh
+            }
+            if let erased = style as? AnyShapeStyle {
+                return singleMeshGradientStyle(erased.storage.box.style)
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private static func singleMeshGradientStyle(
+        _ style: any ShapeStyle
+    ) -> MeshGradient? {
+        if let mesh = style as? MeshGradient {
+            return mesh
+        }
+        if let erased = style as? AnyShapeStyle {
+            return singleMeshGradientStyle(erased.storage.box.style)
+        }
+        return nil
+    }
+
+    private static func interpolatedMeshGradient(
+        from source: MeshGradient,
+        sourceEnvironment: EnvironmentValues,
+        to target: MeshGradient,
+        targetEnvironment: EnvironmentValues,
+        progress: CGFloat
+    ) -> MeshGradient? {
+        guard source.width == target.width,
+              source.height == target.height,
+              source.smoothsColors == target.smoothsColors,
+              source.colorSpace == target.colorSpace,
+              source.width > 1,
+              source.height > 1,
+              source.width <= Int.max / source.height else {
+            return nil
+        }
+        let count = source.width * source.height
+        let locations: MeshGradient.Locations
+        switch (source.locations, target.locations) {
+        case let (.points(sourcePoints), .points(targetPoints)):
+            guard sourcePoints.count == count, targetPoints.count == count else {
+                return nil
+            }
+            locations = .points(zip(sourcePoints, targetPoints).map {
+                interpolatedMeshPoint(from: $0, to: $1, progress: progress)
+            })
+        case let (.bezierPoints(sourcePoints), .bezierPoints(targetPoints)):
+            guard sourcePoints.count == count, targetPoints.count == count else {
+                return nil
+            }
+            locations = .bezierPoints(zip(sourcePoints, targetPoints).map {
+                MeshGradient.BezierPoint(
+                    position: interpolatedMeshPoint(
+                        from: $0.position,
+                        to: $1.position,
+                        progress: progress
+                    ),
+                    leadingControlPoint: interpolatedMeshPoint(
+                        from: $0.leadingControlPoint,
+                        to: $1.leadingControlPoint,
+                        progress: progress
+                    ),
+                    topControlPoint: interpolatedMeshPoint(
+                        from: $0.topControlPoint,
+                        to: $1.topControlPoint,
+                        progress: progress
+                    ),
+                    trailingControlPoint: interpolatedMeshPoint(
+                        from: $0.trailingControlPoint,
+                        to: $1.trailingControlPoint,
+                        progress: progress
+                    ),
+                    bottomControlPoint: interpolatedMeshPoint(
+                        from: $0.bottomControlPoint,
+                        to: $1.bottomControlPoint,
+                        progress: progress
+                    )
+                )
+            })
+        default:
+            return nil
+        }
+
+        let sourceColors = resolvedMeshColors(source.colors, environment: sourceEnvironment)
+        let targetColors = resolvedMeshColors(target.colors, environment: targetEnvironment)
+        guard sourceColors.count == count, targetColors.count == count else {
+            return nil
+        }
+        let colors = zip(sourceColors, targetColors).map {
+            interpolatedMeshColor(from: $0, to: $1, progress: progress)
+        }
+        let background = interpolatedMeshColor(
+            from: source.background.resolve(in: sourceEnvironment),
+            to: target.background.resolve(in: targetEnvironment),
+            progress: progress
+        )
+        return MeshGradient(
+            width: source.width,
+            height: source.height,
+            locations: locations,
+            colors: .resolvedColors(colors),
+            background: Color(background),
+            smoothsColors: source.smoothsColors,
+            colorSpace: source.colorSpace
+        )
+    }
+
+    private static func resolvedMeshColors(
+        _ colors: MeshGradient.Colors,
+        environment: EnvironmentValues
+    ) -> [Color.Resolved] {
+        switch colors {
+        case let .colors(colors):
+            return colors.map { $0.resolve(in: environment) }
+        case let .resolvedColors(colors):
+            return colors
+        }
+    }
+
+    private static func interpolatedMeshPoint(
+        from source: SIMD2<Float>,
+        to target: SIMD2<Float>,
+        progress: CGFloat
+    ) -> SIMD2<Float> {
+        source + (target - source) * Float(progress)
+    }
+
+    private static func interpolatedMeshColor(
+        from source: Color.Resolved,
+        to target: Color.Resolved,
+        progress: CGFloat
+    ) -> Color.Resolved {
+        let progress = Float(progress)
+        return Color.Resolved(
+            colorSpace: .sRGBLinear,
+            red: source.linearRed + (target.linearRed - source.linearRed) * progress,
+            green: source.linearGreen + (target.linearGreen - source.linearGreen) * progress,
+            blue: source.linearBlue + (target.linearBlue - source.linearBlue) * progress,
+            opacity: source.opacity + (target.opacity - source.opacity) * progress
         )
     }
 

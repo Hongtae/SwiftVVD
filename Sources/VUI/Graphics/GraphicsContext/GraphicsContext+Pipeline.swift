@@ -9,14 +9,14 @@ import Foundation
 import VVD
 
 #if false
-private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
+private func decodeShader(device: GraphicsDevice, encodedText: String) -> VVD.ShaderFunction? {
     if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
         let inputStream = InputStream(data: data)
         let outputStream = OutputStream.toMemory()
 
         if decompress(input: inputStream, output: outputStream) == .success {
             let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
-            if let shader = Shader(data: decodedData), shader.validate() {
+            if let shader = VVD.Shader(data: decodedData), shader.validate() {
                 Log.debug("GraphicsPipeline Shader loaded: \(shader)")
                 if let module = device.makeShaderModule(from: shader) {
                     return module.makeFunction(name: module.functionNames.first ?? "")
@@ -117,8 +117,8 @@ struct _Vertex {
 class GraphicsPipelineStates {
 
     struct ShaderFunctions {
-        let vertexFunction: ShaderFunction
-        let fragmentFunction: ShaderFunction?
+        let vertexFunction: VVD.ShaderFunction
+        let fragmentFunction: VVD.ShaderFunction?
     }
 
     let device: GraphicsDevice
@@ -199,6 +199,58 @@ class GraphicsPipelineStates {
             return renderStates[rs]
         }
         return nil
+    }
+
+    func makeCustomRenderState(
+        fragmentFunction: any VVD.ShaderFunction,
+        colorFormat: PixelFormat,
+        depthFormat: PixelFormat,
+        blendState: BlendState,
+        sampleCount: Int
+    ) -> RenderPipelineState? {
+        guard sampleCount.isPowerOfTwo,
+              let vertexFunction = shaderFunctions[.vertexColor]?.vertexFunction else {
+            return nil
+        }
+
+        var descriptor = RenderPipelineDescriptor()
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.colorAttachments = [
+            .init(index: 0, pixelFormat: colorFormat, blendState: blendState)
+        ]
+        descriptor.depthStencilAttachmentPixelFormat = depthFormat
+        descriptor.vertexDescriptor.attributes = [
+            .init(format: .float2, offset: 0, bufferIndex: 0, location: 0),
+            .init(
+                format: .float2,
+                offset: MemoryLayout<_Vertex>.offset(of: \.texcoord)!,
+                bufferIndex: 0,
+                location: 1
+            ),
+            .init(
+                format: .float4,
+                offset: MemoryLayout<_Vertex>.offset(of: \.color)!,
+                bufferIndex: 0,
+                location: 2
+            ),
+        ]
+        descriptor.vertexDescriptor.layouts = [
+            .init(stepRate: .vertex, stride: MemoryLayout<_Vertex>.stride)
+        ]
+        descriptor.primitiveTopology = .triangle
+        descriptor.triangleFillMode = .fill
+        descriptor.rasterSampleCount = sampleCount
+
+        var reflection = PipelineReflection()
+        let state = device.makeRenderPipelineState(
+            descriptor: descriptor,
+            reflection: &reflection
+        )
+        if state != nil {
+            Log.debug("Custom shader pipeline reflection: \(reflection)")
+        }
+        return state
     }
 
     func depthStencilState(_ ds: _Stencil) -> DepthStencilState? {
@@ -292,13 +344,13 @@ class GraphicsPipelineStates {
                 let message: String
             }
 
-            let loadShader = { (name: String) throws -> ShaderFunction in
+            let loadShader = { (name: String) throws -> VVD.ShaderFunction in
                 if let url = Bundle.module.url(forResource: name,
                                                withExtension: "spv",
                                                subdirectory: "SPIRV") {
                     do {
                         let d = try Data(contentsOf: url, options: [])
-                        if let shader = Shader(data: d, name: name), shader.validate() {
+                        if let shader = VVD.Shader(data: d, name: name), shader.validate() {
                             Log.debug("GraphicsPipeline Shader loaded: \(shader)")
                             if let module = device.makeShaderModule(from: shader) {
                                 if let fn = module.makeFunction(name: module.functionNames.first ?? "") {

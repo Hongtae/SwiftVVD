@@ -54,6 +54,27 @@ final class AnimationMarkerSurfaceTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<MarkerTransition>.stride, 1)
         XCTAssertEqual(Mirror(reflecting: MarkerTransition()).children.count, 0)
     }
+
+    func testTypedTransitionModifierErasesThroughAnyTransitionSurface() {
+        let typed = Color.red.transition(MarkerTransition())
+        let erased = Color.red.transition(AnyTransition(MarkerTransition()))
+
+        XCTAssertEqual(
+            String(reflecting: type(of: typed)),
+            String(reflecting: type(of: erased))
+        )
+
+        // ASSERTIONS transitionViewModifierPublicSurfaceObserved
+    }
+
+    func testAnimationValueCarriersExposeBitwiseCopyableConformance() {
+        requireBitwiseCopyable(EmptyAnimatableData.self)
+        requireBitwiseCopyable(TransitionPhase.self)
+    }
+}
+
+private func requireBitwiseCopyable<T: BitwiseCopyable>(_ type: T.Type) {
+    _ = type
 }
 
 private struct MarkerAnimatableModifier: ViewModifier, Animatable {

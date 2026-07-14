@@ -111,6 +111,8 @@ public enum TransitionPhase: Hashable, Sendable {
     }
 }
 
+extension TransitionPhase: BitwiseCopyable {}
+
 extension TransitionPhase {
     public var value: Double {
         switch self {
@@ -932,14 +934,18 @@ struct ModifierTransition<Modifier: ViewModifier>: Transition {
     }
 }
 
-struct OffsetTransition: Transition {
-    var offset: CGSize
+public struct OffsetTransition: Transition {
+    public var offset: CGSize
 
-    func body(content: Content, phase: TransitionPhase) -> some View {
+    public init(_ offset: CGSize) {
+        self.offset = offset
+    }
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
         content.offset(phase.isIdentity ? .zero : offset)
     }
 
-    func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
         switch transition.operation {
         case .hasContentTransition:
             transition.result = .bool(true)
@@ -1264,7 +1270,7 @@ public struct AnyTransition {
     }
 
     public static func offset(_ offset: CGSize) -> AnyTransition {
-        AnyTransition(OffsetTransition(offset: offset))
+        AnyTransition(OffsetTransition(offset))
     }
 
     public static func offset(x: CGFloat = 0, y: CGFloat = 0) -> AnyTransition {
@@ -1339,6 +1345,16 @@ public struct AnyTransition {
     }
 }
 
+extension Transition where Self == OffsetTransition {
+    public static func offset(_ offset: CGSize) -> Self {
+        Self(offset)
+    }
+
+    public static func offset(x: CGFloat = 0, y: CGFloat = 0) -> Self {
+        offset(CGSize(width: x, height: y))
+    }
+}
+
 extension Transition where Self == IdentityTransition {
     public static var identity: IdentityTransition {
         Self()
@@ -1406,3 +1422,30 @@ extension Transition {
         CombiningTransition(transition1: self, transition2: other)
     }
 }
+
+@available(*, unavailable)
+extension OffsetTransition: Sendable {}
+
+@available(*, unavailable)
+extension IdentityTransition: Sendable {}
+
+@available(*, unavailable)
+extension OpacityTransition: Sendable {}
+
+@available(*, unavailable)
+extension MoveTransition: Sendable {}
+
+@available(*, unavailable)
+extension PushTransition: Sendable {}
+
+@available(*, unavailable)
+extension BlurReplaceTransition: Sendable {}
+
+@available(*, unavailable)
+extension SlideTransition: Sendable {}
+
+@available(*, unavailable)
+extension ScaleTransition: Sendable {}
+
+@available(*, unavailable)
+extension AsymmetricTransition: Sendable {}

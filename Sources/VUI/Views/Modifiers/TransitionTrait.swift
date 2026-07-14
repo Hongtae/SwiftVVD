@@ -26,6 +26,10 @@ struct CanTransitionTraitKey: _ViewTraitKey {
 }
 
 extension View {
+    @inlinable public func transition<T>(_ transition: T) -> some View where T: Transition {
+        self.transition(AnyTransition(transition))
+    }
+
     @inlinable public func transition(_ t: AnyTransition) -> some View {
         return _trait(TransitionTraitKey.self, t)
             ._trait(CanTransitionTraitKey.self, true)

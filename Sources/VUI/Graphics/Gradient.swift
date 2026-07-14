@@ -42,8 +42,8 @@ public struct Gradient {
     public struct ColorSpace: Hashable, Sendable {
         let id: UInt32
 
-        static let device = ColorSpace(id: 0)
-        static let perceptual = ColorSpace(id: 2)
+        public static let device = ColorSpace(id: 0)
+        public static let perceptual = ColorSpace(id: 2)
     }
 
     func normalized() -> Self {

@@ -2,7 +2,7 @@
 //  File: Shader.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -240,22 +240,22 @@ private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
         if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
         if size == 0 {
             // runtime array
-            let dim = spvc_type_get_num_array_dimensions(type)
+            let dim = spvc_type_get_num_array_dimensions(memberType)
             var isRuntimeArray = false
             if dim > 0 {
-                isRuntimeArray = spvc_type_array_dimension_is_literal(type, dim-1) == SPVC_TRUE &&
-                                 spvc_type_get_array_dimension(type, dim-1) == 0
+                isRuntimeArray = spvc_type_array_dimension_is_literal(memberType, dim-1) == SPVC_TRUE &&
+                                 spvc_type_get_array_dimension(memberType, dim-1) == 0
             }
             assert(isRuntimeArray)
         }
 
         var count: UInt32 = 1
-        for n in 0..<spvc_type_get_num_array_dimensions(type) {
-            count = count * spvc_type_get_array_dimension(type, n)
+        for n in 0..<spvc_type_get_num_array_dimensions(memberType) {
+            count = count * spvc_type_get_array_dimension(memberType, n)
         }
 
         var stride: UInt32 = 0
-        if spvc_type_get_num_array_dimensions(type) > 0 {
+        if spvc_type_get_num_array_dimensions(memberType) > 0 {
             result = spvc_compiler_type_struct_member_array_stride(compiler, type, i, &stride)
             if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }            
         }

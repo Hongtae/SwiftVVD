@@ -449,6 +449,7 @@ struct DisplayList {
         case animation(any _DisplayList_AnyEffectAnimation)
         case state(StrongHash)
         case contentTransition(ContentTransition.State)
+        case shader(Shader.ResolvedShader)
         case interpolatorRoot(InterpolatorGroup, CGPoint, CGSize)
         case interpolatorLayer(InterpolatorGroup, UInt32)
         case interpolatorAnimation(InterpolatorAnimation)
@@ -547,6 +548,8 @@ struct DisplayList {
         enum ShapeStyleRecord: Equatable {
             case color(Color)
             case gradient(Gradient)
+            case meshGradient(MeshGradient)
+            case shader(Shader.ResolvedShader)
         }
 
         enum ShadingRecord: Equatable {
@@ -1774,7 +1777,10 @@ struct DisplayList {
         let isStroke = role == .stroke
         let command = ItemCommand.shape(
             role: role,
-            style: Self.shapeStyleRecord(for: style),
+            style: Self.shapeStyleRecord(
+                for: style,
+                environment: environment ?? EnvironmentValues()
+            ),
             fillStyle: isStroke ? nil : fillStyle,
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
@@ -1796,7 +1802,10 @@ struct DisplayList {
         let isStroke = role == .stroke
         let command = ItemCommand.shape(
             role: role,
-            style: Self.shapeStyleRecord(for: style),
+            style: Self.shapeStyleRecord(
+                for: style,
+                environment: environment ?? EnvironmentValues()
+            ),
             fillStyle: isStroke ? nil : fillStyle,
             strokeStyle: isStroke ? strokeStyle : nil,
             bounds: bounds
@@ -2343,13 +2352,15 @@ struct DisplayList {
     }
 
     private static func shapeStyleRecord<S: ShapeStyle>(
-        for style: S
+        for style: S,
+        environment: EnvironmentValues
     ) -> ItemRecord.ShapeStyleRecord? {
-        shapeStyleRecord(for: style as any ShapeStyle)
+        shapeStyleRecord(for: style as any ShapeStyle, environment: environment)
     }
 
     private static func shapeStyleRecord(
-        for style: any ShapeStyle
+        for style: any ShapeStyle,
+        environment: EnvironmentValues
     ) -> ItemRecord.ShapeStyleRecord? {
         if let color = style as? Color {
             return .color(color)
@@ -2363,8 +2374,17 @@ struct DisplayList {
         if let gradient = style as? AnyGradient {
             return .gradient(gradient.provider.gradient)
         }
+        if let mesh = style as? MeshGradient {
+            return .meshGradient(mesh)
+        }
+        if let shader = style as? Shader {
+            return .shader(shader.resolvePaint(in: environment))
+        }
         if let erased = style as? AnyShapeStyle {
-            return shapeStyleRecord(for: erased.storage.box.style)
+            return shapeStyleRecord(
+                for: erased.storage.box.style,
+                environment: environment
+            )
         }
         if let foreground = style as? ForegroundStyle {
             return shapeStyleRecord(resolving: foreground)
@@ -2720,6 +2740,21 @@ struct DisplayList {
                  .interpolatorAnimation:
                 renderItems(in: contents, context: context, includeDebug: includeDebug)
 
+            case let .shader(shader):
+                guard shader.shader != nil,
+                      let layer = context.makeLayerContext() else {
+                    renderItems(in: contents, context: context, includeDebug: includeDebug)
+                    return
+                }
+                renderItems(in: contents, context: layer, includeDebug: includeDebug)
+                if !context.drawCustomShaderLayer(
+                    shader,
+                    sourceTexture: layer.backdrop,
+                    frame: frame
+                ) {
+                    renderItems(in: contents, context: context, includeDebug: includeDebug)
+                }
+
             case let .mask(mask, options):
                 var context = context
                 context.clipToLayer(options: options) { layer in
@@ -2988,6 +3023,7 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
         case animation
         case state
         case contentTransition
+        case shader
         case interpolatorRoot
         case interpolatorLayer
         case interpolatorAnimation
@@ -2996,6 +3032,7 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     var kind: Kind
     var hash: StrongHash?
     var contentTransitionState: ContentTransition.State?
+    var shader: Shader.ResolvedShader?
     var groupID: ObjectIdentifier?
     var origin: CGPoint?
     var size: CGSize?
@@ -3052,6 +3089,11 @@ private extension DisplayList.Effect {
             return DisplayListEffectSurfaceRecord(
                 kind: .contentTransition,
                 contentTransitionState: state
+            )
+        case let .shader(shader):
+            return DisplayListEffectSurfaceRecord(
+                kind: .shader,
+                shader: shader
             )
         case let .interpolatorRoot(group, origin, size):
             return DisplayListEffectSurfaceRecord(
@@ -3139,7 +3181,7 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition:
+        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
             break
@@ -3157,7 +3199,7 @@ private extension DisplayList.Item {
             body(self)
         case let .effect(effect, contents):
             switch effect {
-            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition:
+            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader:
                 contents.forEachRenderItem(includeDebug: includeDebug, body)
             case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
                 break

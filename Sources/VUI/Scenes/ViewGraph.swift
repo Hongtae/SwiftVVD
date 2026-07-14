@@ -835,6 +835,7 @@ class ViewGraph: ViewGraphHost {
             )
             viewInputs.requestsLayoutComputer = true
             featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
+            viewInputs.makeRootMatchedGeometryScope()
 
             // GestureResponder.init reads the shared gesture graph from ViewGraph.
             var outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)

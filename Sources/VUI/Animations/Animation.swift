@@ -2597,12 +2597,38 @@ extension Spring {
         solve(target: target, initialVelocity: initialVelocity, time: time).value
     }
 
+    func _keyframeValue<V>(
+        target: V,
+        initialVelocity: V,
+        time: TimeInterval
+    ) -> V where V: VectorArithmetic {
+        solve(
+            target: target,
+            initialVelocity: initialVelocity,
+            time: time,
+            clampsNegativeTime: false
+        ).value
+    }
+
     public func velocity<V>(
         target: V,
         initialVelocity: V = .zero,
         time: TimeInterval
     ) -> V where V: VectorArithmetic {
         solve(target: target, initialVelocity: initialVelocity, time: time).velocity
+    }
+
+    func _keyframeVelocity<V>(
+        target: V,
+        initialVelocity: V,
+        time: TimeInterval
+    ) -> V where V: VectorArithmetic {
+        solve(
+            target: target,
+            initialVelocity: initialVelocity,
+            time: time,
+            clampsNegativeTime: false
+        ).velocity
     }
 
     public func update<V>(
@@ -2742,9 +2768,10 @@ extension Spring {
     private func solve<V>(
         target: V,
         initialVelocity: V,
-        time: TimeInterval
+        time: TimeInterval,
+        clampsNegativeTime: Bool = true
     ) -> (value: V, velocity: V) where V: VectorArithmetic {
-        let t = max(time, 0)
+        let t = clampsNegativeTime ? max(time, 0) : time
         if angularFrequency < 0 {
             return solveOverdamped(target: target, initialVelocity: initialVelocity, time: t)
         }

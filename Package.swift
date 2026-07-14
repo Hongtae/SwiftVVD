@@ -116,7 +116,9 @@ let package = Package(
             ],
             exclude: [
                 "Resources/Shaders/GLSL",
-                "Resources/Shaders/gen_spv.py"
+                "Resources/Shaders/HLSL",
+                "Resources/Shaders/gen_spv.py",
+                "Resources/Shaders/gen_hlsl_spv.py"
             ],
             resources: [
                 .copy("Resources/Fonts"),
