@@ -649,6 +649,9 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
             layoutDirection: currentEnvironment.layoutDirection
         )
         state.transition = transition
+        if transition.symbolReplaceConfiguration != nil {
+            state.options.insert(.animatesDifferentContent)
+        }
         state.animation = currentTransaction.effectiveAnimation
 
         var appliesTransition = false

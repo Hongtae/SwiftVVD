@@ -412,10 +412,14 @@ public struct ShaderLibrary: Equatable, @unchecked Sendable {
         return ShaderLibrary(storage: storage)
     }
 
+    /// Creates a shader library from a compiled SPIR-V binary module.
+    /// - Parameter data: The complete SPIR-V module bytes.
     public init(data: Data) {
         storage = Storage(source: .data(data))
     }
 
+    /// Creates a shader library from a compiled SPIR-V binary module file.
+    /// - Parameter url: The URL of the SPIR-V module file.
     public init(url: URL) {
         storage = Storage(source: .url(url))
     }

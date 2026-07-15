@@ -52,6 +52,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             animationIndex: 0,
             delay: 0
         )
+        var customDuration: Double?
 
         static func paired(
             source: ItemInterpolationInput,
@@ -120,8 +121,32 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         mutating func resolveAnimation(
             table: inout RBAnimationTable,
             defaultAnimationIndex: Int32,
-            sequencer: RBAnimationSequencer?
+            sequencer: RBAnimationSequencer?,
+            transition: RBTransition?
         ) {
+            let sequencerDelay = center.flatMap {
+                sequencer?.evalDelay(
+                    at: $0,
+                    animatedOperationType: animatedOperationType
+                )
+            }
+            if case let .paired(source, target) = kind,
+               let replacement = transition?.symbolReplacementConfiguration,
+               RBDisplayListInterpolator.isSymbolReplacementPair(
+                source: source,
+                target: target
+               ) {
+                customDuration = replacement.duration
+                animation = RBAnimationSequencer.operationAnimationRecord(
+                    operationLowNibble: animatedOperationType,
+                    resolvedAnimationIndex: -2,
+                    defaultAnimationIndex: defaultAnimationIndex,
+                    operationDelay: 0,
+                    sequencerDelay: sequencerDelay
+                )
+                return
+            }
+
             let itemAnimation: RBAnimation?
             switch kind {
             case let .paired(source, target):
@@ -139,12 +164,6 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             // Transition animations are not universal secondary sequences. Their ownership
             // depends on the concrete operation family, so this plan resolves only the
             // operation's default or item-style animation.
-            let sequencerDelay = center.flatMap {
-                sequencer?.evalDelay(
-                    at: $0,
-                    animatedOperationType: animatedOperationType
-                )
-            }
             animation = RBAnimationSequencer.operationAnimationRecord(
                 operationLowNibble: animatedOperationType,
                 resolvedAnimationIndex: resolvedAnimationIndex,
@@ -179,6 +198,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         ) -> CGRect? {
             switch kind {
             case let .paired(source, target):
+                if let replacement = transition?.symbolReplacementConfiguration,
+                   let bounds = RBDisplayListInterpolator.symbolReplacementBounds(
+                    source: source,
+                    target: target,
+                    elapsedTime: progress,
+                    configuration: replacement
+                   ) {
+                    return bounds
+                }
                 // Paired commands use the mixed cross-fade path. Insertion and removal
                 // event masks only govern unmatched operations.
                 return RBDisplayListInterpolator.interpolatedBounds(
@@ -233,6 +261,16 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         ) {
             switch kind {
             case let .paired(source, target):
+                if let replacement = transition?.symbolReplacementConfiguration,
+                   RBDisplayListInterpolator.appendSymbolReplacementPair(
+                    source: source,
+                    target: target,
+                    elapsedTime: progress,
+                    configuration: replacement,
+                    into: &contents
+                   ) {
+                    return
+                }
                 if let mixedImage = RBDisplayListInterpolator.mixedImageItem(
                     from: source,
                     to: target,
@@ -598,9 +636,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             operations.reduce(0) { duration, operation in
                 max(
                     duration,
-                    Double(operation.animation.delay) + animationTable.maximumDuration(
-                        animationIndex: operation.animation.animationIndex
-                    )
+                    Double(operation.animation.delay) +
+                        (operation.customDuration ?? animationTable.maximumDuration(
+                            animationIndex: operation.animation.animationIndex
+                        ))
                 )
             }
         }
@@ -994,6 +1033,302 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         return true
     }
 
+    private struct SymbolReplacementPresentation {
+        var sourceScale: CGFloat
+        var sourceOpacity: CGFloat
+        var targetScale: CGFloat
+        var targetOpacity: CGFloat
+    }
+
+    private static func isSymbolReplacementPair(
+        source: ItemInterpolationInput,
+        target: ItemInterpolationInput
+    ) -> Bool {
+        symbolImageValue(in: source.item)?.image.symbol != nil &&
+            symbolImageValue(in: target.item)?.image.symbol != nil
+    }
+
+    private static func symbolReplacementBounds(
+        source: ItemInterpolationInput,
+        target: ItemInterpolationInput,
+        elapsedTime: CGFloat,
+        configuration: RBSymbolReplacementConfiguration
+    ) -> CGRect? {
+        guard let sourceImage = symbolImageValue(in: source.item),
+              let targetImage = symbolImageValue(in: target.item),
+              let sourceSymbol = sourceImage.image.symbol,
+              let targetSymbol = targetImage.image.symbol else {
+            return nil
+        }
+        if elapsedTime <= 0 { return source.bounds }
+        if Double(elapsedTime) >= configuration.duration { return target.bounds }
+
+        let normalizedTime = min(
+            max(Double(elapsedTime) / configuration.duration, 0),
+            1
+        )
+        let baseBounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: CGFloat(normalizedTime)
+        )
+        let levelCount = configuration.isLayered
+            ? max(symbolEffectLevelCount(sourceSymbol), symbolEffectLevelCount(targetSymbol))
+            : 1
+        var result: CGRect?
+        for level in 0..<max(levelCount, 1) {
+            let presentation = symbolReplacementPresentation(
+                elapsedTime: Double(elapsedTime),
+                level: level,
+                levelCount: max(levelCount, 1),
+                configuration: configuration
+            )
+            if presentation.sourceOpacity > 0 {
+                result = union(
+                    result,
+                    centeredScaledBounds(baseBounds, scale: presentation.sourceScale)
+                )
+            }
+            if presentation.targetOpacity > 0 {
+                result = union(
+                    result,
+                    centeredScaledBounds(baseBounds, scale: presentation.targetScale)
+                )
+            }
+        }
+        return result ?? baseBounds
+    }
+
+    @discardableResult
+    private static func appendSymbolReplacementPair(
+        source: ItemInterpolationInput,
+        target: ItemInterpolationInput,
+        elapsedTime: CGFloat,
+        configuration: RBSymbolReplacementConfiguration,
+        into contents: inout DisplayList
+    ) -> Bool {
+        guard let sourceImage = symbolImageValue(in: source.item),
+              let targetImage = symbolImageValue(in: target.item),
+              let sourceSymbol = sourceImage.image.symbol,
+              let targetSymbol = targetImage.image.symbol else {
+            return false
+        }
+        if elapsedTime <= 0 {
+            contents.items.append(source.item)
+            contents.recordInterpolationBounds(source.bounds)
+            return true
+        }
+        if Double(elapsedTime) >= configuration.duration {
+            contents.items.append(target.item)
+            contents.recordInterpolationBounds(target.bounds)
+            return true
+        }
+
+        let normalizedTime = min(
+            max(Double(elapsedTime) / configuration.duration, 0),
+            1
+        )
+        let baseBounds = interpolatedBounds(
+            from: source.bounds,
+            to: target.bounds,
+            progress: CGFloat(normalizedTime)
+        )
+        let levelCount = configuration.isLayered
+            ? max(symbolEffectLevelCount(sourceSymbol), symbolEffectLevelCount(targetSymbol))
+            : 1
+
+        for level in 0..<max(levelCount, 1) {
+            let presentation = symbolReplacementPresentation(
+                elapsedTime: Double(elapsedTime),
+                level: level,
+                levelCount: max(levelCount, 1),
+                configuration: configuration
+            )
+            let sourceItem = configuration.isLayered
+                ? symbolLayerItem(source.item, effectLevel: level)
+                : source.item
+            let targetItem = configuration.isLayered
+                ? symbolLayerItem(target.item, effectLevel: level)
+                : target.item
+            let sourceOutputBounds = centeredScaledBounds(
+                baseBounds,
+                scale: presentation.sourceScale
+            )
+            let targetOutputBounds = centeredScaledBounds(
+                baseBounds,
+                scale: presentation.targetScale
+            )
+            var bounds: CGRect?
+            if sourceItem != nil, presentation.sourceOpacity > 0 {
+                bounds = sourceOutputBounds
+            }
+            if targetItem != nil, presentation.targetOpacity > 0 {
+                bounds = union(bounds, targetOutputBounds)
+            }
+            guard let bounds else { continue }
+
+            contents.appendCrossFadeItem(
+                sourceItems: sourceItem.map { [$0] } ?? [],
+                sourceBounds: sourceItem == nil ? nil : source.bounds,
+                sourceOutputBounds: sourceItem == nil ? nil : sourceOutputBounds,
+                targetItems: targetItem.map { [$0] } ?? [],
+                targetBounds: targetItem == nil ? nil : target.bounds,
+                targetOutputBounds: targetItem == nil ? nil : targetOutputBounds,
+                bounds: bounds,
+                sourceFraction: Float(1 - presentation.sourceOpacity),
+                targetFraction: Float(presentation.targetOpacity)
+            )
+        }
+        return true
+    }
+
+    private static func symbolImageValue(
+        in item: DisplayList.Item
+    ) -> DisplayList.Content.ImageValue? {
+        guard case let .content(content) = item.value,
+              case let .image(image) = content.value else {
+            return nil
+        }
+        return image
+    }
+
+    private static func symbolEffectLevelCount(_ symbol: ResolvedVectorSymbol) -> Int {
+        symbol.layers.map(\.effectLevel).max().map { $0 + 1 } ?? 0
+    }
+
+    private static func symbolLayerItem(
+        _ item: DisplayList.Item,
+        effectLevel: Int
+    ) -> DisplayList.Item? {
+        guard case var .content(content) = item.value,
+              case var .image(imageValue) = content.value,
+              let symbol = imageValue.image.symbol,
+              symbol.layers.contains(where: { $0.effectLevel == effectLevel }) else {
+            return nil
+        }
+        let count = max(
+            symbolEffectLevelCount(symbol),
+            imageValue.image.symbolLayerOpacities?.count ?? 0
+        )
+        var opacities = [Double](repeating: 1, count: count)
+        if let existing = imageValue.image.symbolLayerOpacities {
+            for index in existing.indices where index < opacities.count {
+                opacities[index] = existing[index]
+            }
+        }
+        for index in opacities.indices where index != effectLevel {
+            opacities[index] = 0
+        }
+        imageValue.image.symbolLayerOpacities = opacities
+        content.value = .image(imageValue)
+        var result = item
+        result.value = .content(content)
+        return result
+    }
+
+    private static func symbolReplacementPresentation(
+        elapsedTime: Double,
+        level: Int,
+        levelCount: Int,
+        configuration: RBSymbolReplacementConfiguration
+    ) -> SymbolReplacementPresentation {
+        let duration = configuration.duration
+        let step = levelCount > 1
+            ? min(0.05, 0.15 / Double(levelCount - 1))
+            : 0
+        let sourceDelay = configuration.isLayered
+            ? Double(levelCount - level - 1) * step
+            : 0
+        let targetDelay = configuration.isLayered ? Double(level) * step : 0
+        let sourceEnd = min(0.25, duration)
+        let targetStart = min(1.0 / 6.0 + targetDelay, duration)
+        let sourceProgress = normalizedProgress(
+            elapsedTime,
+            from: min(sourceDelay, sourceEnd),
+            to: sourceEnd
+        )
+        let targetProgress = normalizedProgress(
+            elapsedTime,
+            from: targetStart,
+            to: duration
+        )
+
+        let sourceScale: CGFloat
+        switch configuration.style {
+        case .downUp:
+            let progress = replacementCurve(
+                sourceProgress,
+                controlPoint1: CGPoint(x: 0.75, y: 0),
+                controlPoint2: CGPoint(x: 0.8, y: 1)
+            )
+            sourceScale = 1 - 0.5 * progress
+        case .upUp:
+            let progress = replacementCurve(
+                sourceProgress,
+                controlPoint1: CGPoint(x: 0.33, y: 0),
+                controlPoint2: CGPoint(x: 0.83, y: 0.83)
+            )
+            sourceScale = 1 + 0.25 * progress
+        case .offUp:
+            sourceScale = 1
+        }
+        let sourceOpacityProgress = replacementCurve(
+            sourceProgress,
+            controlPoint1: CGPoint(x: 0.33, y: 0),
+            controlPoint2: CGPoint(x: 0.67, y: 1)
+        )
+        let incomingProgress = replacementCurve(
+            targetProgress,
+            controlPoint1: CGPoint(x: 0.17, y: 0.17),
+            controlPoint2: CGPoint(x: 0.67, y: 1)
+        )
+        return SymbolReplacementPresentation(
+            sourceScale: sourceScale,
+            sourceOpacity: 1 - sourceOpacityProgress,
+            targetScale: 0.4 + 0.6 * incomingProgress,
+            targetOpacity: incomingProgress
+        )
+    }
+
+    private static func normalizedProgress(
+        _ value: Double,
+        from start: Double,
+        to end: Double
+    ) -> CGFloat {
+        guard end > start else { return value >= end ? 1 : 0 }
+        return CGFloat(min(max((value - start) / (end - start), 0), 1))
+    }
+
+    private static func replacementCurve(
+        _ progress: CGFloat,
+        controlPoint1: CGPoint,
+        controlPoint2: CGPoint
+    ) -> CGFloat {
+        let solver = UnitCurve.CubicSolver(
+            startControlPoint: UnitPoint(
+                x: controlPoint1.x,
+                y: controlPoint1.y
+            ),
+            endControlPoint: UnitPoint(
+                x: controlPoint2.x,
+                y: controlPoint2.y
+            )
+        )
+        return solver.solve(x: min(max(progress, 0), 1))
+    }
+
+    private static func centeredScaledBounds(
+        _ bounds: CGRect,
+        scale: CGFloat
+    ) -> CGRect {
+        CGRect(
+            x: bounds.midX - bounds.width * scale * 0.5,
+            y: bounds.midY - bounds.height * scale * 0.5,
+            width: bounds.width * scale,
+            height: bounds.height * scale
+        )
+    }
+
     private static func mixedImageItem(
         from source: ItemInterpolationInput,
         to target: ItemInterpolationInput,
@@ -1073,6 +1408,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) -> Bool {
         source.baseline == target.baseline &&
             source.textureID == target.textureID &&
+            source.symbolID == target.symbolID &&
             source.textureTransform == target.textureTransform &&
             source.scaleFactor == target.scaleFactor
     }
@@ -2933,7 +3269,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             operations[index].resolveAnimation(
                 table: &animationTable,
                 defaultAnimationIndex: defaultAnimationIndex,
-                sequencer: animationSequencer
+                sequencer: animationSequencer,
+                transition: transition
             )
         }
         return ItemOperationPlan(

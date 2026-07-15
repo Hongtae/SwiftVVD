@@ -559,6 +559,7 @@ struct DisplayList {
         struct ImageRecord: Equatable {
             var baseline: CGFloat
             var textureID: ObjectIdentifier?
+            var symbolID: ResolvedVectorSymbol.Identity?
             var placementRect: CGRect
             var textureTransform: CGAffineTransform
             var scaleFactor: CGFloat
@@ -568,6 +569,7 @@ struct DisplayList {
             init(
                 baseline: CGFloat,
                 textureID: ObjectIdentifier?,
+                symbolID: ResolvedVectorSymbol.Identity? = nil,
                 placementRect: CGRect,
                 textureTransform: CGAffineTransform,
                 scaleFactor: CGFloat,
@@ -576,6 +578,7 @@ struct DisplayList {
             ) {
                 self.baseline = baseline
                 self.textureID = textureID
+                self.symbolID = symbolID
                 self.placementRect = placementRect
                 self.textureTransform = textureTransform
                 self.scaleFactor = scaleFactor
@@ -590,6 +593,7 @@ struct DisplayList {
             ) {
                 baseline = image.baseline
                 textureID = image.texture.map { ObjectIdentifier($0) }
+                symbolID = image.symbol?.identity
                 self.placementRect = placementRect
                 textureTransform = image.textureTransform
                 scaleFactor = image.scaleFactor

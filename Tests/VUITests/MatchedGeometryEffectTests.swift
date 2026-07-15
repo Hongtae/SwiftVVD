@@ -379,6 +379,117 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS matchedGeometryReplacementCompletionRuntimeObserved
+    func testPublicReplacementPreservesReplacementThenOriginalCompletionOrder() throws {
+        let recorder = AnimationCompletionRecorder()
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+        let namespace = Namespace().wrappedValue
+        var source: Attribute<MatchedGeometryReplacementRoot>!
+        var inputs: _ViewInputs!
+        var layout: Attribute<LayoutComputer>!
+        var display: Attribute<DisplayList>!
+
+        func root(stage: Int) -> MatchedGeometryReplacementRoot {
+            MatchedGeometryReplacementRoot(stage: stage, namespace: namespace)
+        }
+
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            inputs = makeViewInputs(graph: graph)
+            inputs.makeRootMatchedGeometryScope()
+            inputs.preferences.keys.insert(DisplayList.Key.self)
+            source = graph.makeInput(value: root(stage: 0))
+            let outputs = MatchedGeometryReplacementRoot._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: inputs
+            )
+            layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+            display = Attribute<DisplayList>(
+                try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            )
+
+            func finishTransactionBody() {
+                Transaction.dispatchPendingListeners().forEach { $0() }
+                flushCompletionActions(in: graph)
+            }
+
+            func sample() {
+                _ = layout.value.sizeThatFits(.unspecified)
+                _ = display.value
+                graph.inbox.drain()
+                _ = layout.value.sizeThatFits(.unspecified)
+                _ = display.value
+            }
+
+            sample()
+
+            source.setValue(
+                root(stage: 1),
+                transaction: completionTransaction(
+                    animation: .linear(duration: 1.0),
+                    label: "first",
+                    recorder: recorder
+                )
+            )
+            sample()
+            finishTransactionBody()
+            XCTAssertEqual(recorder.events, [])
+
+            inputs.base.time.setValue(Time(seconds: 0.25))
+            sample()
+            source.setValue(
+                root(stage: 2),
+                transaction: completionTransaction(
+                    animation: .linear(duration: 0.4),
+                    label: "replacement",
+                    recorder: recorder
+                )
+            )
+            sample()
+            finishTransactionBody()
+            XCTAssertEqual(recorder.events, [])
+
+            inputs.base.time.setValue(Time(seconds: 0.70))
+            sample()
+            flushCompletionActions(in: graph)
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "replacement removed",
+                    "replacement logical",
+                ]
+            )
+
+            inputs.base.time.setValue(Time(seconds: 1.05))
+            sample()
+            flushCompletionActions(in: graph)
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "replacement removed",
+                    "replacement logical",
+                    "first removed",
+                    "first logical",
+                ]
+            )
+        }
+    }
+
+    private func flushCompletionActions(in graph: _AGGraph) {
+        while !graph.actionOutbox.isEmpty {
+            let actions = graph.actionOutbox
+            graph.actionOutbox.removeAll()
+            actions.forEach { $0() }
+        }
+    }
+
     private func registration(
         graph: _AGGraph,
         owner: AGAttribute,
@@ -451,4 +562,39 @@ final class MatchedGeometryEffectTests: XCTestCase {
 private struct MatchedGeometryKeyForTest: Hashable {
     var id: String
     var namespace: Namespace.ID
+}
+
+private struct MatchedGeometryReplacementRoot: View {
+    var stage: Int
+    var namespace: Namespace.ID
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if stage == 0 {
+                matchedBox(
+                    size: CGSize(width: 40, height: 30),
+                    position: CGPoint(x: 55, y: 45)
+                )
+            } else if stage == 1 {
+                matchedBox(
+                    size: CGSize(width: 80, height: 50),
+                    position: CGPoint(x: 170, y: 105)
+                )
+            } else {
+                matchedBox(
+                    size: CGSize(width: 110, height: 70),
+                    position: CGPoint(x: 265, y: 165)
+                )
+            }
+        }
+        .frame(width: 340, height: 230)
+    }
+
+    private func matchedBox(size: CGSize, position: CGPoint) -> some View {
+        Rectangle()
+            .fill(Color.red)
+            .frame(width: size.width, height: size.height)
+            .matchedGeometryEffect(id: "hero", in: namespace, properties: .frame)
+            .offset(x: position.x, y: position.y)
+    }
 }

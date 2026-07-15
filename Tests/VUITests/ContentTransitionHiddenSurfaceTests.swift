@@ -108,6 +108,62 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertFalse(opacity.isIdentity)
     }
 
+    func testSymbolReplacementConfigurationAndRBTransitionLowering() throws {
+        let rows: [(
+            transition: ContentTransition,
+            flags: UInt32,
+            layered: Bool,
+            speed: Float
+        )] = [
+            (.symbolEffect, 0, true, 1),
+            (.symbolEffect(.replace), 0, true, 1),
+            (.symbolEffect(.replace.downUp), 226, true, 1),
+            (.symbolEffect(.replace.upUp), 227, true, 1),
+            (.symbolEffect(.replace.offUp), 228, true, 1),
+            (.symbolEffect(.replace.byLayer), 0, true, 1),
+            (.symbolEffect(.replace.wholeSymbol), 0, false, 1),
+            (.symbolEffect(.replace.magic(fallback: .replace)), 0, true, 1),
+            (.symbolEffect(.replace.magic(fallback: .downUp)), 2, true, 1),
+            (.symbolEffect(.replace.magic(fallback: .upUp)), 3, true, 1),
+            (.symbolEffect(.replace.magic(fallback: .offUp)), 4, true, 1),
+            (
+                .symbolEffect(.replace.offUp.wholeSymbol, options: .speed(9)),
+                228,
+                false,
+                9
+            ),
+        ]
+
+        for row in rows {
+            let configuration = try XCTUnwrap(
+                row.transition.symbolReplaceConfiguration
+            )
+            XCTAssertEqual(configuration.flags.rawValue, row.flags)
+            XCTAssertEqual(configuration.layered, row.layered)
+            XCTAssertEqual(configuration.speed, row.speed)
+            XCTAssertEqual(
+                configuration.transitionFlags.rawValue,
+                row.layered ? row.flags | 0x10 : row.flags
+            )
+
+            let transition = row.transition.rbTransition
+            XCTAssertEqual(transition.method, ContentTransition.Method.binary.method)
+            XCTAssertEqual(transition.effects.count, 1)
+            XCTAssertEqual(transition.effects[0].type, 18)
+            XCTAssertEqual(
+                transition.effects[0].integerArgumentValue(atIndex: 0),
+                row.layered ? row.flags | 0x10 : row.flags
+            )
+            XCTAssertEqual(transition.effects[0].argumentValue(atIndex: 1), 1)
+            XCTAssertEqual(transition.effects[0].events, 0)
+            XCTAssertFalse(transition.isReplaceable)
+        }
+
+        // ASSERTIONS symbolEffectReplaceConfigurationRuntimeObserved
+        // ASSERTIONS symbolEffectReplaceBackendOptionsObserved
+        // ASSERTIONS symbolEffectReplaceDisassemblyObserved
+    }
+
     func testRasterizationOptionsSurface() {
         XCTAssertEqual(RasterizationOptions.Flags.isAccelerated.rawValue, 0x1)
         XCTAssertEqual(RasterizationOptions.Flags.isOpaque.rawValue, 0x2)

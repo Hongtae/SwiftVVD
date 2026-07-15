@@ -13,6 +13,10 @@ class AnyImageProviderBox: @unchecked Sendable {
         nil
     }
 
+    func makeVectorSymbol() -> ResolvedVectorSymbol? {
+        nil
+    }
+
     var scaleFactor: CGFloat { 1 }
 
     func isEqual(to other: AnyImageProviderBox) -> Bool {
@@ -165,6 +169,953 @@ final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
         self.bundle = bundle
         self.label = label
     }
+
+    override func makeVectorSymbol() -> ResolvedVectorSymbol? {
+        SymbolAssetCatalog.resolve(
+            name: name,
+            variableValue: variableValue,
+            bundle: bundle
+        )
+    }
+
+    override func isEqual(to other: AnyImageProviderBox) -> Bool {
+        guard let other = other as? SymbolImageProvider else { return false }
+        return name == other.name &&
+            variableValue == other.variableValue &&
+            bundle == other.bundle &&
+            label == other.label
+    }
+}
+
+struct ImageViewChild: StatefulRule {
+    struct ActivePulse {
+        var id: Int
+        var startTime: Time
+        var cycleDuration: Double
+        var cycleCount: Int?
+        var repeatDelay: Double
+        var isLayered: Bool
+        var finishesAfterEffectRemoval = false
+    }
+
+    struct ActiveVariableColor {
+        static let introDuration = 13.0 / 30.0
+        static let outroDuration = 4.0 / 15.0
+        static let stepDuration = 1.0 / 3.0
+
+        var id: Int
+        var startTime: Time
+        var groupCount: Int
+        var cycleCount: Int?
+        var effectiveSpeed: Double
+        var isReversing: Bool
+        var isIterative: Bool
+        var inactiveOpacity: Double
+        var initialOpacities: [Double]
+        var finishesAfterEffectRemoval = false
+
+        var localDuration: Double {
+            let count = Double(groupCount)
+            switch (isIterative, isReversing) {
+            case (false, false):
+                return (count + 2) * Self.stepDuration
+            case (false, true):
+                return (2 * count + 1) * Self.stepDuration
+            case (true, false):
+                return (count + 1) * Self.stepDuration
+            case (true, true):
+                if groupCount <= 2 {
+                    return 2 * Self.stepDuration
+                }
+                return 2 * Double(groupCount - 1) * Self.stepDuration
+            }
+        }
+    }
+
+    struct ActiveDraw {
+        var id: Int
+        var startTime: Time
+        var motionGroupDurations: [Double]
+        var initialProgresses: [Double]
+        var targetProgress: Double
+        var effectiveSpeed: Double
+        var layerBehavior: DrawLayerBehavior
+        var isReversed: Bool
+        var usesOpacityFallback: Bool
+    }
+
+    struct DrawPresentation {
+        var progresses: [Double]?
+        var fallbackOpacity: Double?
+        var isReversed = false
+        var isActive = false
+    }
+
+    struct Phase {
+        var effects: [IdentifiedSymbolEffect] = []
+        var version: UInt32 = 0
+        var hasResolvedEffects = false
+        var activePulse: ActivePulse?
+        var activeVariableColor: ActiveVariableColor?
+        var activeDraw: ActiveDraw?
+    }
+
+    struct Value {
+        var image: GraphicsContext.ResolvedImage?
+        var symbolEffects: [IdentifiedSymbolEffect]
+        var symbolEffectVersion: UInt32
+        var symbolOpacity: Double
+        var symbolLayerOpacities: [Double]?
+        var symbolVariableColorOpacities: [Double]?
+        var symbolDrawProgresses: [Double]?
+        var symbolDrawFallbackOpacity: Double?
+        var symbolDrawsReversed: Bool
+        var isSymbolEffectActive: Bool
+    }
+
+    var resolvedImage: Attribute<GraphicsContext.ResolvedImage?>
+    var environment: Attribute<EnvironmentValues>
+    var transaction: Attribute<Transaction>
+    var time: Attribute<Time>
+    var phase = Phase()
+
+    mutating func updateValue() {
+        let image = resolvedImage.value
+        let now = time.value
+        let nextEffects = image?.symbol == nil ? [] : environment.value.symbolEffects
+        let effectsChanged = !symbolEffectListsEqual(phase.effects, nextEffects)
+        let previousVariablePresentation = variableColorPresentation(at: now)
+        let previousDrawPresentation = drawPresentation(at: now)
+
+        if effectsChanged {
+            if let activation = activatedPulse(
+                previous: phase.effects,
+                next: nextEffects,
+                hasResolvedEffects: phase.hasResolvedEffects,
+                at: now
+            ) {
+                if var active = phase.activePulse,
+                   let activeCount = active.cycleCount,
+                   let activationCount = activation.cycleCount,
+                   canAppendPulse(
+                    active: active,
+                    activation: activation,
+                    previous: phase.effects,
+                    next: nextEffects
+                   ) {
+                    active.cycleCount = activeCount + activationCount
+                    phase.activePulse = active
+                } else {
+                    phase.activePulse = activation
+                }
+            } else if let active = phase.activePulse {
+                let old = phase.effects.first { $0.id == active.id }
+                let new = nextEffects.first { $0.id == active.id }
+                if let old, let new {
+                    if !symbolEffectsEqual(old, new) {
+                        phase.activePulse = nil
+                    }
+                } else if let old,
+                          let finishing = pulseFinishingCurrentCycle(
+                            active,
+                            removedEffect: old,
+                            at: now
+                          ) {
+                    phase.activePulse = finishing
+                } else {
+                    phase.activePulse = nil
+                }
+            }
+            if let symbol = image?.symbol,
+               let activation = activatedVariableColor(
+                previous: phase.effects,
+                next: nextEffects,
+                hasResolvedEffects: phase.hasResolvedEffects,
+                groupCount: symbol.variableColorLevelCount,
+                initialOpacities: previousVariablePresentation.opacities,
+                at: now
+               ) {
+                phase.activeVariableColor = activation
+            } else if let active = phase.activeVariableColor {
+                let old = phase.effects.first { $0.id == active.id }
+                let new = nextEffects.first { $0.id == active.id }
+                if let old, let new {
+                    if !symbolEffectsEqual(old, new) {
+                        phase.activeVariableColor = nil
+                    }
+                } else if let old,
+                          let finishing = variableColorFinishingCurrentCycle(
+                            active,
+                            removedEffect: old,
+                            at: now
+                          ) {
+                    phase.activeVariableColor = finishing
+                } else {
+                    phase.activeVariableColor = nil
+                }
+            }
+            if let symbol = image?.symbol {
+                phase.activeDraw = updatedDrawAnimation(
+                    previous: phase.effects,
+                    next: nextEffects,
+                    current: phase.activeDraw,
+                    presentation: previousDrawPresentation,
+                    symbol: symbol,
+                    hasResolvedEffects: phase.hasResolvedEffects,
+                    at: now
+                )
+            } else {
+                phase.activeDraw = nil
+            }
+            phase.effects = nextEffects
+            phase.version &+= 1
+        }
+        phase.hasResolvedEffects = true
+
+        let transaction = transaction.value
+        if image?.symbol == nil || transaction.disablesAnimations {
+            phase.activePulse = nil
+            phase.activeVariableColor = nil
+            if let symbol = image?.symbol,
+               let request = drawRequest(in: nextEffects) {
+                phase.activeDraw = drawAnimation(
+                    for: request,
+                    symbol: symbol,
+                    initialProgresses: nil,
+                    at: now,
+                    immediate: true
+                )
+            } else {
+                phase.activeDraw = nil
+            }
+        } else if let active = phase.activePulse,
+                  !active.finishesAfterEffectRemoval,
+                  !nextEffects.contains(where: { $0.id == active.id }) {
+            phase.activePulse = nil
+        }
+
+        if let active = phase.activeVariableColor {
+            if image?.symbol?.variableColorLevelCount != active.groupCount {
+                phase.activeVariableColor = nil
+            } else if !active.finishesAfterEffectRemoval,
+                      !nextEffects.contains(where: { $0.id == active.id }) {
+                phase.activeVariableColor = nil
+            }
+        }
+
+        let pulse = pulsePresentation(at: now)
+        let variableColor = variableColorPresentation(at: now)
+        let draw = drawPresentation(at: now)
+        let isActive = pulse.isActive || variableColor.isActive || draw.isActive
+        if isActive,
+           let ref = _AGGraphContext.current,
+           let viewGraph = ref.context as? ViewGraph {
+            viewGraph.nextUpdate.views.at(now + 1.0 / 120.0)
+        }
+
+        _AGGraph.setStatefulOutput(Value(
+            image: image,
+            symbolEffects: phase.effects,
+            symbolEffectVersion: phase.version,
+            symbolOpacity: pulse.opacity,
+            symbolLayerOpacities: pulse.layerOpacities,
+            symbolVariableColorOpacities: variableColor.opacities,
+            symbolDrawProgresses: draw.progresses,
+            symbolDrawFallbackOpacity: draw.fallbackOpacity,
+            symbolDrawsReversed: draw.isReversed,
+            isSymbolEffectActive: isActive
+        ))
+    }
+
+    private mutating func pulsePresentation(
+        at time: Time
+    ) -> (opacity: Double, layerOpacities: [Double]?, isActive: Bool) {
+        guard let pulse = phase.activePulse else { return (1, nil, false) }
+        let cycleDuration = pulse.cycleDuration
+        let elapsed = max(time.seconds - pulse.startTime.seconds, 0)
+        let cycleStride = cycleDuration + pulse.repeatDelay
+        if let cycleCount = pulse.cycleCount {
+            let totalDuration = cycleDuration * Double(cycleCount) +
+                pulse.repeatDelay * Double(max(cycleCount - 1, 0))
+            if elapsed >= totalDuration {
+                phase.activePulse = nil
+                return (1, nil, false)
+            }
+        }
+        let cycleElapsed = elapsed.truncatingRemainder(dividingBy: cycleStride)
+        if cycleElapsed >= cycleDuration {
+            return pulsePresentation(opacity: 1, pulse: pulse)
+        }
+        let progress = cycleElapsed / cycleDuration
+        let opacity = 0.65 + 0.35 * cos(progress * 2.0 * .pi)
+        return pulsePresentation(opacity: opacity, pulse: pulse)
+    }
+
+    private func pulsePresentation(
+        opacity: Double,
+        pulse: ActivePulse
+    ) -> (opacity: Double, layerOpacities: [Double]?, isActive: Bool) {
+        pulse.isLayered ? (1, [opacity], true) : (opacity, nil, true)
+    }
+
+    private mutating func variableColorPresentation(
+        at time: Time
+    ) -> (opacities: [Double]?, isActive: Bool) {
+        guard let active = phase.activeVariableColor else {
+            return (nil, false)
+        }
+        let elapsed = max(time.seconds - active.startTime.seconds, 0) *
+            active.effectiveSpeed
+        if elapsed < ActiveVariableColor.introDuration {
+            return (variableColorIntroOpacities(at: elapsed, active: active), true)
+        }
+
+        let elapsedAfterIntro = elapsed - ActiveVariableColor.introDuration
+        if let cycleCount = active.cycleCount {
+            let localSpan = active.localDuration * Double(cycleCount)
+            if elapsedAfterIntro >= localSpan {
+                let outroTime = elapsedAfterIntro - localSpan
+                if outroTime >= ActiveVariableColor.outroDuration {
+                    phase.activeVariableColor = nil
+                    return (nil, false)
+                }
+                return (
+                    variableColorOutroOpacities(at: outroTime, active: active),
+                    true
+                )
+            }
+        }
+
+        let localTime = elapsedAfterIntro.truncatingRemainder(
+            dividingBy: active.localDuration
+        )
+        return (variableColorLocalOpacities(at: localTime, active: active), true)
+    }
+
+    private func variableColorIntroOpacities(
+        at time: Double,
+        active: ActiveVariableColor
+    ) -> [Double] {
+        let progress = variableColorEase(
+            (time - 0.1) / ActiveVariableColor.stepDuration
+        )
+        return active.initialOpacities.map {
+            variableColorMix(
+                $0,
+                active.inactiveOpacity,
+                progress: progress
+            )
+        }
+    }
+
+    private func variableColorLocalOpacities(
+        at time: Double,
+        active: ActiveVariableColor
+    ) -> [Double] {
+        if active.isIterative && active.isReversing {
+            return variableColorSequentialBounceOpacities(at: time, active: active)
+        }
+
+        let inactive = active.inactiveOpacity
+        let step = ActiveVariableColor.stepDuration
+        var result = [Double](repeating: inactive, count: active.groupCount)
+        for level in result.indices {
+            let activationStart = step * Double(level)
+            let activation = variableColorEase(
+                (time - activationStart) / step
+            )
+            result[level] = variableColorMix(
+                inactive,
+                1,
+                progress: activation
+            )
+            if active.isIterative, level < result.count - 1 {
+                let deactivation = variableColorEase(
+                    (time - activationStart - step) / step
+                )
+                result[level] = variableColorMix(
+                    result[level],
+                    inactive,
+                    progress: deactivation
+                )
+            }
+        }
+
+        let reverseStart = step * Double(
+            active.groupCount + (active.isIterative ? 0 : 1)
+        )
+        for level in result.indices {
+            let deactivationStart = active.isReversing
+                ? reverseStart + step * Double(result.count - 1 - level)
+                : reverseStart
+            let deactivation = variableColorEase(
+                (time - deactivationStart) / step
+            )
+            result[level] = variableColorMix(
+                result[level],
+                inactive,
+                progress: deactivation
+            )
+        }
+        return result
+    }
+
+    private func variableColorSequentialBounceOpacities(
+        at time: Double,
+        active: ActiveVariableColor
+    ) -> [Double] {
+        let inactive = active.inactiveOpacity
+        var result = [Double](repeating: inactive, count: active.groupCount)
+        guard active.groupCount > 1 else {
+            result[0] = 1
+            return result
+        }
+
+        let forward = Array(0..<active.groupCount)
+        let path = forward + Array(
+            forward.dropLast().dropFirst().reversed()
+        ) + [0]
+        let step = ActiveVariableColor.stepDuration
+        let position = min(
+            max(time / step, 0),
+            Double(path.count - 1)
+        )
+        let segment = min(Int(position), path.count - 2)
+        let progress = variableColorEase(position - Double(segment))
+        let source = path[segment]
+        let target = path[segment + 1]
+        result[source] = variableColorMix(1, inactive, progress: progress)
+        result[target] = variableColorMix(inactive, 1, progress: progress)
+        return result
+    }
+
+    private func variableColorOutroOpacities(
+        at time: Double,
+        active: ActiveVariableColor
+    ) -> [Double] {
+        let progress = variableColorEase(
+            time / ActiveVariableColor.outroDuration
+        )
+        return variableColorTerminalOpacities(active).map {
+            variableColorMix($0, 1, progress: progress)
+        }
+    }
+
+    private func variableColorTerminalOpacities(
+        _ active: ActiveVariableColor
+    ) -> [Double] {
+        var result = [Double](
+            repeating: active.inactiveOpacity,
+            count: active.groupCount
+        )
+        if active.isIterative && active.isReversing {
+            result[0] = 1
+        }
+        return result
+    }
+
+    private mutating func drawPresentation(at time: Time) -> DrawPresentation {
+        guard let active = phase.activeDraw else {
+            return DrawPresentation()
+        }
+        let elapsed = max(time.seconds - active.startTime.seconds, 0) *
+            active.effectiveSpeed
+        var progresses = active.initialProgresses
+        var isComplete = true
+
+        func resolvedProgress(
+            initial: Double,
+            duration: Double,
+            elapsed: Double
+        ) -> Double {
+            let distance = abs(active.targetProgress - initial)
+            let scaledDuration = duration * distance
+            guard scaledDuration > .ulpOfOne else {
+                return active.targetProgress
+            }
+            let linearProgress = min(max(elapsed / scaledDuration, 0), 1)
+            if linearProgress < 1 {
+                isComplete = false
+            }
+            return drawMix(
+                initial,
+                active.targetProgress,
+                progress: drawEase(linearProgress)
+            )
+        }
+
+        switch active.layerBehavior {
+        case .byLayer:
+            for index in progresses.indices {
+                progresses[index] = resolvedProgress(
+                    initial: active.initialProgresses[index],
+                    duration: active.motionGroupDurations[index],
+                    elapsed: elapsed
+                )
+            }
+        case .wholeSymbol:
+            let duration = active.motionGroupDurations.max() ?? 0
+            let distance = active.initialProgresses.map {
+                abs(active.targetProgress - $0)
+            }.max() ?? 0
+            let scaledDuration = duration * distance
+            let linearProgress = scaledDuration > .ulpOfOne
+                ? min(max(elapsed / scaledDuration, 0), 1)
+                : 1
+            isComplete = linearProgress >= 1
+            let easedProgress = drawEase(linearProgress)
+            for index in progresses.indices {
+                progresses[index] = drawMix(
+                    active.initialProgresses[index],
+                    active.targetProgress,
+                    progress: easedProgress
+                )
+            }
+        case .individually:
+            let forwardOrder = Array(progresses.indices)
+            let order = active.isReversed
+                ? Array(forwardOrder.reversed())
+                : forwardOrder
+            var start = 0.0
+            for index in order {
+                let initial = active.initialProgresses[index]
+                let duration = active.motionGroupDurations[index] *
+                    abs(active.targetProgress - initial)
+                if elapsed <= start {
+                    progresses[index] = initial
+                    if duration > .ulpOfOne {
+                        isComplete = false
+                    }
+                } else if elapsed >= start + duration {
+                    progresses[index] = active.targetProgress
+                } else {
+                    progresses[index] = drawMix(
+                        initial,
+                        active.targetProgress,
+                        progress: drawEase((elapsed - start) / duration)
+                    )
+                    isComplete = false
+                }
+                start += duration
+            }
+        }
+
+        if isComplete, active.targetProgress >= 1 {
+            phase.activeDraw = nil
+            return DrawPresentation()
+        }
+        if active.usesOpacityFallback {
+            return DrawPresentation(
+                progresses: nil,
+                fallbackOpacity: progresses.first ?? active.targetProgress,
+                isReversed: active.isReversed,
+                isActive: !isComplete
+            )
+        }
+        return DrawPresentation(
+            progresses: progresses,
+            fallbackOpacity: nil,
+            isReversed: active.isReversed,
+            isActive: !isComplete
+        )
+    }
+}
+
+private struct DrawRequest: Equatable {
+    var id: Int
+    var targetProgress: Double
+    var effectiveSpeed: Double
+    var layerBehavior: DrawLayerBehavior
+    var isReversed: Bool
+    var isTransition: Bool
+}
+
+private func drawRequest(
+    in effects: [IdentifiedSymbolEffect]
+) -> DrawRequest? {
+    for identified in effects.reversed() {
+        let layerBehavior: DrawLayerBehavior
+        let isReversed: Bool
+        switch identified.effect.configuration.effect {
+        case let .drawOn(configuration):
+            layerBehavior = configuration.layerBehavior ?? .byLayer
+            isReversed = false
+        case let .drawOff(configuration):
+            layerBehavior = configuration.layerBehavior ?? .byLayer
+            isReversed = configuration.isReversed == true
+        default:
+            continue
+        }
+
+        let targetProgress: Double
+        let isTransition: Bool
+        switch identified.effect.trigger {
+        case .indefinite:
+            targetProgress = 0
+            isTransition = false
+        case let .transition(phase):
+            targetProgress = phase.isIdentity ? 1 : 0
+            isTransition = true
+        case .value, .condition:
+            continue
+        }
+        let speed = identified.effect.options.speed
+        guard speed.isFinite else { continue }
+        return DrawRequest(
+            id: identified.id,
+            targetProgress: targetProgress,
+            effectiveSpeed: min(max(speed, 0.5), 2),
+            layerBehavior: layerBehavior,
+            isReversed: isReversed,
+            isTransition: isTransition
+        )
+    }
+    return nil
+}
+
+private func updatedDrawAnimation(
+    previous: [IdentifiedSymbolEffect],
+    next: [IdentifiedSymbolEffect],
+    current: ImageViewChild.ActiveDraw?,
+    presentation: ImageViewChild.DrawPresentation,
+    symbol: ResolvedVectorSymbol,
+    hasResolvedEffects: Bool,
+    at time: Time
+) -> ImageViewChild.ActiveDraw? {
+    let previousRequest = drawRequest(in: previous)
+    let nextRequest = drawRequest(in: next)
+    guard previousRequest != nextRequest else { return current }
+
+    let initialProgresses = presentation.progresses ??
+        presentation.fallbackOpacity.map { [$0] }
+    if let nextRequest {
+        return drawAnimation(
+            for: nextRequest,
+            symbol: symbol,
+            initialProgresses: initialProgresses,
+            at: time,
+            immediate: nextRequest.isTransition && !hasResolvedEffects
+        )
+    }
+    if var previousRequest {
+        previousRequest.targetProgress = 1
+        return drawAnimation(
+            for: previousRequest,
+            symbol: symbol,
+            initialProgresses: initialProgresses,
+            at: time
+        )
+    }
+    return current
+}
+
+private func drawAnimation(
+    for request: DrawRequest,
+    symbol: ResolvedVectorSymbol,
+    initialProgresses: [Double]?,
+    at time: Time,
+    immediate: Bool = false
+) -> ImageViewChild.ActiveDraw {
+    let measuredDurations = symbol.drawMotionGroupDurations
+    let usesOpacityFallback = measuredDurations.isEmpty
+    let durations = usesOpacityFallback ? [0.8] : measuredDurations
+    let initial = immediate
+        ? [Double](repeating: request.targetProgress, count: durations.count)
+        : initialProgresses.flatMap {
+            $0.count == durations.count ? $0 : nil
+        } ?? [Double](repeating: 1, count: durations.count)
+    return ImageViewChild.ActiveDraw(
+        id: request.id,
+        startTime: time,
+        motionGroupDurations: durations,
+        initialProgresses: initial,
+        targetProgress: request.targetProgress,
+        effectiveSpeed: request.effectiveSpeed,
+        layerBehavior: request.layerBehavior,
+        isReversed: request.isReversed,
+        usesOpacityFallback: usesOpacityFallback
+    )
+}
+
+private func drawEase(_ value: Double) -> Double {
+    let progress = min(max(value, 0), 1)
+    return (1 - cos(progress * .pi)) * 0.5
+}
+
+private func drawMix(
+    _ from: Double,
+    _ to: Double,
+    progress: Double
+) -> Double {
+    from + (to - from) * progress
+}
+
+private func canAppendPulse(
+    active: ImageViewChild.ActivePulse,
+    activation: ImageViewChild.ActivePulse,
+    previous: [IdentifiedSymbolEffect],
+    next: [IdentifiedSymbolEffect]
+) -> Bool {
+    guard active.id == activation.id,
+          !active.finishesAfterEffectRemoval,
+          active.cycleDuration == activation.cycleDuration,
+          active.repeatDelay == activation.repeatDelay,
+          active.cycleCount != nil,
+          activation.cycleCount != nil,
+          let old = previous.first(where: { $0.id == active.id }),
+          let new = next.first(where: { $0.id == active.id }),
+          old.effect.configuration == new.effect.configuration,
+          old.effect.options == .nonRepeating,
+          new.effect.options == .nonRepeating,
+          case .value = old.effect.trigger,
+          case .value = new.effect.trigger else {
+        return false
+    }
+    return true
+}
+
+private func pulseFinishingCurrentCycle(
+    _ active: ImageViewChild.ActivePulse,
+    removedEffect: IdentifiedSymbolEffect,
+    at time: Time
+) -> ImageViewChild.ActivePulse? {
+    guard active.cycleCount == nil,
+          removedEffect.effect.options == .default,
+          case .indefinite = removedEffect.effect.trigger else {
+        return nil
+    }
+    let elapsed = max(time.seconds - active.startTime.seconds, 0)
+    let cycleStride = active.cycleDuration + active.repeatDelay
+    var finishing = active
+    finishing.cycleCount = max(Int(ceil(elapsed / cycleStride)), 1)
+    finishing.finishesAfterEffectRemoval = true
+    return finishing
+}
+
+private func activatedPulse(
+    previous: [IdentifiedSymbolEffect],
+    next: [IdentifiedSymbolEffect],
+    hasResolvedEffects: Bool,
+    at time: Time
+) -> ImageViewChild.ActivePulse? {
+    for identified in next.reversed() {
+        guard case let .pulse(configuration) = identified.effect.configuration.effect else {
+            continue
+        }
+        let options = identified.effect.options
+        guard options.speed.isFinite,
+              options.repeatDelay?.isFinite != false else {
+            continue
+        }
+        let effectiveSpeed = max(options.speed, 0.5)
+
+        let cycleCount: Int?
+        let repeatDelay: Double
+        switch identified.effect.trigger {
+        case .indefinite:
+            if options == .default {
+                cycleCount = nil
+                repeatDelay = 0
+            } else {
+                guard options.speed == 1,
+                      options.repeat == .indefinite,
+                      options.prefersContinuous,
+                      options.repeatDelay == nil,
+                      previous.first(where: { $0.id == identified.id }) == nil else {
+                    continue
+                }
+                cycleCount = nil
+                repeatDelay = 0
+            }
+            guard previous.first(where: { $0.id == identified.id }) == nil else {
+                continue
+            }
+        case let .value(trigger):
+            guard !options.prefersContinuous,
+                  hasResolvedEffects,
+                  let old = previous.first(where: { $0.id == identified.id }),
+                  case let .value(oldTrigger) = old.effect.trigger,
+                  !trigger.isEqual(to: oldTrigger) else {
+                continue
+            }
+            switch options.repeat {
+            case nil:
+                guard options.repeatDelay == nil else { continue }
+                cycleCount = 1
+                repeatDelay = 0
+            case let .count(count) where count > 0:
+                let delay = options.repeatDelay ?? 0
+                guard delay >= 0 else { continue }
+                cycleCount = count
+                repeatDelay = delay
+            default:
+                continue
+            }
+        case .condition, .transition:
+            continue
+        }
+        return ImageViewChild.ActivePulse(
+            id: identified.id,
+            startTime: time,
+            cycleDuration: 2.0 / effectiveSpeed,
+            cycleCount: cycleCount,
+            repeatDelay: repeatDelay,
+            isLayered: configuration.isLayered != false
+        )
+    }
+    return nil
+}
+
+private func variableColorFinishingCurrentCycle(
+    _ active: ImageViewChild.ActiveVariableColor,
+    removedEffect: IdentifiedSymbolEffect,
+    at time: Time
+) -> ImageViewChild.ActiveVariableColor? {
+    guard active.cycleCount == nil,
+          removedEffect.effect.options == .default,
+          case .indefinite = removedEffect.effect.trigger else {
+        return nil
+    }
+    let elapsed = max(time.seconds - active.startTime.seconds, 0) *
+        active.effectiveSpeed
+    var finishing = active
+    if elapsed < ImageViewChild.ActiveVariableColor.introDuration {
+        finishing.cycleCount = 1
+    } else {
+        let localElapsed = elapsed -
+            ImageViewChild.ActiveVariableColor.introDuration
+        finishing.cycleCount = max(
+            Int(floor(localElapsed / active.localDuration)) + 1,
+            1
+        )
+    }
+    finishing.finishesAfterEffectRemoval = true
+    return finishing
+}
+
+private func activatedVariableColor(
+    previous: [IdentifiedSymbolEffect],
+    next: [IdentifiedSymbolEffect],
+    hasResolvedEffects: Bool,
+    groupCount: Int,
+    initialOpacities: [Double]?,
+    at time: Time
+) -> ImageViewChild.ActiveVariableColor? {
+    guard groupCount > 0 else { return nil }
+    for identified in next.reversed() {
+        guard case let .variableColor(configuration) =
+                identified.effect.configuration.effect else {
+            continue
+        }
+        let options = identified.effect.options
+        guard options.speed.isFinite,
+              options.repeatDelay?.isFinite != false else {
+            continue
+        }
+
+        let cycleCount: Int?
+        switch identified.effect.trigger {
+        case .indefinite:
+            if options == .default {
+                cycleCount = nil
+            } else {
+                guard options.speed == 1,
+                      options.repeat == .indefinite,
+                      options.prefersContinuous,
+                      options.repeatDelay == nil else {
+                    continue
+                }
+                cycleCount = nil
+            }
+            guard previous.first(where: { $0.id == identified.id }) == nil else {
+                continue
+            }
+        case let .value(trigger):
+            guard !options.prefersContinuous,
+                  hasResolvedEffects,
+                  let old = previous.first(where: { $0.id == identified.id }),
+                  case let .value(oldTrigger) = old.effect.trigger,
+                  !trigger.isEqual(to: oldTrigger),
+                  options.repeatDelay == nil || options.repeatDelay == 0 else {
+                continue
+            }
+            switch options.repeat {
+            case nil:
+                cycleCount = 1
+            case let .count(count) where count > 0:
+                cycleCount = count
+            default:
+                continue
+            }
+        case .condition, .transition:
+            continue
+        }
+
+        let startingOpacities = initialOpacities.flatMap {
+            $0.count == groupCount ? $0 : nil
+        } ?? [Double](repeating: 1, count: groupCount)
+        return ImageViewChild.ActiveVariableColor(
+            id: identified.id,
+            startTime: time,
+            groupCount: groupCount,
+            cycleCount: cycleCount,
+            effectiveSpeed: min(max(options.speed, 0.5), 2),
+            isReversing: configuration.isReversing == true,
+            isIterative: configuration.isIterative == true,
+            inactiveOpacity: configuration.hasReveal == true ? 0 : 0.3,
+            initialOpacities: startingOpacities
+        )
+    }
+    return nil
+}
+
+private func variableColorEase(_ value: Double) -> Double {
+    let progress = min(max(value, 0), 1)
+    return (1 - cos(progress * .pi)) * 0.5
+}
+
+private func variableColorMix(
+    _ from: Double,
+    _ to: Double,
+    progress: Double
+) -> Double {
+    from + (to - from) * progress
+}
+
+private func symbolEffectListsEqual(
+    _ lhs: [IdentifiedSymbolEffect],
+    _ rhs: [IdentifiedSymbolEffect]
+) -> Bool {
+    guard lhs.count == rhs.count else { return false }
+    return zip(lhs, rhs).allSatisfy(symbolEffectsEqual)
+}
+
+private func symbolEffectsEqual(
+    _ lhs: IdentifiedSymbolEffect,
+    _ rhs: IdentifiedSymbolEffect
+) -> Bool {
+    lhs.id == rhs.id &&
+        lhs.effect.configuration == rhs.effect.configuration &&
+        lhs.effect.options == rhs.effect.options &&
+        symbolEffectTriggersEqual(lhs.effect.trigger, rhs.effect.trigger)
+}
+
+private func symbolEffectTriggersEqual(
+    _ lhs: ResolvedSymbolEffect.Trigger,
+    _ rhs: ResolvedSymbolEffect.Trigger
+) -> Bool {
+    switch (lhs, rhs) {
+    case (.indefinite, .indefinite):
+        return true
+    case let (.value(lhs), .value(rhs)):
+        return lhs.isEqual(to: rhs)
+    case let (.condition(lhs), .condition(rhs)):
+        return lhs == rhs
+    case let (.transition(lhs), .transition(rhs)):
+        return lhs == rhs
+    default:
+        return false
+    }
 }
 
 public struct Image: Equatable, Sendable {
@@ -264,6 +1215,7 @@ extension Image: View {
         // 1. Internal state nodes for communication between the resource and layout passes.
         // Caches the fully resolved image object (including GPU texture).
         let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
+        let resolvedSourceAttr = graph.makeInput(value: Image?.none)
 
         let inbox = graph.inbox
         let sizeAttr = inputs.size
@@ -278,7 +1230,7 @@ extension Image: View {
             // Optimization (Cache Hit): Return an empty list if the image is already cached.
             // Note: For a robust implementation, you might want to compare an image "version"
             // or use a caching mechanism within the ImageProvider.
-            if resolvedImageAttr.value != nil {
+            if resolvedSourceAttr.value == image, resolvedImageAttr.value != nil {
                 return ResourceList()
             }
 
@@ -298,6 +1250,7 @@ extension Image: View {
 
                     // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                     inbox.enqueue {
+                        resolvedSourceAttr.setValue(image)
                         resolvedImageAttr.setValue(boxedResolved.value)
                     }
                 } // withValue
@@ -306,10 +1259,19 @@ extension Image: View {
             return list
         }
 
+        let imageViewChildAttr: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+            ImageViewChild(
+                resolvedImage: resolvedImageAttr,
+                environment: envAttr,
+                transaction: inputs.base.transaction,
+                time: inputs.base.time
+            )
+        )
+
         // 3. Layout pass (Layout Rule)
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
-            let resolved = resolvedImageAttr.value
+            let resolved = imageViewChildAttr.value.image
 
             return LayoutComputer(
                 sizeThatFits: { _ in resolved?.size ?? .zero }
@@ -321,18 +1283,37 @@ extension Image: View {
             let _ = view._attribute.value // Dependency: image changes
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
-            let resolved = resolvedImageAttr.value
+            let presentation = imageViewChildAttr.value
+            let resolved = presentation.image
             let environment = envAttr.value.untrackedCopy()
 
             var list = DisplayList()
 
-            if let resolved = resolved {
+            if var resolved = resolved {
                 let frame = CGRect(origin: position, size: viewSize)
-                list.appendImageItem(
+                var imageList = DisplayList()
+                resolved.symbolLayerOpacities = presentation.symbolLayerOpacities
+                resolved.symbolVariableColorOpacities =
+                    presentation.symbolVariableColorOpacities
+                resolved.symbolDrawProgresses = presentation.symbolDrawProgresses
+                resolved.symbolDrawFallbackOpacity =
+                    presentation.symbolDrawFallbackOpacity
+                resolved.symbolDrawsReversed = presentation.symbolDrawsReversed
+                imageList.appendImageItem(
                     resolved,
                     bounds: frame,
                     environment: environment
                 )
+                if presentation.isSymbolEffectActive,
+                   presentation.symbolOpacity != 1 {
+                    list.appendOpacityItem(
+                        bounds: frame,
+                        opacity: presentation.symbolOpacity,
+                        contents: imageList
+                    )
+                } else {
+                    list = imageList
+                }
             }
             return list
         }

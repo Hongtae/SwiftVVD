@@ -1489,6 +1489,101 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
+    func testSymbolReplacementUsesCustomDurationAndLayeredImageComposition() throws {
+        let bounds = CGRect(x: 10, y: 20, width: 48, height: 48)
+        let sourceSymbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "photo.fill",
+            variableValue: nil,
+            bundle: nil
+        ))
+        let targetSymbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "draw",
+            variableValue: nil,
+            bundle: nil
+        ))
+        var source = DisplayList()
+        source.appendImageItem(
+            GraphicsContext.ResolvedImage(symbol: sourceSymbol),
+            bounds: bounds
+        )
+        var target = DisplayList()
+        target.appendImageItem(
+            GraphicsContext.ResolvedImage(symbol: targetSymbol),
+            bounds: bounds
+        )
+
+        let longAnimation = RBAnimation()
+        longAnimation.addBezierDuration(
+            3,
+            controlPoint1: .zero,
+            controlPoint2: CGPoint(x: 1, y: 1)
+        )
+        let layered = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [
+                .transition: ContentTransition.symbolEffect(.replace).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(layered.activeDuration, 0.5, accuracy: 0.000_001)
+
+        let layeredPresentation = layered.copyContents(withProgress: 0.2)
+        let layeredCrossFades = try XCTUnwrap(typedCrossFades(in: layeredPresentation))
+        XCTAssertEqual(layeredCrossFades.count, 2)
+        XCTAssertEqual(
+            Set(layeredCrossFades.compactMap { symbolLayerMask(in: $0.source) }),
+            Set([[1, 0], [0, 1]])
+        )
+        XCTAssertEqual(
+            Set(layeredCrossFades.compactMap { symbolLayerMask(in: $0.target) }),
+            Set([[1, 0], [0, 1]])
+        )
+        XCTAssertTrue(layeredCrossFades.contains { value in
+            guard let source = value.source, let target = value.target else { return false }
+            return source.outputBounds != bounds || target.outputBounds != bounds
+        })
+
+        let whole = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [
+                .transition: ContentTransition.symbolEffect(
+                    ReplaceSymbolEffect.replace.wholeSymbol
+                ).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(whole.activeDuration, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(
+            try XCTUnwrap(typedCrossFades(in: whole.copyContents(withProgress: 0.2))).count,
+            1
+        )
+
+        let offUp = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [
+                .transition: ContentTransition.symbolEffect(
+                    ReplaceSymbolEffect.replace.offUp.wholeSymbol
+                ).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(offUp.activeDuration, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(
+            symbolIdentity(in: offUp.copyContents(withProgress: 0)),
+            sourceSymbol.identity
+        )
+        XCTAssertEqual(
+            symbolIdentity(in: offUp.copyContents(withProgress: 0.25)),
+            targetSymbol.identity
+        )
+
+        // ASSERTIONS symbolEffectReplaceDisassemblyObserved
+        // ASSERTIONS symbolEffectReplaceSpatialRuntimeObserved
+    }
+
     func testRBDisplayListInterpolatorMixesCompatibleImageTintAsOneItem() throws {
         let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
         let texture = ProbeTexture()
@@ -6020,6 +6115,28 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             return nil
         }
         return value
+    }
+
+    private func symbolLayerMask(
+        in branch: DisplayList.Content.CrossFadeValue.Branch?
+    ) -> [Double]? {
+        guard let item = branch?.contents.items.first,
+              case let .content(content) = item.value,
+              case let .image(image) = content.value else {
+            return nil
+        }
+        return image.image.symbolLayerOpacities
+    }
+
+    private func symbolIdentity(
+        in list: DisplayList
+    ) -> ResolvedVectorSymbol.Identity? {
+        guard let item = list.items.first,
+              case let .content(content) = item.value,
+              case let .image(image) = content.value else {
+            return nil
+        }
+        return image.image.symbol?.identity
     }
 
     private func typedOpacityStyle(

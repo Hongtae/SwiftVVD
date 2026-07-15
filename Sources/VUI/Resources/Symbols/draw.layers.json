@@ -1,0 +1,29 @@
+{
+  "semanticLevels": [0, 0],
+  "effectLevels": [0, 1],
+  "variableColorLevels": [null, null],
+  "drawLayers": [
+    {
+      "motionGroup": 0,
+      "guides": [
+        {
+          "path": "M4.8 19.8 L17.8 6.8",
+          "lineWidth": 6,
+          "lineCap": "round",
+          "lineJoin": "round"
+        }
+      ]
+    },
+    {
+      "motionGroup": 1,
+      "guides": [
+        {
+          "path": "M4.4 4.8 C6 3.2 9.8 4 10 5.8 C10.2 8.1 4 8.9 4 11 C4 13.2 8 13.8 11 15 C14 16.2 18 15.8 18 18 C18 20 15.8 20 14 20",
+          "lineWidth": 3,
+          "lineCap": "round",
+          "lineJoin": "round"
+        }
+      ]
+    }
+  ]
+}

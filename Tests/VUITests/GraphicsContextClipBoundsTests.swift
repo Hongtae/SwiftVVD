@@ -85,6 +85,127 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         return digest
     }
 
+    private func renderSymbol(
+        _ name: String,
+        deviceContext: GraphicsDeviceContext,
+        layerOpacities: [Double]? = nil,
+        variableColorOpacities: [Double]? = nil,
+        drawProgresses: [Double]? = nil,
+        drawsReversed: Bool = false,
+        drawFallbackOpacity: Double? = nil
+    ) throws -> (count: Int, centerAlpha: UInt8) {
+        let width = 24
+        let height = 24
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(
+            GraphicsContext(
+                sceneResources: SceneResources(),
+                environment: EnvironmentValues(),
+                viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: width, height: height),
+                commandBuffer: commandBuffer
+            )
+        )
+        context.clear(with: .clear)
+        let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: name,
+            variableValue: nil,
+            bundle: nil
+        ))
+        var image = GraphicsContext.ResolvedImage(symbol: symbol)
+        image.symbolLayerOpacities = layerOpacities
+        image.symbolVariableColorOpacities = variableColorOpacities
+        image.symbolDrawProgresses = drawProgresses
+        image.symbolDrawsReversed = drawsReversed
+        image.symbolDrawFallbackOpacity = drawFallbackOpacity
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(deviceContext.makeCPUAccessible(texture: context.backdrop))
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(start: pointer, count: width * height * 4)
+        var count = 0
+        for index in 0..<(width * height) where bytes[index * 4 + 3] > 0 {
+            count += 1
+        }
+        let centerOffset = ((12 * width) + 12) * 4 + 3
+        return (count, bytes[centerOffset])
+    }
+
+    func testPortableVectorSymbolsRenderOutlineAndFilledVariantsOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let outline = try renderSymbol("star", deviceContext: deviceContext)
+        let filled = try renderSymbol("star.fill", deviceContext: deviceContext)
+
+        XCTAssertGreaterThan(outline.count, 0)
+        XCTAssertGreaterThan(filled.count, outline.count)
+        XCTAssertLessThan(outline.centerAlpha, filled.centerAlpha)
+        XCTAssertEqual(filled.centerAlpha, 255)
+
+        let photo = try renderSymbol("photo.fill", deviceContext: deviceContext)
+        let primaryHidden = try renderSymbol(
+            "photo.fill",
+            deviceContext: deviceContext,
+            layerOpacities: [0, 1]
+        )
+        let secondaryHidden = try renderSymbol(
+            "photo.fill",
+            deviceContext: deviceContext,
+            layerOpacities: [1, 0]
+        )
+        XCTAssertGreaterThan(primaryHidden.count, 0)
+        XCTAssertGreaterThan(secondaryHidden.count, 0)
+        XCTAssertLessThan(primaryHidden.count, photo.count)
+        XCTAssertLessThan(secondaryHidden.count, photo.count)
+
+        let independentlyHidden = try renderSymbol(
+            "photo.fill",
+            deviceContext: deviceContext,
+            layerOpacities: [0, 1],
+            variableColorOpacities: [1, 0]
+        )
+        XCTAssertEqual(independentlyHidden.count, 0)
+
+        let draw = try renderSymbol("draw", deviceContext: deviceContext)
+        let halfDrawn = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0.5, 0.5]
+        )
+        let reverseHalfDrawn = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0.5, 0.5],
+            drawsReversed: true
+        )
+        let drawHidden = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0, 0]
+        )
+        XCTAssertGreaterThan(draw.count, halfDrawn.count)
+        XCTAssertGreaterThan(halfDrawn.count, 0)
+        XCTAssertGreaterThan(reverseHalfDrawn.count, 0)
+        XCTAssertEqual(drawHidden.count, 0)
+
+        let fallbackHidden = try renderSymbol(
+            "star.fill",
+            deviceContext: deviceContext,
+            drawFallbackOpacity: 0
+        )
+        XCTAssertEqual(fallbackHidden.count, 0)
+
+        // ASSERTIONS symbolEffectImageConsumerDisassemblyObserved
+        // ASSERTIONS symbolEffectPulseLayeredRuntimeObserved
+        // ASSERTIONS symbolEffectVariableColorRuntimeObserved
+        // ASSERTIONS symbolEffectDrawDisassemblyObserved
+    }
+
     func testResolvedClipBoundingRectIntersectsNormalAndPreservesInverseBounds() {
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 80)
         let clip = CGRect(x: 10, y: 15, width: 30, height: 20)

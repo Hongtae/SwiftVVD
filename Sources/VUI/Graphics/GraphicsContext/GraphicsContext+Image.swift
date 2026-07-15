@@ -12,13 +12,15 @@ extension GraphicsContext {
     public struct ResolvedImage {
         final class Storage: AppLifetimeResource, @unchecked Sendable {
             var texture: Texture?
+            let symbol: ResolvedVectorSymbol?
             let width: Int
             let height: Int
 
-            init(texture: Texture?) {
+            init(texture: Texture?, symbol: ResolvedVectorSymbol? = nil) {
                 self.texture = texture
-                self.width = texture?.width ?? 0
-                self.height = texture?.height ?? 0
+                self.symbol = symbol
+                self.width = texture?.width ?? Int(ceil(symbol?.viewport.width ?? 0))
+                self.height = texture?.height ?? Int(ceil(symbol?.viewport.height ?? 0))
             }
 
             override func purgeResources(reason: ResourcePurgeReason) {
@@ -34,6 +36,11 @@ extension GraphicsContext {
         }
         public let baseline: CGFloat
         public var shading: Shading?
+        var symbolLayerOpacities: [Double]?
+        var symbolVariableColorOpacities: [Double]?
+        var symbolDrawProgresses: [Double]?
+        var symbolDrawFallbackOpacity: Double?
+        var symbolDrawsReversed: Bool
 
         private let storage: Storage
         let textureTransform: CGAffineTransform
@@ -43,16 +50,41 @@ extension GraphicsContext {
             storage.texture
         }
 
+        var symbol: ResolvedVectorSymbol? {
+            storage.symbol
+        }
+
         init(baseline: CGFloat, shading: Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
             self.baseline = baseline
             self.shading = shading
+            self.symbolLayerOpacities = nil
+            self.symbolVariableColorOpacities = nil
+            self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackOpacity = nil
+            self.symbolDrawsReversed = false
             self.storage = Storage(texture: texture)
             self.textureTransform = textureTransform
             self.scaleFactor = scaleFactor
         }
+
+        init(symbol: ResolvedVectorSymbol, shading: Shading? = nil) {
+            self.baseline = symbol.viewport.height
+            self.shading = shading
+            self.symbolLayerOpacities = nil
+            self.symbolVariableColorOpacities = nil
+            self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackOpacity = nil
+            self.symbolDrawsReversed = false
+            self.storage = Storage(texture: nil, symbol: symbol)
+            self.textureTransform = .identity
+            self.scaleFactor = 1
+        }
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {
+        if let symbol = image.provider.makeVectorSymbol() {
+            return ResolvedImage(symbol: symbol)
+        }
         let texture = image.provider.makeTexture(self)
         let displayScale = self.sceneResources.contentScaleFactor
         let scaleFactor = image.provider.scaleFactor / displayScale
@@ -60,6 +92,10 @@ extension GraphicsContext {
         return ResolvedImage(baseline: baseline, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
+        if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
+            draw(symbol, image: image, in: rect, style: style)
+            return
+        }
         if let texture = image.texture, (rect.width > 0 && rect.height > 0) {
             let textureFrame = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
             let textureTransform = image.textureTransform
@@ -78,6 +114,82 @@ extension GraphicsContext {
                 self.recordContentBounds(rect)
             }
         }
+    }
+
+    private func draw(
+        _ symbol: ResolvedVectorSymbol,
+        image: ResolvedImage,
+        in rect: CGRect,
+        style: FillStyle
+    ) {
+        let viewport = symbol.viewport
+        guard viewport.width > 0, viewport.height > 0 else { return }
+        let scale = min(rect.width / viewport.width, rect.height / viewport.height)
+        let transform = CGAffineTransform(
+            a: scale,
+            b: 0,
+            c: 0,
+            d: scale,
+            tx: rect.midX - viewport.midX * scale,
+            ty: rect.midY - viewport.midY * scale
+        )
+        for layer in symbol.layers where layer.opacity > 0 {
+            let effectOpacity = image.symbolLayerOpacities.flatMap { opacities in
+                opacities.indices.contains(layer.effectLevel)
+                    ? opacities[layer.effectLevel]
+                    : nil
+            } ?? 1
+            let variableColorOpacity = layer.variableColorLevel.flatMap { level in
+                image.symbolVariableColorOpacities.flatMap { opacities in
+                    opacities.indices.contains(level) ? opacities[level] : nil
+                }
+            } ?? 1
+            let presentationOpacity = effectOpacity * variableColorOpacity *
+                (image.symbolDrawFallbackOpacity ?? 1)
+            guard presentationOpacity > 0 else { continue }
+            var context = self
+            context.opacity *= layer.opacity * presentationOpacity
+            if let draw = layer.draw,
+               let progresses = image.symbolDrawProgresses,
+               progresses.indices.contains(draw.motionGroup) {
+                let progress = min(max(progresses[draw.motionGroup], 0), 1)
+                guard progress > 0 else { continue }
+                if progress < 1 {
+                    let revealPath = draw.clipPath(
+                        progress: progress,
+                        reversed: image.symbolDrawsReversed
+                    ).applying(transform)
+                    guard !revealPath.isEmpty else { continue }
+                    context.clip(to: revealPath)
+                }
+            }
+            context.fill(
+                layer.path.applying(transform),
+                with: image.shading ?? symbolShading(for: layer.semanticLevel),
+                style: FillStyle(
+                    eoFill: layer.isEOFilled || style.isEOFilled,
+                    antialiased: style.isAntialiased
+                )
+            )
+        }
+    }
+
+    private func symbolShading(for semanticLevel: Int) -> Shading {
+        guard let levels = environment.foregroundStyleLevels else {
+            return .style(ForegroundStyle())
+        }
+        let style: AnyShapeStyle
+        switch semanticLevel {
+        case 1:
+            style = levels.secondary ?? levels.primary
+        case 2...:
+            style = levels.tertiary ?? levels.secondary ?? levels.primary
+        default:
+            style = levels.primary
+        }
+        var shape = _ShapeStyle_Shape()
+        style._apply(to: &shape)
+        return shape.shading ?? .style(ForegroundStyle())
     }
     public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
         let size = image.size
@@ -162,6 +274,7 @@ extension GraphicsContext.ResolvedImage: InterpolatableContent {
         if baseline != target.baseline { return true }
         if scaleFactor != target.scaleFactor { return true }
         if !textureIdentityEquals(texture, target.texture) { return true }
+        if symbol?.identity != target.symbol?.identity { return true }
         if !textureTransform.isTransitionEqual(to: target.textureTransform) { return true }
         if shading != nil || target.shading != nil { return true }
         return false

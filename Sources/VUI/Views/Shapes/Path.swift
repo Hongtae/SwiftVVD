@@ -710,6 +710,46 @@ public struct Path: Equatable {
         }
         return path
     }
+
+    var approximateLength: CGFloat {
+        var length: CGFloat = 0
+        var subpathStart: CGPoint?
+        var current: CGPoint?
+        for element in elements {
+            switch element {
+            case let .move(to: point):
+                subpathStart = point
+                current = point
+            case let .line(to: point):
+                if let current {
+                    length += (point - current).magnitude
+                }
+                current = point
+            case let .quadCurve(to: point, control: control):
+                if let current {
+                    length += QuadraticBezier(
+                        p0: current,
+                        p1: control,
+                        p2: point
+                    ).approximateLength(subdivide: 2)
+                }
+                current = point
+            case let .curve(to: point, control1: control1, control2: control2):
+                if let current {
+                    length += CubicBezier(
+                        p0: current,
+                        p1: control1,
+                        p2: control2,
+                        p3: point
+                    ).approximateLength(subdivide: 3)
+                }
+                current = point
+            case .closeSubpath:
+                current = subpathStart
+            }
+        }
+        return length
+    }
 }
 
 // Creating a circle with a cubic Bezier curve

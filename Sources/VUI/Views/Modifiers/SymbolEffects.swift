@@ -41,6 +41,89 @@ public struct SymbolEffectConfiguration: Hashable, Sendable {
     }
 }
 
+struct RBSymbolAnimationReplaceFlags: OptionSet, Equatable, Hashable, Sendable {
+    let rawValue: UInt32
+
+    init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+}
+
+enum _SymbolEffect {
+    struct ReplaceConfiguration: Equatable, Sendable {
+        var flags: RBSymbolAnimationReplaceFlags
+        var layered: Bool
+        var speed: Float
+
+        init() {
+            self.flags = []
+            self.layered = true
+            self.speed = 1
+        }
+
+        init?(
+            configuration: SymbolEffectConfiguration,
+            options: SymbolEffectOptions
+        ) {
+            self.init()
+            speed = Float(options.speed)
+
+            switch configuration.effect {
+            case .automatic:
+                break
+            case let .replace(effect):
+                flags = RBSymbolAnimationReplaceFlags(
+                    rawValue: Self.ordinaryFlags(for: effect.style)
+                )
+                layered = effect.isLayered ?? true
+            case let .magicReplace(effect):
+                flags = RBSymbolAnimationReplaceFlags(
+                    rawValue: Self.magicFlags(for: effect.fallback.style)
+                )
+                layered = effect.fallback.isLayered ?? true
+            default:
+                return nil
+            }
+        }
+
+        var transitionFlags: RBSymbolAnimationReplaceFlags {
+            layered
+                ? RBSymbolAnimationReplaceFlags(rawValue: flags.rawValue | 0x10)
+                : flags
+        }
+
+        private static func ordinaryFlags(
+            for style: ReplaceSymbolEffect.ReplaceStyle?
+        ) -> UInt32 {
+            switch style {
+            case nil:
+                0
+            case .downUp:
+                226
+            case .upUp:
+                227
+            case .offUp:
+                228
+            }
+        }
+
+        private static func magicFlags(
+            for style: ReplaceSymbolEffect.ReplaceStyle?
+        ) -> UInt32 {
+            switch style {
+            case nil:
+                0
+            case .downUp:
+                2
+            case .upUp:
+                3
+            case .offUp:
+                4
+            }
+        }
+    }
+}
+
 public struct PulseSymbolEffect: SymbolEffect {
     var isLayered: Bool?
 

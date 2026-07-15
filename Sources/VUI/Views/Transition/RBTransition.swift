@@ -31,6 +31,18 @@ struct RBTransitionEffectResults: Equatable {
     var bounds: CGRect?
 }
 
+struct RBSymbolReplacementConfiguration: Equatable {
+    enum Style: Equatable {
+        case downUp
+        case upUp
+        case offUp
+    }
+
+    var style: Style
+    var isLayered: Bool
+    var duration: Double
+}
+
 // Single render effect entry used by RBTransition to describe opacity, transform, blur, and
 // other content-transition operations.
 final class RBTransitionEffect: NSObject, NSCopying {
@@ -532,6 +544,34 @@ final class RBTransition: NSObject, NSCopying {
         let requestedEvents = event & 0x3f
         guard requestedEvents != 0 else { return true }
         return !effects.contains { ($0.events & requestedEvents) != 0 }
+    }
+
+    var symbolReplacementConfiguration: RBSymbolReplacementConfiguration? {
+        guard let effect = effects.first(where: { $0.semanticType == 18 }) else {
+            return nil
+        }
+        let flags = effect.integerArgumentValue(atIndex: 0)
+        let style: RBSymbolReplacementConfiguration.Style
+        switch flags & 0xf {
+        case 0, 2:
+            style = .downUp
+        case 3:
+            style = .upUp
+        case 4:
+            style = .offUp
+        default:
+            return nil
+        }
+        guard let duration = effect.customDuration(for: 1),
+              duration.isFinite,
+              duration > 0 else {
+            return nil
+        }
+        return RBSymbolReplacementConfiguration(
+            style: style,
+            isLayered: flags & 0x10 != 0,
+            duration: Double(duration)
+        )
     }
 
     func effectResults(
