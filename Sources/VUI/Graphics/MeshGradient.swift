@@ -398,8 +398,9 @@ private func meshGradientBilinear(
 ) -> SIMD2<Float> {
     let u = Float(u)
     let v = Float(v)
-    return (topLeft + (topRight - topLeft) * u) * (1 - v)
-        + (bottomLeft + (bottomRight - bottomLeft) * u) * v
+    let top = ((topLeft + (topRight - topLeft) * u) * (1 - v))
+    let bottom = ((bottomLeft + (bottomRight - bottomLeft) * u) * v)
+    return top + bottom
 }
 
 private func meshGradientBilinear(
