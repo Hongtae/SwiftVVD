@@ -149,7 +149,83 @@ private final class _OptionalListViewState {
     var isUpdating = false
     var lastWrappedValue: Any? = nil
     var subgraph: AGSubgraph? = nil
+    var managedSubgraph: _ViewList_Subgraph? = nil
     var activeListOutputs: _ViewListOutputs? = nil
+    let id = UniqueID()
+}
+
+private struct _OptionalIdentityViewList: ViewList {
+    var base: any ViewList
+    var id: UniqueID
+    var owner: AGAttribute
+    var isUnary: Bool
+    var reuseID: Int
+    var subgraph: _ViewList_Subgraph
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        base.count(style: style)
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        base.estimatedCount(style: style)
+    }
+
+    var traitKeys: ViewTraitKeys? { base.traitKeys }
+    var traits: ViewTraitCollection { base.traits }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        base.applyNodes(
+            from: &from,
+            style: style,
+            list: list,
+            transform: transform.withPushedItem(
+                _OptionalIdentityTransform(
+                    id: id,
+                    owner: owner,
+                    isUnary: isUnary,
+                    reuseID: reuseID,
+                    subgraph: subgraph
+                )
+            ),
+            to: to
+        )
+    }
+}
+
+private struct _OptionalIdentityTransform: _ViewList_SublistTransform_Item {
+    var id: UniqueID
+    var owner: AGAttribute
+    var isUnary: Bool
+    var reuseID: Int
+    var subgraph: _ViewList_Subgraph
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        bindID(&sublist.id)
+        sublist.traits[CanTransitionTraitKey.self] = true
+        if var elements = sublist.elements as? _ViewList_SubgraphElements {
+            elements.wrap(subgraph: subgraph)
+            sublist.elements = elements
+        } else {
+            var elements = _ViewList_SubgraphElements(base: sublist.elements)
+            elements.wrap(subgraph: subgraph)
+            sublist.elements = elements
+        }
+    }
+
+    func bindID(_ id: inout _ViewList_ID) {
+        id.bind(
+            explicitID: self.id,
+            owner: owner,
+            isUnary: isUnary,
+            reuseID: reuseID
+        )
+    }
 }
 
 extension Optional: View where Wrapped: View {
@@ -245,7 +321,9 @@ extension Optional: View where Wrapped: View {
         }
 
         let state = _OptionalListViewState()
-        state.subgraph = AGSubgraph()
+        let initialSubgraph = AGSubgraph()
+        state.subgraph = initialSubgraph
+        state.managedSubgraph = _ViewList_Subgraph(subgraph: initialSubgraph)
 
         func makeWrappedOutputs() -> _ViewListOutputs? {
             guard let wrappedValue = view._attribute.value else { return nil }
@@ -282,7 +360,13 @@ extension Optional: View where Wrapped: View {
             guard !state.isUpdating else { return }
             state.isUpdating = true
             state.activeListOutputs = nil
-            state.subgraph?.invalidate()
+            // The dynamic container can retain the outgoing elements for a removal
+            // transition. Release only this producer's ownership; the final token
+            // invalidates the branch subgraph after retained rendering completes.
+            state.managedSubgraph?.release()
+            let nextSubgraph = AGSubgraph()
+            state.subgraph = nextSubgraph
+            state.managedSubgraph = _ViewList_Subgraph(subgraph: nextSubgraph)
             state.hasValue = nowHasValue
             state.activeListOutputs = makeWrappedOutputs()
             state.isUpdating = false
@@ -302,7 +386,17 @@ extension Optional: View where Wrapped: View {
             guard let outputs = state.activeListOutputs else {
                 return EmptyViewList()
             }
-            return resolvedList(from: outputs)
+            guard let managedSubgraph = state.managedSubgraph else {
+                fatalError("Optional<\(Wrapped.self)> lost its active list subgraph.")
+            }
+            return _OptionalIdentityViewList(
+                base: resolvedList(from: outputs),
+                id: state.id,
+                owner: view._attribute.identifier,
+                isUnary: outputs.staticCount == 1,
+                reuseID: Int(bitPattern: ObjectIdentifier(Wrapped.self)),
+                subgraph: managedSubgraph
+            )
         }
 
         return _ViewListOutputs(
