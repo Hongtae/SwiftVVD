@@ -17,6 +17,10 @@ class AnyImageProviderBox: @unchecked Sendable {
         nil
     }
 
+    func makeSVG() -> SVG? {
+        nil
+    }
+
     var scaleFactor: CGFloat { 1 }
 
     func isEqual(to other: AnyImageProviderBox) -> Bool {
@@ -184,6 +188,25 @@ final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
             variableValue == other.variableValue &&
             bundle == other.bundle &&
             label == other.label
+    }
+}
+
+final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
+    let svg: SVG
+    let label: Text?
+
+    init(svg: SVG, label: Text?) {
+        self.svg = svg
+        self.label = label
+    }
+
+    override func makeSVG() -> SVG? {
+        svg
+    }
+
+    override func isEqual(to other: AnyImageProviderBox) -> Bool {
+        guard let other = other as? SVGImageProvider else { return false }
+        return svg == other.svg && label == other.label
     }
 }
 
@@ -1203,6 +1226,20 @@ extension Image {
     }
     public init(decorative name: String, variableValue: Double?, bundle: Bundle? = nil) {
         self.provider = SymbolImageProvider(name: name, variableValue: variableValue, bundle: bundle, label: nil)
+    }
+}
+
+extension Image {
+    public init(svg: SVG) {
+        self.provider = SVGImageProvider(svg: svg, label: nil)
+    }
+
+    public init(svg: SVG, label: Text) {
+        self.provider = SVGImageProvider(svg: svg, label: label)
+    }
+
+    public init(decorative svg: SVG) {
+        self.provider = SVGImageProvider(svg: svg, label: nil)
     }
 }
 

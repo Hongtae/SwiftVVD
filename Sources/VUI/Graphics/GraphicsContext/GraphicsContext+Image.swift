@@ -11,21 +11,39 @@ import VVD
 extension GraphicsContext {
     public struct ResolvedImage {
         final class Storage: AppLifetimeResource, @unchecked Sendable {
-            var texture: Texture?
-            let symbol: ResolvedVectorSymbol?
+            enum Contents {
+                case texture(Texture)
+                case symbol(ResolvedVectorSymbol)
+                case svg(SVG)
+            }
+
+            var contents: Contents?
             let width: Int
             let height: Int
 
-            init(texture: Texture?, symbol: ResolvedVectorSymbol? = nil) {
-                self.texture = texture
-                self.symbol = symbol
-                self.width = texture?.width ?? Int(ceil(symbol?.viewport.width ?? 0))
-                self.height = texture?.height ?? Int(ceil(symbol?.viewport.height ?? 0))
+            init(contents: Contents?) {
+                self.contents = contents
+                switch contents {
+                case let .texture(texture):
+                    self.width = texture.width
+                    self.height = texture.height
+                case let .symbol(symbol):
+                    self.width = Int(ceil(symbol.viewport.width))
+                    self.height = Int(ceil(symbol.viewport.height))
+                case let .svg(svg):
+                    let size = svg.intrinsicSize ?? svg.viewBox.size
+                    self.width = Int(ceil(size.width))
+                    self.height = Int(ceil(size.height))
+                case nil:
+                    self.width = 0
+                    self.height = 0
+                }
             }
 
             override func purgeResources(reason: ResourcePurgeReason) {
-                if reason == .appTermination {
-                    self.texture = nil
+                if reason == .appTermination,
+                   case .texture = contents {
+                    contents = nil
                 }
             }
         }
@@ -47,11 +65,29 @@ extension GraphicsContext {
         let scaleFactor: CGFloat
 
         var texture: Texture? {
-            storage.texture
+            guard case let .texture(texture) = storage.contents else {
+                return nil
+            }
+            return texture
         }
 
         var symbol: ResolvedVectorSymbol? {
-            storage.symbol
+            guard case let .symbol(symbol) = storage.contents else {
+                return nil
+            }
+            return symbol
+        }
+
+        var svg: SVG? {
+            guard case let .svg(svg) = storage.contents else {
+                return nil
+            }
+            return svg
+        }
+
+        var vectorID: ObjectIdentifier? {
+            guard case .svg = storage.contents else { return nil }
+            return ObjectIdentifier(storage)
         }
 
         init(baseline: CGFloat, shading: Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
@@ -62,7 +98,7 @@ extension GraphicsContext {
             self.symbolDrawProgresses = nil
             self.symbolDrawFallbackOpacity = nil
             self.symbolDrawsReversed = false
-            self.storage = Storage(texture: texture)
+            self.storage = Storage(contents: texture.map(Storage.Contents.texture))
             self.textureTransform = textureTransform
             self.scaleFactor = scaleFactor
         }
@@ -75,7 +111,20 @@ extension GraphicsContext {
             self.symbolDrawProgresses = nil
             self.symbolDrawFallbackOpacity = nil
             self.symbolDrawsReversed = false
-            self.storage = Storage(texture: nil, symbol: symbol)
+            self.storage = Storage(contents: .symbol(symbol))
+            self.textureTransform = .identity
+            self.scaleFactor = 1
+        }
+
+        init(svg: SVG, shading: Shading? = nil) {
+            self.baseline = svg.intrinsicSize?.height ?? svg.viewBox.height
+            self.shading = shading
+            self.symbolLayerOpacities = nil
+            self.symbolVariableColorOpacities = nil
+            self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackOpacity = nil
+            self.symbolDrawsReversed = false
+            self.storage = Storage(contents: .svg(svg))
             self.textureTransform = .identity
             self.scaleFactor = 1
         }
@@ -84,6 +133,9 @@ extension GraphicsContext {
     public func resolve(_ image: Image) -> ResolvedImage {
         if let symbol = image.provider.makeVectorSymbol() {
             return ResolvedImage(symbol: symbol)
+        }
+        if let svg = image.provider.makeSVG() {
+            return ResolvedImage(svg: svg)
         }
         let texture = image.provider.makeTexture(self)
         let displayScale = self.sceneResources.contentScaleFactor
@@ -94,6 +146,10 @@ extension GraphicsContext {
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
             draw(symbol, image: image, in: rect, style: style)
+            return
+        }
+        if let svg = image.svg, rect.width > 0, rect.height > 0 {
+            draw(svg, shading: image.shading, in: rect)
             return
         }
         if let texture = image.texture, (rect.width > 0 && rect.height > 0) {
@@ -191,6 +247,93 @@ extension GraphicsContext {
         style._apply(to: &shape)
         return shape.shading ?? .style(ForegroundStyle())
     }
+
+    public func draw(_ svg: SVG, in rect: CGRect) {
+        draw(svg, shading: nil, in: rect)
+    }
+
+    public func draw(_ layer: SVG.Layer) {
+        draw(layer, applying: .identity, shading: nil)
+    }
+
+    private func draw(
+        _ svg: SVG,
+        shading: Shading?,
+        in rect: CGRect
+    ) {
+        guard svg.viewBox.width > 0, svg.viewBox.height > 0,
+              rect.width > 0, rect.height > 0 else {
+            return
+        }
+        let scale = min(
+            rect.width / svg.viewBox.width,
+            rect.height / svg.viewBox.height
+        )
+        let viewportTransform = CGAffineTransform(
+            a: scale,
+            b: 0,
+            c: 0,
+            d: scale,
+            tx: rect.midX - svg.viewBox.midX * scale,
+            ty: rect.midY - svg.viewBox.midY * scale
+        )
+        for layer in svg.layers {
+            draw(layer, applying: viewportTransform, shading: shading)
+        }
+    }
+
+    private func draw(
+        _ layer: SVG.Layer,
+        applying outerTransform: CGAffineTransform,
+        shading override: Shading?
+    ) {
+        guard layer.opacity > 0 else { return }
+        let transform = layer.transform.concatenating(outerTransform)
+        var layerContext = self
+        layerContext.opacity *= layer.opacity
+
+        for style in layer.styles {
+            switch style {
+            case let .fill(paint, fillStyle, opacity):
+                guard opacity > 0 else { continue }
+                var context = layerContext
+                context.opacity *= opacity
+                context.fill(
+                    layer.path.applying(transform),
+                    with: override ?? svgShading(for: paint),
+                    style: fillStyle
+                )
+
+            case let .stroke(paint, strokeStyle, opacity):
+                guard opacity > 0, strokeStyle.lineWidth > 0 else { continue }
+                var context = layerContext
+                context.opacity *= opacity
+                let outline = layer.path
+                    .strokedPath(strokeStyle)
+                    .applying(transform)
+                context.fill(
+                    outline,
+                    with: override ?? svgShading(for: paint)
+                )
+            }
+        }
+    }
+
+    private func svgShading(for paint: SVG.Paint) -> Shading {
+        switch paint {
+        case let .color(color):
+            return .color(color)
+        case .currentColor, .foregroundStyle:
+            return symbolShading(for: 0)
+        case .backgroundStyle:
+            guard let style = environment.backgroundStyle else {
+                return .style(BackgroundStyle())
+            }
+            var shape = _ShapeStyle_Shape()
+            style._apply(to: &shape)
+            return shape.shading ?? .style(BackgroundStyle())
+        }
+    }
     public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
         let size = image.size
         let x = point.x - anchor.x * size.width
@@ -275,6 +418,7 @@ extension GraphicsContext.ResolvedImage: InterpolatableContent {
         if scaleFactor != target.scaleFactor { return true }
         if !textureIdentityEquals(texture, target.texture) { return true }
         if symbol?.identity != target.symbol?.identity { return true }
+        if vectorID != target.vectorID { return true }
         if !textureTransform.isTransitionEqual(to: target.textureTransform) { return true }
         if shading != nil || target.shading != nil { return true }
         return false

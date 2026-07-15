@@ -560,6 +560,7 @@ struct DisplayList {
             var baseline: CGFloat
             var textureID: ObjectIdentifier?
             var symbolID: ResolvedVectorSymbol.Identity?
+            var vectorID: ObjectIdentifier?
             var placementRect: CGRect
             var textureTransform: CGAffineTransform
             var scaleFactor: CGFloat
@@ -570,6 +571,7 @@ struct DisplayList {
                 baseline: CGFloat,
                 textureID: ObjectIdentifier?,
                 symbolID: ResolvedVectorSymbol.Identity? = nil,
+                vectorID: ObjectIdentifier? = nil,
                 placementRect: CGRect,
                 textureTransform: CGAffineTransform,
                 scaleFactor: CGFloat,
@@ -579,6 +581,7 @@ struct DisplayList {
                 self.baseline = baseline
                 self.textureID = textureID
                 self.symbolID = symbolID
+                self.vectorID = vectorID
                 self.placementRect = placementRect
                 self.textureTransform = textureTransform
                 self.scaleFactor = scaleFactor
@@ -594,6 +597,7 @@ struct DisplayList {
                 baseline = image.baseline
                 textureID = image.texture.map { ObjectIdentifier($0) }
                 symbolID = image.symbol?.identity
+                vectorID = image.vectorID
                 self.placementRect = placementRect
                 textureTransform = image.textureTransform
                 scaleFactor = image.scaleFactor

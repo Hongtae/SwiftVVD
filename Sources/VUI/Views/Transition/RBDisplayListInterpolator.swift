@@ -1409,6 +1409,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         source.baseline == target.baseline &&
             source.textureID == target.textureID &&
             source.symbolID == target.symbolID &&
+            source.vectorID == target.vectorID &&
             source.textureTransform == target.textureTransform &&
             source.scaleFactor == target.scaleFactor
     }
