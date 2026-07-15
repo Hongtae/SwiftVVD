@@ -178,7 +178,9 @@ final class ContextMenuResponder: ViewResponder {
             // dismissing the menu also stops the source-graph side effect.
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
+                let environment = self.environment.value.untrackedCopy()
                 session?.root?.replaceMenuItems(items)
+                session?.root?.setPresentationEnvironment(environment)
             }
         }
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
@@ -192,6 +194,7 @@ final class ContextMenuResponder: ViewResponder {
         let usesPlatformWindow = environment.value.presentationChildUsingPlatformWindow
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
+                                               environment: environment.value.untrackedCopy(),
                                                scene: parent.scene,
                                                anchor: location,
                                                items: initialItems,
@@ -316,6 +319,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private weak var openedSubmenu: ContextMenuWindowController?
 
     init<Content: View>(content: Content,
+         environment: EnvironmentValues,
          scene: WindowKey,
          anchor: CGPoint,
          items: [PlatformItemList.Item],
@@ -329,6 +333,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         self.menuItems = items
         let frame = CGRect(origin: anchor, size: .zero)
         super.init(content: content,
+                   environment: environment,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
                    frameInParent: frame)
@@ -345,6 +350,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let actions = ContextMenuPopupActions()
         let child = ContextMenuWindowController(content: ContextMenuPopupView(items: item.children,
                                                                               actions: actions),
+                                                environment: environment.untrackedCopy(),
                                                 scene: scene,
                                                 anchor: origin,
                                                 items: item.children,

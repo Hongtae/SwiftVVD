@@ -371,7 +371,9 @@ final class MenuDropdownResponder: AnyHoverResponder {
         AGSubgraph.withCurrent(liveContentSubgraph) {
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
+                let environment = self.environment.value.untrackedCopy()
                 session?.root?.replaceMenuItems(items)
+                session?.root?.setPresentationEnvironment(environment)
             }
         }
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
@@ -385,6 +387,7 @@ final class MenuDropdownResponder: AnyHoverResponder {
 
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
+                                               environment: environment.value.untrackedCopy(),
                                                scene: parent.scene,
                                                anchor: presentationAnchor(),
                                                items: initialItems,

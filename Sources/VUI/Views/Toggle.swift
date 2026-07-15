@@ -221,9 +221,23 @@ private struct SwitchToggleStyleBody: View {
 
     var body: some View {
         Button(action: toggle) {
-            HStack {
+            HStack(spacing: 8) {
                 configuration.label
-                Text(configuration.isOn ? "On" : "Off")
+                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                    Capsule()
+                        .fill(configuration.isOn ? Color.blue : Color(white: 0.75))
+                        .frame(width: 38, height: 22)
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                        Circle()
+                            .strokeBorder(Color(white: 0.84), lineWidth: 1)
+                    }
+                    .frame(width: 18, height: 18)
+                    .padding(2)
+                }
+                .frame(width: 38, height: 22)
+                .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
             }
         }
         .buttonStyle(.plain)

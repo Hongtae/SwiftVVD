@@ -182,16 +182,18 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     private var didTearDown = false
 
     init<Content: View>(content: Content,
+                        environment: EnvironmentValues = .tracking(),
                         scene: WindowKey,
                         usesPlatformWindow: Bool,
                         frameInParent: CGRect = .zero) {
         self.usesPlatformWindow = usesPlatformWindow
         self.frameInParent = frameInParent
-        super.init(content: content, scene: scene)
+        super.init(content: content, environment: environment, scene: scene)
     }
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
+         environment: EnvironmentValues = .tracking(),
          scene: WindowKey,
          usesPlatformWindow: Bool,
          frameInParent: CGRect = .zero) {
@@ -199,6 +201,7 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
         self.frameInParent = frameInParent
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
+                   environment: environment,
                    scene: scene)
     }
 

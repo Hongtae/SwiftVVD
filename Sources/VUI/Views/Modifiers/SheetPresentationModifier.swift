@@ -21,6 +21,31 @@ struct SheetPreference {
     // Presentation backend policy captured from the presentation modifier's environment.
     // Default is overlay. Editors can opt into platform modal windows.
     let usesPlatformWindow: Bool
+    // A sheet has a separate host graph, so it also carries the environment at
+    // the presentation site for that graph's root input.
+    let presentationEnvironment: EnvironmentValues
+
+    init(
+        content: AnyView,
+        onDismiss: (() -> Void)?,
+        namespaceID: Namespace.ID,
+        itemID: AnyHashable?,
+        drawsBackground: Bool,
+        placement: Placement,
+        activeInspector: Bool?,
+        usesPlatformWindow: Bool,
+        presentationEnvironment: EnvironmentValues = EnvironmentValues()
+    ) {
+        self.content = content
+        self.onDismiss = onDismiss
+        self.namespaceID = namespaceID
+        self.itemID = itemID
+        self.drawsBackground = drawsBackground
+        self.placement = placement
+        self.activeInspector = activeInspector
+        self.usesPlatformWindow = usesPlatformWindow
+        self.presentationEnvironment = presentationEnvironment
+    }
 
     enum Placement: Equatable {
         case automatic
@@ -137,7 +162,8 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
                         drawsBackground: drawsBackground,
                         placement: placement,
                         activeInspector: activeInspector,
-                        usesPlatformWindow: usesPlatformWindow
+                        usesPlatformWindow: usesPlatformWindow,
+                        presentationEnvironment: environment.untrackedCopy()
                     ))
                 }
             } else {

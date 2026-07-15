@@ -603,6 +603,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
+         environment: EnvironmentValues = .tracking(),
          scene: WindowKey,
          parentController: WindowController,
          usesPlatformWindow: Bool) {
@@ -610,6 +611,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
         self.usesPlatformWindow = usesPlatformWindow
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
+                   environment: environment,
                    scene: scene)
     }
 

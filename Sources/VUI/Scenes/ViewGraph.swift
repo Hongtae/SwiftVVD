@@ -728,21 +728,27 @@ class ViewGraph: ViewGraphHost {
         rootViewType: V.Type,
         content: V,
         rendererHost: any ViewRendererHost,
+        initialEnvironment: EnvironmentValues = .tracking(),
         requestedOutputs: Outputs = .defaults,
         features: [any ViewGraphFeature] = []
     ) {
-        self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
+        self.init(rootViewType: V.self, rendererHost: rendererHost,
+                  initialEnvironment: initialEnvironment,
+                  requestedOutputs: requestedOutputs, features: features) { g in
             _GraphValue<V>(_attribute: g.makeInput(value: content))
         }
     }
 
     convenience init<Content: View>(replaceableContent content: Content,
                                     rendererHost: any ViewRendererHost,
+                                    initialEnvironment: EnvironmentValues = .tracking(),
                                     requestedOutputs: Outputs = .defaults,
                                     features: [any ViewGraphFeature] = []) {
         var contentAttr: Attribute<AnyView>?
         let erasedContent = AnyView(content)
-        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
+        self.init(rootViewType: AnyView.self, rendererHost: rendererHost,
+                  initialEnvironment: initialEnvironment,
+                  requestedOutputs: requestedOutputs, features: features) { g in
             let attr: Attribute<AnyView> = g.makeInput(value: erasedContent)
             contentAttr = attr
             return _GraphValue<AnyView>(_attribute: attr)
@@ -755,9 +761,13 @@ class ViewGraph: ViewGraphHost {
     // is notified, and the child updates on its next updateOutputs. Caller must evaluate contentAttr in sourceGraph
     // first (call `_ = contentAttr.value`) so the crossGraphRef finds a non-nil cached value.
     convenience init(crossGraphContentAttr: Attribute<AnyView>, sourceGraph: _AGGraph,
-                     rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults,
+                     rendererHost: any ViewRendererHost,
+                     initialEnvironment: EnvironmentValues = .tracking(),
+                     requestedOutputs: Outputs = .defaults,
                      features: [any ViewGraphFeature] = []) {
-        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs, features: features) { g in
+        self.init(rootViewType: AnyView.self, rendererHost: rendererHost,
+                  initialEnvironment: initialEnvironment,
+                  requestedOutputs: requestedOutputs, features: features) { g in
             _GraphValue<AnyView>(_attribute: g.makeCrossGraphRef(source: crossGraphContentAttr, in: sourceGraph))
         }
     }
@@ -765,6 +775,7 @@ class ViewGraph: ViewGraphHost {
     // Common designated init: `makeContent` is called inside data.withCurrent to produce the
     // root _GraphValue. The _AGGraph passed is self.data.graph (child graph, current).
     private init<V: View>(rootViewType: V.Type, rendererHost: any ViewRendererHost,
+                          initialEnvironment: EnvironmentValues,
                           requestedOutputs: Outputs,
                           features: [any ViewGraphFeature],
                           makeContent: (_AGGraph) -> _GraphValue<V>) {
@@ -794,7 +805,7 @@ class ViewGraph: ViewGraphHost {
             let timeAttr        = g.makeInput(value: time)
             let phaseAttr       = self.data.phaseAttribute
             let transactionAttr = g.makeInput(value: Transaction())
-            let envAttr         = g.makeInput(value: EnvironmentValues.tracking())
+            let envAttr         = g.makeInput(value: initialEnvironment)
             let graphInputs = _GraphInputs(
                 customInputs: PropertyList(),
                 time: timeAttr,

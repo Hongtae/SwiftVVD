@@ -481,7 +481,12 @@ class WindowController: WindowDelegate,
 
         // Create ViewGraph with full AG wiring, including _makeView responder construction.
         // rendererHost: self must be set on GestureGraph before this call.
-        self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
+        self._viewGraph = ViewGraph(
+            rootViewType: Content.self,
+            content: contentValue,
+            rendererHost: self,
+            initialEnvironment: environment
+        )
         self.crossGraphSourceGraph = nil
         
         // Wire ViewGraph delegate slots.
@@ -498,10 +503,11 @@ class WindowController: WindowDelegate,
     }
 
     init<Content: View>(content: Content,
+                        environment: EnvironmentValues = .tracking(),
                         scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = EnvironmentValues.tracking()
+        self.environment = environment.trackingCopy()
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -511,7 +517,11 @@ class WindowController: WindowDelegate,
         self.gestureGraph!.rendererHost = self
         configureGestureEventBridge()
 
-        self._viewGraph = ViewGraph(replaceableContent: content, rendererHost: self)
+        self._viewGraph = ViewGraph(
+            replaceableContent: content,
+            rendererHost: self,
+            initialEnvironment: self.environment
+        )
         self.crossGraphSourceGraph = nil
         self.viewGraph.renderDelegate = self
         self.viewGraph.viewDelegate = self
@@ -529,10 +539,11 @@ class WindowController: WindowDelegate,
     // contentAttr must already have a non-nil cached value in sourceGraph before this is called.
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
+         environment: EnvironmentValues = .tracking(),
          scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = EnvironmentValues.tracking()
+        self.environment = environment.trackingCopy()
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -545,7 +556,8 @@ class WindowController: WindowDelegate,
         self._viewGraph = ViewGraph(
             crossGraphContentAttr: contentAttr,
             sourceGraph: sourceGraph,
-            rendererHost: self
+            rendererHost: self,
+            initialEnvironment: self.environment
         )
         self.crossGraphSourceGraph = sourceGraph
         self.viewGraph.renderDelegate = self
@@ -1939,6 +1951,24 @@ class WindowController: WindowDelegate,
         viewGraph.envAttr?.setValue(self.environment)
     }
 
+    // Presentation roots own a distinct ViewGraph, but begin with the
+    // environment at the source presentation site. Platform presentation
+    // graphs run on their own render thread, so route later updates through
+    // the child graph's inbox instead of entering that graph from the source
+    // graph's thread.
+    func setPresentationEnvironment(_ environment: EnvironmentValues) {
+        let snapshot = UnsafeBox(environment.untrackedCopy())
+        viewGraph.data.graph.inbox.enqueue { [weak self, snapshot] in
+            guard let self else { return }
+            let environment = snapshot.value.trackingCopy()
+            self.environment = environment
+            self.viewGraph.envAttr?.setValue(environment)
+        }
+        forEachPresentationChild {
+            $0.setPresentationEnvironment(environment)
+        }
+    }
+
     func updateSize() {
         viewGraph.sizeAttr?.setValue(ViewSize(cachedContentSize))
     }
@@ -2388,7 +2418,7 @@ class WindowController: WindowDelegate,
 
         // Update existing sessions and enqueue new ones.
         for pref in incoming {
-            let existingContentAttr: Attribute<AnyView>? = modalChildren.withLock { entries in
+            let existingPresentation: (Attribute<AnyView>, ModalWindowController)? = modalChildren.withLock { entries in
                 guard let index = entries.firstIndex(where: {
                     guard case .sheet(let existing) = $0.session else { return false }
                     return sid(existing) == sid(pref)
@@ -2396,9 +2426,11 @@ class WindowController: WindowDelegate,
                     return nil
                 }
                 entries[index].session = .sheet(pref)
-                return entries[index].contentAttr
+                guard let contentAttr = entries[index].contentAttr else { return nil }
+                return (contentAttr, entries[index].controller)
             }
-            if let existingContentAttr {
+            if let (existingContentAttr, controller) = existingPresentation {
+                controller.setPresentationEnvironment(pref.presentationEnvironment)
                 existingContentAttr.setValue(rootContent(for: pref), transaction: transaction)
                 continue
             }
@@ -2414,6 +2446,7 @@ class WindowController: WindowDelegate,
             // becomes the final architecture.
             let ctrl = ModalWindowController(crossGraphContent: contentAttr,
                                              sourceGraph: graph,
+                                             environment: pref.presentationEnvironment,
                                              scene: sheetKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
