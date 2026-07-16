@@ -188,10 +188,42 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
             deviceContext: deviceContext,
             drawProgresses: [0, 0]
         )
+        let reversedHideBoundary = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [1, 0],
+            drawsReversed: true
+        )
+        let reversedHideNextGroup = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0.999_9, 0],
+            drawsReversed: true
+        )
+        let reversedRestoreBoundary = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0, 1],
+            drawsReversed: true
+        )
+        let reversedRestoreNextGroup = try renderSymbol(
+            "draw",
+            deviceContext: deviceContext,
+            drawProgresses: [0.000_1, 1],
+            drawsReversed: true
+        )
         XCTAssertGreaterThan(draw.count, halfDrawn.count)
         XCTAssertGreaterThan(halfDrawn.count, 0)
         XCTAssertGreaterThan(reverseHalfDrawn.count, 0)
         XCTAssertEqual(drawHidden.count, 0)
+        XCTAssertLessThanOrEqual(
+            abs(reversedHideBoundary.count - reversedHideNextGroup.count),
+            2
+        )
+        XCTAssertLessThanOrEqual(
+            abs(reversedRestoreBoundary.count - reversedRestoreNextGroup.count),
+            2
+        )
 
         let fallbackHidden = try renderSymbol(
             "star.fill",

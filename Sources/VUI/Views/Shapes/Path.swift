@@ -609,7 +609,7 @@ public struct Path: Equatable {
                 if start <= progress { t0 = 0 }
                 else { t0 = (start - progress) / d }
                 if end >= progress + d { t1 = 1 }
-                else { t1 = (progress + d - end) / d }
+                else { t1 = (end - progress) / d }
                 return (t0, t1)
             }
 

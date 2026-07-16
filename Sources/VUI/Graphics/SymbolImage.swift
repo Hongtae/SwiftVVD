@@ -48,6 +48,38 @@ struct ResolvedVectorSymbol: Equatable {
                 }
                 return result
             }
+
+            func clipBoundaryOpacities(
+                progress: Double,
+                reversed: Bool
+            ) -> (reveal: Double, completion: Double) {
+                let progress = min(max(progress, 0), 1)
+                let totalLength = strokeLength
+                guard totalLength > 0, !guides.isEmpty else {
+                    return (progress > 0 ? 1 : 0, progress >= 1 ? 1 : 0)
+                }
+
+                let startGuide = reversed ? guides.last! : guides.first!
+                let endGuide = reversed ? guides.first! : guides.last!
+                let minimumFadeLength = CGFloat.ulpOfOne.squareRoot()
+                let startFadeLength = max(
+                    startGuide.strokeStyle.lineWidth * 0.5,
+                    minimumFadeLength
+                )
+                let endFadeLength = max(
+                    endGuide.strokeStyle.lineWidth * 0.5,
+                    minimumFadeLength
+                )
+                let revealedLength = CGFloat(progress) * totalLength
+                let remainingLength = CGFloat(1 - progress) * totalLength
+                return (
+                    reveal: min(max(Double(revealedLength / startFadeLength), 0), 1),
+                    completion: min(
+                        max(Double(1 - remainingLength / endFadeLength), 0),
+                        1
+                    )
+                )
+            }
         }
 
         var path: Path

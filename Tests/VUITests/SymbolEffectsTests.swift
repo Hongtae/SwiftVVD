@@ -55,6 +55,25 @@ final class SymbolEffectsTests: XCTestCase {
             firstDraw.clipPath(progress: 0.5, reversed: false),
             firstDraw.clipPath(progress: 0.5, reversed: true)
         )
+        let hiddenBoundary = firstDraw.clipBoundaryOpacities(
+            progress: 0,
+            reversed: true
+        )
+        XCTAssertEqual(hiddenBoundary.reveal, 0)
+        XCTAssertEqual(hiddenBoundary.completion, 0)
+        let startingBoundary = firstDraw.clipBoundaryOpacities(
+            progress: 0.000_1,
+            reversed: true
+        )
+        XCTAssertGreaterThan(startingBoundary.reveal, 0)
+        XCTAssertLessThan(startingBoundary.reveal, 0.01)
+        XCTAssertEqual(startingBoundary.completion, 0)
+        let finishingBoundary = firstDraw.clipBoundaryOpacities(
+            progress: 0.999_9,
+            reversed: true
+        )
+        XCTAssertEqual(finishingBoundary.reveal, 1)
+        XCTAssertGreaterThan(finishingBoundary.completion, 0.99)
 
         let draw = try XCTUnwrap(SymbolAssetCatalog.resolve(
             name: "draw",
@@ -86,6 +105,20 @@ final class SymbolEffectsTests: XCTestCase {
             bundle: nil,
             label: nil
         )))
+    }
+
+    func testTrimmedLinePathUsesRequestedEndFraction() {
+        var path = Path()
+        path.move(to: .zero)
+        path.addLine(to: CGPoint(x: 100, y: 0))
+
+        let firstQuarter = path.trimmedPath(from: 0, to: 0.25)
+        XCTAssertEqual(firstQuarter.initialPoint, .zero)
+        XCTAssertEqual(firstQuarter.currentPoint, CGPoint(x: 25, y: 0))
+
+        let lastQuarter = path.trimmedPath(from: 0.75, to: 1)
+        XCTAssertEqual(lastQuarter.initialPoint, CGPoint(x: 75, y: 0))
+        XCTAssertEqual(lastQuarter.currentPoint, CGPoint(x: 100, y: 0))
     }
 
     func testSVGPathParserSupportsCompactRelativeAndArcCommands() throws {

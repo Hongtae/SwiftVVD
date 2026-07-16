@@ -203,8 +203,13 @@ extension GraphicsContext {
             let presentationOpacity = effectOpacity * variableColorOpacity *
                 (image.symbolDrawFallbackOpacity ?? 1)
             guard presentationOpacity > 0 else { continue }
-            var context = self
-            context.opacity *= layer.opacity * presentationOpacity
+            let layerOpacity = layer.opacity * presentationOpacity
+            let layerPath = layer.path.applying(transform)
+            let shading = image.shading ?? symbolShading(for: layer.semanticLevel)
+            let fillStyle = FillStyle(
+                eoFill: layer.isEOFilled || style.isEOFilled,
+                antialiased: style.isAntialiased
+            )
             if let draw = layer.draw,
                let progresses = image.symbolDrawProgresses,
                progresses.indices.contains(draw.motionGroup) {
@@ -216,16 +221,43 @@ extension GraphicsContext {
                         reversed: image.symbolDrawsReversed
                     ).applying(transform)
                     guard !revealPath.isEmpty else { continue }
-                    context.clip(to: revealPath)
+                    let boundaryOpacities = draw.clipBoundaryOpacities(
+                        progress: progress,
+                        reversed: image.symbolDrawsReversed
+                    )
+                    if boundaryOpacities.completion > 0 {
+                        var completionContext = self
+                        completionContext.opacity *= layerOpacity *
+                            boundaryOpacities.completion
+                        completionContext.clip(
+                            to: revealPath,
+                            options: .inverse
+                        )
+                        completionContext.fill(
+                            layerPath,
+                            with: shading,
+                            style: fillStyle
+                        )
+                    }
+                    guard boundaryOpacities.reveal > 0 else { continue }
+                    var revealContext = self
+                    revealContext.opacity *= layerOpacity *
+                        boundaryOpacities.reveal
+                    revealContext.clip(to: revealPath)
+                    revealContext.fill(
+                        layerPath,
+                        with: shading,
+                        style: fillStyle
+                    )
+                    continue
                 }
             }
+            var context = self
+            context.opacity *= layerOpacity
             context.fill(
-                layer.path.applying(transform),
-                with: image.shading ?? symbolShading(for: layer.semanticLevel),
-                style: FillStyle(
-                    eoFill: layer.isEOFilled || style.isEOFilled,
-                    antialiased: style.isAntialiased
-                )
+                layerPath,
+                with: shading,
+                style: fillStyle
             )
         }
     }
