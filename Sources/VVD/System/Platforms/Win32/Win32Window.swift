@@ -159,11 +159,52 @@ final class Win32Window: Window {
 
     // MARK: - Modal State
 
-    private struct ModalEntry: @unchecked Sendable {
+    private enum ModalPlacementMode {
+        case attached
+        case independent
+    }
+
+    private final class ModalPresentationContext: @unchecked Sendable {
+        weak var host: Win32Window?
+        let mode: ModalPlacementMode
+        let hostWasEnabled: Bool
+        let hostMouseWasLocked: Bool
+        var previousOwner: HWND?
+
+        // Attached SetWindowPos calls synchronously reenter the window
+        // procedure. Coalesce that reentrancy into one final geometry pass.
+        var applyingPlacement = false
+        var placementPending = false
+
+        // Placement suspension is Attached-specific. Visibility grouping is
+        // common to both modes because owner SW_HIDE is not propagated by Win32.
+        var hostPlacementSuspended = false
+        var modalHiddenWithHost = false
+
+        init(host: Win32Window,
+             mode: ModalPlacementMode,
+             hostWasEnabled: Bool,
+             hostMouseWasLocked: Bool) {
+            self.host = host
+            self.mode = mode
+            self.hostWasEnabled = hostWasEnabled
+            self.hostMouseWasLocked = hostMouseWasLocked
+        }
+    }
+
+    private final class ModalEntry: @unchecked Sendable {
         let window: Win32Window
         let completionHandler: (()->Void)?
+        var context: ModalPresentationContext?
+
+        init(window: Win32Window, completionHandler: (()->Void)?) {
+            self.window = window
+            self.completionHandler = completionHandler
+        }
     }
     private var modalEntries: [ModalEntry] = []
+    private weak var modalQueueHost: Win32Window?
+    private var modalPresentationContext: ModalPresentationContext?
 
     // MARK: - Window Class Registration
 
@@ -378,6 +419,10 @@ final class Win32Window: Window {
     var origin: CGPoint {
         get { self.windowFrame.origin }
         set (value) {
+            if self.modalPresentationContext?.mode == .attached {
+                self.repositionAttachedModal()
+                return
+            }
             if let hWnd = self.hWnd {
                 let x = Int32(value.x)
                 let y = Int32(value.y)
@@ -447,13 +492,24 @@ final class Win32Window: Window {
     }
     
     func close() {
+        // A presented modal must leave its host queue while its HWND is still
+        // valid. This restores the previous owner and the host enabled/focus
+        // state before DefWindowProc destroys the owned window. Waiting for the
+        // later `.closed` event can let Windows perform owner activation with a
+        // stale disabled relationship.
+        if let modalHost = self.modalQueueHost, modalHost !== self {
+            _ = modalHost.dismissModalWindow(self)
+        }
+
         // Close all modal windows.
         let entries = self.modalEntries
         self.modalEntries.removeAll()
         let completionHandlers = entries.compactMap { $0.completionHandler }
-        entries.forEach { 
-            $0.window.removeEventObserver(self)
-            $0.window.close()
+        entries.forEach { entry in
+            self.endModalPresentation(entry, restoreHostActivation: false)
+            entry.window.modalQueueHost = nil
+            entry.window.removeEventObserver(self)
+            entry.window.close()
         }
         if !completionHandlers.isEmpty {
             Task { completionHandlers.forEach { $0() } }
@@ -616,6 +672,25 @@ final class Win32Window: Window {
         }
     }
 
+    private func suspendMouseCaptureForModal() {
+        // A modal may be presented synchronously from the host's button-down
+        // callback. The matching button-up will then go to the modal, so keeping
+        // the host's old button mask/capture would redirect later caption clicks
+        // back into the host client area. Preserve only the intentional locked-
+        // mouse state and rebuild it after the modal presentation ends.
+        self.mouseButtonDownMask = []
+        self.mouseLocked = false
+        if let hWnd = self.hWnd, GetCapture() == hWnd {
+            ReleaseCapture()
+        }
+    }
+
+    private func restoreMouseCaptureAfterModal(_ wasLocked: Bool) {
+        guard wasLocked else { return }
+        self.mouseLocked = true
+        PostMessageW(self.hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+    }
+
     private func keyboardModifiers(from keyStates: [UInt8]) -> KeyboardModifierFlags {
         let capsLock = keyStates[Int(VK_CAPITAL)] & 0x01 != 0
         let leftShift = keyStates[Int(VK_LSHIFT)] & 0x80 != 0
@@ -771,6 +846,139 @@ final class Win32Window: Window {
 
     // MARK: - Modal Presentation
 
+    /*
+     Win32 modal presentation deliberately has two behaviors. Both are real
+     modal presentations and both use a Win32 owner/owned-window relationship;
+     "independent" describes placement and host interaction, not modality.
+
+     The distinction lets a UI framework use one platform-neutral modal API for
+     two native presentation styles. Attached mode reproduces AppKit sheet
+     behavior. Independent mode is an AppKit/Win32 hybrid: it keeps modal
+     ownership, lifetime, and visibility grouped with the host while using a
+     Win32-style disabled owner and a freely movable dialog. There is no public
+     mode switch. The mode is selected when an entry reaches the head of the
+     modal queue, using the actual HWND styles rather than the requested VVD
+     styles:
+
+         captioned host + captionless modal -> Attached
+         every other combination             -> Independent
+
+     Reading WS_CAPTION from both HWNDs is important because the final native
+     style is the authoritative indication that a system title bar exists.
+     Borderless/custom-skinned hosts therefore use Independent mode even when
+     their application-level appearance resembles a normal window.
+
+     Shared rules
+     ------------
+     - The active modal is installed as an owned top-level window with
+       GWLP_HWNDPARENT. The previous owner is restored on dismissal. Passing the
+       host as SetWindowPos's hWndInsertAfter changes Z-order only and is not a
+       substitute for this owner relationship.
+     - Only the first queued entry owns a ModalPresentationContext. A later
+       entry chooses its mode only when it becomes active, so transitions
+       between Attached and Independent cannot inherit stale state.
+     - The host's previous enabled state, mouse-lock state, and foreground
+       ownership are preserved. Dismissal must not enable a host that was
+       already disabled or steal focus from another application.
+     - A host hide/minimize hides the active modal in both modes, and showing or
+       restoring the host reveals it again. Explicit hide is handled here
+       because Win32 automatically groups owned windows for minimization, but
+       does not guarantee the same grouping when an owner is merely hidden.
+     - Native close requests are modal interaction and are blocked. A direct
+       programmatic host.close() remains an explicit lifetime operation: it
+       dismisses/cleans up queued modals and then closes the host.
+     - Presentation may begin inside a host mouse-down callback. Host capture
+       and its pressed-button mask are cleared so the missing button-up cannot
+       leave capture stuck; an intentional locked-mouse state is restored after
+       dismissal.
+     - Popup and utility-window activation/lifetime rules are unrelated to this
+       path and must not be changed as part of modal presentation.
+
+     Attached mode -- AppKit sheet semantics
+     ----------------------------------------
+     AppKit keeps a sheet attached to its parent content area while allowing
+     native operations on the parent frame. To reproduce that behavior, the
+     host HWND remains enabled. Disabling it with EnableWindow would also
+     disable caption dragging, resize borders, and minimize/maximize buttons.
+     Instead, client mouse, wheel, gesture, keyboard, IME, and drag/drop input
+     are gated while selected non-client interactions remain native.
+
+     Caption dragging, resizing, minimizing, maximizing, and restoring the host
+     are allowed. User close requests and content interaction are blocked; a
+     blocked click produces modal feedback and returns foreground/activation/
+     focus to the modal. Windows may need to activate the host temporarily to
+     enter a native move/size loop, so the modal is reactivated when that loop
+     ends. The host can consequently look inactive, matching the AppKit sheet
+     presentation, without being disabled. Do not synthesize an active host or
+     keep its active render interval: Window.activated and frame pacing continue
+     to follow native foreground activation while the modal owns focus.
+
+     The platform continuously owns the Attached modal origin. The modal outer
+     frame is horizontally centered in the host's screen-space client rect. It
+     is vertically centered while it fits; if it is taller than the client
+     area, its top is aligned with the client top. This is the Win32-coordinate
+     equivalent of AppKit's rule that a large sheet may extend below and beyond
+     the parent, but must not cover the parent's system title bar. Attached
+     placement is intentionally not clamped to the monitor work area because
+     attachment to the parent takes precedence.
+
+         left = clientLeft + (clientWidth - modalOuterWidth) / 2
+         centeredTop = clientTop + (clientHeight - modalOuterHeight) / 2
+         top = max(clientTop, centeredTop)
+
+     GetClientRect plus ClientToScreen supplies the host rectangle; GetWindowRect
+     supplies the modal outer size. Mixing client size with outer size would
+     offset a captioned or bordered modal and break the title-bar guarantee.
+
+     Host/modal move, resize, DPI, maximize, and restore events recompute the
+     position from current native rectangles rather than accumulating a delta.
+     A direct origin setter is ignored, and external SetWindowPos movement is
+     corrected in WM_WINDOWPOSCHANGING while still accepting size changes. The
+     reentrancy/pending flags ensure that nested move/size messages do not either
+     oscillate or lose the final placement. This continuous policy also supports
+     a UI framework's normal creation sequence, where a modal starts at a small
+     placeholder size and receives its fitted content size only after layout.
+
+     Independent mode -- AppKit/Win32 hybrid dialog semantics
+     --------------------------------------------------------
+     The entire host is disabled with EnableWindow for the duration of the
+     presentation, so client and non-client operations are both unavailable.
+     A click attempt on the disabled host produces feedback, restores an iconic
+     modal if necessary, and brings the modal to the foreground with focus.
+
+     The platform owns only the initial position: center the modal outer frame
+     on the host outer frame, then clamp it to the nearest monitor work area.
+     If the modal is larger than the work area on an axis, it is not resized;
+     that axis is aligned to the work-area start so its top/left controls remain
+     reachable. The clamp is never repeated after initial presentation.
+     After presentation, user dragging and programmatic origin changes are
+     authoritative. Host movement, modal resizing, and later application moves
+     must not recenter or clamp it again.
+
+     Message-routing invariants
+     --------------------------
+     - Attached content messages are gated before normal event translation.
+       OLE IDropTarget callbacks bypass the window procedure, so the drop target
+       separately checks blocksModalContentInput.
+     - A disabled Independent host does not receive ordinary button-down
+       messages. WM_SETCURSOR's triggering mouse message is therefore used to
+       detect a click attempt. Hit-test constants such as HTCLIENT/HTCAPTION are
+       integer values, not bit flags.
+     - WM_MOVE.lParam for a top-level window identifies the client-area origin,
+       not the outer-frame origin. GetWindowRect is the source of truth for both
+       stored windowFrame state and Attached placement.
+     - While the host is minimized or hidden, screen-space Attached placement is
+       suspended and SWP_HIDEWINDOW is never corrected back into a move. Restore
+       first reveals the modal, then recomputes placement from final rectangles.
+     - WM_DPICHANGED applies the suggested frame before final placement. Host and
+       modal DPI messages may arrive in either order, so each pass rereads native
+       geometry and the pending flag requests a final pass after reentrancy.
+
+     Keep these policies separate. In particular, disabling an Attached host
+     breaks AppKit-compatible frame interaction, while continuously tracking an
+     Independent modal takes control away from the user.
+     */
+
     var canPresentModalWindow: Bool {
         hWnd != nil
     }
@@ -779,14 +987,333 @@ final class Win32Window: Window {
         self.modalEntries.map { $0.window }
     }
 
+    private var activeModalEntry: ModalEntry? {
+        guard let entry = self.modalEntries.first, entry.context != nil else {
+            return nil
+        }
+        return entry
+    }
+
+    private var activeModalMode: ModalPlacementMode? {
+        self.activeModalEntry?.context?.mode
+    }
+
+    var blocksModalContentInput: Bool {
+        // Independent hosts are already disabled, but Attached hosts remain
+        // enabled. The OLE drop target uses this common flag because drag/drop
+        // callbacks do not pass through blocksAttachedHostContentMessage().
+        self.activeModalEntry != nil
+    }
+
+    private static func hasSystemCaption(_ hWnd: HWND) -> Bool {
+        let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
+        return style & DWORD(WS_CAPTION) == DWORD(WS_CAPTION)
+    }
+
+    private func modalMode(for modal: Win32Window) -> ModalPlacementMode {
+        guard let host = self.hWnd, let modal = modal.hWnd else {
+            return .independent
+        }
+        if Self.hasSystemCaption(host) && !Self.hasSystemCaption(modal) {
+            return .attached
+        }
+        return .independent
+    }
+
+    private func modalGroupOwnsForeground(_ entry: ModalEntry) -> Bool {
+        let foreground = GetForegroundWindow()
+        return foreground == self.hWnd || foreground == entry.window.hWnd
+    }
+
+    private func activateModal(_ modalWindow: Win32Window, feedback: Bool) {
+        guard let modal = modalWindow.hWnd else { return }
+
+        if feedback { MessageBeep(UINT(MB_OK)) }
+        if IsIconic(modal) {
+            ShowWindow(modal, SW_RESTORE)
+        }
+        SetForegroundWindow(modal)
+        SetActiveWindow(modal)
+        SetFocus(modal)
+
+        if feedback {
+            var info = FLASHWINFO()
+            info.cbSize = UINT(MemoryLayout<FLASHWINFO>.size)
+            info.hwnd = modal
+            info.dwFlags = DWORD(FLASHW_ALL | FLASHW_TIMERNOFG)
+            info.uCount = 3
+            info.dwTimeout = 0
+            FlashWindowEx(&info)
+        }
+    }
+
+    private func notifyActiveModal() {
+        guard let entry = self.activeModalEntry else { return }
+        self.activateModal(entry.window, feedback: true)
+    }
+
+    private func blocksAttachedHostContentMessage(_ message: UINT) -> Bool {
+        guard self.activeModalMode == .attached else { return false }
+        switch message {
+        case UINT(WM_MOUSEMOVE),
+             UINT(WM_LBUTTONDOWN), UINT(WM_LBUTTONUP), UINT(WM_LBUTTONDBLCLK),
+             UINT(WM_RBUTTONDOWN), UINT(WM_RBUTTONUP), UINT(WM_RBUTTONDBLCLK),
+             UINT(WM_MBUTTONDOWN), UINT(WM_MBUTTONUP), UINT(WM_MBUTTONDBLCLK),
+             UINT(WM_XBUTTONDOWN), UINT(WM_XBUTTONUP), UINT(WM_XBUTTONDBLCLK),
+             UINT(WM_MOUSEWHEEL), UINT(WM_MOUSEHWHEEL),
+             UINT(WM_GESTURENOTIFY), UINT(WM_GESTURE),
+             UINT(WM_KEYDOWN), UINT(WM_KEYUP),
+             UINT(WM_SYSKEYDOWN), UINT(WM_SYSKEYUP),
+             UINT(WM_CHAR), UINT(WM_DEADCHAR),
+             UINT(WM_SYSCHAR), UINT(WM_SYSDEADCHAR),
+             UINT(WM_IME_STARTCOMPOSITION), UINT(WM_IME_ENDCOMPOSITION),
+             UINT(WM_IME_COMPOSITION), UINT(WM_IME_CHAR),
+             UINT(WM_IME_KEYDOWN), UINT(WM_IME_KEYUP),
+             UINT(WM_DROPFILES):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isPointerDownMessage(_ message: UINT) -> Bool {
+        switch message {
+        case UINT(WM_LBUTTONDOWN), UINT(WM_RBUTTONDOWN),
+             UINT(WM_MBUTTONDOWN), UINT(WM_XBUTTONDOWN),
+             UINT(WM_NCLBUTTONDOWN), UINT(WM_NCRBUTTONDOWN),
+             UINT(WM_NCMBUTTONDOWN), UINT(WM_NCXBUTTONDOWN):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func reactivateAttachedModalAfterHostInteraction() {
+        guard let entry = self.activeModalEntry,
+              entry.context?.mode == .attached,
+              let host = self.hWnd,
+              !IsIconic(host),
+              self.modalGroupOwnsForeground(entry) else {
+            return
+        }
+        self.activateModal(entry.window, feedback: false)
+    }
+
+    private func attachedModalOrigin(outerWidth: LONG? = nil,
+                                     outerHeight: LONG? = nil) -> POINT? {
+        guard let context = self.modalPresentationContext,
+              context.mode == .attached,
+              !context.hostPlacementSuspended,
+              let host = context.host?.hWnd,
+              let modal = self.hWnd,
+              !IsIconic(host) else {
+            return nil
+        }
+
+        var clientRect = RECT()
+        guard GetClientRect(host, &clientRect) else { return nil }
+        var topLeft = POINT(x: clientRect.left, y: clientRect.top)
+        var bottomRight = POINT(x: clientRect.right, y: clientRect.bottom)
+        guard ClientToScreen(host, &topLeft), ClientToScreen(host, &bottomRight) else {
+            return nil
+        }
+
+        var modalRect = RECT()
+        guard GetWindowRect(modal, &modalRect) else { return nil }
+        let width = outerWidth ?? (modalRect.right - modalRect.left)
+        let height = outerHeight ?? (modalRect.bottom - modalRect.top)
+        let clientWidth = bottomRight.x - topLeft.x
+        let clientHeight = bottomRight.y - topLeft.y
+        let left = topLeft.x + (clientWidth - width) / 2
+        let centeredTop = topLeft.y + (clientHeight - height) / 2
+        return POINT(x: left, y: max(topLeft.y, centeredTop))
+    }
+
+    private func repositionAttachedModal(show: Bool = false) {
+        guard let context = self.modalPresentationContext,
+              context.mode == .attached,
+              let modal = self.hWnd,
+              !IsIconic(modal) else {
+            return
+        }
+        if context.applyingPlacement {
+            context.placementPending = true
+            return
+        }
+
+        context.applyingPlacement = true
+        defer { context.applyingPlacement = false }
+
+        var shouldShow = show
+        repeat {
+            context.placementPending = false
+            guard let target = self.attachedModalOrigin() else { return }
+            var current = RECT()
+            guard GetWindowRect(modal, &current) else { return }
+            if current.left != target.x || current.top != target.y || shouldShow {
+                var flags = UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
+                if shouldShow { flags |= UINT(SWP_SHOWWINDOW) }
+                shouldShow = false
+                SetWindowPos(modal, HWND_TOP, target.x, target.y, 0, 0, flags)
+            }
+        } while context.placementPending
+    }
+
+    private func constrainAttachedWindowPosition(_ position: UnsafeMutablePointer<WINDOWPOS>) {
+        guard let context = self.modalPresentationContext,
+              context.mode == .attached,
+              !context.hostPlacementSuspended,
+              position.pointee.flags & UINT(SWP_HIDEWINDOW) == 0 else {
+            return
+        }
+
+        var rect = RECT()
+        guard let modal = self.hWnd, GetWindowRect(modal, &rect) else { return }
+        let changesSize = position.pointee.flags & UINT(SWP_NOSIZE) == 0
+        let width = changesSize ? position.pointee.cx : rect.right - rect.left
+        let height = changesSize ? position.pointee.cy : rect.bottom - rect.top
+        guard let target = self.attachedModalOrigin(outerWidth: width,
+                                                    outerHeight: height) else {
+            return
+        }
+        position.pointee.x = target.x
+        position.pointee.y = target.y
+        position.pointee.flags &= ~UINT(SWP_NOMOVE)
+    }
+
+    private func repositionActiveAttachedModal() {
+        guard let entry = self.activeModalEntry,
+              entry.context?.mode == .attached else {
+            return
+        }
+        entry.window.repositionAttachedModal()
+    }
+
+    private func setActiveAttachedHostPlacementSuspended(_ suspended: Bool) {
+        guard let context = self.activeModalEntry?.context,
+              context.mode == .attached else {
+            return
+        }
+        context.hostPlacementSuspended = suspended
+    }
+
+    private func hideActiveModalWithHost() {
+        guard let entry = self.activeModalEntry,
+              let context = entry.context,
+              let modal = entry.window.hWnd else {
+            return
+        }
+        if context.mode == .attached {
+            context.hostPlacementSuspended = true
+        }
+        context.modalHiddenWithHost = true
+        ShowWindow(modal, SW_HIDE)
+    }
+
+    private func restoreActiveModalWithHost(restoreActivation: Bool) {
+        guard let entry = self.activeModalEntry,
+              let context = entry.context,
+              context.modalHiddenWithHost else {
+            return
+        }
+        context.modalHiddenWithHost = false
+        switch context.mode {
+        case .attached:
+            context.hostPlacementSuspended = false
+            entry.window.repositionAttachedModal(show: true)
+        case .independent:
+            if let modal = entry.window.hWnd {
+                SetWindowPos(modal, HWND_TOP, 0, 0, 0, 0,
+                             UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER |
+                                  SWP_NOACTIVATE | SWP_SHOWWINDOW))
+            }
+        }
+        if restoreActivation && self.modalGroupOwnsForeground(entry) {
+            self.activateModal(entry.window, feedback: false)
+        }
+    }
+
+    private func positionIndependentModal(_ modalWindow: Win32Window) {
+        guard let host = self.hWnd, let modal = modalWindow.hWnd else { return }
+        var hostRect = RECT()
+        var modalRect = RECT()
+        guard GetWindowRect(host, &hostRect), GetWindowRect(modal, &modalRect) else {
+            return
+        }
+
+        let width = modalRect.right - modalRect.left
+        let height = modalRect.bottom - modalRect.top
+        var left = hostRect.left + ((hostRect.right - hostRect.left) - width) / 2
+        var top = hostRect.top + ((hostRect.bottom - hostRect.top) - height) / 2
+
+        if let monitor = MonitorFromWindow(host, DWORD(MONITOR_DEFAULTTONEAREST)) {
+            var info = MONITORINFO()
+            info.cbSize = DWORD(MemoryLayout<MONITORINFO>.size)
+            if GetMonitorInfoW(monitor, &info) {
+                let workWidth = info.rcWork.right - info.rcWork.left
+                let workHeight = info.rcWork.bottom - info.rcWork.top
+                if width <= workWidth {
+                    left = min(max(left, info.rcWork.left), info.rcWork.right - width)
+                } else {
+                    left = info.rcWork.left
+                }
+                if height <= workHeight {
+                    top = min(max(top, info.rcWork.top), info.rcWork.bottom - height)
+                } else {
+                    top = info.rcWork.top
+                }
+            }
+        }
+
+        SetWindowPos(modal, HWND_TOP, left, top, 0, 0,
+                     UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW))
+    }
+
+    private func endModalPresentation(_ entry: ModalEntry,
+                                      restoreHostActivation: Bool) {
+        guard let context = entry.context else { return }
+        let modalWindow = entry.window
+
+        if let modal = modalWindow.hWnd {
+            let ownerValue = context.previousOwner.map {
+                LONG_PTR(Int64(Int(bitPattern: $0)))
+            } ?? 0
+            SetWindowLongPtrW(modal, GWLP_HWNDPARENT, ownerValue)
+        }
+        if context.mode == .independent,
+           context.hostWasEnabled,
+           let host = context.host?.hWnd {
+            EnableWindow(host, true)
+        }
+        context.host?.restoreMouseCaptureAfterModal(context.hostMouseWasLocked)
+
+        if modalWindow.modalPresentationContext === context {
+            modalWindow.modalPresentationContext = nil
+        }
+        entry.context = nil
+
+        if restoreHostActivation,
+           context.hostWasEnabled,
+           let host = context.host?.hWnd,
+           !IsIconic(host) {
+            SetForegroundWindow(host)
+            SetActiveWindow(host)
+            SetFocus(host)
+        }
+    }
+
     func presentModalWindow(_ window: any Window, completionHandler: (()->Void)?) -> Bool {
         guard let modalWindow = window as? Win32Window else {
             Log.err("Window.presentModalWindow failed: incompatible window type.")
             return false
         }
 
-        if modalWindow.isValid {
+        if modalWindow.isValid,
+           modalWindow !== self,
+           modalWindow.modalQueueHost == nil,
+           modalWindow.modalPresentationContext == nil {
             let present = self.modalEntries.isEmpty
+            modalWindow.modalQueueHost = self
             self.modalEntries.append(
                 ModalEntry(window: modalWindow,
                            completionHandler: completionHandler))
@@ -795,8 +1322,8 @@ final class Win32Window: Window {
             }
             return true
         }
-        Log.err("Window.presentModalWindow failed: invalid window.")
-       return false
+        Log.err("Window.presentModalWindow failed: invalid or already presented window.")
+        return false
     }
 
     func dismissModalWindow(_ window: any Window) -> Bool {
@@ -805,49 +1332,57 @@ final class Win32Window: Window {
             return false
         }
 
-        var presentNext = false
+        let current = self.modalEntries.first
+        let dismissingCurrent = current?.window === modalWindow
+        let restoreActivation = current.map(self.modalGroupOwnsForeground) ?? false
         modalWindow.removeEventObserver(self)
 
-        // Check whether the dismissed window is the current modal window.
-        if let current = self.modalEntries.first {
-            if current.window === modalWindow {
-                presentNext = true
-            }
-        }
-        // Remove modal entries and collect completion handlers.
+        var removedEntries: [ModalEntry] = []
         var completionHandlers: [(() -> Void)] = []
         self.modalEntries = self.modalEntries.filter {
             if $0.window !== modalWindow {
                 return true
             }
+            removedEntries.append($0)
             if let handler = $0.completionHandler {
                 completionHandlers.append(handler)
             }
             return false
         }
-        // Enable the host window when no modal windows remain.
-        if self.modalEntries.isEmpty {
-            presentNext = true
-        }
-        if presentNext {
-            if let hWnd = modalWindow.hWnd {
-                ShowWindow(hWnd, SW_HIDE)
-            }
 
-            self.presentNextModal()
+        guard !removedEntries.isEmpty else { return false }
+        removedEntries.forEach {
+            self.endModalPresentation($0, restoreHostActivation: false)
+            $0.window.modalQueueHost = nil
         }
-        // Call completion handlers after presenting the next modal.
+
+        if dismissingCurrent {
+            if let hWnd = modalWindow.hWnd { ShowWindow(hWnd, SW_HIDE) }
+            self.presentNextModal(activate: restoreActivation)
+            if self.modalEntries.isEmpty,
+               restoreActivation,
+               let host = self.hWnd,
+               IsWindowEnabled(host),
+               !IsIconic(host) {
+                SetForegroundWindow(host)
+                SetActiveWindow(host)
+                SetFocus(host)
+            }
+        }
+
         if !completionHandlers.isEmpty {
             Task { completionHandlers.forEach { $0() } }
         }
         return true
     }
 
-    private func presentNextModal() {
+    private func presentNextModal(activate: Bool = true) {
         // Remove invalid windows from the modal list.
         var cancelledHandlers: [()->Void] = []
         self.modalEntries = self.modalEntries.filter {
             if $0.window.isValid { return true }
+            self.endModalPresentation($0, restoreHostActivation: false)
+            $0.window.modalQueueHost = nil
             if let handler = $0.completionHandler {
                 cancelledHandlers.append(handler)
             }
@@ -857,40 +1392,48 @@ final class Win32Window: Window {
             Task { cancelledHandlers.forEach { $0() } }
         }
         if let hWnd = self.hWnd {
-            if let next = self.modalEntries.first?.window {
-                if let modal = next.hWnd {
-                    next.addEventObserver(self) { (event: WindowEvent) in
-                        if event.type == .closed {
-                            next.removeEventObserver(self)
-                            Task {
-                                self.dismissModalWindow(next)
-                            }
+            if let entry = self.modalEntries.first,
+               let modal = entry.window.hWnd {
+                let next = entry.window
+                let mode = self.modalMode(for: next)
+                let context = ModalPresentationContext(
+                    host: self,
+                    mode: mode,
+                    hostWasEnabled: IsWindowEnabled(hWnd),
+                    hostMouseWasLocked: self.mouseLocked
+                )
+                context.hostPlacementSuspended = IsIconic(hWnd)
+                self.suspendMouseCaptureForModal()
+                let previousOwnerValue = GetWindowLongPtrW(modal, GWLP_HWNDPARENT)
+                context.previousOwner = previousOwnerValue == 0
+                    ? nil
+                    : HWND(bitPattern: Int(previousOwnerValue))
+                SetWindowLongPtrW(modal, GWLP_HWNDPARENT,
+                                  LONG_PTR(Int64(Int(bitPattern: hWnd))))
+                entry.context = context
+                next.modalPresentationContext = context
+
+                next.addEventObserver(self) { (event: WindowEvent) in
+                    if event.type == .closed {
+                        next.removeEventObserver(self)
+                        Task {
+                            self.dismissModalWindow(next)
                         }
                     }
-
-                    SetForegroundWindow(hWnd)
-                    EnableWindow(hWnd, false)
-
-                    var rcHost = RECT()
-                    GetWindowRect(hWnd, &rcHost)
-                    var rcModal = RECT()
-                    GetWindowRect(modal, &rcModal)
-                    
-                    let centerX = (rcHost.left + rcHost.right) / 2
-                    let centerY = (rcHost.top + rcHost.bottom) / 2
-                    let modalWidth = rcModal.right - rcModal.left
-                    let modalHeight = rcModal.bottom - rcModal.top
-                    let left = centerX - (modalWidth / 2)
-                    let top = centerY - (modalHeight / 2)
-                    
-                    Log.debug("Presenting modal window at (\(left), \(top))")
-                    SetWindowPos(modal, hWnd, left, top, 0, 0,  UINT(SWP_NOSIZE | SWP_SHOWWINDOW))
-
-                    SetActiveWindow(modal)
                 }
-            } else {
-                EnableWindow(hWnd, true)
-                SetForegroundWindow(hWnd)
+
+                switch mode {
+                case .attached:
+                    next.repositionAttachedModal(show: true)
+                case .independent:
+                    if context.hostWasEnabled { EnableWindow(hWnd, false) }
+                    self.positionIndependentModal(next)
+                }
+
+                Log.debug("Presenting \(mode) modal window")
+                if activate {
+                    self.activateModal(next, feedback: false)
+                }
             }
         }
     }
@@ -964,7 +1507,20 @@ final class Win32Window: Window {
                 }
             }
 
+            if window.blocksAttachedHostContentMessage(uMsg) {
+                if Self.isPointerDownMessage(uMsg) ||
+                    (uMsg == UINT(WM_SYSKEYDOWN) && wParam == WPARAM(VK_F4)) {
+                    window.notifyActiveModal()
+                }
+                return 0
+            }
+
             switch uMsg {
+            case UINT(WM_WINDOWPOSCHANGING):
+                if let position = UnsafeMutablePointer<WINDOWPOS>(bitPattern: UInt(lParam)) {
+                    window.constrainAttachedWindowPosition(position)
+                }
+                return DefWindowProcW(hWnd, uMsg, wParam, lParam)
             case UINT(WM_NCACTIVATE):
                 let activated = wParam != 0
                 if activated {
@@ -989,13 +1545,19 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_SHOWWINDOW):
+                // Owned windows follow owner minimization, but an explicit
+                // SW_HIDE of the owner does not reliably hide them. Mirror host
+                // visibility for both modal modes without activating on show.
                 if wParam != 0 {
+                    window.setActiveAttachedHostPlacementSuspended(false)
                     if window.visible == false {
                         window.visible = true
                         window.minimized = false
                         window.postWindowEvent(type: .shown)
                     }
+                    window.restoreActiveModalWithHost(restoreActivation: false)
                 } else {
+                    window.hideActiveModalWithHost()
                     if window.visible {
                         window.visible = false
                         window.postWindowEvent(type: .hidden)
@@ -1003,6 +1565,26 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_MOUSEACTIVATE):
+                if window.activeModalMode == .attached {
+                    let hitTest = LOWORD(lParam)
+                    switch hitTest {
+                    case WORD(HTCAPTION),
+                         WORD(HTLEFT), WORD(HTRIGHT),
+                         WORD(HTTOP), WORD(HTBOTTOM),
+                         WORD(HTTOPLEFT), WORD(HTTOPRIGHT),
+                         WORD(HTBOTTOMLEFT), WORD(HTBOTTOMRIGHT),
+                         WORD(HTMINBUTTON), WORD(HTMAXBUTTON):
+                        // A disabled-looking but enabled owner may still need to
+                        // become active briefly for DefWindowProc to enter the
+                        // native move/size or caption-button command loop. Client
+                        // input remains gated, and activation returns to the modal
+                        // when the native interaction completes.
+                        return LRESULT(MA_ACTIVATE)
+                    default:
+                        window.notifyActiveModal()
+                        return LRESULT(MA_NOACTIVATEANDEAT)
+                    }
+                }
                 let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 if styleEx & DWORD(WS_EX_NOACTIVATE) != 0 {
                     return LRESULT(MA_NOACTIVATE)
@@ -1049,11 +1631,18 @@ final class Win32Window: Window {
                     }
                 }
                 window.endMoveSizeLoop()
+                window.repositionActiveAttachedModal()
+                window.reactivateAttachedModalAfterHostInteraction()
                 return 0
             case UINT(WM_SIZING):
                 window.beginResizeEventIfNeeded()
                 return 1
             case UINT(WM_SIZE):
+                let hostMinimized = wParam == SIZE_MINIMIZED || wParam == SIZE_MAXHIDE
+                window.setActiveAttachedHostPlacementSuspended(hostMinimized)
+                if hostMinimized {
+                    window.hideActiveModalWithHost()
+                }
                 if wParam == SIZE_MAXHIDE {
                     if window.visible {
                         window.visible = false
@@ -1085,18 +1674,33 @@ final class Win32Window: Window {
                         window.postWindowEvent(type: .resized)
                     }
                 }
+                if !hostMinimized {
+                    window.restoreActiveModalWithHost(restoreActivation: true)
+                }
+                if wParam != SIZE_MINIMIZED && wParam != SIZE_MAXHIDE {
+                    window.repositionActiveAttachedModal()
+                    window.repositionAttachedModal()
+                }
                 return 0
             case UINT(WM_MOVING):
                 window.invalidateMoveGeometryIfNeeded()
                 return 1
             case UINT(WM_MOVE):
+                // Reposition the active Attached child even inside a native
+                // move/size loop. WM_MOVE.lParam is the client origin for a top-
+                // level window, so outer-frame state is read with GetWindowRect.
+                window.repositionActiveAttachedModal()
                 if window.resizing == false {
-                    let x = Int(Int16(bitPattern: LOWORD(lParam)))
-                    let y = Int(Int16(bitPattern: HIWORD(lParam)))
-
-                    window.windowFrame.origin = CGPoint(x: x, y: y)
-                    window.postWindowEvent(type: .moved)
+                    var rect = RECT()
+                    if GetWindowRect(hWnd, &rect) {
+                        window.windowFrame = CGRect(x: Int(rect.left),
+                                                    y: Int(rect.top),
+                                                    width: Int(rect.right - rect.left),
+                                                    height: Int(rect.bottom - rect.top))
+                        window.postWindowEvent(type: .moved)
+                    }
                 }
+                window.repositionAttachedModal()
                 return 0
             case UINT(WM_DPICHANGED):
                 // xDPI and yDPI are identical for Windows apps.
@@ -1132,6 +1736,8 @@ final class Win32Window: Window {
                                                   height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
                     window.postWindowEvent(type: .resized)
                 }
+                window.repositionActiveAttachedModal()
+                window.repositionAttachedModal()
                 return 0    
             case UINT(WM_GETMINMAXINFO):
                 let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
@@ -1510,26 +2116,22 @@ final class Win32Window: Window {
                 }
                 break
             case UINT(WM_SETCURSOR):
-                if IsWindowEnabled(hWnd) == false &&
-                     (HIWORD(lParam) == WM_LBUTTONDOWN || HIWORD(lParam) == WM_RBUTTONDOWN) &&
-                     (LOWORD(lParam) & WORD(HTCLIENT | HTCAPTION)) != 0 {
-                    if let currentModal = window.modalEntries.first?.window, let modal = currentModal.hWnd {
-                        MessageBeep(UINT(MB_OK))
-                        SetForegroundWindow(hWnd)
-                        SetActiveWindow(modal)
-                        
-                        var fi = FLASHWINFO()
-                        fi.cbSize = UINT(MemoryLayout<FLASHWINFO>.size)
-                        fi.hwnd = modal
-                        fi.dwFlags = DWORD(FLASHW_ALL | FLASHW_TIMERNOFG)
-                        fi.uCount = 3
-                        fi.dwTimeout = 0
-                        FlashWindowEx(&fi)
-                        return 1
-                    }
+                // A disabled Independent host receives no normal button-down.
+                // WM_SETCURSOR still reports the triggering mouse message in
+                // HIWORD(lParam), which lets the host redirect attention to the
+                // active modal (including restoring an iconic modal).
+                if window.activeModalMode == .independent,
+                   IsWindowEnabled(hWnd) == false,
+                   Self.isPointerDownMessage(UINT(HIWORD(lParam))) {
+                    window.notifyActiveModal()
+                    return 1
                 }
                 break
             case UINT(WM_CLOSE):
+                if window.activeModalEntry != nil {
+                    window.notifyActiveModal()
+                    return 0
+                }
                 var close = true
                 if let answer = window.delegate?.shouldClose(window: window) {
                     close = answer
@@ -1541,7 +2143,17 @@ final class Win32Window: Window {
             case UINT(WM_COMMAND):
                 break
             case UINT(WM_SYSCOMMAND):
-                switch wParam {
+                let command = wParam & WPARAM(0xfff0)
+                if let mode = window.activeModalMode {
+                    if mode == .attached && command == WPARAM(SC_MINIMIZE) {
+                        window.hideActiveModalWithHost()
+                    }
+                    if mode == .independent || command == WPARAM(SC_CLOSE) {
+                        window.notifyActiveModal()
+                        return 0
+                    }
+                }
+                switch command {
                 case WPARAM(SC_CONTEXTHELP), // Help menu.
                      WPARAM(SC_KEYMENU),     // Alt key.
                      WPARAM(SC_HOTKEY):      // Hot key.

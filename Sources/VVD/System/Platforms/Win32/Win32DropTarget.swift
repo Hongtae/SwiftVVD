@@ -61,6 +61,12 @@ struct Win32DropTarget {
     private var lastKeyState: DWORD = DWORD(0)
     private var periodicUpdate: Bool = false
 
+    // OLE invokes IDropTarget directly instead of routing drag/drop through the
+    // target window procedure. Every enter/over/drop path must therefore check
+    // blocksModalContentInput so an enabled Attached host cannot accept content
+    // while its modal is active. The same check is harmless for a disabled
+    // Independent host and keeps the modality rule uniform.
+
     private static func filesFromDataObject(_ dataObject: inout IDataObject) -> [String] {
         var files: [String] = []
         var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
@@ -93,6 +99,11 @@ struct Win32DropTarget {
         self.files = [String]()
         self.dropAllowed = false
         self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+
+        if self.target?.blocksModalContentInput == true {
+            pdwEffect?.pointee = DWORD(DROPEFFECT_NONE)
+            return S_OK
+        }
 
         let delegate = self.target?.delegate
         if  delegate != nil {
@@ -138,6 +149,12 @@ struct Win32DropTarget {
     private mutating func dragOver(_ grfKeyState: DWORD,
                                    _ pt: POINTL,
                                    _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+
+        if self.target?.blocksModalContentInput == true {
+            self.dropAllowed = false
+            pdwEffect?.pointee = DWORD(DROPEFFECT_NONE)
+            return S_OK
+        }
 
         if let delegate = self.target?.delegate, self.dropAllowed {
             var pos: POINT = POINT(x: pt.x, y: pt.y)
@@ -191,6 +208,14 @@ struct Win32DropTarget {
                                _ grfKeyState: DWORD,
                                _ pt: POINTL,
                                _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+
+        if self.target?.blocksModalContentInput == true {
+            self.dropAllowed = false
+            self.files = []
+            self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+            pdwEffect?.pointee = DWORD(DROPEFFECT_NONE)
+            return S_OK
+        }
 
         if let delegate = self.target?.delegate, self.dropAllowed {
             var pos: POINT = POINT(x: pt.x, y: pt.y)
