@@ -17,35 +17,48 @@ public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier whe
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
-            AnimationModifierTransactionRule(
-                modifier: modifier._attribute,
-                parent: parentTransAttr
-            )
-        )
         var modifiedInputs = inputs
-        modifiedInputs.base.transaction = newTransAttr
+        _makeInputs(modifier: modifier, inputs: &modifiedInputs.base)
         return body(_Graph(), modifiedInputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        var modifiedInputs = inputs
+        _makeInputs(modifier: modifier, inputs: &modifiedInputs.base)
+        return body(_Graph(), modifiedInputs)
+    }
+
+    private static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
         guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
-        let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
-            AnimationModifierTransactionRule(
-                modifier: modifier._attribute,
-                parent: parentTransAttr
+
+        let observedValue = modifier[\.value]._attribute
+        let animation = modifier[\.animation]._attribute
+        let transactionSeed = transactionSeedAttribute(in: graph)
+        let valueTransactionSeed: Attribute<UInt32> = graph.makeStatefulRule(
+            ValueTransactionSeed(
+                value: observedValue,
+                transactionSeed: transactionSeed,
+                oldValue: observedValue.value
             )
         )
-        var modifiedInputs = inputs
-        modifiedInputs.base.transaction = newTransAttr
-        return body(_Graph(), modifiedInputs)
+        inputs.transaction = graph.makeRule(
+            ChildTransaction(
+                valueTransactionSeed: valueTransactionSeed,
+                animation: animation,
+                parent: inputs.transaction,
+                transactionSeed: transactionSeed
+            )
+        )
+    }
+
+    private static func transactionSeedAttribute(in graph: _AGGraph) -> Attribute<UInt32> {
+        if let ref = _AGGraphContext.current,
+           let host = ref.context as? GraphHost {
+            return host.data.transactionSeedAttribute
+        }
+        return graph.makeInput(value: UInt32.zero)
     }
 
     public typealias Body = Never
@@ -58,26 +71,57 @@ extension _AnimationModifier: Equatable {
 extension _AnimationModifier: Sendable {
 }
 
-private struct AnimationModifierTransactionRule<Observed: Equatable>: StatefulRule {
-    typealias Value = Transaction
+private struct ValueTransactionSeed<Observed: Equatable>: StatefulRule {
+    typealias Value = UInt32
 
-    var modifier: Attribute<_AnimationModifier<Observed>>
-    var parent: Attribute<Transaction>
-    var previousValue: Observed?
+    var value: Attribute<Observed>
+    var transactionSeed: Attribute<UInt32>
+    var oldValue: Observed?
 
     mutating func updateValue() {
-        let modifierValue = modifier.value
-        var transaction = parent.value
-        if let previousValue,
-           previousValue != modifierValue.value,
-           !transaction.disablesAnimations {
-            if modifierValue.animation == nil {
-                enqueueNoRegisteredAnimationFallback(transaction.animationCompletionObserver)
-            }
-            transaction.animation = modifierValue.animation
+        let newValue = value.value
+        let currentSeed = transactionSeed.value
+        if oldValue != newValue {
+            oldValue = newValue
+            _AGGraph.setStatefulOutput(currentSeed)
+        } else if let previousSeed = _AGGraph.currentStatefulOutput(UInt32.self) {
+            _AGGraph.setStatefulOutput(previousSeed)
+        } else {
+            // Initial evaluation must not activate the modifier in this pass.
+            _AGGraph.setStatefulOutput(currentSeed &- 1)
         }
-        previousValue = modifierValue.value
-        _AGGraph.setStatefulOutput(transaction)
+    }
+}
+
+private struct ChildTransaction: Rule {
+    typealias Value = Transaction
+
+    var valueTransactionSeed: Attribute<UInt32>
+    var animation: Attribute<Animation?>
+    var parent: Attribute<Transaction>
+    var transactionSeed: Attribute<UInt32>
+
+    func updateValue() -> Transaction {
+        var transaction = parent.value
+        guard !transaction.disablesAnimations else {
+            return transaction
+        }
+
+        let currentSeed = transactionSeed.value
+        guard valueTransactionSeed.value == currentSeed else {
+            return transaction
+        }
+
+        let animation = animation.value
+        if animation == nil {
+            enqueueNoRegisteredAnimationFallback(transaction.animationCompletionObserver)
+        }
+        transaction.animation = animation
+        precondition(
+            transactionSeed.value == currentSeed,
+            "Transaction seed changed while evaluating an animation modifier."
+        )
+        return transaction
     }
 }
 

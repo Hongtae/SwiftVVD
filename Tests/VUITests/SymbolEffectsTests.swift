@@ -121,6 +121,119 @@ final class SymbolEffectsTests: XCTestCase {
         XCTAssertEqual(lastQuarter.currentPoint, CGPoint(x: 100, y: 0))
     }
 
+    func testTrimmedMultiElementPathsKeepTrailingElements() throws {
+        var lines = Path()
+        lines.move(to: .zero)
+        lines.addLine(to: CGPoint(x: 10, y: 0))
+        lines.addLine(to: CGPoint(x: 20, y: 0))
+        lines.addLine(to: CGPoint(x: 30, y: 0))
+
+        var quadratics = Path()
+        quadratics.move(to: .zero)
+        for segment in 0..<3 {
+            let start = CGFloat(segment) * 10
+            quadratics.addQuadCurve(
+                to: CGPoint(x: start + 10, y: 0),
+                control: CGPoint(x: start + 5, y: 0)
+            )
+        }
+
+        var cubics = Path()
+        cubics.move(to: .zero)
+        for segment in 0..<3 {
+            let start = CGFloat(segment) * 10
+            cubics.addCurve(
+                to: CGPoint(x: start + 10, y: 0),
+                control1: CGPoint(x: start + 10.0 / 3.0, y: 0),
+                control2: CGPoint(x: start + 20.0 / 3.0, y: 0)
+            )
+        }
+
+        for source in [lines, quadratics, cubics] {
+            let trailingPath = source.trimmedPath(from: 0.25, to: 1)
+            let initialPoint = try XCTUnwrap(trailingPath.initialPoint)
+            let currentPoint = try XCTUnwrap(trailingPath.currentPoint)
+            XCTAssertEqual(
+                initialPoint.x,
+                7.5,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                currentPoint.x,
+                30,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                trailingPath.approximateLength,
+                22.5,
+                accuracy: 0.000_001
+            )
+
+            let boundaryPath = source.trimmedPath(from: 1.0 / 3.0, to: 1)
+            XCTAssertEqual(
+                try XCTUnwrap(boundaryPath.initialPoint).x,
+                10,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(boundaryPath.currentPoint).x,
+                30,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                boundaryPath.approximateLength,
+                20,
+                accuracy: 0.000_001
+            )
+
+            let middlePath = source.trimmedPath(from: 0.25, to: 0.75)
+            XCTAssertEqual(
+                try XCTUnwrap(middlePath.initialPoint).x,
+                7.5,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(middlePath.currentPoint).x,
+                22.5,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                middlePath.approximateLength,
+                15,
+                accuracy: 0.000_001
+            )
+        }
+    }
+
+    func testReversedDrawGuideTrimLengthIsMonotonic() throws {
+        let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "draw",
+            variableValue: nil,
+            bundle: nil
+        ))
+
+        for layer in symbol.layers {
+            guard let draw = layer.draw else { continue }
+            for guide in draw.guides {
+                var previousLength: CGFloat = 0
+                for step in 0...100 {
+                    let progress = CGFloat(step) / 100
+                    let path = guide.path.trimmedPath(
+                        from: 1 - progress,
+                        to: 1
+                    )
+                    let length = path.approximateLength
+                    XCTAssertGreaterThanOrEqual(
+                        length + 0.000_001,
+                        previousLength,
+                        "Reversed trim regressed at progress \(progress)."
+                    )
+                    previousLength = length
+                }
+            }
+        }
+    }
+
     func testSVGPathParserSupportsCompactRelativeAndArcCommands() throws {
         var compact = SVGPathDataParser("M12 2 14 8l6 .5-4.5 4 1.5 6L12 15l-5 3 1.5-6L4 8.5 10 8z")
         let compactPath = try XCTUnwrap(compact.parse())
@@ -956,6 +1069,139 @@ final class SymbolEffectsTests: XCTestCase {
             // ASSERTIONS symbolEffectDrawOptionsRuntimeObserved
             // ASSERTIONS symbolEffectDrawBackendOptionsObserved
             // ASSERTIONS symbolEffectDrawDisassemblyObserved
+        }
+    }
+
+    func testDrawTransitionPreservesWillAppearUntilSymbolResourceResolves() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let resolved = graph.makeInput(
+                value: Optional<GraphicsContext.ResolvedImage>.none
+            )
+            var effects = EnvironmentValues()
+            effects.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.individually.configuration,
+                    options: .default,
+                    trigger: .transition(.willAppear)
+                ),
+                for: 41
+            )
+            let environment = graph.makeInput(value: effects)
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: time
+                )
+            )
+
+            XCTAssertNil(child.value.symbolDrawProgresses)
+            effects.symbolEffects[0].effect.trigger = .transition(.identity)
+            environment.setValue(effects)
+            XCTAssertNil(child.value.symbolDrawProgresses)
+
+            resolved.setValue(GraphicsContext.ResolvedImage(symbol: symbol))
+            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+
+            time.setValue(Time(
+                seconds: symbol.drawMotionGroupDurations.reduce(0, +) + 0.001
+            ))
+            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertFalse(child.value.isSymbolEffectActive)
+
+            // ASSERTIONS symbolEffectDrawTransitionRuntimeObserved
+        }
+    }
+
+    func testDrawTransitionCompletionWaitsForRendererOwnedDuration() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            var effects = EnvironmentValues()
+            effects.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.individually.configuration,
+                    options: .default,
+                    trigger: .transition(.identity)
+                ),
+                for: 42
+            )
+            let effectSource = graph.makeInput(value: effects)
+            let environment: Attribute<EnvironmentValues> = graph.makeRule {
+                effectSource.value
+            }
+            let time = graph.makeInput(value: Time(seconds: 1))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: time
+                )
+            )
+            XCTAssertNil(child.value.symbolDrawProgresses)
+
+            var completions: [String] = []
+            var removal = Transaction(animation: .linear(duration: 0.01))
+            removal.addAnimationCompletion(
+                criteria: .removed,
+                tracksStandalonePending: false
+            ) {
+                completions.append("removed")
+            }
+            removal.addAnimationCompletion(
+                criteria: .logicallyComplete,
+                tracksStandalonePending: false
+            ) {
+                completions.append("logical")
+            }
+            effects.symbolEffects[0].effect.trigger = .transition(.didDisappear)
+            effectSource.setValue(effects, transaction: removal)
+            // A frame-time invalidation can overwrite the consumer node's own
+            // transaction before it evaluates. The effect environment must
+            // remain the authoritative removal-transaction source.
+            let drawStart = 1.001
+            time.setValue(Time(seconds: drawStart))
+
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+            finalizeAnimationCompletions(
+                in: removal,
+                animation: removal.effectiveAnimation
+            )
+            graph.drainActionOutbox()
+            XCTAssertEqual(completions, [])
+
+            time.setValue(Time(seconds: drawStart + 0.02))
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+            graph.drainActionOutbox()
+            XCTAssertEqual(completions, [])
+
+            time.setValue(Time(
+                seconds: drawStart +
+                    symbol.drawMotionGroupDurations.reduce(0, +) + 0.001
+            ))
+            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
+            XCTAssertFalse(child.value.isSymbolEffectActive)
+            graph.drainActionOutbox()
+            XCTAssertEqual(completions, ["removed", "logical"])
+
+            // ASSERTIONS symbolEffectDrawTransitionRuntimeObserved
         }
     }
 

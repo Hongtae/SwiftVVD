@@ -623,6 +623,7 @@ public struct Path: Equatable {
                     }
                 case .line(let p1):
                     if let p0 = currentPoint {
+                        if end <= progress { break elementLoop }
                         currentPoint = p1
                         let d = (p1 - p0).magnitude
                         if start >= progress + d {
@@ -633,6 +634,8 @@ public struct Path: Equatable {
                         let (t0, t1) = pathElementFraction(d, progress)
                         if t0 > 0 {
                             path.move(to: lerp(p0, p1, t0))
+                        } else if path.currentPoint != p0 {
+                            path.move(to: p0)
                         }
                         if t1 < 1 {
                             path.addLine(to: lerp(p0, p1, t1))
@@ -640,65 +643,89 @@ public struct Path: Equatable {
                         } else {
                             path.addLine(to: p1)
                         }
-                        progress += (t1 - t0) * d
+                        // `progress` tracks the source path, not the emitted
+                        // portion of this element. The next element therefore
+                        // starts after the full source segment even when this
+                        // one was trimmed at its leading edge.
+                        progress += d
                     }
                 case .quadCurve(let p2, let p1):
                     if let p0 = currentPoint {
+                        if end <= progress { break elementLoop }
                         currentPoint = p2
                         var curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
-                        var d = curve.approximateLength(subdivide: quadraticBezierSubdivision)
-                        if start >= progress + d {
-                            progress += d
+                        let sourceLength = curve.approximateLength(
+                            subdivide: quadraticBezierSubdivision
+                        )
+                        if start >= progress + sourceLength {
+                            progress += sourceLength
                             continue
                         }
 
-                        var (t0, t1) = pathElementFraction(d, progress)
+                        let (t0, originalT1) = pathElementFraction(
+                            sourceLength,
+                            progress
+                        )
+                        var t1 = originalT1
+                        let endsWithinElement = t1 < 1
                         if t0 > 0 {
                             path.move(to: curve.interpolate(t0))
                             curve = curve.split(t0).1
-                            // rescale curve length
-                            let tmp = (t1 - t0) * d
-                            d = d - d * t0
-                            t1 = tmp / d
-                            t0 = 0
+                            t1 = clamp(
+                                (t1 - t0) / (1 - t0),
+                                min: 0,
+                                max: 1
+                            )
+                        } else if path.currentPoint != p0 {
+                            path.move(to: p0)
                         }
-                        if t1 < 1 {
+                        if endsWithinElement {
                             curve = curve.split(t1).0
                             path.addQuadCurve(to: curve.p2, control: curve.p1)
                             break elementLoop
                         } else {
                             path.addQuadCurve(to: curve.p2, control: curve.p1)
                         }
-                        progress += (t1 - t0) * d
+                        progress += sourceLength
                     }
                 case .curve(let p3, let p1, let p2):
                     if let p0 = currentPoint {
+                        if end <= progress { break elementLoop }
                         currentPoint = p3
                         var curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
-                        var d = curve.approximateLength(subdivide: cubicBezierSubdivision)
-                        if start >= progress + d {
-                            progress += d
+                        let sourceLength = curve.approximateLength(
+                            subdivide: cubicBezierSubdivision
+                        )
+                        if start >= progress + sourceLength {
+                            progress += sourceLength
                             continue
                         }
 
-                        var (t0, t1) = pathElementFraction(d, progress)
+                        let (t0, originalT1) = pathElementFraction(
+                            sourceLength,
+                            progress
+                        )
+                        var t1 = originalT1
+                        let endsWithinElement = t1 < 1
                         if t0 > 0 {
                             path.move(to: curve.interpolate(t0))
                             curve = curve.split(t0).1
-                            // rescale curve length
-                            let tmp = (t1 - t0) * d
-                            d = d - d * t0
-                            t1 = tmp / d
-                            t0 = 0
+                            t1 = clamp(
+                                (t1 - t0) / (1 - t0),
+                                min: 0,
+                                max: 1
+                            )
+                        } else if path.currentPoint != p0 {
+                            path.move(to: p0)
                         }
-                        if t1 < 1 {
+                        if endsWithinElement {
                             curve = curve.split(t1).0
                             path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
                             break elementLoop
                         } else {
                             path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
                         }
-                        progress += (t1 - t0) * d
+                        progress += sourceLength
                     }
                 case .closeSubpath:
                     currentPoint = startPoint

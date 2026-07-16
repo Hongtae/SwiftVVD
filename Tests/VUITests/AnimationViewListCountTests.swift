@@ -403,6 +403,45 @@ final class AnimationViewListCountTests: XCTestCase {
         }
     }
 
+    func testAnimationModifierAnimationExpiresAfterTransactionSeedAdvances() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let content = graph.makeInput(
+                value: TransactionReportingAnimationContent(equalityKey: 1, width: 10)
+            )
+            let outputs = _AnimationModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                TransactionReportingAnimationContent._makeView(
+                    view: _GraphValue(_attribute: content),
+                    inputs: inputs
+                )
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
+
+            assertLayout(layout, width: 10, height: 800)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            assertLayout(layout, width: 10, height: 725)
+
+            host.data.incrementTransactionSeed()
+            content.setValue(
+                TransactionReportingAnimationContent(equalityKey: 1, width: 20)
+            )
+            assertLayout(layout, width: 20, height: 800)
+        }
+    }
+
     func testNestedAnimationModifiersKeepContentAdjacentAnimationAsFinalWriter() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -583,6 +622,51 @@ final class AnimationViewListCountTests: XCTestCase {
                 _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
             )
             XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 725)
+        }
+    }
+
+    func testAnimationModifierListAnimationExpiresAfterTransactionSeedAdvances() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            var parent = Transaction(animation: .linear(duration: 1.0))
+            parent[AnimationViewTransactionMarkerKey.self] = 700
+            let modifier = graph.makeInput(
+                value: _AnimationModifier(animation: .linear(duration: 0.25), value: 1)
+            )
+            let contentWidth = graph.makeInput(value: 10)
+            let outputs = _AnimationModifier<Int>._makeViewList(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: makeViewListInputs(graph: graph, transaction: parent)
+            ) { _, inputs in
+                let transaction = inputs.base.transaction
+                let list: Attribute<any ViewList> = graph.makeRule {
+                    let currentTransaction = transaction.value
+                    let duration = currentTransaction.animation?.box.duration ?? -1
+                    let marker = currentTransaction[AnimationViewTransactionMarkerKey.self]
+                    return TransactionReportingAnimationViewList(
+                        countValue: contentWidth.value + marker + Int(duration * 100)
+                    )
+                }
+                return _ViewListOutputs(
+                    views: .dynamicList(list, nil),
+                    nextImplicitID: 0,
+                    staticCount: nil
+                )
+            }
+            let list = try XCTUnwrap(dynamicListAttribute(from: outputs))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 810)
+
+            modifier.setValue(
+                _AnimationModifier(animation: .linear(duration: 0.25), value: 2)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 735)
+
+            host.data.incrementTransactionSeed()
+            contentWidth.setValue(20)
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 820)
         }
     }
 

@@ -265,6 +265,9 @@ struct ImageViewChild: StatefulRule {
         var layerBehavior: DrawLayerBehavior
         var isReversed: Bool
         var usesOpacityFallback: Bool
+        // Symbol draw timing is renderer-owned, so these tokens keep transition
+        // completion tied to the draw presentation instead of the outer curve.
+        var completionTokens: [AnimationCompletionToken]
     }
 
     struct DrawPresentation {
@@ -281,6 +284,9 @@ struct ImageViewChild: StatefulRule {
         var activePulse: ActivePulse?
         var activeVariableColor: ActiveVariableColor?
         var activeDraw: ActiveDraw?
+        // Resource publication may arrive after willAppear has already advanced
+        // to identity. Preserve the hidden draw boundary across that gap.
+        fileprivate var pendingDrawTransitionStart: DrawRequest?
     }
 
     struct Value {
@@ -305,7 +311,18 @@ struct ImageViewChild: StatefulRule {
     mutating func updateValue() {
         let image = resolvedImage.value
         let now = time.value
-        let nextEffects = image?.symbol == nil ? [] : environment.value.symbolEffects
+        let environmentEffects = environment.value.symbolEffects
+        // Transition phase changes carry their transaction through the effect
+        // environment node. The inherited input transaction predates retained
+        // removal and therefore does not contain its completion listeners.
+        let transaction = _AGGraph.current?.transaction(for: environment.identifier) ??
+            transaction.value
+        let pendingDrawTransitionStart = updatePendingDrawTransitionStart(
+            effects: environmentEffects,
+            hasResolvedImage: image != nil,
+            hasResolvedSymbol: image?.symbol != nil
+        )
+        let nextEffects = image?.symbol == nil ? [] : environmentEffects
         let effectsChanged = !symbolEffectListsEqual(phase.effects, nextEffects)
         let previousVariablePresentation = variableColorPresentation(at: now)
         let previousDrawPresentation = drawPresentation(at: now)
@@ -378,16 +395,42 @@ struct ImageViewChild: StatefulRule {
                 }
             }
             if let symbol = image?.symbol {
-                phase.activeDraw = updatedDrawAnimation(
-                    previous: phase.effects,
-                    next: nextEffects,
-                    current: phase.activeDraw,
-                    presentation: previousDrawPresentation,
-                    symbol: symbol,
-                    hasResolvedEffects: phase.hasResolvedEffects,
-                    at: now
-                )
+                let nextDrawRequest = drawRequest(in: nextEffects)
+                if let pendingDrawTransitionStart,
+                   let nextDrawRequest,
+                   pendingDrawTransitionStart.matchesTransition(nextDrawRequest) {
+                    finishActiveDrawCompletionTokens()
+                    let shouldAnimateFromHidden = nextDrawRequest.targetProgress >= 1
+                    phase.activeDraw = drawAnimation(
+                        for: nextDrawRequest,
+                        symbol: symbol,
+                        initialProgresses: shouldAnimateFromHidden
+                            ? [Double](
+                                repeating: 0,
+                                count: max(symbol.drawMotionGroupDurations.count, 1)
+                            )
+                            : nil,
+                        transaction: transaction,
+                        at: now,
+                        immediate: !shouldAnimateFromHidden
+                    )
+                } else {
+                    if drawRequest(in: phase.effects) != nextDrawRequest {
+                        finishActiveDrawCompletionTokens()
+                    }
+                    phase.activeDraw = updatedDrawAnimation(
+                        previous: phase.effects,
+                        next: nextEffects,
+                        current: phase.activeDraw,
+                        presentation: previousDrawPresentation,
+                        symbol: symbol,
+                        hasResolvedEffects: phase.hasResolvedEffects,
+                        transaction: transaction,
+                        at: now
+                    )
+                }
             } else {
+                finishActiveDrawCompletionTokens()
                 phase.activeDraw = nil
             }
             phase.effects = nextEffects
@@ -395,16 +438,17 @@ struct ImageViewChild: StatefulRule {
         }
         phase.hasResolvedEffects = true
 
-        let transaction = transaction.value
         if image?.symbol == nil || transaction.disablesAnimations {
             phase.activePulse = nil
             phase.activeVariableColor = nil
+            finishActiveDrawCompletionTokens()
             if let symbol = image?.symbol,
                let request = drawRequest(in: nextEffects) {
                 phase.activeDraw = drawAnimation(
                     for: request,
                     symbol: symbol,
                     initialProgresses: nil,
+                    transaction: transaction,
                     at: now,
                     immediate: true
                 )
@@ -448,6 +492,39 @@ struct ImageViewChild: StatefulRule {
             symbolDrawsReversed: draw.isReversed,
             isSymbolEffectActive: isActive
         ))
+    }
+
+    private mutating func updatePendingDrawTransitionStart(
+        effects: [IdentifiedSymbolEffect],
+        hasResolvedImage: Bool,
+        hasResolvedSymbol: Bool
+    ) -> DrawRequest? {
+        if hasResolvedImage {
+            defer { phase.pendingDrawTransitionStart = nil }
+            return hasResolvedSymbol ? phase.pendingDrawTransitionStart : nil
+        }
+
+        guard let request = drawRequest(in: effects), request.isTransition else {
+            phase.pendingDrawTransitionStart = nil
+            return nil
+        }
+        if request.targetProgress <= 0 {
+            phase.pendingDrawTransitionStart = request
+        } else if phase.pendingDrawTransitionStart?.matchesTransition(request) != true {
+            phase.pendingDrawTransitionStart = nil
+        }
+        return nil
+    }
+
+    private mutating func finishActiveDrawCompletionTokens() {
+        guard var active = phase.activeDraw,
+              !active.completionTokens.isEmpty else {
+            return
+        }
+        let tokens = active.completionTokens
+        active.completionTokens.removeAll()
+        phase.activeDraw = active
+        enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
     }
 
     private mutating func pulsePresentation(
@@ -638,7 +715,7 @@ struct ImageViewChild: StatefulRule {
     }
 
     private mutating func drawPresentation(at time: Time) -> DrawPresentation {
-        guard let active = phase.activeDraw else {
+        guard var active = phase.activeDraw else {
             return DrawPresentation()
         }
         let elapsed = max(time.seconds - active.startTime.seconds, 0) *
@@ -723,9 +800,15 @@ struct ImageViewChild: StatefulRule {
             }
         }
 
-        if isComplete, active.targetProgress >= 1 {
-            phase.activeDraw = nil
-            return DrawPresentation()
+        if isComplete {
+            let tokens = active.completionTokens
+            active.completionTokens.removeAll()
+            enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
+            if active.targetProgress >= 1 {
+                phase.activeDraw = nil
+                return DrawPresentation()
+            }
+            phase.activeDraw = active
         }
         if active.usesOpacityFallback {
             return DrawPresentation(
@@ -744,13 +827,21 @@ struct ImageViewChild: StatefulRule {
     }
 }
 
-private struct DrawRequest: Equatable {
+fileprivate struct DrawRequest: Equatable {
     var id: Int
     var targetProgress: Double
     var effectiveSpeed: Double
     var layerBehavior: DrawLayerBehavior
     var isReversed: Bool
     var isTransition: Bool
+
+    func matchesTransition(_ other: DrawRequest) -> Bool {
+        id == other.id &&
+            effectiveSpeed == other.effectiveSpeed &&
+            layerBehavior == other.layerBehavior &&
+            isReversed == other.isReversed &&
+            isTransition && other.isTransition
+    }
 }
 
 private func drawRequest(
@@ -803,6 +894,7 @@ private func updatedDrawAnimation(
     presentation: ImageViewChild.DrawPresentation,
     symbol: ResolvedVectorSymbol,
     hasResolvedEffects: Bool,
+    transaction: Transaction,
     at time: Time
 ) -> ImageViewChild.ActiveDraw? {
     let previousRequest = drawRequest(in: previous)
@@ -816,6 +908,7 @@ private func updatedDrawAnimation(
             for: nextRequest,
             symbol: symbol,
             initialProgresses: initialProgresses,
+            transaction: transaction,
             at: time,
             immediate: nextRequest.isTransition && !hasResolvedEffects
         )
@@ -826,6 +919,7 @@ private func updatedDrawAnimation(
             for: previousRequest,
             symbol: symbol,
             initialProgresses: initialProgresses,
+            transaction: transaction,
             at: time
         )
     }
@@ -836,6 +930,7 @@ private func drawAnimation(
     for request: DrawRequest,
     symbol: ResolvedVectorSymbol,
     initialProgresses: [Double]?,
+    transaction: Transaction,
     at time: Time,
     immediate: Bool = false
 ) -> ImageViewChild.ActiveDraw {
@@ -847,6 +942,13 @@ private func drawAnimation(
         : initialProgresses.flatMap {
             $0.count == durations.count ? $0 : nil
         } ?? [Double](repeating: 1, count: durations.count)
+    let hasMotion = zip(initial, durations).contains { initial, duration in
+        duration * abs(request.targetProgress - initial) > .ulpOfOne
+    }
+    let completionTokens = hasMotion
+        ? drawCompletionTokens(for: transaction)
+        : []
+    completionTokens.forEach { $0.start() }
     return ImageViewChild.ActiveDraw(
         id: request.id,
         startTime: time,
@@ -856,8 +958,32 @@ private func drawAnimation(
         effectiveSpeed: request.effectiveSpeed,
         layerBehavior: request.layerBehavior,
         isReversed: request.isReversed,
-        usesOpacityFallback: usesOpacityFallback
+        usesOpacityFallback: usesOpacityFallback,
+        completionTokens: completionTokens
     )
+}
+
+private func drawCompletionTokens(
+    for transaction: Transaction
+) -> [AnimationCompletionToken] {
+    var tokens: [AnimationCompletionToken] = []
+    if let listener = transaction.animationListener {
+        tokens.append(AnimationCompletionToken(listener: listener, criteria: .removed))
+    }
+    if let listener = transaction.animationLogicalListener {
+        tokens.append(
+            AnimationCompletionToken(listener: listener, criteria: .logicallyComplete)
+        )
+    }
+    return tokens
+}
+
+private func finishDrawCompletionTokens(
+    _ tokens: [AnimationCompletionToken]
+) -> [() -> Void] {
+    let removed = tokens.filter { $0.criteria == .removed }
+    let remaining = tokens.filter { $0.criteria != .removed }
+    return (removed + remaining).flatMap { $0.finish() }
 }
 
 private func drawEase(_ value: Double) -> Double {
