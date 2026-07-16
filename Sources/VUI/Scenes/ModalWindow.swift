@@ -304,12 +304,26 @@ final class ModalPresentationContext: @unchecked Sendable {
                 }
             }
         } else {
-            if let parentSize = parentController?.cachedContentSize {
-                windowOffset = CGPoint(
-                    x: (parentSize.width - fittedSize.width) * 0.5,
-                    y: (parentSize.height - fittedSize.height) * 0.5)
-            }
+            updateOverlayPlacement(controller: controller)
         }
+    }
+
+    @discardableResult
+    func updateOverlayPlacement(controller: WindowController) -> Bool {
+        guard controller.window == nil,
+              windowSize != .zero,
+              let parentSize = parentController?.cachedContentSize else {
+            return false
+        }
+        // Attached modals remain centered while fitting and keep their top
+        // edge reachable when their fitted height exceeds the parent.
+        let offset = CGPoint(
+            x: (parentSize.width - windowSize.width) * 0.5,
+            y: max((parentSize.height - windowSize.height) * 0.5, 0)
+        )
+        guard offset != windowOffset else { return false }
+        windowOffset = offset
+        return true
     }
 
     func prepareForInput(controller: WindowController) {
@@ -657,6 +671,9 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     override func updateView(tick: UInt64, delta: Double, date: Date,
                              contentSize: CGSize, redraw: inout Bool,
                              _ withGC: WindowContext.WithGraphicsContext) {
+        if presentationContext.updateOverlayPlacement(controller: self) {
+            redraw = true
+        }
         super.updateView(tick: tick, delta: delta, date: date,
                          contentSize: contentSize, redraw: &redraw, withGC)
         if presentationContext.updateAnimation(delta: delta) {

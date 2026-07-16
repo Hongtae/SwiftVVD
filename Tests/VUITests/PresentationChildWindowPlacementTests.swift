@@ -4,6 +4,102 @@ import XCTest
 
 final class PresentationChildWindowPlacementTests: XCTestCase {
     @MainActor
+    func testOverlayModalRecentersAfterParentResizeAndTopAlignsWhenTooTall() throws {
+        let initialHostSize = CGSize(width: 640, height: 420)
+        let host = PresentationPlacementHostController(contentSize: initialHostSize)
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Overlay modal placement should not request graphics resources.")
+        }
+
+        var redraw = false
+        host.updateView(
+            tick: 0,
+            delta: 0,
+            date: host.date,
+            contentSize: initialHostSize,
+            redraw: &redraw,
+            withGC
+        )
+
+        let content = AnyView(Color.clear.frame(width: 300, height: 200))
+        let modal = makeOverlayModal(
+            parent: host,
+            content: content,
+            sceneIndex: 0
+        )
+        host.addModal(
+            child: modal,
+            session: sheetSession(content: content, namespaceID: 91_000)
+        )
+
+        redraw = false
+        host.updateView(
+            tick: 1,
+            delta: 1,
+            date: host.date.addingTimeInterval(1),
+            contentSize: initialHostSize,
+            redraw: &redraw,
+            withGC
+        )
+        redraw = false
+        host.updateView(
+            tick: 2,
+            delta: 1.0 / 60.0,
+            date: host.date.addingTimeInterval(1.0 + 1.0 / 60.0),
+            contentSize: initialHostSize,
+            redraw: &redraw,
+            withGC
+        )
+
+        let modalSize = modal.cachedContentSize
+        XCTAssertGreaterThan(modalSize.width, 0)
+        XCTAssertGreaterThan(modalSize.height, 0)
+        assertOverlayOrigin(
+            modal.presentationPointInParent(forLocalPoint: .zero),
+            equals: CGPoint(
+                x: (initialHostSize.width - modalSize.width) * 0.5,
+                y: (initialHostSize.height - modalSize.height) * 0.5
+            )
+        )
+
+        let expandedHostSize = CGSize(width: 900, height: 700)
+        redraw = false
+        host.updateView(
+            tick: 3,
+            delta: 1.0 / 60.0,
+            date: host.date.addingTimeInterval(1.0 + 2.0 / 60.0),
+            contentSize: expandedHostSize,
+            redraw: &redraw,
+            withGC
+        )
+        assertOverlayOrigin(
+            modal.presentationPointInParent(forLocalPoint: .zero),
+            equals: CGPoint(
+                x: (expandedHostSize.width - modalSize.width) * 0.5,
+                y: (expandedHostSize.height - modalSize.height) * 0.5
+            )
+        )
+
+        let shortHostSize = CGSize(
+            width: modalSize.width + 80,
+            height: max(modalSize.height - 40, 1)
+        )
+        redraw = false
+        host.updateView(
+            tick: 4,
+            delta: 1.0 / 60.0,
+            date: host.date.addingTimeInterval(1.0 + 3.0 / 60.0),
+            contentSize: shortHostSize,
+            redraw: &redraw,
+            withGC
+        )
+        assertOverlayOrigin(
+            modal.presentationPointInParent(forLocalPoint: .zero),
+            equals: CGPoint(x: 40, y: 0)
+        )
+    }
+
+    @MainActor
     func testOverlayPopupInsideOverlayModalFitsNearestPlatformHostSurface() throws {
         let hostSize = CGSize(width: 640, height: 420)
         let host = PresentationPlacementHostController(contentSize: hostSize)
@@ -280,6 +376,14 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
             activeInspector: nil,
             usesPlatformWindow: false
         ))
+    }
+
+    private func assertOverlayOrigin(_ actual: CGPoint,
+                                     equals expected: CGPoint,
+                                     file: StaticString = #filePath,
+                                     line: UInt = #line) {
+        XCTAssertEqual(actual.x, expected.x, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actual.y, expected.y, accuracy: 0.001, file: file, line: line)
     }
 }
 
