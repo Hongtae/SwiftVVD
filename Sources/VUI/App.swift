@@ -86,7 +86,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         let graph = AppGraph(app: app)
         let wc = AppWindowsController()
         wc.syncWindowControllers(sceneListAttr: graph.sceneListAttr,
-                                 runtimeConfigAttr: graph.runtimeWindowConfigAttr,
+                                 configurationOverrideAttr: graph.windowConfigurationOverrideAttr,
                                  in: graph.graph)
         self.appGraph = graph
         self.windowsController = wc

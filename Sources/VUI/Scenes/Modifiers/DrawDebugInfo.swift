@@ -32,12 +32,15 @@ public struct _DrawDebug: _SceneModifier {
             fatalError("\(Self.self)._makeScene called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
-        let configAttr: Attribute<_RuntimeWindowConfig> = graph.makeRule {
-            var c = _RuntimeWindowConfig()
-            c.drawDebugInfo = modifier._attribute.value.selectedValues
-            return c
+        let configAttr: Attribute<WindowConfiguration.Override> = graph.makeRule {
+            WindowConfiguration.Override(
+                drawDebugInfo: modifier._attribute.value.selectedValues
+            )
         }
-        outputs.preferences.append(_RuntimeWindowConfig.Key.self, node: configAttr.identifier)
+        outputs.preferences.append(
+            WindowConfiguration.Override.Key.self,
+            node: configAttr.identifier
+        )
         return outputs
     }
 }

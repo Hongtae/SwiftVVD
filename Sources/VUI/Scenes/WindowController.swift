@@ -28,6 +28,12 @@ class WindowController: WindowDelegate,
     typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
     typealias AttachWindowResolver = (AttachWindow?) -> Void
 
+    // Values inherited by presentation and modal windows from their parent.
+    // The complete carrier uses the same path for initial attachment and later updates.
+    struct InheritedValues {
+        var configurationOverride = WindowConfiguration.Override()
+    }
+
     // MARK: - Core State
 
     var windowContext: WindowContext?
@@ -370,7 +376,14 @@ class WindowController: WindowDelegate,
     var title: String { _titleString }
     var style: PlatformWindowStyle { _style }
 
-    var sceneConfiguration: SceneConfiguration = SceneConfiguration()
+    private var _sceneConfiguration = WindowSceneConfiguration()
+    var sceneConfiguration: WindowSceneConfiguration {
+        get { windowContext?.sceneConfiguration ?? _sceneConfiguration }
+        set {
+            _sceneConfiguration = newValue
+            windowContext?.sceneConfiguration = newValue
+        }
+    }
     var filterGestureTypes: Bool = true
     var allowedGestureTypes: _PrimitiveGestureTypes = .all
     var endSessionOnWindowClosed: Bool { true }
@@ -381,13 +394,37 @@ class WindowController: WindowDelegate,
 
     var window: (any PlatformWindow)? { windowContext?.window }
 
-    private var _config: WindowContext.Configuration = WindowContext.Configuration()
-    var config: WindowContext.Configuration {
-        get { windowContext?.config ?? _config }
+    private var _baseConfiguration = WindowConfiguration()
+    var baseConfiguration: WindowConfiguration {
+        get { windowContext?.baseConfiguration ?? _baseConfiguration }
         set {
-            _config = newValue
-            windowContext?.config = newValue
+            _baseConfiguration = newValue
+            windowContext?.baseConfiguration = newValue
         }
+    }
+
+    private var _inheritedValues = InheritedValues()
+    var inheritedValues: InheritedValues {
+        get { _inheritedValues }
+        set {
+            _inheritedValues = newValue
+            windowContext?.configurationOverride = newValue.configurationOverride
+            propagateInheritedValuesToChildren(newValue)
+        }
+    }
+
+    var configurationOverride: WindowConfiguration.Override {
+        get { inheritedValues.configurationOverride }
+        set {
+            var values = inheritedValues
+            values.configurationOverride = newValue
+            inheritedValues = values
+        }
+    }
+
+    var configuration: WindowConfiguration {
+        windowContext?.configuration
+            ?? _baseConfiguration.applying(_inheritedValues.configurationOverride)
     }
 
     // MARK: - Input Queue
@@ -572,8 +609,12 @@ class WindowController: WindowDelegate,
     func makeWindow() -> (any PlatformWindow)? {
         let isNew = windowContext?.window == nil
         if windowContext == nil {
-            let ctx = WindowContext(sceneResources: self.sceneResources)
-            ctx.config = self._config
+            let ctx = WindowContext(
+                sceneResources: self.sceneResources,
+                sceneConfiguration: self._sceneConfiguration,
+                baseConfiguration: self._baseConfiguration,
+                configurationOverride: self._inheritedValues.configurationOverride
+            )
             ctx.updateFrame = { [weak self] tick, delta, date, size, drawFrame, withGC in
                 self?.updateFrame(tick: tick, delta: delta, date: date,
                                   contentSize: size, shouldDrawFrame: drawFrame,
@@ -653,7 +694,7 @@ class WindowController: WindowDelegate,
                         contentSize: contentSize, redraw: &redraw, withGC)
 
         if redraw || shouldDrawFrame {
-            let clearColor = config.backgroundColor
+            let clearColor = configuration.backgroundColor
             withGC(true) { context in
                 context.clear(with: clearColor)
                 self.drawFrame(offset: .zero, context)
@@ -1042,6 +1083,23 @@ class WindowController: WindowDelegate,
     func forEachPresentationChild(_ body: (PresentationChildWindowController) -> Void) {
         self.presentationChildren.withLock { $0.map(\.controller) }
             .forEach(body)
+    }
+
+    private func propagateInheritedValuesToChildren(
+        _ inheritedValues: InheritedValues
+    ) {
+        let presentationChildren = self.presentationChildren.withLock {
+            $0.map(\.controller)
+        }
+        let modalChildren = self.modalChildren.withLock {
+            $0.map(\.controller)
+        }
+        for child in presentationChildren {
+            child.inheritedValues = inheritedValues
+        }
+        for child in modalChildren {
+            child.inheritedValues = inheritedValues
+        }
     }
 
     func onViewLoaded() {}
@@ -1873,12 +1931,12 @@ class WindowController: WindowDelegate,
 
     // Fills in per-frame render parameters.
     // contentsScale: from sceneResources (updated by WindowContext on window events).
-    // opaqueBackground: true if config background has no transparency.
+    // opaqueBackground: true if the resolved background has no transparency.
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
         context.contentsScale = sceneResources.contentScaleFactor
         // backgroundColor.opacity is 0.0-1.0. Treat >= 1.0 as fully opaque.
         // The backend color alpha is stored as a normalized Scalar.
-        context.opaqueBackground = (config.backgroundColor.a >= 1.0)
+        context.opaqueBackground = (configuration.backgroundColor.a >= 1.0)
     }
 
     // Ensures body runs on the main render thread.
@@ -2041,6 +2099,7 @@ class WindowController: WindowDelegate,
     func addPresentationChild(child: PresentationChildWindowController,
                               attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
+        child.inheritedValues = inheritedValues
         let canUsePlatformWindow = child.prefersPlatformWindowPresentation &&
             attachWindow != nil &&
             runOnMainQueueSync { self.window != nil }
@@ -2150,6 +2209,7 @@ class WindowController: WindowDelegate,
                   contentAttr: Attribute<AnyView>? = nil,
                   attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
+        child.inheritedValues = inheritedValues
         var entry = ModalChildEntry(controller: child, session: session)
         entry.contentAttr = contentAttr
         entry.attachWindow = attachWindow

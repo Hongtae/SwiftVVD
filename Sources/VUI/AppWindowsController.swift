@@ -47,11 +47,11 @@ class AppWindowsController: @unchecked Sendable {
     }
 
     // Synchronizes the controller registries against the current SceneList,
-    // and applies runtime window config to all live controllers.
+    // and applies runtime window configuration overrides to all live controllers.
     // Must be called from outside an AG context; internally activates `graph`
     // to pull-evaluate the AG nodes.
     func syncWindowControllers(sceneListAttr: Attribute<[SceneList.Item]>?,
-                               runtimeConfigAttr: Attribute<_RuntimeWindowConfig>? = nil,
+                               configurationOverrideAttr: Attribute<WindowConfiguration.Override>? = nil,
                                in graph: _AGGraph) {
         guard let attr = sceneListAttr else { return }
 
@@ -94,15 +94,10 @@ class AppWindowsController: @unchecked Sendable {
                 settingsWindowController = nil
             }
 
-            // Apply runtime window config to all live controllers.
-            if let rc = runtimeConfigAttr?.value {
-                for wc in allWindowControllers {
-                    var cfg = wc.config
-                    if let r = rc.activeFrameRate   { cfg.activeFrameInterval   = 1.0 / r }
-                    if let r = rc.inactiveFrameRate { cfg.inactiveFrameInterval = 1.0 / r }
-                    cfg.drawDebugInfo = rc.drawDebugInfo
-                    wc.config = cfg
-                }
+            // An absent preference removes any override left by a previous sync.
+            let configurationOverride = configurationOverrideAttr?.value ?? .init()
+            for windowController in allWindowControllers {
+                windowController.configurationOverride = configurationOverride
             }
         }
     }

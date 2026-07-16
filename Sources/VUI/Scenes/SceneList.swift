@@ -69,7 +69,7 @@ enum SceneList {
         var kind: Kind
 
         // Creation-time window hints from scene modifiers.
-        var sceneConfiguration: SceneConfiguration = SceneConfiguration()
+        var sceneConfiguration = WindowSceneConfiguration()
 
         // Factory called once by AppWindowsController when it decides to open this window.
         // Captured at _makeScene time. Holds AG graph cursors for the content view.

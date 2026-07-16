@@ -18,12 +18,17 @@ public struct _UpdateFrameRate: _SceneModifier {
             fatalError("\(Self.self)._makeScene called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
-        let configAttr: Attribute<_RuntimeWindowConfig> = graph.makeRule {
+        let configAttr: Attribute<WindowConfiguration.Override> = graph.makeRule {
             let m = modifier._attribute.value
-            return _RuntimeWindowConfig(activeFrameRate: m.active,
-                                        inactiveFrameRate: m.inactive)
+            return WindowConfiguration.Override(
+                activeFrameInterval: Double(1.0 / m.active),
+                inactiveFrameInterval: Double(1.0 / m.inactive)
+            )
         }
-        outputs.preferences.append(_RuntimeWindowConfig.Key.self, node: configAttr.identifier)
+        outputs.preferences.append(
+            WindowConfiguration.Override.Key.self,
+            node: configAttr.identifier
+        )
         return outputs
     }
 }

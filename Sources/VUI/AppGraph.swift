@@ -20,16 +20,16 @@ class AppGraph<A: App>: @unchecked Sendable {
     // to determine which windows to open/close.
     let sceneListAttr: Attribute<[SceneList.Item]>?
 
-    // The _RuntimeWindowConfigKey AG node produced by scene modifiers
+    // The window-configuration override AG node produced by scene modifiers
     // (.updateFrameRate, .drawDebugInfo). Re-evaluated on every sync and
     // applied to all live WindowControllers.
-    let runtimeWindowConfigAttr: Attribute<_RuntimeWindowConfig>?
+    let windowConfigurationOverrideAttr: Attribute<WindowConfiguration.Override>?
 
     init(app: A) {
         let graph = _AGGraph()
         let time = Time(seconds: 0)
         var sceneList: Attribute<[SceneList.Item]>? = nil
-        var runtimeConfig: Attribute<_RuntimeWindowConfig>? = nil
+        var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
 
         _AGGraph.withCurrent(graph) {
             // Stub AG input nodes for _GraphInputs fields.
@@ -52,7 +52,7 @@ class AppGraph<A: App>: @unchecked Sendable {
             // Register preference keys so that scenes output them in _SceneOutputs.
             var prefKeys = PreferenceKeys()
             prefKeys.insert(SceneList.Key.self)
-            prefKeys.insert(_RuntimeWindowConfig.Key.self)
+            prefKeys.insert(WindowConfiguration.Override.Key.self)
             let hostKeysAttr = graph.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
 
@@ -69,14 +69,17 @@ class AppGraph<A: App>: @unchecked Sendable {
             sceneList = outputs.preferences.values(for: SceneList.Key.self)
                 .last.map { Attribute($0) }
 
-            // _RuntimeWindowConfigKey: multiple modifiers may each append an entry
+            // Multiple modifiers may each append a window-configuration override
             // (e.g. .updateFrameRate + .drawDebugInfo), so reduce all entries into
             // one AG node using the stored _makeReduceRule.
-            runtimeConfig = outputs.preferences.reducedValue(for: _RuntimeWindowConfig.Key.self, in: graph)
+            configurationOverride = outputs.preferences.reducedValue(
+                for: WindowConfiguration.Override.Key.self,
+                in: graph
+            )
         }
 
         self.graph = graph
         self.sceneListAttr = sceneList
-        self.runtimeWindowConfigAttr = runtimeConfig
+        self.windowConfigurationOverrideAttr = configurationOverride
     }
 }

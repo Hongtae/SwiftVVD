@@ -81,11 +81,11 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
         let titleGraph = scene[\.title]
         let item = SceneList.Item(windowKey: windowKey, kind: .main) {
             let wc = WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
-            var cfg = wc.config
-            cfg.backgroundColor = BackendColor(
+            var configuration = wc.baseConfiguration
+            configuration.backgroundColor = BackendColor(
                 rgba8: .init(r: 255, g: 255, b: 241, a: 255)
             )
-            wc.config = cfg
+            wc.baseConfiguration = configuration
             return wc
         }
         let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule { [item] in [item] }

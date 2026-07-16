@@ -29,25 +29,38 @@ class WindowContext: @unchecked Sendable {
         var bounds: CGRect = .zero
         var surfaceRevision: Int = 0
     }
-    struct Configuration {
-        var activeFrameInterval = 1.0 / 60.0
-        var inactiveFrameInterval = 1.0 / 30.0
-        var drawEveryFrames: Bool = true
-        var backgroundColor = BackendColor(
-            rgba8: .init(r: 255, g: 255, b: 241, a: 255)
-        )
-        var drawDebugInfo: _DrawDebug.Info = []
+
+    private struct Storage {
+        var state = State()
+        var sceneConfiguration = WindowSceneConfiguration()
+        var baseConfiguration = WindowConfiguration()
+        var configurationOverride = WindowConfiguration.Override()
+
+        var configuration: WindowConfiguration {
+            baseConfiguration.applying(configurationOverride)
+        }
     }
 
     var state: State {
-        stateConfig.withLock { $0.state }
+        storage.withLock { $0.state }
     }
-    var config: Configuration {
-        get { stateConfig.withLock { $0.config } }
-        set { stateConfig.withLock { $0.config = newValue } }
+    var sceneConfiguration: WindowSceneConfiguration {
+        get { storage.withLock { $0.sceneConfiguration } }
+        set { storage.withLock { $0.sceneConfiguration = newValue } }
+    }
+    var baseConfiguration: WindowConfiguration {
+        get { storage.withLock { $0.baseConfiguration } }
+        set { storage.withLock { $0.baseConfiguration = newValue } }
+    }
+    var configurationOverride: WindowConfiguration.Override {
+        get { storage.withLock { $0.configurationOverride } }
+        set { storage.withLock { $0.configurationOverride = newValue } }
+    }
+    var configuration: WindowConfiguration {
+        storage.withLock { $0.configuration }
     }
 
-    private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
+    private let storage: Mutex<Storage>
 
     // Set by WindowController.makeWindow(); shared with all GraphicsContexts created in drawFrame.
     let sceneResources: SceneResources
@@ -70,8 +83,18 @@ class WindowContext: @unchecked Sendable {
     // while the WindowContext was still retained by the loop.
     var onFinalize: (() -> Void)?
 
-    init(sceneResources: SceneResources) {
+    init(
+        sceneResources: SceneResources,
+        sceneConfiguration: WindowSceneConfiguration = .init(),
+        baseConfiguration: WindowConfiguration = .init(),
+        configurationOverride: WindowConfiguration.Override = .init()
+    ) {
         self.sceneResources = sceneResources
+        self.storage = Mutex(Storage(
+            sceneConfiguration: sceneConfiguration,
+            baseConfiguration: baseConfiguration,
+            configurationOverride: configurationOverride
+        ))
     }
 
     deinit {
@@ -99,7 +122,7 @@ class WindowContext: @unchecked Sendable {
                         Log.error("Failed to cache GraphicsPipelineStates")
                     }
                     if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
-                        self.stateConfig.withLock {
+                        self.storage.withLock {
                             $0.state.frame = window.windowFrame.standardized
                             $0.state.bounds = window.contentBounds.standardized
                             $0.state.contentScaleFactor = window.contentScaleFactor
@@ -164,8 +187,8 @@ class WindowContext: @unchecked Sendable {
                 if Task.isCancelled { break }
                 onFinalize = self.onFinalize
 
-                let (state, config) = self.stateConfig.withLock {
-                    ($0.state, $0.config)
+                let (state, config) = self.storage.withLock {
+                    ($0.state, $0.configuration)
                 }
 
                 if contentSize != state.bounds.size {
@@ -274,7 +297,7 @@ class WindowContext: @unchecked Sendable {
                                 }
                                 if debugDrawInfo.contains(.thread) {
                                     drawText(Text("thread: \(Platform.currentThreadID())"))
-                                }
+                                }                                
                                 if debugDrawInfo.contains(.queue) {
                                     drawText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
                                 }
@@ -387,7 +410,7 @@ class WindowContext: @unchecked Sendable {
             self.task = nil
 
         case .created:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.frame = event.windowFrame.standardized
                 $0.state.bounds = event.contentBounds.standardized
                 $0.state.contentScaleFactor = event.contentScaleFactor
@@ -395,30 +418,30 @@ class WindowContext: @unchecked Sendable {
                 $0.state.surfaceRevision = 1
             }
         case .hidden:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.visible = false
                 $0.state.activated = false
             }
         case .shown:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.visible = true
             }
         case .activated:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.visible = true
                 $0.state.activated = true
             }
         case .inactivated:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.activated = false
             }
         case .minimized:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.activated = false
                 $0.state.visible = false
             }
         case .moved, .resized:
-            self.stateConfig.withLock {
+            self.storage.withLock {
                 $0.state.frame = event.windowFrame.standardized
                 $0.state.bounds = event.contentBounds.standardized
                 $0.state.contentScaleFactor = event.contentScaleFactor
