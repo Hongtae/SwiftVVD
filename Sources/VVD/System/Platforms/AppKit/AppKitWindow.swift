@@ -9,6 +9,10 @@
 import Foundation
 @_implementationOnly import AppKit
 
+private final class _NativeWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class AppKitWindow: Window {
     
@@ -151,7 +155,7 @@ final class AppKitWindow: Window {
         if style.contains(.maximizeButton)  {  }
         if style.contains(.resizableBorder) { styleMask.insert(.resizable) }
         
-        var windowType: NSWindow.Type = NSWindow.self
+        var windowType: NSWindow.Type = _NativeWindow.self
         
         let isPopupWindow = style.contains(.popupWindow)
         if isPopupWindow {
