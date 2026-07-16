@@ -143,7 +143,7 @@ final class WindowControllerGestureArbitrationTests: XCTestCase {
         var redraw = false
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: contentSize,
             redraw: &redraw,

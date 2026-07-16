@@ -18,7 +18,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -70,7 +70,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -108,7 +108,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -142,7 +142,8 @@ final class WindowControllerScrollInputTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(tick),
-                delta: 1.0 / 60.0,
+                delta: 0.1 + Double(tick) * 0.1 -
+                    controller.currentTimestamp.seconds,
                 date: controller.date.addingTimeInterval(0.1 + Double(tick) * 0.1),
                 contentSize: CGSize(width: 200, height: 120),
                 redraw: &redraw,
@@ -169,7 +170,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -191,7 +192,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         ))
         controller.updateView(
             tick: 1,
-            delta: 1.0 / 60.0,
+            delta: 0.1 - controller.currentTimestamp.seconds,
             date: controller.date.addingTimeInterval(0.1),
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -216,7 +217,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -256,7 +257,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -315,7 +316,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -358,7 +359,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,
@@ -396,7 +397,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 0,
-            delta: 1.0 / 60.0,
+            delta: 0,
             date: controller.date,
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,

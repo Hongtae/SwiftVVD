@@ -371,7 +371,7 @@ class WindowController: WindowDelegate,
     private var _viewGraph: ViewGraph!
     private weak var crossGraphSourceGraph: _AGGraph?
 
-    var date: Date  // render loop timing reference (animation)
+    var date: Date  // latest platform frame timestamp
 
     var title: String { _titleString }
     var style: PlatformWindowStyle { _style }
@@ -445,7 +445,7 @@ class WindowController: WindowDelegate,
     // Input samples and graph frames must use the same epoch. Preserving the
     // receipt time here keeps queued samples distinct when rendering hitches.
     private var inputTimestamp: Time {
-        Time(seconds: Date.now.timeIntervalSince(date))
+        currentTimestamp + Date.now.timeIntervalSince(date)
     }
 
     private func inputTimestamp(for event: MouseEvent) -> Time {
@@ -681,6 +681,8 @@ class WindowController: WindowDelegate,
                      contentSize: CGSize, shouldDrawFrame: Bool,
                      _ withGC: WindowContext.WithGraphicsContext) {
 
+        self.date = date
+
         // Pull render context from delegate (ViewGraphRenderDelegate).
         // contentsScale: HiDPI scale factor for the current display.
         // opaqueBackground: whether the background is fully opaque (skip alpha clear).
@@ -732,12 +734,13 @@ class WindowController: WindowDelegate,
         return true
     }
 
-    func updateView(tick: UInt64, delta: Double, date: Date,
+    func updateView(tick: UInt64, delta: Double, date _: Date,
                     contentSize: CGSize, redraw: inout Bool,
                     _ withGC: WindowContext.WithGraphicsContext) {
+        let time = currentTimestamp + delta
+        currentTimestamp = time
         guard let rootLayoutComputer = viewGraph.rootLayoutComputer else { return }
 
-        let time = Time(seconds: date.timeIntervalSince(self.date))
         let layoutContentSize = layoutContentSize(from: contentSize)
 
         // Detect size change and mark the dirty bit.

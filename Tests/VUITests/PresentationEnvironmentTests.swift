@@ -28,7 +28,7 @@ final class PresentationEnvironmentTests: XCTestCase {
         let withGraphicsContext: WindowContext.WithGraphicsContext = { _, _ in }
         controller.updateView(
             tick: 1,
-            delta: 1,
+            delta: 1 - controller.currentTimestamp.seconds,
             date: controller.date.addingTimeInterval(1),
             contentSize: CGSize(width: 320, height: 240),
             redraw: &redraw,
@@ -44,7 +44,7 @@ final class PresentationEnvironmentTests: XCTestCase {
         controller.viewGraph.updateOutputs(at: Time(seconds: 2))
         controller.updateView(
             tick: 2,
-            delta: 1,
+            delta: 2 - controller.currentTimestamp.seconds,
             date: controller.date.addingTimeInterval(2),
             contentSize: CGSize(width: 320, height: 240),
             redraw: &redraw,
