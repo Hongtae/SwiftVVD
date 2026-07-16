@@ -864,6 +864,100 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
+    func testRBDisplayListInterpolatorUsesObservedAffineTransformMixRules() throws {
+        let localBounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+
+        func shapeList(_ transform: CGAffineTransform) throws -> DisplayList {
+            var base = DisplayList()
+            base.appendShapeItem(
+                path: Path(localBounds),
+                role: .fill,
+                style: Color.red,
+                bounds: localBounds
+            )
+            var transformed = DisplayList()
+            transformed.appendTransformedItem(
+                try XCTUnwrap(base.items.first),
+                affineTransform: transform
+            )
+            return transformed
+        }
+
+        func midpointTransform(
+            from source: CGAffineTransform,
+            to target: CGAffineTransform
+        ) throws -> CGAffineTransform {
+            let midpoint = RBDisplayListInterpolator(
+                from: try shapeList(source),
+                to: try shapeList(target)
+            ).copyContents(withProgress: 0.5)
+            let item = try XCTUnwrap(midpoint.items.first)
+            guard case let .content(content) = item.value,
+                  case let .shape(shape) = content.value else {
+                XCTFail("compatible transforms should use one typed shape item")
+                return .identity
+            }
+            return shape.transform
+        }
+
+        func assertTransform(
+            _ actual: CGAffineTransform,
+            _ expected: CGAffineTransform,
+            accuracy: CGFloat = 0.000_001,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            XCTAssertEqual(actual.a, expected.a, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.b, expected.b, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.c, expected.c, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.d, expected.d, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.tx, expected.tx, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(actual.ty, expected.ty, accuracy: accuracy, file: file, line: line)
+        }
+
+        assertTransform(
+            try midpointTransform(
+                from: .identity,
+                to: CGAffineTransform(rotationAngle: .pi / 2)
+            ),
+            CGAffineTransform(rotationAngle: .pi / 4)
+        )
+        assertTransform(
+            try midpointTransform(
+                from: CGAffineTransform(rotationAngle: 170 * .pi / 180),
+                to: CGAffineTransform(rotationAngle: -170 * .pi / 180)
+            ),
+            CGAffineTransform(rotationAngle: .pi)
+        )
+        assertTransform(
+            try midpointTransform(
+                from: .identity,
+                to: CGAffineTransform(a: 1, b: 0.5, c: 0.25, d: 1, tx: 8, ty: 4)
+            ),
+            CGAffineTransform(
+                a: 1.030687220,
+                b: 0.243312247,
+                c: 0.166990661,
+                d: 0.955231907,
+                tx: 4,
+                ty: 2
+            )
+        )
+        assertTransform(
+            try midpointTransform(
+                from: CGAffineTransform(scaleX: -1, y: 1),
+                to: CGAffineTransform(scaleX: 1, y: -1)
+            ),
+            CGAffineTransform(a: 0, b: 0, c: 0, d: 0, tx: 0, ty: 0)
+        )
+
+        let incompatible = RBDisplayListInterpolator(
+            from: try shapeList(.identity),
+            to: try shapeList(CGAffineTransform(scaleX: 1, y: 0))
+        ).copyContents(withProgress: 0.5)
+        XCTAssertEqual(incompatible.itemRecords.first?.effectKind, .crossFade)
+    }
+
     func testRBDisplayListInterpolatorMixesTypedShapeColorInOklabAcrossColorSpacesAndAlpha() throws {
         let bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
 
@@ -2512,6 +2606,240 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 return XCTFail("incompatible child coverage should retain the source shape")
             }
             XCTAssertEqual(maskShape.path, Path(maskBounds))
+        }
+    }
+
+    func testRBDisplayListInterpolatorKeepsMultiItemSupersetMaskForEntireLifetime() throws {
+        let firstMaskBounds = CGRect(x: 10, y: 15, width: 20, height: 20)
+        let secondMaskBounds = CGRect(x: 40, y: 15, width: 20, height: 20)
+        let targetMaskBounds = firstMaskBounds.union(secondMaskBounds)
+        let contentBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func maskList(_ bounds: [CGRect]) -> DisplayList {
+            var list = DisplayList()
+            for bounds in bounds {
+                list.appendShapeItem(
+                    path: Path(bounds),
+                    role: .fill,
+                    style: Color.white,
+                    bounds: bounds
+                )
+            }
+            return list
+        }
+
+        func contentList() -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(contentBounds),
+                role: .fill,
+                style: Color.red,
+                bounds: contentBounds
+            )
+            return list
+        }
+
+        let transition = RBTransition()
+        transition.method = ContentTransition.Method.diff.method
+        let effect = RBTransitionEffect()
+        effect.type = ContentTransition.EffectType(type: 3).type
+        effect.events = 3
+        transition.addEffect(effect)
+
+        let singleItemMask = maskList([firstMaskBounds])
+        let multiItemMask = maskList([firstMaskBounds, secondMaskBounds])
+        for (sourceMask, targetMask) in [
+            (singleItemMask, multiItemMask),
+            (multiItemMask, singleItemMask),
+        ] {
+            let interpolator = RBDisplayListInterpolator(
+                from: .effect(.mask(sourceMask, []), contents: contentList()),
+                to: .effect(.mask(targetMask, []), contents: contentList()),
+                options: [.transition: transition]
+            )
+
+            XCTAssertEqual(interpolator.activeDuration, 1)
+            XCTAssertFalse(interpolator.onlyFades)
+            for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+                XCTAssertEqual(
+                    interpolator.boundingRect(withProgress: progress),
+                    targetMaskBounds
+                )
+                let sampled = interpolator.copyContents(withProgress: progress)
+                let sampledEffect = try XCTUnwrap(sampled.effects.first)
+                guard case let .mask(mask, options) = sampledEffect.effect else {
+                    return XCTFail("multi-item child coverage should remain a mask effect")
+                }
+                XCTAssertEqual(options.rawValue, 0)
+                XCTAssertEqual(mask.items.count, 2)
+                XCTAssertEqual(mask.interpolationBounds, targetMaskBounds)
+            }
+        }
+    }
+
+    func testRBDisplayListInterpolatorRecursivelyMixesNestedMaskGeometry() throws {
+        let sourceInnerBounds = CGRect(x: 10, y: 15, width: 20, height: 20)
+        let targetInnerBounds = CGRect(x: 40, y: 15, width: 20, height: 20)
+        let outerBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        func nestedList(innerBounds: CGRect) -> DisplayList {
+            let innerMask = shapeList(bounds: innerBounds, color: .white)
+            let nestedMask = DisplayList.effect(
+                .mask(innerMask, []),
+                contents: shapeList(bounds: outerBounds, color: .white)
+            )
+            return .effect(
+                .mask(nestedMask, []),
+                contents: shapeList(bounds: outerBounds, color: .red)
+            )
+        }
+
+        let interpolator = RBDisplayListInterpolator(
+            from: nestedList(innerBounds: sourceInnerBounds),
+            to: nestedList(innerBounds: targetInnerBounds)
+        )
+
+        XCTAssertEqual(interpolator.activeDuration, 1)
+        XCTAssertFalse(interpolator.onlyFades)
+        for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+            let expectedBounds = CGRect(
+                x: 10 + 30 * CGFloat(progress),
+                y: 15,
+                width: 20,
+                height: 20
+            )
+            XCTAssertEqual(
+                interpolator.boundingRect(withProgress: progress),
+                expectedBounds
+            )
+
+            let sampled = interpolator.copyContents(withProgress: progress)
+            XCTAssertEqual(sampled.interpolationBounds, expectedBounds)
+            let outerEffect = try XCTUnwrap(sampled.effects.first)
+            guard case let .mask(nestedMask, outerOptions) = outerEffect.effect else {
+                return XCTFail("outer nested coverage should remain a mask effect")
+            }
+            XCTAssertEqual(outerOptions.rawValue, 0)
+            XCTAssertEqual(nestedMask.interpolationBounds, expectedBounds)
+
+            let innerEffect = try XCTUnwrap(nestedMask.effects.first)
+            guard case let .mask(innerMask, innerOptions) = innerEffect.effect else {
+                return XCTFail("inner nested coverage should remain a mask effect")
+            }
+            XCTAssertEqual(innerOptions.rawValue, 0)
+            XCTAssertEqual(innerMask.interpolationBounds, expectedBounds)
+            guard case let .content(maskContent) = try XCTUnwrap(innerMask.items.first).value,
+                  case let .shape(maskShape) = maskContent.value else {
+                return XCTFail("inner nested coverage should retain typed shape content")
+            }
+            XCTAssertEqual(maskShape.path, Path(expectedBounds))
+        }
+    }
+
+    func testRBDisplayListInterpolatorPreservesDirectAndNestedMaskTopologyBranches() throws {
+        let sourceMaskBounds = CGRect(x: 10, y: 15, width: 20, height: 20)
+        let targetMaskBounds = CGRect(x: 40, y: 15, width: 20, height: 20)
+        let unionBounds = sourceMaskBounds.union(targetMaskBounds)
+        let outerBounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let directMask = shapeList(bounds: sourceMaskBounds, color: .white)
+        let nestedMask = DisplayList.effect(
+            .mask(shapeList(bounds: targetMaskBounds, color: .white), []),
+            contents: shapeList(bounds: outerBounds, color: .white)
+        )
+        let contents = shapeList(bounds: outerBounds, color: .red)
+
+        let transition = RBTransition()
+        transition.method = ContentTransition.Method.diff.method
+        let effect = RBTransitionEffect()
+        effect.type = ContentTransition.EffectType(type: 3).type
+        effect.events = 3
+        transition.addEffect(effect)
+
+        for (sourceMask, targetMask) in [
+            (directMask, nestedMask),
+            (nestedMask, directMask),
+        ] {
+            let interpolator = RBDisplayListInterpolator(
+                from: .effect(.mask(sourceMask, []), contents: contents),
+                to: .effect(.mask(targetMask, []), contents: contents),
+                options: [.transition: transition]
+            )
+
+            XCTAssertEqual(interpolator.activeDuration, 1)
+            XCTAssertFalse(interpolator.onlyFades)
+            for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+                XCTAssertEqual(
+                    interpolator.boundingRect(withProgress: progress),
+                    unionBounds
+                )
+                let sampled = interpolator.copyContents(withProgress: progress)
+                XCTAssertEqual(sampled.interpolationBounds, unionBounds)
+                let outerEffect = try XCTUnwrap(sampled.effects.first)
+                guard case let .mask(mask, options) = outerEffect.effect else {
+                    return XCTFail("topology fallback should remain an outer mask effect")
+                }
+                XCTAssertEqual(options.rawValue, 0)
+                XCTAssertEqual(mask.interpolationBounds, unionBounds)
+                XCTAssertEqual(mask.items.count, 2)
+                XCTAssertEqual(mask.effects.count, 1)
+            }
+        }
+
+        for (sourceMask, targetMask) in [
+            (directMask, nestedMask),
+            (nestedMask, directMask),
+        ] {
+            let interpolator = RBDisplayListInterpolator(
+                from: .effect(.mask(sourceMask, []), contents: contents),
+                to: .effect(.mask(targetMask, []), contents: contents)
+            )
+
+            for progress: Float in [0, 0.25, 0.5, 0.75, 1] {
+                XCTAssertEqual(
+                    interpolator.boundingRect(withProgress: progress),
+                    unionBounds
+                )
+                let sampled = interpolator.copyContents(withProgress: progress)
+                let outerEffect = try XCTUnwrap(sampled.effects.first)
+                guard case let .mask(mask, options) = outerEffect.effect else {
+                    return XCTFail("default topology fallback should remain a mask effect")
+                }
+                XCTAssertEqual(options.rawValue, 0)
+                XCTAssertEqual(mask.interpolationBounds, unionBounds)
+                XCTAssertEqual(mask.items.count, 2)
+                XCTAssertTrue(mask.effects.isEmpty)
+                let sourceOpacity = try XCTUnwrap(
+                    typedOpacityStyle(in: mask.items[0])?.opacity
+                )
+                let targetOpacity = try XCTUnwrap(
+                    typedOpacityStyle(in: mask.items[1])?.opacity
+                )
+                XCTAssertEqual(sourceOpacity, 1 - Double(progress), accuracy: 0.000_001)
+                XCTAssertEqual(targetOpacity, Double(progress), accuracy: 0.000_001)
+            }
         }
     }
 

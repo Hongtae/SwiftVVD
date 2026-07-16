@@ -645,6 +645,101 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertEqual(pixel(x: 0, y: 0), [0, 0, 0, 0])
     }
 
+    func testDirectAndNestedMaskTopologyFallbackPreservesBothBranchesOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let width = 80
+        let height = 80
+        let sourceMaskBounds = CGRect(x: 10, y: 15, width: 20, height: 20)
+        let targetMaskBounds = CGRect(x: 40, y: 15, width: 20, height: 20)
+        let contentBounds = CGRect(x: 0, y: 0, width: width, height: height)
+
+        func shapeList(bounds: CGRect, color: VUI.Color) -> DisplayList {
+            var list = DisplayList()
+            list.appendShapeItem(
+                path: Path(bounds),
+                role: .fill,
+                style: color,
+                bounds: bounds
+            )
+            return list
+        }
+
+        let directMask = shapeList(bounds: sourceMaskBounds, color: .white)
+        let nestedMask = DisplayList.effect(
+            .mask(shapeList(bounds: targetMaskBounds, color: .white), []),
+            contents: shapeList(bounds: contentBounds, color: .white)
+        )
+        let contents = shapeList(
+            bounds: contentBounds,
+            color: VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
+        )
+
+        let transition = RBTransition()
+        transition.method = ContentTransition.Method.diff.method
+        let effect = RBTransitionEffect()
+        effect.type = ContentTransition.EffectType(type: 3).type
+        effect.events = 3
+        transition.addEffect(effect)
+
+        func pixels(for sampled: DisplayList) throws -> [UInt8] {
+            let queue = try XCTUnwrap(deviceContext.renderQueue())
+            let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+            let context = try XCTUnwrap(
+                GraphicsContext(
+                    sceneResources: SceneResources(),
+                    environment: EnvironmentValues(),
+                    viewport: contentBounds,
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: contentBounds.size,
+                    commandBuffer: commandBuffer
+                )
+            )
+            context.clear(with: .clear)
+            sampled.draw(in: context)
+            try waitForCompletion(commandBuffer)
+
+            let staging = try XCTUnwrap(
+                deviceContext.makeCPUAccessible(texture: context.backdrop)
+            )
+            let pointer = try XCTUnwrap(staging.contents())
+            return Array(UnsafeRawBufferPointer(
+                start: pointer,
+                count: width * height * 4
+            ))
+        }
+
+        func pixel(_ pixels: [UInt8], x: Int, y: Int) -> [UInt8] {
+            let offset = (y * width + x) * 4
+            return Array(pixels[offset..<(offset + 4)])
+        }
+
+        let source = DisplayList.effect(.mask(directMask, []), contents: contents)
+        let target = DisplayList.effect(.mask(nestedMask, []), contents: contents)
+        let transitioned = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: transition]
+        ).copyContents(withProgress: 0.5)
+        let transitionedPixels = try pixels(for: transitioned)
+        XCTAssertEqual(pixel(transitionedPixels, x: 15, y: 20), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(transitionedPixels, x: 30, y: 20), [0, 0, 0, 0])
+        XCTAssertEqual(pixel(transitionedPixels, x: 45, y: 20), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(transitionedPixels, x: 0, y: 0), [0, 0, 0, 0])
+
+        let defaultMidpoint = RBDisplayListInterpolator(
+            from: source,
+            to: target
+        ).copyContents(withProgress: 0.5)
+        let defaultPixels = try pixels(for: defaultMidpoint)
+        XCTAssertEqual(pixel(defaultPixels, x: 15, y: 20), [128, 0, 0, 128])
+        XCTAssertEqual(pixel(defaultPixels, x: 30, y: 20), [0, 0, 0, 0])
+        XCTAssertEqual(pixel(defaultPixels, x: 45, y: 20), [128, 0, 0, 128])
+        XCTAssertEqual(pixel(defaultPixels, x: 0, y: 0), [0, 0, 0, 0])
+    }
+
     func testDisplayListItemOpacityAppliesAtRendererAndImmediateReplayBoundaries() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

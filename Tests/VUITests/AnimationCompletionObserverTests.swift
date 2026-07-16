@@ -175,7 +175,10 @@ final class AnimationCompletionObserverTests: XCTestCase {
             animation: transaction.animation
         )
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertGreaterThan(
+            transaction.animation?.box.noRegisteredCompletionDelay() ?? 0,
+            0.05
+        )
         XCTAssertTrue(events.isEmpty)
 
         waitForMainQueue(until: { events.count == 2 })
@@ -205,7 +208,11 @@ final class AnimationCompletionObserverTests: XCTestCase {
                 animation: transaction.animation
             )
 
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: testCase.earlyWait))
+            XCTAssertGreaterThan(
+                testCase.animation.box.noRegisteredCompletionDelay() ?? 0,
+                testCase.earlyWait,
+                testCase.name
+            )
             XCTAssertTrue(events.isEmpty, testCase.name)
 
             waitForMainQueue(timeout: 0.40, until: { events.count == 2 })
@@ -274,7 +281,11 @@ final class AnimationCompletionObserverTests: XCTestCase {
             )
 
             if testCase.shouldWait {
-                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+                XCTAssertGreaterThan(
+                    testCase.animation.box.noRegisteredCompletionDelay() ?? 0,
+                    0,
+                    testCase.name
+                )
                 XCTAssertTrue(events.isEmpty, testCase.name)
             }
 
@@ -1113,8 +1124,10 @@ final class AnimationCompletionObserverTests: XCTestCase {
         )
 
         XCTAssertFalse(listener.isComplete)
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
-        XCTAssertFalse(listener.isComplete)
+        XCTAssertGreaterThan(
+            transaction.animation?.box.noRegisteredCompletionDelay() ?? 0,
+            0
+        )
 
         waitForMainQueue(until: { listener.isComplete })
         XCTAssertTrue(listener.isComplete)

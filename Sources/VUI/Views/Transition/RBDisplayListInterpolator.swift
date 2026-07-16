@@ -1349,6 +1349,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 to: targetRecord,
                 progress: progress
               ),
+              let transform = interpolatedTransform(
+                from: sourceImage.transform,
+                to: targetImage.transform,
+                progress: progress
+              ),
               source.item.styleChain == target.item.styleChain else {
             return nil
         }
@@ -1376,11 +1381,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         content.value = .image(DisplayList.Content.ImageValue(
             image: image,
             frame: placementRect,
-            transform: interpolatedTransform(
-                from: sourceImage.transform,
-                to: targetImage.transform,
-                progress: progress
-            ),
+            transform: transform,
             command: command
         ))
         return DisplayList.Item(
@@ -1503,6 +1504,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 from: sourceShape.path,
                 to: targetShape.path,
                 progress: progress
+              ),
+              let transform = interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
               ) else {
             return nil
         }
@@ -1527,11 +1533,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             shading: .color(mixedColor),
             fillStyle: sourceShape.fillStyle,
             strokeStyle: sourceShape.strokeStyle,
-            transform: interpolatedTransform(
-                from: sourceShape.transform,
-                to: targetShape.transform,
-                progress: progress
-            ),
+            transform: transform,
             command: command
         ))
         return DisplayList.Item(
@@ -1634,6 +1636,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 from: sourceShape.path,
                 to: targetShape.path,
                 progress: progress
+              ),
+              let transform = interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
               ) else {
             return nil
         }
@@ -1658,11 +1665,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             shading: .shader(shader, bounds: .null),
             fillStyle: sourceShape.fillStyle,
             strokeStyle: sourceShape.strokeStyle,
-            transform: interpolatedTransform(
-                from: sourceShape.transform,
-                to: targetShape.transform,
-                progress: progress
-            ),
+            transform: transform,
             command: command
         ))
         return DisplayList.Item(
@@ -1778,6 +1781,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 from: sourceShape.path,
                 to: targetShape.path,
                 progress: progress
+              ),
+              let transform = interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
               ) else {
             return nil
         }
@@ -1802,11 +1810,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             shading: mixedGradientShading.shading,
             fillStyle: sourceShape.fillStyle,
             strokeStyle: sourceShape.strokeStyle,
-            transform: interpolatedTransform(
-                from: sourceShape.transform,
-                to: targetShape.transform,
-                progress: progress
-            ),
+            transform: transform,
             command: command
         ))
         return DisplayList.Item(
@@ -1868,6 +1872,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 from: sourceShape.path,
                 to: targetShape.path,
                 progress: progress
+              ),
+              let transform = interpolatedTransform(
+                from: sourceShape.transform,
+                to: targetShape.transform,
+                progress: progress
               ) else {
             return nil
         }
@@ -1892,11 +1901,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             shading: .meshGradient(mixedMesh),
             fillStyle: sourceShape.fillStyle,
             strokeStyle: sourceShape.strokeStyle,
-            transform: interpolatedTransform(
-                from: sourceShape.transform,
-                to: targetShape.transform,
-                progress: progress
-            ),
+            transform: transform,
             command: command
         ))
         return DisplayList.Item(
@@ -2598,7 +2603,98 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         )
     }
 
+    private struct AffineTransformComponents {
+        var scaleX: CGFloat
+        var scaleY: CGFloat
+        var horizontalShear: CGFloat
+        var rotation: CGFloat
+        var translationX: CGFloat
+        var translationY: CGFloat
+    }
+
     private static func interpolatedTransform(
+        from source: CGAffineTransform,
+        to target: CGAffineTransform,
+        progress: CGFloat
+    ) -> CGAffineTransform? {
+        if source == target { return source }
+
+        let sourceDeterminant = source.a * source.d - source.b * source.c
+        let targetDeterminant = target.a * target.d - target.b * target.c
+        guard (sourceDeterminant > 0 && targetDeterminant > 0) ||
+                (sourceDeterminant < 0 && targetDeterminant < 0) else {
+            return nil
+        }
+
+        let hasMatchingLinearTransform =
+            source.a == target.a && source.b == target.b &&
+            source.c == target.c && source.d == target.d
+        let usesAxisAlignedFastPath =
+            source.b == 0 && source.c == 0 && target.b == 0 && target.c == 0
+        if hasMatchingLinearTransform || usesAxisAlignedFastPath {
+            return componentInterpolatedTransform(
+                from: source,
+                to: target,
+                progress: progress
+            )
+        }
+
+        guard var sourceComponents = decomposedTransform(source),
+              var targetComponents = decomposedTransform(target) else {
+            return nil
+        }
+
+        // Preserve orientation while choosing compatible scale signs, then
+        // wrap the two rotations onto their shortest interpolation arc.
+        if (sourceComponents.scaleX < 0 && targetComponents.scaleY < 0) ||
+            (sourceComponents.scaleY < 0 && targetComponents.scaleX < 0) {
+            sourceComponents.scaleX.negate()
+            sourceComponents.scaleY.negate()
+            sourceComponents.rotation += sourceComponents.rotation < 0 ? .pi : -.pi
+        }
+
+        let fullRotation = CGFloat.pi * 2
+        if sourceComponents.rotation == 0 {
+            sourceComponents.rotation = fullRotation
+        }
+        if targetComponents.rotation == 0 {
+            targetComponents.rotation = fullRotation
+        }
+        if abs(sourceComponents.rotation - targetComponents.rotation) > .pi {
+            if sourceComponents.rotation > targetComponents.rotation {
+                targetComponents.rotation += fullRotation
+            } else {
+                sourceComponents.rotation += fullRotation
+            }
+        }
+
+        return transform(from: AffineTransformComponents(
+            scaleX: interpolate(
+                sourceComponents.scaleX,
+                targetComponents.scaleX,
+                by: progress
+            ),
+            scaleY: interpolate(
+                sourceComponents.scaleY,
+                targetComponents.scaleY,
+                by: progress
+            ),
+            horizontalShear: interpolate(
+                sourceComponents.horizontalShear,
+                targetComponents.horizontalShear,
+                by: progress
+            ),
+            rotation: interpolate(
+                sourceComponents.rotation,
+                targetComponents.rotation,
+                by: progress
+            ),
+            translationX: interpolate(source.tx, target.tx, by: progress),
+            translationY: interpolate(source.ty, target.ty, by: progress)
+        ))
+    }
+
+    private static func componentInterpolatedTransform(
         from source: CGAffineTransform,
         to target: CGAffineTransform,
         progress: CGFloat
@@ -2610,6 +2706,41 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             d: interpolate(source.d, target.d, by: progress),
             tx: interpolate(source.tx, target.tx, by: progress),
             ty: interpolate(source.ty, target.ty, by: progress)
+        )
+    }
+
+    private static func decomposedTransform(
+        _ transform: CGAffineTransform
+    ) -> AffineTransformComponents? {
+        let determinant = transform.a * transform.d - transform.b * transform.c
+        let scaleMagnitude = hypot(transform.a, transform.b)
+        guard determinant != 0, scaleMagnitude != 0 else { return nil }
+
+        let scaleX = determinant < 0 ? -scaleMagnitude : scaleMagnitude
+        let scaleY = determinant / scaleX
+        return AffineTransformComponents(
+            scaleX: scaleX,
+            scaleY: scaleY,
+            horizontalShear: (transform.a * transform.c + transform.b * transform.d) /
+                (scaleX * scaleY),
+            rotation: atan2(transform.b / scaleX, transform.a / scaleX),
+            translationX: transform.tx,
+            translationY: transform.ty
+        )
+    }
+
+    private static func transform(
+        from components: AffineTransformComponents
+    ) -> CGAffineTransform {
+        let cosine = cos(components.rotation)
+        let sine = sin(components.rotation)
+        return CGAffineTransform(
+            a: components.scaleX * cosine,
+            b: components.scaleX * sine,
+            c: components.scaleY * (components.horizontalShear * cosine - sine),
+            d: components.scaleY * (components.horizontalShear * sine + cosine),
+            tx: components.translationX,
+            ty: components.translationY
         )
     }
 
@@ -2704,15 +2835,37 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             if case let .mask(sourceMask, sourceOptions) = source.effect,
                case let .mask(targetMask, targetOptions) = target.effect {
                 if sourceOptions.rawValue == targetOptions.rawValue {
-                    let mask = preservesSourceMaskForIncompatibleCoverageFamily(
+                    let mask: DisplayList
+                    let hasDirectAndNestedTopology =
+                        canPreserveDirectAndNestedMaskTopologyBranches(
                         from: sourceMask,
                         to: targetMask
-                    ) ? sourceMask : interpolatedContents(
-                        from: sourceMask,
-                        to: targetMask,
-                        progress: progress,
-                        transition: transition
                     )
+                    if hasDirectAndNestedTopology, transition == nil {
+                        mask = crossFadedDirectAndNestedMaskTopology(
+                            from: sourceMask,
+                            to: targetMask,
+                            progress: progress
+                        )
+                    } else if hasDirectAndNestedTopology,
+                              usesCheckedIdentityTopologyTransition(transition) {
+                        mask = preservedDirectAndNestedMaskTopology(
+                            from: sourceMask,
+                            to: targetMask
+                        )
+                    } else if preservesSourceMaskForIncompatibleCoverageFamily(
+                        from: sourceMask,
+                        to: targetMask
+                    ) {
+                        mask = sourceMask
+                    } else {
+                        mask = interpolatedContents(
+                            from: sourceMask,
+                            to: targetMask,
+                            progress: progress,
+                            transition: transition
+                        )
+                    }
                     contents.appendEffect(
                         .mask(mask, sourceOptions),
                         contents: interpolatedContents(
@@ -2904,12 +3057,28 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                case let .mask(targetMask, targetOptions) = target.effect {
                 let effectBounds: CGRect
                 if sourceOptions.rawValue == targetOptions.rawValue {
-                    guard let maskBounds = interpolatedBounds(
+                    let maskBounds: CGRect
+                    if canPreserveDirectAndNestedMaskTopologyBranches(
                         from: sourceMask,
-                        to: targetMask,
-                        progress: Float(progress),
-                        transition: transition
-                    ), let contentBounds = interpolatedBounds(
+                        to: targetMask
+                    ) {
+                        guard let sourceBounds = recordedBounds(of: sourceMask),
+                              let targetBounds = recordedBounds(of: targetMask) else {
+                            return nil
+                        }
+                        maskBounds = sourceBounds.union(targetBounds)
+                    } else {
+                        guard let bounds = interpolatedBounds(
+                            from: sourceMask,
+                            to: targetMask,
+                            progress: Float(progress),
+                            transition: transition
+                        ) else {
+                            return nil
+                        }
+                        maskBounds = bounds
+                    }
+                    guard let contentBounds = interpolatedBounds(
                         from: source.contents,
                         to: target.contents,
                         progress: Float(progress),
@@ -2959,6 +3128,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             bounds = union(bounds, effectBounds)
         }
         return bounds
+    }
+
+    private static func recordedBounds(of list: DisplayList) -> CGRect? {
+        interpolatedRecordedBounds(
+            from: list,
+            to: list,
+            progress: 0,
+            transition: nil
+        ) ?? list.interpolationBounds
     }
 
     private static func maskEffectBounds(
@@ -3054,6 +3232,119 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     ) -> Bool {
         source.hasSameInterpolationSurface(as: target) ||
             canMaterializeInterpolatedContents(from: source, to: target)
+    }
+
+    // A direct child and a one-level nested child use their effective coverage
+    // bounds. Their branch weights depend on the transition carried by the
+    // interpolator, so this gate intentionally accepts only the checked shape
+    // topology.
+    private static func canPreserveDirectAndNestedMaskTopologyBranches(
+        from source: DisplayList,
+        to target: DisplayList
+    ) -> Bool {
+        isCompatibleDirectAndNestedMaskTopology(direct: source, nested: target) ||
+            isCompatibleDirectAndNestedMaskTopology(direct: target, nested: source)
+    }
+
+    private static func preservedDirectAndNestedMaskTopology(
+        from source: DisplayList,
+        to target: DisplayList
+    ) -> DisplayList {
+        var mask = source
+        mask.append(contentsOf: target)
+        if let sourceBounds = recordedBounds(of: source),
+           let targetBounds = recordedBounds(of: target) {
+            mask.interpolationBounds = sourceBounds.union(targetBounds)
+        }
+        return mask
+    }
+
+    private static func crossFadedDirectAndNestedMaskTopology(
+        from source: DisplayList,
+        to target: DisplayList,
+        progress: Float
+    ) -> DisplayList {
+        guard let sourceBounds = recordedBounds(of: source),
+              let targetBounds = recordedBounds(of: target) else {
+            return source
+        }
+        let fraction = Double(min(max(progress, 0), 1))
+        var mask = DisplayList()
+        mask.appendOpacityItem(
+            bounds: sourceBounds,
+            opacity: 1 - fraction,
+            contents: source
+        )
+        mask.appendOpacityItem(
+            bounds: targetBounds,
+            opacity: fraction,
+            contents: target
+        )
+        mask.interpolationBounds = sourceBounds.union(targetBounds)
+        return mask
+    }
+
+    private static func usesCheckedIdentityTopologyTransition(
+        _ transition: RBTransition?
+    ) -> Bool {
+        guard let transition,
+              transition.method == ContentTransition.Method.diff.method,
+              transition.effects.count == 1,
+              let effect = transition.effects.first,
+              effect.semanticType == ContentTransition.EffectType.translation(.zero).type,
+              effect.events & 3 == 3,
+              effect.beginTime == 0,
+              effect.duration == 0,
+              effect.flags == 0,
+              effect.argumentValue(atIndex: 0) == 0,
+              effect.argumentValue(atIndex: 1) == 0 else {
+            return false
+        }
+        return true
+    }
+
+    private static func isCompatibleDirectAndNestedMaskTopology(
+        direct: DisplayList,
+        nested: DisplayList
+    ) -> Bool {
+        guard let directInput = singleShapeInput(in: direct),
+              nested.renderItems.isEmpty,
+              nested.debugItems.isEmpty,
+              nested.effects.count == 1,
+              let nestedEffect = nested.effects.first,
+              case let .mask(innerMask, innerOptions) = nestedEffect.effect,
+              innerOptions.rawValue == 0,
+              let innerInput = singleShapeInput(in: innerMask),
+              let outerInput = singleShapeInput(in: nestedEffect.contents),
+              mixedShapeItem(
+                from: directInput,
+                to: innerInput,
+                progress: 0.5
+              ) != nil,
+              mixedShapeItem(
+                from: innerInput,
+                to: outerInput,
+                progress: 0.5
+              ) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private static func singleShapeInput(
+        in list: DisplayList
+    ) -> ItemInterpolationInput? {
+        guard list.effects.isEmpty,
+              list.debugItems.isEmpty,
+              list.renderItems.count == 1,
+              list.itemCommands.count == 1,
+              let item = list.renderItems.first,
+              let command = list.itemCommands.first,
+              case .shape = command,
+              let bounds = list.interpolationBounds else {
+            return nil
+        }
+        return ItemInterpolationInput(item: item, command: command, bounds: bounds)
     }
 
     // A single incompatible coverage pair remains source-owned for the
