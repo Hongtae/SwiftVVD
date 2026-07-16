@@ -258,7 +258,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
         redraw = false
         host.updateView(
             tick: 1,
-            delta: 1.0 - host.currentTimestamp.seconds,
+            delta: 1.0 - host.animationTimestamp.seconds,
             date: host.date.addingTimeInterval(1.0),
             contentSize: hostSize,
             redraw: &redraw,
@@ -285,7 +285,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
         redraw = false
         host.updateView(
             tick: 2,
-            delta: 2.0 - host.currentTimestamp.seconds,
+            delta: 2.0 - host.animationTimestamp.seconds,
             date: host.date.addingTimeInterval(2.0),
             contentSize: hostSize,
             redraw: &redraw,
@@ -294,7 +294,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
         redraw = false
         host.updateView(
             tick: 3,
-            delta: (2.0 + 1.0 / 60.0) - host.currentTimestamp.seconds,
+            delta: (2.0 + 1.0 / 60.0) - host.animationTimestamp.seconds,
             date: host.date.addingTimeInterval(2.0 + 1.0 / 60.0),
             contentSize: hostSize,
             redraw: &redraw,
@@ -335,7 +335,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
         redraw = false
         host.updateView(
             tick: 4,
-            delta: (2.0 + 2.0 / 60.0) - host.currentTimestamp.seconds,
+            delta: (2.0 + 2.0 / 60.0) - host.animationTimestamp.seconds,
             date: host.date.addingTimeInterval(2.0 + 2.0 / 60.0),
             contentSize: hostSize,
             redraw: &redraw,

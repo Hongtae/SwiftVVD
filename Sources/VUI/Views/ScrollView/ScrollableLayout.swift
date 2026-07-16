@@ -883,7 +883,8 @@ struct ScrollViewBehavior {
 
         phase = .decelerating(DecelerationState(
             targetOffset: target,
-            beginTime: .systemUptime,
+            beginTime: (node.host.context as? ViewGraph)?.currentTimestamp
+                ?? .systemUptime,
             completion: completion,
             simulation: deceleration
         ))

@@ -441,11 +441,12 @@ class WindowController: WindowDelegate,
         var local: Time
     }
     private let mouseInputTimeReference = Mutex<InputTimeReference?>(nil)
+    private static let eventTimestampOrigin = Date.now
 
-    // Input samples and graph frames must use the same epoch. Preserving the
-    // receipt time here keeps queued samples distinct when rendering hitches.
+    // Event time follows wall-clock receipt time and is intentionally
+    // independent from the scaled animation clock.
     private var inputTimestamp: Time {
-        currentTimestamp + Date.now.timeIntervalSince(date)
+        Time(seconds: Date.now.timeIntervalSince(Self.eventTimestampOrigin))
     }
 
     private func inputTimestamp(for event: MouseEvent) -> Time {
@@ -474,9 +475,21 @@ class WindowController: WindowDelegate,
         }
     }
 
-    // ViewRendererHost / ViewGraphOwner stored state.
-    // WindowController tracks its owner-side state separately from ViewGraph's internal state.
-    var currentTimestamp: Time = Time(seconds: 0)
+    // ViewRendererHost / ViewGraphOwner event time. ViewGraph animation and
+    // presentation sampling use animationTimestamp instead.
+    var currentTimestamp: Time = Time(
+        seconds: Date.now.timeIntervalSince(WindowController.eventTimestampOrigin)
+    )
+    private static let animationTimeScaleStorage = Mutex<Double>(1.0)
+    static var animationTimeScale: Double {
+        get { animationTimeScaleStorage.withLock { $0 } }
+        set {
+            precondition(newValue.isFinite && newValue >= 0)
+            animationTimeScaleStorage.withLock { $0 = newValue }
+        }
+    }
+    private(set) var animationTimestamp: Time = .zero
+    private(set) var animationDelta: TimeInterval = 0
     private let displayListRenderer = DisplayList.GraphicsRenderer()
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -622,7 +635,7 @@ class WindowController: WindowDelegate,
             }
             ctx.preferredFrameInterval = { [weak self] in
                 guard let self else { return nil }
-                return self.renderIntervalForDisplayLink(timestamp: self.currentTimestamp)
+                return self.renderIntervalForDisplayLink(timestamp: self.animationTimestamp)
             }
             ctx.onFinalize = { [weak self] in
                 guard let self, self.endSessionOnWindowClosed else { return }
@@ -734,11 +747,15 @@ class WindowController: WindowDelegate,
         return true
     }
 
-    func updateView(tick: UInt64, delta: Double, date _: Date,
+    func updateView(tick: UInt64, delta: Double, date: Date,
                     contentSize: CGSize, redraw: inout Bool,
                     _ withGC: WindowContext.WithGraphicsContext) {
-        let time = currentTimestamp + delta
-        currentTimestamp = time
+        currentTimestamp = Time(
+            seconds: date.timeIntervalSince(Self.eventTimestampOrigin)
+        )
+        animationDelta = delta * Self.animationTimeScale
+        animationTimestamp = animationTimestamp + animationDelta
+        let time = animationTimestamp
         guard let rootLayoutComputer = viewGraph.rootLayoutComputer else { return }
 
         let layoutContentSize = layoutContentSize(from: contentSize)
@@ -854,11 +871,11 @@ class WindowController: WindowDelegate,
                 }
             }
 
-            // Gesture deadlines are evaluated on the same controller-relative
-            // clock as input samples. This wakes recognizers that remain possible
-            // between input IDs, such as the single-tap fallback beside a double tap.
+            // Gesture deadlines are evaluated on unscaled event time. This
+            // wakes recognizers that remain possible between input IDs, such as
+            // the single-tap fallback beside a double tap.
             if let gestureGraph,
-               gestureGraph.updateTimedGestures(at: time) {
+               gestureGraph.updateTimedGestures(at: currentTimestamp) {
                 drainedGestureOutbox = true
             }
 
@@ -1012,13 +1029,13 @@ class WindowController: WindowDelegate,
                 let displayList = rootDisplayList.value
                 displayListRenderer.render(
                     list: displayList,
-                    at: currentTimestamp,
+                    at: animationTimestamp,
                     in: context
                 )
             }
             self.viewChangedWhileDrawing = !changeSet.isEmpty
         }
-        if !(currentTimestamp < displayListRenderer.nextTime) {
+        if !(animationTimestamp < displayListRenderer.nextTime) {
             viewChangedWhileDrawing = true
         }
         if drainActionOutbox(viewGraph.data.graph) {

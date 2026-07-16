@@ -143,7 +143,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
             controller.updateView(
                 tick: UInt64(tick),
                 delta: 0.1 + Double(tick) * 0.1 -
-                    controller.currentTimestamp.seconds,
+                    controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(0.1 + Double(tick) * 0.1),
                 contentSize: CGSize(width: 200, height: 120),
                 redraw: &redraw,
@@ -192,7 +192,7 @@ final class WindowControllerScrollInputTests: XCTestCase {
         ))
         controller.updateView(
             tick: 1,
-            delta: 0.1 - controller.currentTimestamp.seconds,
+            delta: 0.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(0.1),
             contentSize: CGSize(width: 200, height: 120),
             redraw: &redraw,

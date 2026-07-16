@@ -4,7 +4,7 @@ import XCTest
 
 final class WindowControllerLayoutSchedulingTests: XCTestCase {
     @MainActor
-    func testFrameTimeAccumulatesDeltaIndependentlyOfPlatformDate() {
+    func testAnimationTimeAccumulatesDeltaIndependentlyOfEventTime() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
             content: LayoutSchedulingRoot(counter: counter),
@@ -27,8 +27,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         XCTAssertEqual(controller.date, firstFrameDate)
-        XCTAssertEqual(controller.currentTimestamp.seconds, 0.125)
+        XCTAssertEqual(controller.animationTimestamp.seconds, 0.125)
         XCTAssertEqual(controller.viewGraph.currentTimestamp.seconds, 0.125)
+        let firstEventTimestamp = controller.currentTimestamp
 
         controller.updateFrame(
             tick: 1,
@@ -39,8 +40,59 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         XCTAssertEqual(controller.date, secondFrameDate)
-        XCTAssertEqual(controller.currentTimestamp.seconds, 0.375)
+        XCTAssertEqual(controller.animationTimestamp.seconds, 0.375)
         XCTAssertEqual(controller.viewGraph.currentTimestamp.seconds, 0.375)
+        XCTAssertEqual(
+            controller.currentTimestamp.seconds - firstEventTimestamp.seconds,
+            -20_000
+        )
+    }
+
+    @MainActor
+    func testAnimationTimeScaleDoesNotAffectEventTime() {
+        let previousScale = WindowController.animationTimeScale
+        WindowController.animationTimeScale = 0.25
+        defer { WindowController.animationTimeScale = previousScale }
+
+        let counter = LayoutSchedulingCounter()
+        let controller = WindowController(
+            content: LayoutSchedulingRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingRoot.self)
+            )
+        )
+        let referenceDate = controller.date
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+
+        controller.updateFrame(
+            tick: 0,
+            delta: 0.4,
+            date: referenceDate.addingTimeInterval(0.4),
+            contentSize: CGSize(width: 120, height: 80),
+            shouldDrawFrame: false,
+            withGC
+        )
+        let firstEventTimestamp = controller.currentTimestamp
+        XCTAssertEqual(controller.animationDelta, 0.1, accuracy: 0.000_001)
+        XCTAssertEqual(controller.animationTimestamp.seconds, 0.1, accuracy: 0.000_001)
+
+        controller.updateFrame(
+            tick: 1,
+            delta: 0.2,
+            date: referenceDate.addingTimeInterval(0.6),
+            contentSize: CGSize(width: 120, height: 80),
+            shouldDrawFrame: false,
+            withGC
+        )
+        XCTAssertEqual(controller.animationDelta, 0.05, accuracy: 0.000_001)
+        XCTAssertEqual(controller.animationTimestamp.seconds, 0.15, accuracy: 0.000_001)
+        XCTAssertEqual(controller.viewGraph.currentTimestamp.seconds, 0.15, accuracy: 0.000_001)
+        XCTAssertEqual(
+            controller.currentTimestamp.seconds - firstEventTimestamp.seconds,
+            0.2,
+            accuracy: 0.000_001
+        )
     }
 
     @MainActor
@@ -72,7 +124,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         controller.updateView(
             tick: 1,
-            delta: (1.0 / 60.0) - controller.currentTimestamp.seconds,
+            delta: (1.0 / 60.0) - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(1.0 / 60.0),
             contentSize: CGSize(width: 120, height: 80),
             redraw: &redraw,
@@ -82,7 +134,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         controller.updateView(
             tick: 2,
-            delta: (2.0 / 60.0) - controller.currentTimestamp.seconds,
+            delta: (2.0 / 60.0) - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(2.0 / 60.0),
             contentSize: CGSize(width: 140, height: 80),
             redraw: &redraw,
@@ -123,7 +175,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 1,
-            delta: (1.0 / 60.0) - controller.currentTimestamp.seconds,
+            delta: (1.0 / 60.0) - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(1.0 / 60.0),
             contentSize: CGSize(width: 120, height: 80),
             redraw: &redraw,
@@ -169,7 +221,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 1,
-            delta: (1.0 / 60.0) - controller.currentTimestamp.seconds,
+            delta: (1.0 / 60.0) - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(1.0 / 60.0),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -181,7 +233,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 2,
-            delta: 0.25 - controller.currentTimestamp.seconds,
+            delta: 0.25 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(0.25),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -247,7 +299,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -261,7 +313,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 20,
-            delta: 20.1 - controller.currentTimestamp.seconds,
+            delta: 20.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(20.1),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -271,7 +323,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 21,
-            delta: 20.1 - controller.currentTimestamp.seconds,
+            delta: 20.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(20.1),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -339,7 +391,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             child.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - child.currentTimestamp.seconds,
+                delta: sampleTime - child.animationTimestamp.seconds,
                 date: child.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -400,7 +452,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -448,7 +500,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 redraw = false
                 controller.updateView(
                     tick: tick,
-                    delta: (baseTime + sampleOffset) - controller.currentTimestamp.seconds,
+                    delta: (baseTime + sampleOffset) - controller.animationTimestamp.seconds,
                     date: controller.date.addingTimeInterval(baseTime + sampleOffset),
                     contentSize: CGSize(width: 420, height: 240),
                     redraw: &redraw,
@@ -519,7 +571,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 2,
-            delta: 30 - controller.currentTimestamp.seconds,
+            delta: 30 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(30),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -632,7 +684,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -652,7 +704,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 20,
-            delta: 20.1 - controller.currentTimestamp.seconds,
+            delta: 20.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(20.1),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -662,7 +714,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 21,
-            delta: 20.1 - controller.currentTimestamp.seconds,
+            delta: 20.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(20.1),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -711,7 +763,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -792,7 +844,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -865,7 +917,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -994,7 +1046,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1054,7 +1106,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1135,7 +1187,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1201,7 +1253,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1267,7 +1319,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1336,7 +1388,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1406,7 +1458,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1472,7 +1524,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 1,
-            delta: 0.1 - controller.currentTimestamp.seconds,
+            delta: 0.1 - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(0.1),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -1522,7 +1574,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -1576,7 +1628,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: tick,
-                delta: time - controller.currentTimestamp.seconds,
+                delta: time - controller.animationTimestamp.seconds,
                 date: startDate.addingTimeInterval(time),
                 contentSize: CGSize(width: 560, height: 360),
                 redraw: &redraw,
@@ -1669,7 +1721,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: tick,
-                delta: time - controller.currentTimestamp.seconds,
+                delta: time - controller.animationTimestamp.seconds,
                 date: startDate.addingTimeInterval(time),
                 contentSize: CGSize(width: 560, height: 360),
                 redraw: &redraw,
@@ -1808,7 +1860,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: tick,
-                delta: time - controller.currentTimestamp.seconds,
+                delta: time - controller.animationTimestamp.seconds,
                 date: startDate.addingTimeInterval(time),
                 contentSize: CGSize(width: 560, height: 360),
                 redraw: &redraw,
@@ -1947,7 +1999,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             child.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - child.currentTimestamp.seconds,
+                delta: sampleTime - child.animationTimestamp.seconds,
                 date: child.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -2019,7 +2071,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw = false
             controller.updateView(
                 tick: UInt64(index + 1),
-                delta: sampleTime - controller.currentTimestamp.seconds,
+                delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw,
@@ -2036,7 +2088,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         redraw = false
         controller.updateView(
             tick: 20,
-            delta: finalTime - controller.currentTimestamp.seconds,
+            delta: finalTime - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(finalTime),
             contentSize: CGSize(width: 420, height: 240),
             redraw: &redraw,
@@ -2107,7 +2159,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         controller.enqueueInputAction {}
         controller.updateView(
             tick: 1,
-            delta: (1.0 / 60.0) - controller.currentTimestamp.seconds,
+            delta: (1.0 / 60.0) - controller.animationTimestamp.seconds,
             date: controller.date.addingTimeInterval(1.0 / 60.0),
             contentSize: CGSize(width: 120, height: 80),
             redraw: &redraw,

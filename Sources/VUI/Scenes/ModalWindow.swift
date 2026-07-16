@@ -676,7 +676,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
         }
         super.updateView(tick: tick, delta: delta, date: date,
                          contentSize: contentSize, redraw: &redraw, withGC)
-        if presentationContext.updateAnimation(delta: delta) {
+        if presentationContext.updateAnimation(delta: animationDelta) {
             redraw = true
         }
     }

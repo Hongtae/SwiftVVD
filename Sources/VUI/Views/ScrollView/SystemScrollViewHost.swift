@@ -490,7 +490,10 @@ class HostingScrollView {
                     || (behaviorTarget != nil && behaviorTarget != currentOffset) {
                     decelerationState = DecelerationState(
                         simulation: simulation,
-                        beginTime: eventTime,
+                        // Gesture timestamps use event time, while inertial
+                        // presentation advances on ViewGraph animation time.
+                        beginTime: (graphRef.context as? ViewGraph)?.currentTimestamp
+                            ?? eventTime,
                         targetOffsetState: targetOffsetState
                     )
                     publishInteraction(
@@ -527,7 +530,6 @@ class HostingScrollView {
         }
         let elapsed: Double
         if let beginTime = decelerationState.beginTime {
-            // beginTime and the frame clock share WindowController's epoch.
             elapsed = max(time.seconds - beginTime.seconds, 0)
         } else {
             decelerationState.beginTime = time
