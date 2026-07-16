@@ -592,7 +592,9 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         let colorAttachment = RenderPassColorAttachmentDescriptor(
             renderTarget: renderTarget,
             loadAction: .clear,
-            storeAction: .store,
+            // The zero-area fallback is a transient off-screen target whose
+            // contents are discarded. Transient attachments cannot be stored.
+            storeAction: renderTarget.isTransient ? .dontCare : .store,
             clearColor: .clear)
 
         self.renderPassDescriptor = RenderPassDescriptor(
