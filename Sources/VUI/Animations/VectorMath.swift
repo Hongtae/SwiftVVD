@@ -2,8 +2,35 @@
 //  File: VectorMath.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
+
+public protocol VectorArithmetic: AdditiveArithmetic {
+    mutating func scale(by rhs: Double)
+    var magnitudeSquared: Double { get }
+}
+
+extension VectorArithmetic {
+    public func scaled(by rhs: Double) -> Self {
+        var result = self
+        result.scale(by: rhs)
+        return result
+    }
+
+    public mutating func interpolate(towards other: Self, amount: Double) {
+        var result = other
+        result -= self
+        result.scale(by: amount)
+        result += self
+        self = result
+    }
+
+    public func interpolated(towards other: Self, amount: Double) -> Self {
+        var result = self
+        result.interpolate(towards: other, amount: amount)
+        return result
+    }
+}
 
 public protocol _VectorMath: Animatable {
 }
