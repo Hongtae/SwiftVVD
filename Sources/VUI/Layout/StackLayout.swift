@@ -11,10 +11,18 @@ public struct _StackLayoutCache {
     var spacings: [ViewSpacing] = []
     var subviewSpacings: [CGFloat] = []
     var priorities: [Double] = []
-    
+
     // Store alignment for explicitAlignment calculation
     var horizontalAlignment: HorizontalAlignment?
     var verticalAlignment: VerticalAlignment?
+
+    // Proposal-dependent child state. The stack's sizing and placement entry
+    // points share these values so placement can commit already-resolved child
+    // dimensions without measuring every child again.
+    var resolvedProposal: ProposedViewSize?
+    var resolvedSize: CGSize = .zero
+    var resolvedMajorLengths: [CGFloat] = []
+    var resolvedDimensions: [ViewDimensions] = []
 }
 
 enum _StackLayoutImplementation {
@@ -39,6 +47,10 @@ enum _StackLayoutImplementation {
         cache.spacings = subviews.map { $0.spacing }
         cache.horizontalAlignment = horizontalAlignment
         cache.verticalAlignment = verticalAlignment
+        cache.resolvedProposal = nil
+        cache.resolvedSize = .zero
+        cache.resolvedMajorLengths.removeAll(keepingCapacity: true)
+        cache.resolvedDimensions.removeAll(keepingCapacity: true)
 
         cache.subviewSpacings = cache.spacings.indices.map { index in
             guard index > 0 else { return 0 }
@@ -54,25 +66,13 @@ enum _StackLayoutImplementation {
                              subviews: LayoutSubviews,
                              cache: inout _StackLayoutCache) -> CGSize {
         guard !subviews.isEmpty else { return .zero }
-
-        let crossProposal = cross(proposal, axis: axis)
-        let majorLengths = self.majorLengths(axis: axis,
-                                             proposal: proposal,
-                                             subviews: subviews,
-                                             cache: &cache)
-        var dimensions: [ViewDimensions] = []
-        dimensions.reserveCapacity(subviews.count)
-
-        for index in subviews.indices {
-            let childProposal = proposalFor(axis: axis,
-                                            major: majorLengths[index],
-                                            cross: crossProposal)
-            dimensions.append(subviews[index].dimensions(in: childProposal))
-        }
-
-        let totalMajor = majorLengths.reduce(0, +) + totalSpacing(for: subviews.count, cache: cache)
-        let totalCross = crossExtent(axis: axis, dimensions: dimensions, cache: cache)
-        return size(axis: axis, major: totalMajor, cross: totalCross)
+        resolveChildren(
+            axis: axis,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+        return cache.resolvedSize
     }
 
     static func spacing(axis: Axis, cache: _StackLayoutCache) -> ViewSpacing {
@@ -104,20 +104,14 @@ enum _StackLayoutImplementation {
         let placementProposal = proposalWhenPlacing(axis: axis,
                                                     proposal: proposal,
                                                     bounds: bounds)
-        let crossProposal = cross(placementProposal, axis: axis)
-        let majorLengths = self.majorLengths(axis: axis,
-                                             proposal: placementProposal,
-                                             subviews: subviews,
-                                             cache: &cache)
-        var dimensions: [ViewDimensions] = []
-        dimensions.reserveCapacity(subviews.count)
-
-        for index in subviews.indices {
-            let childProposal = proposalFor(axis: axis,
-                                            major: majorLengths[index],
-                                            cross: crossProposal)
-            dimensions.append(subviews[index].dimensions(in: childProposal))
-        }
+        resolveChildren(
+            axis: axis,
+            proposal: placementProposal,
+            subviews: subviews,
+            cache: &cache
+        )
+        let majorLengths = cache.resolvedMajorLengths
+        let dimensions = cache.resolvedDimensions
 
         let crossRange = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
         // Normalize extra cross-axis alignment bounds inside the stack-local frame.
@@ -128,14 +122,15 @@ enum _StackLayoutImplementation {
         for index in subviews.indices {
             majorOffset += spacingBeforeSubview(at: index, cache: cache)
 
-            let childProposal = proposalFor(axis: axis,
-                                            major: majorLengths[index],
-                                            cross: crossProposal)
             let childCrossOrigin = guidePosition - alignmentGuide(axis: axis,
                                                                   dimensions: dimensions[index],
                                                                   cache: cache)
             let point = origin(axis: axis, major: majorOffset, cross: childCrossOrigin)
-            subviews[index].place(at: point, anchor: .topLeading, proposal: childProposal)
+            subviews[index].place(
+                at: point,
+                anchor: .topLeading,
+                dimensions: dimensions[index]
+            )
 
             majorOffset += majorLengths[index]
         }
@@ -159,20 +154,14 @@ enum _StackLayoutImplementation {
         let placementProposal = proposalWhenPlacing(axis: axis,
                                                     proposal: proposal,
                                                     bounds: bounds)
-        let crossProposal = cross(placementProposal, axis: axis)
-        let majorLengths = self.majorLengths(axis: axis,
-                                             proposal: placementProposal,
-                                             subviews: subviews,
-                                             cache: &cache)
-        var dimensions: [ViewDimensions] = []
-        dimensions.reserveCapacity(subviews.count)
-
-        for index in subviews.indices {
-            let childProposal = proposalFor(axis: axis,
-                                            major: majorLengths[index],
-                                            cross: crossProposal)
-            dimensions.append(subviews[index].dimensions(in: childProposal))
-        }
+        resolveChildren(
+            axis: axis,
+            proposal: placementProposal,
+            subviews: subviews,
+            cache: &cache
+        )
+        let majorLengths = cache.resolvedMajorLengths
+        let dimensions = cache.resolvedDimensions
 
         let crossRange = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
         let guidePosition = minCross(bounds, axis: axis) - crossRange.min
@@ -195,6 +184,49 @@ enum _StackLayoutImplementation {
         }
 
         return guide.combineExplicit(explicitValues)
+    }
+
+    private static func resolveChildren(
+        axis: Axis,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        if cache.resolvedProposal == proposal,
+           cache.resolvedMajorLengths.count == subviews.count,
+           cache.resolvedDimensions.count == subviews.count {
+            return
+        }
+
+        let crossProposal = cross(proposal, axis: axis)
+        let majorLengths = self.majorLengths(
+            axis: axis,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+        var dimensions: [ViewDimensions] = []
+        dimensions.reserveCapacity(subviews.count)
+        for index in subviews.indices {
+            let childProposal = proposalFor(
+                axis: axis,
+                major: majorLengths[index],
+                cross: crossProposal
+            )
+            dimensions.append(subviews[index].dimensions(in: childProposal))
+        }
+
+        let totalMajor = majorLengths.reduce(0, +) +
+            totalSpacing(for: subviews.count, cache: cache)
+        let totalCross = crossExtent(
+            axis: axis,
+            dimensions: dimensions,
+            cache: cache
+        )
+        cache.resolvedProposal = proposal
+        cache.resolvedSize = size(axis: axis, major: totalMajor, cross: totalCross)
+        cache.resolvedMajorLengths = majorLengths
+        cache.resolvedDimensions = dimensions
     }
 
     private static func majorLengths(axis: Axis,

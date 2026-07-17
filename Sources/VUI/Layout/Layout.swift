@@ -204,6 +204,18 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
     var layoutDirection: LayoutDirection
     mutating func updateValue() {
         let layout = layoutAttr.value
+        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
+           let box = current.box as? LayoutEngineBox<ViewLayoutEngine<L>> {
+            box.engine.update(
+                layout: layout,
+                layoutAttr: layoutAttr,
+                children: children,
+                layoutDirection: layoutDirection
+            )
+            current.changeCount &+= 1
+            _AGGraph.setStatefulOutput(current)
+            return
+        }
         let engine = ViewLayoutEngine(
             layout: layout,
             layoutAttr: layoutAttr,
@@ -1072,6 +1084,18 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
         for child in children {
             _ = child.layoutComputer.attribute?.value
         }  // register AG deps on each child LC
+        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
+           let box = current.box as? LayoutEngineBox<ViewLayoutEngine<L>> {
+            box.engine.update(
+                layout: layout,
+                layoutAttr: layoutAttr,
+                children: children,
+                layoutDirection: .leftToRight
+            )
+            current.changeCount &+= 1
+            _AGGraph.setStatefulOutput(current)
+            return
+        }
         let engine = ViewLayoutEngine(
             layout: layout,
             layoutAttr: layoutAttr,

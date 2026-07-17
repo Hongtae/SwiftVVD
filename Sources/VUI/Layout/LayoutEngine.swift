@@ -141,6 +141,47 @@ protocol _AnyLayoutEngineBoxDispatch: AnyObject {
     func place_(_ position: CGPoint, _ anchor: UnitPoint, _ proposal: ProposedViewSize)
 }
 
+/// Three-entry insertion-order cache used for repeated layout proposals.
+/// Cache hits do not change replacement order: after three distinct inserts,
+/// the fourth replaces the oldest inserted entry.
+private struct LayoutSizeCache {
+    private struct Entry {
+        var proposal: ProposedViewSize
+        var size: CGSize
+    }
+
+    private var first: Entry?
+    private var second: Entry?
+    private var third: Entry?
+    private var replacementIndex = 0
+
+    mutating func value(
+        for proposal: ProposedViewSize,
+        makeValue: () -> CGSize
+    ) -> CGSize {
+        if let first, first.proposal == proposal { return first.size }
+        if let second, second.proposal == proposal { return second.size }
+        if let third, third.proposal == proposal { return third.size }
+
+        let size = makeValue()
+        let entry = Entry(proposal: proposal, size: size)
+        switch replacementIndex {
+        case 0: first = entry
+        case 1: second = entry
+        default: third = entry
+        }
+        replacementIndex = (replacementIndex + 1) % 3
+        return size
+    }
+
+    mutating func invalidate() {
+        first = nil
+        second = nil
+        third = nil
+        replacementIndex = 0
+    }
+}
+
 // MARK: - LayoutEngineBox<E: LayoutEngine>
 
 /// Generic box holding a concrete LayoutEngine instance.
@@ -176,6 +217,7 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
     func place_(_ position: CGPoint, _ anchor: UnitPoint, _ proposal: ProposedViewSize) {
         engine.place(at: position, anchor: anchor, proposal: proposal)
     }
+
 }
 
 // MARK: - ClosureLayoutEngine
@@ -191,6 +233,9 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
     var layoutAttr: Attribute<L>?
     var children: [LayoutProxyAttributes]
     var _layoutDirection: LayoutDirection
+    private var cache: L.Cache
+    private var sizeCache = LayoutSizeCache()
+    private var cachedChildGeometries: (size: ViewSize, geometries: [ViewGeometry])?
 
     init(
         layout: L,
@@ -202,19 +247,50 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
         self.layoutAttr = layoutAttr
         self.children = children
         self._layoutDirection = layoutDirection
+        self.cache = layout.makeCache(
+            subviews: Self.makeSubviews(
+                children: children,
+                layoutDirection: layoutDirection
+            )
+        )
     }
 
-    private func makeSubviews() -> LayoutSubviews {
+    private static func makeSubviews(
+        children: [LayoutProxyAttributes],
+        layoutDirection: LayoutDirection
+    ) -> LayoutSubviews {
         LayoutSubviews(
             subviews: children.enumerated().map { idx, attrs in
                 LayoutSubview(
                     proxy: LayoutProxy(attributes: attrs),
                     placementIndex: Int32(idx),
-                    layoutDirection: _layoutDirection
+                    layoutDirection: layoutDirection
                 )
             },
+            layoutDirection: layoutDirection
+        )
+    }
+
+    private func makeSubviews() -> LayoutSubviews {
+        Self.makeSubviews(
+            children: children,
             layoutDirection: _layoutDirection
         )
+    }
+
+    func update(
+        layout: L,
+        layoutAttr: Attribute<L>?,
+        children: [LayoutProxyAttributes],
+        layoutDirection: LayoutDirection
+    ) {
+        self.layout = layout
+        self.layoutAttr = layoutAttr
+        self.children = children
+        self._layoutDirection = layoutDirection
+        self.layout.updateCache(&cache, subviews: makeSubviews())
+        sizeCache.invalidate()
+        cachedChildGeometries = nil
     }
 
     private func placementTransaction() -> Transaction {
@@ -238,20 +314,21 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let subviews = makeSubviews()
-        var cache = layout.makeCache(subviews: subviews)
-        return layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
+        sizeCache.value(for: proposal) {
+            layout.sizeThatFits(
+                proposal: proposal,
+                subviews: makeSubviews(),
+                cache: &cache
+            )
+        }
     }
 
     func spacing() -> ViewSpacing {
-        let subviews = makeSubviews()
-        var cache = layout.makeCache(subviews: subviews)
-        return layout.spacing(subviews: subviews, cache: &cache)
+        layout.spacing(subviews: makeSubviews(), cache: &cache)
     }
 
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
         let subviews = makeSubviews()
-        var cache = layout.makeCache(subviews: subviews)
         let bounds = CGRect(origin: .zero, size: size.value)
 
         switch key.axis {
@@ -271,8 +348,14 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
     }
 
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+        if origin == .zero,
+           let cachedChildGeometries,
+           cachedChildGeometries.size == size,
+           cachedChildGeometries.geometries.count == children.count {
+            return cachedChildGeometries.geometries
+        }
+
         let subviews = makeSubviews()
-        var cache = layout.makeCache(subviews: subviews)
         var placementData = PlacementData(
             count: children.count,
             bounds: CGRect(origin: origin, size: size.value),
@@ -289,26 +372,30 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
                     )
                 }
             }
-            return pointer.pointee.resolvedGeometries(children: children,
-                                                      proposal: size.proposal)
+            let geometries = pointer.pointee.resolvedGeometries(
+                children: children,
+                proposal: size.proposal
+            )
+            if origin == .zero {
+                cachedChildGeometries = (size, geometries)
+            }
+            return geometries
         }
     }
 
     func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
         let subviews = makeSubviews()
-        var sizeCache = layout.makeCache(subviews: subviews)
-        let size = layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &sizeCache)
+        let size = sizeThatFits(proposal)
         let origin = CGPoint(
             x: position.x - size.width * anchor.x,
             y: position.y - size.height * anchor.y
         )
-        var placeCache = layout.makeCache(subviews: subviews)
         Transaction.withScopedThreadTransaction(placementTransaction()) {
             layout.placeSubviews(
                 in: CGRect(origin: origin, size: size),
                 proposal: proposal,
                 subviews: subviews,
-                cache: &placeCache
+                cache: &cache
             )
         }
     }
