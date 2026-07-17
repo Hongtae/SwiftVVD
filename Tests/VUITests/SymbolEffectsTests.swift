@@ -30,6 +30,8 @@ final class SymbolEffectsTests: XCTestCase {
         XCTAssertEqual(layered.layers.count, 2)
         XCTAssertEqual(layered.layers.map(\.semanticLevel), [1, 0])
         XCTAssertEqual(layered.layers.map(\.effectLevel), [1, 0])
+        XCTAssertEqual(layered.layers.map(\.replacementLevel), [0, 0])
+        XCTAssertEqual(layered.replacementLevelCount, 1)
         XCTAssertEqual(layered.layers.map(\.variableColorLevel), [1, 0])
         XCTAssertEqual(layered.variableColorLevelCount, 2)
         XCTAssertEqual(layered.layers.map(\.opacity), [0.3, 1])
@@ -42,6 +44,9 @@ final class SymbolEffectsTests: XCTestCase {
             bundle: nil
         ))
         XCTAssertEqual(drawable.layers.count, 2)
+        XCTAssertEqual(drawable.layers.map(\.semanticLevel), [0, 1])
+        XCTAssertEqual(drawable.layers.map(\.replacementLevel), [0, 1])
+        XCTAssertEqual(drawable.replacementLevelCount, 2)
         XCTAssertEqual(drawable.drawMotionGroupCount, 2)
         XCTAssertEqual(
             drawable.layers.compactMap { $0.draw?.motionGroup },

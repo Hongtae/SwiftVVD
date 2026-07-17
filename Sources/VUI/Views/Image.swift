@@ -210,6 +210,28 @@ final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
+// Image resolution is published asynchronously by the backend resource pass, while the
+// display-list interpolation lane requires a stable non-optional content value. This adapter
+// ignores the initial unresolved-to-resolved publication and delegates real image changes to
+// the resolved-image transition contract.
+private struct ResolvedImageTransitionContent: InterpolatableContent {
+    var image: GraphicsContext.ResolvedImage?
+
+    static var defaultTransition: ContentTransition {
+        GraphicsContext.ResolvedImage.defaultTransition
+    }
+
+    func requiresTransition(to target: Self) -> Bool {
+        guard let image, let targetImage = target.image else { return false }
+        return image.requiresTransition(to: targetImage)
+    }
+
+    func modifyTransition(state: inout ContentTransition.State, to target: Self) {
+        guard let image, let targetImage = target.image else { return }
+        image.modifyTransition(state: &state, to: targetImage)
+    }
+}
+
 struct ImageViewChild: StatefulRule {
     struct ActivePulse {
         var id: Int
@@ -1295,6 +1317,36 @@ public struct Image: Equatable, Sendable {
     }
 }
 
+final class _ImageResourceResolutionState {
+    private var pendingImage: Image?
+    private var pendingTransaction = Transaction()
+
+    func transaction(for image: Image, candidate: Transaction) -> Transaction {
+        guard pendingImage != image else {
+            return pendingTransaction
+        }
+        pendingImage = image
+        pendingTransaction = candidate
+        return candidate
+    }
+
+    func didResolve(image: Image) {
+        guard pendingImage == image else { return }
+        pendingImage = nil
+        pendingTransaction = Transaction()
+    }
+
+    static func publicationTransaction(
+        candidate: Transaction,
+        hasResolvedContent: Bool
+    ) -> Transaction {
+        guard !hasResolvedContent else { return candidate }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        return transaction
+    }
+}
+
 extension Image {
     public struct DynamicRange: Hashable, Sendable {
         enum Storage: UInt8, Hashable, Sendable {
@@ -1379,6 +1431,8 @@ extension Image: View {
         // Caches the fully resolved image object (including GPU texture).
         let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
         let resolvedSourceAttr = graph.makeInput(value: Image?.none)
+        let resolvedImageTransactionAttr = graph.makeInput(value: Transaction())
+        let resourceResolutionState = _ImageResourceResolutionState()
 
         let inbox = graph.inbox
         let sizeAttr = inputs.size
@@ -1394,8 +1448,20 @@ extension Image: View {
             // Note: For a robust implementation, you might want to compare an image "version"
             // or use a caching mechanism within the ImageProvider.
             if resolvedSourceAttr.value == image, resolvedImageAttr.value != nil {
+                resourceResolutionState.didResolve(image: image)
                 return ResourceList()
             }
+
+            let candidateTransaction = _AGGraph.currentRuleContextAttribute
+                .flatMap { graph.transaction(for: $0) } ?? Transaction()
+            let resourceTransaction = resourceResolutionState.transaction(
+                for: image,
+                candidate: candidateTransaction
+            )
+            let publicationTransaction = _ImageResourceResolutionState.publicationTransaction(
+                candidate: resourceTransaction,
+                hasResolvedContent: resolvedImageAttr.value != nil
+            )
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
             let environment = envAttr.value
@@ -1410,11 +1476,24 @@ extension Image: View {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
                     let resolved = context.resolve(image)
                     let boxedResolved = UnsafeBox(resolved)
+                    let boxedTransaction = UnsafeBox(publicationTransaction)
 
                     // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
-                    inbox.enqueue {
-                        resolvedSourceAttr.setValue(image)
-                        resolvedImageAttr.setValue(boxedResolved.value)
+                    let publish: @Sendable () -> Void = {
+                        resolvedImageTransactionAttr.setValue(boxedTransaction.value)
+                        resolvedSourceAttr.setValue(
+                            image,
+                            transaction: boxedTransaction.value
+                        )
+                        resolvedImageAttr.setValue(
+                            boxedResolved.value,
+                            transaction: boxedTransaction.value
+                        )
+                    }
+                    if _AGGraph.current === graph {
+                        publish()
+                    } else {
+                        inbox.enqueue(transaction: publicationTransaction, publish)
                     }
                 } // withValue
             }
@@ -1430,6 +1509,9 @@ extension Image: View {
                 time: inputs.base.time
             )
         )
+        let transitionContentAttr: Attribute<ResolvedImageTransitionContent> = graph.makeRule {
+            ResolvedImageTransitionContent(image: resolvedImageAttr.value)
+        }
 
         // 3. Layout pass (Layout Rule)
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
@@ -1487,6 +1569,15 @@ extension Image: View {
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        var interpolatorInputs = inputs
+        interpolatorInputs.base.transaction = resolvedImageTransactionAttr
+        outputs.applyInterpolatorGroup(
+            DisplayList.UnaryInterpolatorGroup(),
+            content: transitionContentAttr,
+            inputs: interpolatorInputs,
+            animatesSize: false,
+            defersRender: false
+        )
 
         return outputs
     }

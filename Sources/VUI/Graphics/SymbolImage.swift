@@ -87,6 +87,8 @@ struct ResolvedVectorSymbol: Equatable {
         var isEOFilled: Bool
         var semanticLevel: Int
         var effectLevel: Int
+        // Replacement grouping is independent of pulse-effect grouping.
+        var replacementLevel: Int
         // A nil level keeps the path outside the variable-color animator.
         var variableColorLevel: Int?
         // Draw geometry is asset metadata, independent of visible fill order.
@@ -99,6 +101,10 @@ struct ResolvedVectorSymbol: Equatable {
 
     var variableColorLevelCount: Int {
         layers.compactMap(\.variableColorLevel).max().map { $0 + 1 } ?? 0
+    }
+
+    var replacementLevelCount: Int {
+        layers.map(\.replacementLevel).max().map { $0 + 1 } ?? 0
     }
 
     var drawMotionGroupCount: Int {
@@ -177,6 +183,7 @@ struct SymbolAssetMetadata: Decodable {
 
     var semanticLevels: [Int]
     var effectLevels: [Int]
+    var replacementLevels: [Int]?
     var variableColorLevels: [Int?]?
     var drawLayers: [DrawLayer?]?
 }
@@ -220,6 +227,7 @@ enum SVGSymbolDocument {
                 isEOFilled: attributes["fill-rule"]?.lowercased() == "evenodd",
                 semanticLevel: 0,
                 effectLevel: 0,
+                replacementLevel: 0,
                 variableColorLevel: nil,
                 draw: nil
             ))
@@ -228,12 +236,15 @@ enum SVGSymbolDocument {
         if let metadata {
             guard metadata.semanticLevels.count == layers.count,
                   metadata.effectLevels.count == layers.count,
+                  metadata.replacementLevels?.count == layers.count ||
+                    metadata.replacementLevels == nil,
                   metadata.variableColorLevels?.count == layers.count ||
                     metadata.variableColorLevels == nil,
                   metadata.drawLayers?.count == layers.count ||
                     metadata.drawLayers == nil,
                   metadata.semanticLevels.allSatisfy({ $0 >= 0 }),
                   metadata.effectLevels.allSatisfy({ $0 >= 0 }),
+                  metadata.replacementLevels?.allSatisfy({ $0 >= 0 }) != false,
                   metadata.variableColorLevels?.allSatisfy({
                     $0.map { $0 >= 0 } ?? true
                   }) != false,
@@ -245,6 +256,8 @@ enum SVGSymbolDocument {
             for index in layers.indices {
                 layers[index].semanticLevel = metadata.semanticLevels[index]
                 layers[index].effectLevel = metadata.effectLevels[index]
+                layers[index].replacementLevel =
+                    metadata.replacementLevels?[index] ?? 0
                 layers[index].variableColorLevel =
                     metadata.variableColorLevels?[index]
                 if let drawLayer = metadata.drawLayers?[index] {

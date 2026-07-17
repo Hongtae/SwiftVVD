@@ -55,6 +55,7 @@ extension GraphicsContext {
         public let baseline: CGFloat
         public var shading: Shading?
         var symbolLayerOpacities: [Double]?
+        var symbolReplacementLayerOpacities: [Double]?
         var symbolVariableColorOpacities: [Double]?
         var symbolDrawProgresses: [Double]?
         var symbolDrawFallbackOpacity: Double?
@@ -94,6 +95,7 @@ extension GraphicsContext {
             self.baseline = baseline
             self.shading = shading
             self.symbolLayerOpacities = nil
+            self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawProgresses = nil
             self.symbolDrawFallbackOpacity = nil
@@ -107,6 +109,7 @@ extension GraphicsContext {
             self.baseline = symbol.viewport.height
             self.shading = shading
             self.symbolLayerOpacities = nil
+            self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawProgresses = nil
             self.symbolDrawFallbackOpacity = nil
@@ -120,6 +123,7 @@ extension GraphicsContext {
             self.baseline = svg.intrinsicSize?.height ?? svg.viewBox.height
             self.shading = shading
             self.symbolLayerOpacities = nil
+            self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawProgresses = nil
             self.symbolDrawFallbackOpacity = nil
@@ -195,12 +199,19 @@ extension GraphicsContext {
                     ? opacities[layer.effectLevel]
                     : nil
             } ?? 1
+            let replacementOpacity = image.symbolReplacementLayerOpacities.flatMap {
+                opacities in
+                opacities.indices.contains(layer.replacementLevel)
+                    ? opacities[layer.replacementLevel]
+                    : nil
+            } ?? 1
             let variableColorOpacity = layer.variableColorLevel.flatMap { level in
                 image.symbolVariableColorOpacities.flatMap { opacities in
                     opacities.indices.contains(level) ? opacities[level] : nil
                 }
             } ?? 1
-            let presentationOpacity = effectOpacity * variableColorOpacity *
+            let presentationOpacity = effectOpacity * replacementOpacity *
+                variableColorOpacity *
                 (image.symbolDrawFallbackOpacity ?? 1)
             guard presentationOpacity > 0 else { continue }
             let layerOpacity = layer.opacity * presentationOpacity

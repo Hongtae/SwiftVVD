@@ -40,6 +40,7 @@ struct RBSymbolReplacementConfiguration: Equatable {
 
     var style: Style
     var isLayered: Bool
+    var isAutomaticStyle: Bool
     var duration: Double
 }
 
@@ -570,6 +571,7 @@ final class RBTransition: NSObject, NSCopying {
         return RBSymbolReplacementConfiguration(
             style: style,
             isLayered: flags & 0x10 != 0,
+            isAutomaticStyle: flags & 0xf == 0,
             duration: Double(duration)
         )
     }

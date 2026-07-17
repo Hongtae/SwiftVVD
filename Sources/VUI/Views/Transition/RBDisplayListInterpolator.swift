@@ -132,11 +132,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             }
             if case let .paired(source, target) = kind,
                let replacement = transition?.symbolReplacementConfiguration,
-               RBDisplayListInterpolator.isSymbolReplacementPair(
-                source: source,
-                target: target
-               ) {
-                customDuration = replacement.duration
+               let sourceSymbol = RBDisplayListInterpolator.symbolImageValue(
+                in: source.item
+               )?.image.symbol,
+               let targetSymbol = RBDisplayListInterpolator.symbolImageValue(
+                in: target.item
+               )?.image.symbol {
+                customDuration = RBDisplayListInterpolator.symbolReplacementTimeline(
+                    source: sourceSymbol,
+                    target: targetSymbol,
+                    configuration: replacement
+                ).duration
                 animation = RBAnimationSequencer.operationAnimationRecord(
                     operationLowNibble: animatedOperationType,
                     resolvedAnimationIndex: -2,
@@ -1040,12 +1046,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var targetOpacity: CGFloat
     }
 
-    private static func isSymbolReplacementPair(
-        source: ItemInterpolationInput,
-        target: ItemInterpolationInput
-    ) -> Bool {
-        symbolImageValue(in: source.item)?.image.symbol != nil &&
-            symbolImageValue(in: target.item)?.image.symbol != nil
+    private struct SymbolReplacementTimeline {
+        var duration: Double
+        var sourceLevelCount: Int
+        var targetLevelCount: Int
+        var sourceDrawDuration: Double?
+        var targetDrawDuration: Double?
     }
 
     private static func symbolReplacementBounds(
@@ -1061,10 +1067,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return nil
         }
         if elapsedTime <= 0 { return source.bounds }
-        if Double(elapsedTime) >= configuration.duration { return target.bounds }
+        let timeline = symbolReplacementTimeline(
+            source: sourceSymbol,
+            target: targetSymbol,
+            configuration: configuration
+        )
+        if Double(elapsedTime) >= timeline.duration { return target.bounds }
 
         let normalizedTime = min(
-            max(Double(elapsedTime) / configuration.duration, 0),
+            max(Double(elapsedTime) / timeline.duration, 0),
             1
         )
         let baseBounds = interpolatedBounds(
@@ -1072,24 +1083,24 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             to: target.bounds,
             progress: CGFloat(normalizedTime)
         )
-        let levelCount = configuration.isLayered
-            ? max(symbolEffectLevelCount(sourceSymbol), symbolEffectLevelCount(targetSymbol))
-            : 1
+        let levelCount = max(timeline.sourceLevelCount, timeline.targetLevelCount)
         var result: CGRect?
         for level in 0..<max(levelCount, 1) {
             let presentation = symbolReplacementPresentation(
                 elapsedTime: Double(elapsedTime),
                 level: level,
-                levelCount: max(levelCount, 1),
+                timeline: timeline,
                 configuration: configuration
             )
-            if presentation.sourceOpacity > 0 {
+            if level < timeline.sourceLevelCount,
+               presentation.sourceOpacity > 0 {
                 result = union(
                     result,
                     centeredScaledBounds(baseBounds, scale: presentation.sourceScale)
                 )
             }
-            if presentation.targetOpacity > 0 {
+            if level < timeline.targetLevelCount,
+               presentation.targetOpacity > 0 {
                 result = union(
                     result,
                     centeredScaledBounds(baseBounds, scale: presentation.targetScale)
@@ -1118,14 +1129,19 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             contents.recordInterpolationBounds(source.bounds)
             return true
         }
-        if Double(elapsedTime) >= configuration.duration {
+        let timeline = symbolReplacementTimeline(
+            source: sourceSymbol,
+            target: targetSymbol,
+            configuration: configuration
+        )
+        if Double(elapsedTime) >= timeline.duration {
             contents.items.append(target.item)
             contents.recordInterpolationBounds(target.bounds)
             return true
         }
 
         let normalizedTime = min(
-            max(Double(elapsedTime) / configuration.duration, 0),
+            max(Double(elapsedTime) / timeline.duration, 0),
             1
         )
         let baseBounds = interpolatedBounds(
@@ -1133,23 +1149,51 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             to: target.bounds,
             progress: CGFloat(normalizedTime)
         )
-        let levelCount = configuration.isLayered
-            ? max(symbolEffectLevelCount(sourceSymbol), symbolEffectLevelCount(targetSymbol))
-            : 1
+        let levelCount = max(timeline.sourceLevelCount, timeline.targetLevelCount)
+        let sourceDrawProgresses = timeline.sourceDrawDuration.map { _ in
+            symbolReplacementDrawProgresses(
+                symbol: sourceSymbol,
+                elapsedTime: Double(elapsedTime),
+                startsAt: 0,
+                appears: false
+            )
+        }
+        let targetDrawProgresses = timeline.targetDrawDuration.map { _ in
+            symbolReplacementDrawProgresses(
+                symbol: targetSymbol,
+                elapsedTime: Double(elapsedTime),
+                startsAt: 0.25,
+                appears: true
+            )
+        }
 
         for level in 0..<max(levelCount, 1) {
             let presentation = symbolReplacementPresentation(
                 elapsedTime: Double(elapsedTime),
                 level: level,
-                levelCount: max(levelCount, 1),
+                timeline: timeline,
                 configuration: configuration
             )
-            let sourceItem = configuration.isLayered
-                ? symbolLayerItem(source.item, effectLevel: level)
-                : source.item
-            let targetItem = configuration.isLayered
-                ? symbolLayerItem(target.item, effectLevel: level)
-                : target.item
+            var sourceItem = level < timeline.sourceLevelCount
+                ? (configuration.isLayered
+                    ? symbolReplacementLayerItem(source.item, level: level)
+                    : source.item)
+                : nil
+            var targetItem = level < timeline.targetLevelCount
+                ? (configuration.isLayered
+                    ? symbolReplacementLayerItem(target.item, level: level)
+                    : target.item)
+                : nil
+            if let sourceDrawProgresses {
+                sourceItem = sourceItem.flatMap {
+                    symbolDrawItem($0, progresses: sourceDrawProgresses)
+                }
+            }
+            if let targetDrawProgresses {
+                targetItem = targetItem.flatMap {
+                    symbolDrawItem($0, progresses: targetDrawProgresses)
+                }
+            }
             let sourceOutputBounds = centeredScaledBounds(
                 baseBounds,
                 scale: presentation.sourceScale
@@ -1192,101 +1236,214 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         return image
     }
 
-    private static func symbolEffectLevelCount(_ symbol: ResolvedVectorSymbol) -> Int {
-        symbol.layers.map(\.effectLevel).max().map { $0 + 1 } ?? 0
-    }
-
-    private static func symbolLayerItem(
+    private static func symbolReplacementLayerItem(
         _ item: DisplayList.Item,
-        effectLevel: Int
+        level: Int
     ) -> DisplayList.Item? {
         guard case var .content(content) = item.value,
               case var .image(imageValue) = content.value,
               let symbol = imageValue.image.symbol,
-              symbol.layers.contains(where: { $0.effectLevel == effectLevel }) else {
+              symbol.layers.contains(where: { $0.replacementLevel == level }) else {
             return nil
         }
         let count = max(
-            symbolEffectLevelCount(symbol),
-            imageValue.image.symbolLayerOpacities?.count ?? 0
+            symbol.replacementLevelCount,
+            imageValue.image.symbolReplacementLayerOpacities?.count ?? 0
         )
         var opacities = [Double](repeating: 1, count: count)
-        if let existing = imageValue.image.symbolLayerOpacities {
+        if let existing = imageValue.image.symbolReplacementLayerOpacities {
             for index in existing.indices where index < opacities.count {
                 opacities[index] = existing[index]
             }
         }
-        for index in opacities.indices where index != effectLevel {
+        for index in opacities.indices where index != level {
             opacities[index] = 0
         }
-        imageValue.image.symbolLayerOpacities = opacities
+        imageValue.image.symbolReplacementLayerOpacities = opacities
         content.value = .image(imageValue)
         var result = item
         result.value = .content(content)
         return result
     }
 
+    private static func symbolDrawItem(
+        _ item: DisplayList.Item,
+        progresses: [Double]
+    ) -> DisplayList.Item? {
+        guard case var .content(content) = item.value,
+              case var .image(imageValue) = content.value,
+              imageValue.image.symbol != nil else {
+            return nil
+        }
+        imageValue.image.symbolDrawProgresses = progresses
+        content.value = .image(imageValue)
+        var result = item
+        result.value = .content(content)
+        return result
+    }
+
+    private static func symbolReplacementTimeline(
+        source: ResolvedVectorSymbol,
+        target: ResolvedVectorSymbol,
+        configuration: RBSymbolReplacementConfiguration
+    ) -> SymbolReplacementTimeline {
+        let sourceLevelCount = configuration.isLayered
+            ? max(source.replacementLevelCount, 1)
+            : 1
+        let targetLevelCount = configuration.isLayered
+            ? max(target.replacementLevelCount, 1)
+            : 1
+        let sourceDrawDuration = source.drawMotionGroupDurations.max()
+        let targetDrawDuration = target.drawMotionGroupDurations.max()
+        let specializedSourceDuration: Double?
+        let specializedTargetDuration: Double?
+        if configuration.isAutomaticStyle,
+           sourceDrawDuration != nil,
+           targetDrawDuration == nil {
+            specializedSourceDuration = sourceDrawDuration
+            specializedTargetDuration = nil
+        } else if configuration.isAutomaticStyle,
+                  sourceDrawDuration == nil,
+                  targetDrawDuration != nil {
+            specializedSourceDuration = nil
+            specializedTargetDuration = targetDrawDuration
+        } else {
+            specializedSourceDuration = nil
+            specializedTargetDuration = nil
+        }
+        let specializedDuration: Double
+        if let specializedSourceDuration {
+            specializedDuration = specializedSourceDuration + 0.25
+        } else if let specializedTargetDuration {
+            specializedDuration = 0.25 + specializedTargetDuration
+        } else {
+            specializedDuration = 0
+        }
+        return SymbolReplacementTimeline(
+            duration: max(configuration.duration, specializedDuration),
+            sourceLevelCount: sourceLevelCount,
+            targetLevelCount: targetLevelCount,
+            sourceDrawDuration: specializedSourceDuration,
+            targetDrawDuration: specializedTargetDuration
+        )
+    }
+
+    private static func symbolReplacementDrawProgresses(
+        symbol: ResolvedVectorSymbol,
+        elapsedTime: Double,
+        startsAt startTime: Double,
+        appears: Bool
+    ) -> [Double] {
+        symbol.drawMotionGroupDurations.map { duration in
+            let progress = min(max((elapsedTime - startTime) / duration, 0), 1)
+            let eased = (1 - cos(progress * .pi)) * 0.5
+            return appears ? eased : 1 - eased
+        }
+    }
+
     private static func symbolReplacementPresentation(
         elapsedTime: Double,
         level: Int,
-        levelCount: Int,
+        timeline: SymbolReplacementTimeline,
         configuration: RBSymbolReplacementConfiguration
     ) -> SymbolReplacementPresentation {
-        let duration = configuration.duration
-        let step = levelCount > 1
-            ? min(0.05, 0.15 / Double(levelCount - 1))
+        let sourceStep = timeline.sourceLevelCount > 1
+            ? min(0.05, 0.15 / Double(timeline.sourceLevelCount - 1))
+            : 0
+        let targetStep = timeline.targetLevelCount > 1
+            ? min(0.05, 0.15 / Double(timeline.targetLevelCount - 1))
             : 0
         let sourceDelay = configuration.isLayered
-            ? Double(levelCount - level - 1) * step
+            ? Double(max(timeline.sourceLevelCount - level - 1, 0)) * sourceStep
             : 0
-        let targetDelay = configuration.isLayered ? Double(level) * step : 0
-        let sourceEnd = min(0.25, duration)
-        let targetStart = min(1.0 / 6.0 + targetDelay, duration)
+        let targetForwardDelay = configuration.isLayered
+            ? Double(level) * targetStep
+            : 0
+        let targetReverseDelay = configuration.isLayered
+            ? Double(max(timeline.targetLevelCount - level - 1, 0)) * targetStep
+            : 0
+        let sourceEnd = 0.25
         let sourceProgress = normalizedProgress(
             elapsedTime,
             from: min(sourceDelay, sourceEnd),
             to: sourceEnd
         )
-        let targetProgress = normalizedProgress(
-            elapsedTime,
-            from: targetStart,
-            to: duration
-        )
 
         let sourceScale: CGFloat
+        let sourceOpacity: CGFloat
+        let targetScale: CGFloat
+        let targetOpacity: CGFloat
         switch configuration.style {
         case .downUp:
-            let progress = replacementCurve(
+            let sourceCurve = replacementCurve(
                 sourceProgress,
                 controlPoint1: CGPoint(x: 0.75, y: 0),
                 controlPoint2: CGPoint(x: 0.8, y: 1)
             )
-            sourceScale = 1 - 0.5 * progress
+            sourceScale = 1 - 0.5 * sourceCurve
+            sourceOpacity = elapsedTime < sourceEnd ? 1 : 0
+            let targetStart = timeline.sourceDrawDuration ?? 0.25
+            let targetDuration = max(0.25 - targetReverseDelay, 0)
+            let targetProgress = normalizedProgress(
+                elapsedTime,
+                from: targetStart,
+                to: targetStart + targetDuration
+            )
+            let targetCurve = replacementCurve(
+                targetProgress,
+                controlPoint1: CGPoint(x: 0.2, y: 0),
+                controlPoint2: CGPoint(x: 0.25, y: 1)
+            )
+            targetScale = 0.5 + 0.5 * targetCurve
+            targetOpacity = elapsedTime > targetStart ? 1 : 0
         case .upUp:
-            let progress = replacementCurve(
+            let sourceCurve = replacementCurve(
                 sourceProgress,
                 controlPoint1: CGPoint(x: 0.33, y: 0),
                 controlPoint2: CGPoint(x: 0.83, y: 0.83)
             )
-            sourceScale = 1 + 0.25 * progress
+            sourceScale = 1 + 0.25 * sourceCurve
+            sourceOpacity = 1 - sourceCurve
+            let targetStart = 1.0 / 6.0 + targetForwardDelay
+            let targetProgress = normalizedProgress(
+                elapsedTime,
+                from: targetStart,
+                to: 0.5
+            )
+            let targetCurve = replacementCurve(
+                targetProgress,
+                controlPoint1: CGPoint(x: 0.17, y: 0.17),
+                controlPoint2: CGPoint(x: 0.67, y: 1)
+            )
+            targetScale = 0.4 + 0.6 * targetCurve
+            targetOpacity = targetCurve
         case .offUp:
             sourceScale = 1
+            sourceOpacity = elapsedTime <= 0 ? 1 : 0
+            let targetDuration = max(0.25 - targetReverseDelay, 0)
+            let targetProgress = normalizedProgress(
+                elapsedTime,
+                from: 0,
+                to: targetDuration
+            )
+            let targetScaleCurve = replacementCurve(
+                targetProgress,
+                controlPoint1: CGPoint(x: 0.2, y: 0),
+                controlPoint2: CGPoint(x: 0.25, y: 1)
+            )
+            let targetOpacityCurve = replacementCurve(
+                targetProgress,
+                controlPoint1: CGPoint(x: 0.33, y: 0),
+                controlPoint2: CGPoint(x: 0.67, y: 1)
+            )
+            targetScale = 0.5 + 0.5 * targetScaleCurve
+            targetOpacity = targetOpacityCurve
         }
-        let sourceOpacityProgress = replacementCurve(
-            sourceProgress,
-            controlPoint1: CGPoint(x: 0.33, y: 0),
-            controlPoint2: CGPoint(x: 0.67, y: 1)
-        )
-        let incomingProgress = replacementCurve(
-            targetProgress,
-            controlPoint1: CGPoint(x: 0.17, y: 0.17),
-            controlPoint2: CGPoint(x: 0.67, y: 1)
-        )
         return SymbolReplacementPresentation(
             sourceScale: sourceScale,
-            sourceOpacity: 1 - sourceOpacityProgress,
-            targetScale: 0.4 + 0.6 * incomingProgress,
-            targetOpacity: incomingProgress
+            sourceOpacity: sourceOpacity,
+            targetScale: targetScale,
+            targetOpacity: targetOpacity
         )
     }
 

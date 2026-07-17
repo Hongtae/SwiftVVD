@@ -1583,7 +1583,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testSymbolReplacementUsesCustomDurationAndLayeredImageComposition() throws {
+    func testSymbolReplacementUsesStyleSpecificLayeredImageComposition() throws {
         let bounds = CGRect(x: 10, y: 20, width: 48, height: 48)
         let sourceSymbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
             name: "photo.fill",
@@ -1620,23 +1620,92 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 .animation: longAnimation,
             ]
         )
-        XCTAssertEqual(layered.activeDuration, 0.5, accuracy: 0.000_001)
+        let drawDuration = try XCTUnwrap(targetSymbol.drawMotionGroupDurations.max())
+        XCTAssertEqual(layered.activeDuration, 0.25 + drawDuration, accuracy: 0.000_001)
 
-        let layeredPresentation = layered.copyContents(withProgress: 0.2)
+        let layeredPresentation = layered.copyContents(withProgress: 0.3)
         let layeredCrossFades = try XCTUnwrap(typedCrossFades(in: layeredPresentation))
         XCTAssertEqual(layeredCrossFades.count, 2)
         XCTAssertEqual(
-            Set(layeredCrossFades.compactMap { symbolLayerMask(in: $0.source) }),
-            Set([[1, 0], [0, 1]])
+            Set(layeredCrossFades.compactMap { symbolReplacementLayerMask(in: $0.source) }),
+            Set([[1]])
         )
         XCTAssertEqual(
-            Set(layeredCrossFades.compactMap { symbolLayerMask(in: $0.target) }),
+            Set(layeredCrossFades.compactMap { symbolReplacementLayerMask(in: $0.target) }),
             Set([[1, 0], [0, 1]])
         )
-        XCTAssertTrue(layeredCrossFades.contains { value in
-            guard let source = value.source, let target = value.target else { return false }
-            return source.outputBounds != bounds || target.outputBounds != bounds
+        let drawProgresses = layeredCrossFades.compactMap {
+            symbolDrawProgresses(in: $0.target)
+        }
+        XCTAssertEqual(drawProgresses.count, 2)
+        XCTAssertTrue(drawProgresses.allSatisfy { progresses in
+            progresses.count == 2 && progresses.allSatisfy { $0 > 0 && $0 < 1 }
         })
+        XCTAssertNotEqual(drawProgresses[0][0], drawProgresses[0][1])
+
+        let downUp = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [
+                .transition: ContentTransition.symbolEffect(
+                    ReplaceSymbolEffect.replace.downUp
+                ).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(downUp.activeDuration, 0.5, accuracy: 0.000_001)
+        let downUpPresentation = try XCTUnwrap(typedCrossFades(
+            in: downUp.copyContents(withProgress: 0.3)
+        ))
+        XCTAssertEqual(downUpPresentation.count, 2)
+        let downUpTargetWidths = downUpPresentation.compactMap { value in
+            value.target.map { target in
+                (symbolReplacementLayerMask(in: value.target), target.outputBounds.width)
+            }
+        }
+        XCTAssertEqual(downUpTargetWidths.count, 2)
+        let firstTargetWidth = try XCTUnwrap(
+            downUpTargetWidths.first(where: { $0.0 == [1, 0] })?.1
+        )
+        let secondTargetWidth = try XCTUnwrap(
+            downUpTargetWidths.first(where: { $0.0 == [0, 1] })?.1
+        )
+        XCTAssertGreaterThan(firstTargetWidth, secondTargetWidth)
+        XCTAssertTrue(downUpPresentation.allSatisfy {
+            symbolDrawProgresses(in: $0.target) == nil
+        })
+        let downUpSource = try XCTUnwrap(typedCrossFades(
+            in: downUp.copyContents(withProgress: 0.125)
+        )?.first)
+        XCTAssertEqual(crossFadeFractions(in: downUpSource)?.source, 0)
+        XCTAssertLessThan(
+            try XCTUnwrap(downUpSource.source).outputBounds.width,
+            bounds.width
+        )
+
+        let upUp = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [
+                .transition: ContentTransition.symbolEffect(
+                    ReplaceSymbolEffect.replace.upUp
+                ).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(upUp.activeDuration, 0.5, accuracy: 0.000_001)
+        let upUpSource = try XCTUnwrap(typedCrossFades(
+            in: upUp.copyContents(withProgress: 0.125)
+        )?.first)
+        let upUpSourceFraction = try XCTUnwrap(
+            crossFadeFractions(in: upUpSource)?.source
+        )
+        XCTAssertGreaterThan(upUpSourceFraction, 0)
+        XCTAssertLessThan(upUpSourceFraction, 1)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(upUpSource.source).outputBounds.width,
+            bounds.width
+        )
 
         let whole = RBDisplayListInterpolator(
             from: source,
@@ -1648,9 +1717,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 .animation: longAnimation,
             ]
         )
-        XCTAssertEqual(whole.activeDuration, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(whole.activeDuration, 0.25 + drawDuration, accuracy: 0.000_001)
         XCTAssertEqual(
-            try XCTUnwrap(typedCrossFades(in: whole.copyContents(withProgress: 0.2))).count,
+            try XCTUnwrap(typedCrossFades(in: whole.copyContents(withProgress: 0.3))).count,
             1
         )
 
@@ -1659,7 +1728,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             to: target,
             options: [
                 .transition: ContentTransition.symbolEffect(
-                    ReplaceSymbolEffect.replace.offUp.wholeSymbol
+                    ReplaceSymbolEffect.replace.offUp
                 ).rbTransition,
                 .animation: longAnimation,
             ]
@@ -1674,8 +1743,36 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             targetSymbol.identity
         )
 
+        let offUpPresentation = try XCTUnwrap(typedCrossFades(
+            in: offUp.copyContents(withProgress: 0.01)
+        ))
+        XCTAssertEqual(offUpPresentation.count, 2)
+        XCTAssertTrue(offUpPresentation.allSatisfy {
+            crossFadeFractions(in: $0)?.source == 1
+        })
+        let offUpTargetWidths = offUpPresentation.compactMap { $0.target?.outputBounds.width }
+        XCTAssertEqual(offUpTargetWidths.count, 2)
+        XCTAssertNotEqual(offUpTargetWidths[0], offUpTargetWidths[1])
+
+        let reverseAutomatic = RBDisplayListInterpolator(
+            from: target,
+            to: source,
+            options: [
+                .transition: ContentTransition.symbolEffect(.replace).rbTransition,
+                .animation: longAnimation,
+            ]
+        )
+        XCTAssertEqual(
+            reverseAutomatic.activeDuration,
+            drawDuration + 0.25,
+            accuracy: 0.000_001
+        )
+        XCTAssertTrue(reverseAutomatic.copyContents(withProgress: 0.4).items.isEmpty)
+        XCTAssertFalse(reverseAutomatic.copyContents(withProgress: 0.6).items.isEmpty)
+
         // ASSERTIONS symbolEffectReplaceDisassemblyObserved
         // ASSERTIONS symbolEffectReplaceSpatialRuntimeObserved
+        // ASSERTIONS symbolEffectReplaceTimelineRuntimeObserved
     }
 
     func testRBDisplayListInterpolatorMixesCompatibleImageTintAsOneItem() throws {
@@ -6196,6 +6293,65 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
+    func testImageMakeViewAppliesResolvedImageInterpolator() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let image = graph.makeInput(value: Image(systemName: "photo.fill"))
+            let outputs = Image._makeView(
+                view: _GraphValue(_attribute: image),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            XCTAssertEqual(outputs.preferences.values(for: ResourceList.Key.self).count, 1)
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            XCTAssertTrue(graph.debugDescription(for: outputID).contains("(stateful)"))
+            XCTAssertEqual(Attribute<DisplayList>(outputID).value.items.count, 0)
+        }
+    }
+
+    func testImageResourceResolutionKeepsFirstTransactionForPendingImage() throws {
+        let state = _ImageResourceResolutionState()
+        let imageA = Image(systemName: "photo.fill")
+        let imageB = Image(systemName: "pencil")
+        let immediate = Transaction()
+        var animated = Transaction()
+        animated.animation = .linear(duration: 5)
+
+        XCTAssertNil(state.transaction(for: imageA, candidate: immediate).animation)
+        XCTAssertNil(state.transaction(for: imageA, candidate: animated).animation)
+
+        state.didResolve(image: imageA)
+        XCTAssertEqual(
+            try XCTUnwrap(state.transaction(for: imageB, candidate: animated).animation).box.duration,
+            5,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testImageInitialResourcePublicationDoesNotAdoptInsertionAnimation() throws {
+        var animated = Transaction()
+        animated.animation = .linear(duration: 5)
+
+        let initial = _ImageResourceResolutionState.publicationTransaction(
+            candidate: animated,
+            hasResolvedContent: false
+        )
+        XCTAssertNil(initial.animation)
+        XCTAssertTrue(initial.disablesAnimations)
+
+        let replacement = _ImageResourceResolutionState.publicationTransaction(
+            candidate: animated,
+            hasResolvedContent: true
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(replacement.animation).box.duration,
+            5,
+            accuracy: 0.000_001
+        )
+        XCTAssertFalse(replacement.disablesAnimations)
+    }
+
     func testResolvedStyledTextInterpolatorEmitsContentTransitionEffect() throws {
         let graph = _AGGraph()
 
@@ -6454,6 +6610,40 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             return nil
         }
         return image.image.symbolLayerOpacities
+    }
+
+    private func symbolReplacementLayerMask(
+        in branch: DisplayList.Content.CrossFadeValue.Branch?
+    ) -> [Double]? {
+        guard let item = branch?.contents.items.first,
+              case let .content(content) = item.value,
+              case let .image(image) = content.value else {
+            return nil
+        }
+        return image.image.symbolReplacementLayerOpacities
+    }
+
+    private func symbolDrawProgresses(
+        in branch: DisplayList.Content.CrossFadeValue.Branch?
+    ) -> [Double]? {
+        guard let item = branch?.contents.items.first,
+              case let .content(content) = item.value,
+              case let .image(image) = content.value else {
+            return nil
+        }
+        return image.image.symbolDrawProgresses
+    }
+
+    private func crossFadeFractions(
+        in value: DisplayList.Content.CrossFadeValue
+    ) -> (source: Float, target: Float)? {
+        guard case let .effect(
+            .crossFade(sourceFraction, targetFraction),
+            _
+        ) = value.command else {
+            return nil
+        }
+        return (sourceFraction, targetFraction)
     }
 
     private func symbolIdentity(

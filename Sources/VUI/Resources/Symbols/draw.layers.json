@@ -1,6 +1,7 @@
 {
-  "semanticLevels": [0, 0],
+  "semanticLevels": [0, 1],
   "effectLevels": [0, 1],
+  "replacementLevels": [0, 1],
   "variableColorLevels": [null, null],
   "drawLayers": [
     {
