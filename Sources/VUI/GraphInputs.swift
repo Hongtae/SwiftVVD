@@ -442,6 +442,16 @@ public struct _GraphInputs {
             changedDebugProperties |= 0x20
         }
 
+        // A modifier's captured inputs provide the higher-priority semantic
+        // environment, but its frame cache predates child materialization.
+        // Prefer the concrete child's frame when layout has installed one so
+        // modifier content reads its own geometry rather than an ancestor's.
+        if let childFrame = other.cachedEnvironment.value.animatedFrame {
+            var newCE = cachedEnvironment.value
+            newCE.animatedFrame = childFrame
+            cachedEnvironment = MutableBox(newCE)
+        }
+
         // Step 3: Transaction
         let selfTxID  = transaction.identifier
         let otherTxID = other.transaction.identifier

@@ -324,6 +324,7 @@ enum DynamicContainer {
         // child addressable until multi-output storage is modeled.
         var layoutAttributes: [LayoutProxyAttributes]
         var preferenceOutputs: [PreferencesOutputs]
+        var viewPhase: Attribute<TransitionPhase>?
         var transitionPhaseSetters: [_TransitionPhaseSetter]
         var transitionCompletionSeed: Attribute<UInt32>?
         var transitionTransactions: _TransitionTransactionResolver?
@@ -338,6 +339,7 @@ enum DynamicContainer {
             outputs: _ViewOutputs,
             layoutAttributes: [LayoutProxyAttributes],
             preferenceOutputs: [PreferencesOutputs],
+            viewPhase: Attribute<TransitionPhase>? = nil,
             transitionPhaseSetters: [_TransitionPhaseSetter] = [],
             needsTransitions: Bool = false,
             listener: TransitionRemovalListener? = nil,
@@ -367,6 +369,7 @@ enum DynamicContainer {
             self.item = item
             self.layoutAttributes = layoutAttributes
             self.preferenceOutputs = preferenceOutputs
+            self.viewPhase = viewPhase
             self.transitionPhaseSetters = transitionPhaseSetters
             self.transitionCompletionSeed = transitionCompletionSeed
             self.transitionTransactions = transitionTransactions
@@ -379,6 +382,7 @@ enum DynamicContainer {
             _ phase: TransitionPhase,
             transaction: Transaction = Transaction()
         ) {
+            viewPhase?.setValue(phase, transaction: transaction)
             for setter in transitionPhaseSetters {
                 setter(phase, transaction)
             }
@@ -524,6 +528,104 @@ enum DynamicContainer {
 /// so retained animation listeners can drain after disappearance.
 struct DynamicContainerWillRemoveBeforeInvalidation: GraphInput {
     static var defaultValue: Bool { false }
+}
+
+struct DynamicContainerTransitionPhaseInput: ViewInput {
+    static var defaultValue: OptionalAttribute<TransitionPhase> {
+        OptionalAttribute()
+    }
+
+    static func valuesEqual(
+        _ lhs: OptionalAttribute<TransitionPhase>,
+        _ rhs: OptionalAttribute<TransitionPhase>
+    ) -> Bool {
+        lhs.base.identifier == rhs.base.identifier
+    }
+}
+
+struct LayoutPlacementStateInput: ViewInput {
+    static var defaultValue: OptionalAttribute<Bool> {
+        OptionalAttribute()
+    }
+
+    static func valuesEqual(
+        _ lhs: OptionalAttribute<Bool>,
+        _ rhs: OptionalAttribute<Bool>
+    ) -> Bool {
+        lhs.base.identifier == rhs.base.identifier
+    }
+}
+
+struct LayoutPlacementAnimationsDisabledInput: ViewInput {
+    static var defaultValue: Bool { false }
+}
+
+struct LayoutPlacementProjection {
+    var targetFrame: Attribute<ViewFrame>
+    var presentationFrame: Attribute<ViewFrame>
+}
+
+struct LayoutPlacementProjectionInput: ViewInput {
+    static var defaultValue: LayoutPlacementProjection? { nil }
+
+    static func valuesEqual(
+        _ lhs: LayoutPlacementProjection?,
+        _ rhs: LayoutPlacementProjection?
+    ) -> Bool {
+        lhs?.targetFrame.identifier == rhs?.targetFrame.identifier &&
+            lhs?.presentationFrame.identifier == rhs?.presentationFrame.identifier
+    }
+}
+
+private struct ProjectedLayoutPosition: Rule {
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var projection: LayoutPlacementProjection
+
+    func updateValue() -> CGPoint {
+        let rawOrigin = position.value
+        let childSize = size.value.value
+        let target = projection.targetFrame.value
+        let presentation = projection.presentationFrame.value
+        let targetPoint = CGPoint(
+            x: rawOrigin.x + childSize.width * 0.5,
+            y: rawOrigin.y + childSize.height * 0.5
+        )
+        let projectedPoint = CGPoint(
+            x: project(
+                targetPoint.x,
+                from: target.origin.x,
+                length: target.size.value.width,
+                to: presentation.origin.x,
+                length: presentation.size.value.width
+            ),
+            y: project(
+                targetPoint.y,
+                from: target.origin.y,
+                length: target.size.value.height,
+                to: presentation.origin.y,
+                length: presentation.size.value.height
+            )
+        )
+        return CGPoint(
+            x: projectedPoint.x - childSize.width * 0.5,
+            y: projectedPoint.y - childSize.height * 0.5
+        )
+    }
+
+    private func project(
+        _ value: CGFloat,
+        from sourceOrigin: CGFloat,
+        length sourceLength: CGFloat,
+        to destinationOrigin: CGFloat,
+        length destinationLength: CGFloat
+    ) -> CGFloat {
+        guard sourceLength != 0 else {
+            return destinationOrigin + value - sourceOrigin
+        }
+        let unitPosition = (value - sourceOrigin) / sourceLength
+        return destinationOrigin + destinationLength * unitPosition
+    }
 }
 
 /// Keeps a phase-3 retained-unused item cached after its later animated removal
@@ -870,6 +972,7 @@ struct DynamicContainerInfo: StatefulRule {
         baseInputs.copyCaches()
 
         let item: DynamicContainer.ItemInfo? = AGSubgraph.withCurrent(subgraph) {
+            let viewPhase = graph.makeInput(value: initialTransitionPhase)
             let parentTransform = capturedInputs.transform
 
             var firstOutputs: _ViewOutputs?
@@ -887,6 +990,7 @@ struct DynamicContainerInfo: StatefulRule {
             for elementOffset in offset..<(offset + viewCount) {
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
                 let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
+                let isPlacedAttr = graph.makeInput(value: false)
                 let scrollBasePosAttr = scrollContext.map { _ in
                     graph.makeInput(value: CGPoint.zero)
                 }
@@ -898,11 +1002,29 @@ struct DynamicContainerInfo: StatefulRule {
                     elementInputs,
                     makeView in
                     var childInputs = elementInputs
+                    childInputs[DynamicContainerTransitionPhaseInput.self] =
+                        OptionalAttribute(viewPhase)
+                    childInputs[LayoutPlacementStateInput.self] =
+                        OptionalAttribute(isPlacedAttr)
+                    let projectedPosition = childInputs[
+                        LayoutPlacementProjectionInput.self
+                    ].map { projection in
+                        graph.makeRule(
+                            ProjectedLayoutPosition(
+                                position: rawPosAttr,
+                                size: rawSizeAttr,
+                                projection: projection
+                            )
+                        )
+                    } ?? rawPosAttr
                     let animatedFrame = makeAnimatableFrameAttributes(
                         in: &childInputs.base,
-                        position: rawPosAttr,
+                        position: projectedPosition,
                         size: rawSizeAttr,
-                        supportsVFD: childInputs.supportsVFD
+                        supportsVFD: childInputs.supportsVFD,
+                        animationsDisabled: childInputs[
+                            LayoutPlacementAnimationsDisabledInput.self
+                        ]
                     )
                     let posAttr = animatedFrame.position
                     let sizeAttr = animatedFrame.size
@@ -992,6 +1114,7 @@ struct DynamicContainerInfo: StatefulRule {
                                 ViewSize(sz, proposal: proposal),
                                 transaction: placementTransaction
                             )
+                            isPlacedAttr.setValue(true, transaction: placementTransaction)
                             if let scrollContext,
                                let scrollBasePosAttr,
                                let identifier = dynamicItem,
@@ -1033,6 +1156,7 @@ struct DynamicContainerInfo: StatefulRule {
                 outputs: outputs,
                 layoutAttributes: layoutAttributes,
                 preferenceOutputs: preferenceOutputs,
+                viewPhase: viewPhase,
                 transitionPhaseSetters: transitionPhaseSetters,
                 needsTransitions: transition != nil,
                 phase: initialTransitionPhase == .willAppear ? 0 : 1,
@@ -1364,13 +1488,30 @@ extension Layout {
                 // LayoutChildGeometries projection directly.
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
                 let rawSizeAttr = graph.makeInput(value: ViewSize.zero)
+                let isPlacedAttr = graph.makeInput(value: false)
 
                 var childInputs = elementInputs
+                childInputs[LayoutPlacementStateInput.self] =
+                    OptionalAttribute(isPlacedAttr)
+                let projectedPosition = childInputs[
+                    LayoutPlacementProjectionInput.self
+                ].map { projection in
+                    graph.makeRule(
+                        ProjectedLayoutPosition(
+                            position: rawPosAttr,
+                            size: rawSizeAttr,
+                            projection: projection
+                        )
+                    )
+                } ?? rawPosAttr
                 let animatedFrame = makeAnimatableFrameAttributes(
                     in: &childInputs.base,
-                    position: rawPosAttr,
+                    position: projectedPosition,
                     size: rawSizeAttr,
-                    supportsVFD: childInputs.supportsVFD
+                    supportsVFD: childInputs.supportsVFD,
+                    animationsDisabled: childInputs[
+                        LayoutPlacementAnimationsDisabledInput.self
+                    ]
                 )
                 let posAttr = animatedFrame.position
                 let sizeAttr = animatedFrame.size
@@ -1416,6 +1557,7 @@ extension Layout {
                                     ViewSize(resolvedSize, proposal: proposal),
                                     transaction: placementTransaction
                                 )
+                                isPlacedAttr.setValue(true, transaction: placementTransaction)
                                 Transaction.withScopedThreadTransaction(placementTransaction) {
                                     inner.place(at: position, anchor: anchor, proposal: proposal)
                                 }

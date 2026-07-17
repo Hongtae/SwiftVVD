@@ -150,6 +150,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let recorder = DynamicContainerTransitionPhaseRecorder()
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
+        var viewPhase: Attribute<Phase>!
+        var transitionPhase: Attribute<TransitionPhase>!
+        var placementState: Attribute<Bool>!
         var removalEvents: [String] = []
 
         ref.withCurrent {
@@ -157,9 +160,20 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             source = graph.makeInput(
                 value: makeTransitionList(
                     inputs: inputs,
+                    rows: ["row"],
                     transition: AnyTransition(
                         DynamicContainerPhaseRecordingTransition(recorder: recorder)
-                    )
+                    ),
+                    makeOutputs: { inputs in
+                        viewPhase = inputs.base.phase
+                        transitionPhase = inputs[
+                            DynamicContainerTransitionPhaseInput.self
+                        ].attribute
+                        placementState = inputs[
+                            LayoutPlacementStateInput.self
+                        ].attribute
+                        return Self.makeFixedLayoutOutputs(inputs)
+                    }
                 )
             )
             infoAttr = graph.makeStatefulRule(
@@ -173,9 +187,18 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.items.first?.phase, 1)
             if let layout = initial.items.first?.outputs._layoutComputer.attribute?.value {
-                _ = layout.sizeThatFits(.unspecified)
+                XCTAssertFalse(placementState.value)
+                let size = layout.sizeThatFits(.unspecified)
+                layout.place(
+                    at: .zero,
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
             }
+            XCTAssertTrue(placementState.value)
             XCTAssertEqual(recorder.events, ["identity"])
+            XCTAssertFalse(viewPhase.value.isBeingRemoved)
+            XCTAssertEqual(transitionPhase.value, .identity)
         }
 
         let retainedItem = try ref.withCurrent {
@@ -201,6 +224,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             }
             XCTAssertEqual(removalEvents, [])
             XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
+            XCTAssertFalse(viewPhase.value.isBeingRemoved)
+            XCTAssertEqual(transitionPhase.value, .didDisappear)
             return item
         }
 

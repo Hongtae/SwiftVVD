@@ -132,6 +132,54 @@ final class GraphInputsMergeTests: XCTestCase {
         }
     }
 
+    func testMergeUsesMaterializedChildAnimatedFrameInsteadOfCapturedModifierFrame() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            var modifierInputs = makeGraphInputs(graph: graph)
+            _ = makeAnimatableFrameAttributes(
+                in: &modifierInputs,
+                position: graph.makeInput(value: CGPoint(x: 10, y: 20)),
+                size: graph.makeInput(value: ViewSize(CGSize(width: 110, height: 78)))
+            )
+            let modifierFrame = try XCTUnwrap(
+                modifierInputs.cachedEnvironment.value.animatedFrame
+            )
+
+            var childInputs = makeGraphInputs(graph: graph)
+            _ = makeAnimatableFrameAttributes(
+                in: &childInputs,
+                position: graph.makeInput(value: CGPoint(x: 44, y: 51)),
+                size: graph.makeInput(value: ViewSize(CGSize(width: 40.5, height: 16)))
+            )
+            let childFrame = try XCTUnwrap(
+                childInputs.cachedEnvironment.value.animatedFrame
+            )
+
+            modifierInputs.merge(childInputs)
+
+            let mergedFrame = try XCTUnwrap(
+                modifierInputs.cachedEnvironment.value.animatedFrame
+            )
+            XCTAssertNotEqual(
+                modifierFrame.animatedFrame.identifier,
+                childFrame.animatedFrame.identifier
+            )
+            XCTAssertEqual(
+                mergedFrame.animatedFrame.identifier,
+                childFrame.animatedFrame.identifier
+            )
+            XCTAssertEqual(
+                mergedFrame._animatedPosition?.identifier,
+                childFrame._animatedPosition?.identifier
+            )
+            XCTAssertEqual(
+                mergedFrame._animatedSize?.identifier,
+                childFrame._animatedSize?.identifier
+            )
+        }
+    }
+
     private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
             customInputs: PropertyList(),

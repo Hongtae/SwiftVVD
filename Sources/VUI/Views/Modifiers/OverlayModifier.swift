@@ -28,7 +28,7 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
         let ovSizeAttr = graph.makeInput(value: ViewSize(.zero))
         let ovInputs = _ViewInputs(
             base: inputs.base,
-            customInputs: PropertyList(),
+            customInputs: inputs.customInputs,
             preferences: inputs.preferences,
             transform: inputs.transform,
             position: ovPosAttr,

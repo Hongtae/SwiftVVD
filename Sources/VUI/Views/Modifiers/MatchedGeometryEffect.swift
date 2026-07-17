@@ -37,6 +37,7 @@ final class MatchedGeometryScope: PropertyKey {
         var args: Attribute<MatchedGeometryArguments>
         var transaction: Attribute<Transaction>
         var phase: Attribute<Phase>
+        var placement: OptionalAttribute<Bool>
         var size: Attribute<ViewSize>
         var position: Attribute<CGPoint>
         var transform: Attribute<ViewTransform>
@@ -129,9 +130,19 @@ final class MatchedGeometryScope: PropertyKey {
     func sourceInfo(frameIndex: Int) -> MatchedGeometrySourceInfo? {
         guard frames.indices.contains(frameIndex) else { return nil }
         let frame = frames[frameIndex]
-        let source = frame.views.first(where: {
-            $0.args.value.isSource && !$0.phase.value.isBeingRemoved
+        let sources = frame.views.filter { $0.args.value.isSource }
+        let activeSource = sources.first(where: {
+            !$0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
         })
+        let hasUnplacedActiveSource = sources.contains(where: {
+            !$0.phase.value.isBeingRemoved && !($0.placement.attribute?.value ?? true)
+        })
+        let deferredSource = hasUnplacedActiveSource
+            ? sources.first(where: {
+                $0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
+            })
+            : nil
+        let source = activeSource ?? deferredSource
         guard let source else { return nil }
 
         let args = source.args.value
@@ -149,9 +160,17 @@ final class MatchedGeometryScope: PropertyKey {
         let transaction = graph?.transaction(for: source.position.identifier) ??
             graph?.transaction(for: source.size.identifier) ??
             source.transaction.value
+        var phase = source.phase.value
+        if activeSource == nil {
+            // A replacement source can exist before its parent layout has
+            // assigned target geometry. Keep the retained source authoritative
+            // during that gap instead of retargeting the shared frame to the
+            // new layout bridge's placeholder origin.
+            phase.isBeingRemoved = false
+        }
         return MatchedGeometrySourceInfo(
             frame: ViewFrame(origin: origin, size: size),
-            phase: source.phase.value,
+            phase: phase,
             transaction: transaction,
             positionAttribute: source.position.identifier,
             sizeAttribute: source.size.identifier
@@ -312,6 +331,7 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
     var args: Attribute<MatchedGeometryArguments>
     var transaction: Attribute<Transaction>
     var phase: Attribute<Phase>
+    var placement: OptionalAttribute<Bool>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
     var transform: Attribute<ViewTransform>
@@ -345,6 +365,7 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
                 args: args,
                 transaction: transaction,
                 phase: phase,
+                placement: placement,
                 size: size,
                 position: position,
                 transform: transform
@@ -441,6 +462,17 @@ private struct MatchedGeometryFrame: Rule {
     }
 }
 
+private struct MatchedGeometrySourcePhase: Rule {
+    var phase: Attribute<Phase>
+    var transitionPhase: Attribute<TransitionPhase>
+
+    func updateValue() -> Phase {
+        var value = phase.value
+        value.isBeingRemoved = transitionPhase.value == .didDisappear
+        return value
+    }
+}
+
 public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
     public var id: ID
     public var namespace: Namespace.ID
@@ -480,15 +512,52 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
         var modifiedInputs = inputs
         modifiedInputs.needsGeometry = true
         let args = modifier[\.args]._attribute
+        let animatedLayoutFrame = inputs.base.cachedEnvironment.value.animatedFrame
+        let targetPosition = animatedLayoutFrame?.position ?? inputs.position
+        let targetSize = animatedLayoutFrame?.size ?? inputs.size
+        let targetGeometryFrame: Attribute<ViewFrame> = graph.makeRule {
+            ViewFrame(origin: targetPosition.value, size: targetSize.value)
+        }
+        let targetTransform: Attribute<ViewTransform>
+        if animatedLayoutFrame != nil {
+            let presentationTransform = inputs.transform
+            targetTransform = graph.makeRule {
+                var transform = presentationTransform.value
+                // Layout animation exposes its current presentation origin through
+                // inputs.position, while the cached frame retains the newly placed
+                // target origin. Matched source arbitration must start from that
+                // target geometry; otherwise a newly inserted source is registered
+                // at the layout bridge's initial zero frame and flies in from the
+                // window origin.
+                transform.appendPosition(targetPosition.value)
+                return transform
+            }
+        } else {
+            targetTransform = inputs.transform
+        }
+        let sourcePhase: Attribute<Phase>
+        if let transitionPhase = inputs[
+            DynamicContainerTransitionPhaseInput.self
+        ].attribute {
+            sourcePhase = graph.makeRule(
+                MatchedGeometrySourcePhase(
+                    phase: inputs.base.phase,
+                    transitionPhase: transitionPhase
+                )
+            )
+        } else {
+            sourcePhase = inputs.base.phase
+        }
         let registration: Attribute<Attribute<ViewFrame?>> = graph.makeStatefulRule(
             MatchedGeometryRegistration(
                 modifier: modifier._attribute,
                 args: args,
                 transaction: inputs.base.transaction,
-                phase: inputs.base.phase,
-                size: inputs.size,
-                position: inputs.position,
-                transform: inputs.transform,
+                phase: sourcePhase,
+                placement: inputs[LayoutPlacementStateInput.self],
+                size: targetSize,
+                position: targetPosition,
+                transform: targetTransform,
                 scope: scope
             )
         )
@@ -506,6 +575,11 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
         )
         let transformedInputs: _ViewInputs = {
             var value = modifiedInputs
+            value[LayoutPlacementAnimationsDisabledInput.self] = true
+            value[LayoutPlacementProjectionInput.self] = LayoutPlacementProjection(
+                targetFrame: targetGeometryFrame,
+                presentationFrame: matchedFrame
+            )
             let parentTransform = modifiedInputs.transform
             value.position = graph.makeRule { matchedFrame.value.origin }
             value.size = graph.makeRule { matchedFrame.value.size }
@@ -521,7 +595,34 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
             childLayoutComputer,
             to: outputs._layoutComputer.attribute
         )
-        return outputs
+        guard let innerLayoutComputer = outputs._layoutComputer.attribute else {
+            return outputs
+        }
+        // The parent measures the view in its target layout, while descendants
+        // must be placed in the current matched presentation frame. Replacing
+        // only the outer position and size would leave overlays at the target
+        // or previous layout position while the matched content is in flight.
+        let projectedLayoutComputer: Attribute<LayoutComputer> = graph.makeRule {
+            let inner = innerLayoutComputer.value
+            let frame = targetGeometryFrame.value
+            return LayoutComputer(
+                sizeThatFits: { inner.sizeThatFits($0) },
+                spacing: inner.spacing,
+                place: { _, anchor, _ in
+                    let proposal = ProposedViewSize(frame.size.value)
+                    let position = CGPoint(
+                        x: frame.origin.x + frame.size.value.width * anchor.x,
+                        y: frame.origin.y + frame.size.value.height * anchor.y
+                    )
+                    inner.place(at: position, anchor: anchor, proposal: proposal)
+                },
+                priority: inner.priority,
+                explicitAlignment: { inner.explicitAlignment($0, at: $1) }
+            )
+        }
+        var projectedOutputs = outputs
+        projectedOutputs._layoutComputer = OptionalAttribute(projectedLayoutComputer)
+        return projectedOutputs
     }
 
     public static func _makeViewList(
