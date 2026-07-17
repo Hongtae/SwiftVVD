@@ -112,7 +112,24 @@ extension PhaseAnimator {
             let attrs = makeChildAttributes(view: view, baseInputs: inputs.base)
             var inputs = inputs
             inputs.base.transaction = attrs.transaction
-            return Content._makeViewList(view: _GraphValue(_attribute: attrs.content), inputs: inputs)
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
+            }
+            let appearanceModifier = graph.makeInput(
+                value: _AppearanceActionModifier(
+                    appear: appearanceHandler(isVisible: attrs.isVisible.asWeak(), value: true),
+                    disappear: appearanceHandler(isVisible: attrs.isVisible.asWeak(), value: false)
+                )
+            )
+            return _AppearanceActionModifier._makeViewList(
+                modifier: _GraphValue(_attribute: appearanceModifier),
+                inputs: inputs
+            ) { _, inputs in
+                Content._makeViewList(
+                    view: _GraphValue(_attribute: attrs.content),
+                    inputs: inputs
+                )
+            }
         }
 
         private static func makeChildAttributes(

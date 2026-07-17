@@ -6770,6 +6770,46 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
+    func testStateTransitioningContainerMakeViewListQueuesAppearanceHandlerWhenMaterialized() throws {
+        try withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let view = Container(
+                phases: [7],
+                content: { phase in
+                    PhaseSizedView(width: CGFloat(phase))
+                },
+                animation: { _ in .default },
+                behavior: .eventDriven(trigger: AnyEquatable(0))
+            )
+            let source = graph.makeInput(value: view)
+            let listInputs = makeViewInputs(graph: graph).listInputs
+            let outputs = Container._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: listInputs
+            )
+
+            guard case let .staticList(elements) = outputs.views else {
+                return XCTFail("Expected a static list output.")
+            }
+            guard case .modified = elements else {
+                return XCTFail("Expected the appearance modifier to wrap the list elements.")
+            }
+
+            var from = 0
+            let (materialized, _) = elements.makeElements(
+                from: &from,
+                inputs: makeViewInputs(graph: graph),
+                indirectMap: nil
+            ) { inputs, makeView in
+                (makeView(inputs), false)
+            }
+            let layout = try XCTUnwrap(materialized?._layoutComputer.attribute?.value)
+
+            XCTAssertEqual(layout.sizeThatFits(.unspecified), CGSize(width: 7, height: 19))
+            XCTAssertTrue(viewGraph.hasPendingTransactions)
+        }
+    }
+
     func testTransactionRuleSelectsPhaseChangeTransactionWhenSeedMatches() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
