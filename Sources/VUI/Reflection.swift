@@ -2,10 +2,13 @@
 //  File: Reflection.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import SwiftShims
+
+// Runtime entry points used to enumerate stored fields without allocating
+// intermediate mirror values.
 
 // The original reflection code can be found here:
 // https://github.com/apple/swift/blob/main/stdlib/public/core/ReflectionMirror.swift
@@ -19,7 +22,8 @@ private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMut
 @_silgen_name("swift_reflectionMirror_recursiveChildOffset")
 private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
-// Note: I modified some code that I don't think is necessary. (removed _MetadataKind)
+/// Visits each stored field in declaration order with its name, byte offset,
+/// and runtime type. Returning false stops traversal.
 @discardableResult
 func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
     let numChildren = _getRecursiveChildCount(type)

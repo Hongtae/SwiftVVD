@@ -1005,7 +1005,7 @@ final class AnimatorState<AnimatedValue: Animatable> {
     func addListenersForCompletionRecords(
         transaction: Transaction
     ) -> ListenerRegistration {
-        // Some callers mirror listener identity into their own deadline sorter.
+        // Some callers copy listener identity into a separate deadline sorter.
         // Return the registration payload there, but keep the actual listener
         // storage owned by AnimatorState.
         registerListeners(transaction: transaction)
@@ -1839,4 +1839,3 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         )
     }
 }
-

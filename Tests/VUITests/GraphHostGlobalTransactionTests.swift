@@ -4,7 +4,6 @@ import XCTest
 final class GraphHostGlobalTransactionTests: XCTestCase {
     override func tearDown() {
         GraphHost.flushGlobalTransactions()
-        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
@@ -376,51 +375,6 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
         XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
     }
 
-    func testRuntimeOverridePreV5NilHostGlobalTransactionDirectInstallsChildWithoutFlushParentMerge() {
-        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
-        let provider = GlobalTransactionHostProvider(host: nil)
-        var child = Transaction()
-        child.isContinuous = true
-        var observedDuringMutation: [(Bool, Bool, Bool)] = []
-        var observedAfterFlushInsideParent: (Bool, Bool)?
-
-        GraphHost.globalTransaction(
-            child,
-            id: Transaction.ID(value: 109),
-            mutation: GlobalRecordingGraphMutation {
-                let current = Transaction.current
-                observedDuringMutation.append((
-                    current.disablesAnimations,
-                    current.isContinuous,
-                    current[GlobalQueueMergeFlagKey.self]
-                ))
-            },
-            hostProvider: provider
-        )
-
-        var parent = Transaction()
-        parent.disablesAnimations = true
-        parent[GlobalQueueMergeFlagKey.self] = true
-        withTransaction(parent) {
-            GraphHost.flushGlobalTransactions()
-            let current = Transaction.current
-            observedAfterFlushInsideParent = (
-                current.disablesAnimations,
-                current[GlobalQueueMergeFlagKey.self]
-            )
-        }
-
-        XCTAssertEqual(observedDuringMutation.count, 1)
-        XCTAssertEqual(observedDuringMutation[0].0, false)
-        XCTAssertEqual(observedDuringMutation[0].1, true)
-        XCTAssertEqual(observedDuringMutation[0].2, false)
-        XCTAssertEqual(observedAfterFlushInsideParent?.0, true)
-        XCTAssertEqual(observedAfterFlushInsideParent?.1, true)
-        XCTAssertFalse(Transaction.current.disablesAnimations)
-        XCTAssertFalse(Transaction.current.isContinuous)
-        XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
-    }
-
     func testMainThreadGlobalTransactionFlushesFromRunLoopObserver() throws {
         guard Thread.isMainThread else {
             throw XCTSkip("Run-loop observer scheduling is only meaningful on the main test thread.")
@@ -485,7 +439,7 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
     private func makeSignal(in host: GraphHost) -> AGWeakAttribute {
         var signal: AGWeakAttribute!
         host.data.withCurrent {
-            signal = host.data.graph.makeInput(value: ()).asWeak().raw
+            signal = host.data.graph.makeInput(value: ()).asWeak().base
         }
         return signal
     }

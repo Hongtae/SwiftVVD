@@ -191,16 +191,16 @@ extension MenuDropdownModifier {
             .filter { $0.key == ViewRespondersKey.self }
             .map { $0.value }
 
-        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        let innerRespondersAttr: Attribute<[ViewResponder]>
         if innerResponderNodes.isEmpty {
             innerRespondersAttr = graph.makeInput(value: [])
         } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
         } else {
             innerRespondersAttr = graph.makeRule {
                 var combined = ViewRespondersKey.defaultValue
                 for nodeID in innerResponderNodes {
-                    let value = Attribute<[any ViewResponder]>(nodeID).value
+                    let value = Attribute<[ViewResponder]>(nodeID).value
                     ViewRespondersKey.reduce(value: &combined) { value }
                 }
                 return combined
@@ -243,7 +243,7 @@ extension MenuDropdownModifier {
         // Standalone Menu installs a dropdown responder; nested Menu under
         // MenuStyleContext remains PlatformItemListMenuStyle collection.
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
         return outputs
     }
@@ -262,10 +262,8 @@ extension MenuDropdownModifier {
 
 private let _menuDropdownResponderNextKey = Mutex<UInt32>(0x91000000)
 
-final class MenuDropdownResponder: AnyHoverResponder {
+final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
     let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
 
     let itemList: Attribute<PlatformItemList>
     let environment: Attribute<EnvironmentValues>
@@ -279,7 +277,9 @@ final class MenuDropdownResponder: AnyHoverResponder {
     var onMenuOpenChanged: ((Bool) -> Void)?
     var onPressingChanged: ((Bool) -> Void)?
     var onPresentationChanged: ((Bool) -> Void)?
-    var innerResponders: [any ViewResponder]
+    var innerResponders: [ViewResponder] {
+        didSet { children = innerResponders }
+    }
 
     private var isHovered = false
     private var isMenuOpen = false
@@ -293,7 +293,7 @@ final class MenuDropdownResponder: AnyHoverResponder {
          onMenuOpenChanged: ((Bool) -> Void)?,
          onPressingChanged: ((Bool) -> Void)?,
          onPresentationChanged: ((Bool) -> Void)?,
-         innerResponders: [any ViewResponder]) {
+         innerResponders: [ViewResponder]) {
         self.hitTestKey = _menuDropdownResponderNextKey.withLock { key in
             defer { key &+= 1 }
             return key
@@ -310,25 +310,27 @@ final class MenuDropdownResponder: AnyHoverResponder {
         self.onPressingChanged = onPressingChanged
         self.onPresentationChanged = onPresentationChanged
         self.innerResponders = innerResponders
+        super.init()
+        children = innerResponders
     }
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func containsGlobalPoints(_ points: [CGPoint],
-                              cacheKey: UInt32?,
-                              options: ContainsPointsOptions) -> ContainsPointsResult {
+    override func containsGlobalPoints(_ points: [CGPoint],
+                                       cacheKey: UInt32?,
+                                       options: ViewResponder.ContainsPointsOptions) -> ViewResponder.ContainsPointsResult {
         guard snapshotIsEnabled else { return .stop }
         var localPts = Array(points.prefix(64))
         snapshotTransform.convertGlobal(to: .local, points: &localPts)
         let bounds = CGRect(origin: .zero, size: snapshotSize.value)
-        var mask: UInt64 = 0
+        var mask = BitVector64()
         for (index, point) in localPts.enumerated() {
-            if bounds.contains(point) { mask |= (1 << index) }
+            mask[index] = bounds.contains(point)
         }
-        guard mask != 0 else { return .stop }
-        return ContainsPointsResult(mask: mask,
+        guard !mask.isEmpty else { return .stop }
+        return ViewResponder.ContainsPointsResult(mask: mask,
                                     priority: 16.0,
                                     children: innerResponders)
     }

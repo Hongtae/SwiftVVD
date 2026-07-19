@@ -77,7 +77,7 @@ struct OnScrollPhaseChangeModifier: ViewModifier, MultiViewModifier {
         }
 
         var contentInputs = inputs
-        contentInputs.preferences.keys.insert(ScrollPhasePreferenceKey.self)
+        contentInputs.preferences.keys.add(ScrollPhasePreferenceKey.self)
         let outputs = body(_Graph(), contentInputs)
 
         if let phaseValues = outputs.preferences.reducedValue(for: ScrollPhasePreferenceKey.self, in: graph) {
@@ -136,8 +136,8 @@ struct OnScrollPhaseContextChangeModifier: ViewModifier, MultiViewModifier {
         }
 
         var contentInputs = inputs
-        contentInputs.preferences.keys.insert(ScrollPhasePreferenceKey.self)
-        contentInputs.preferences.keys.insert(ScrollGeometryPreferenceKey.self)
+        contentInputs.preferences.keys.add(ScrollPhasePreferenceKey.self)
+        contentInputs.preferences.keys.add(ScrollGeometryPreferenceKey.self)
         let outputs = body(_Graph(), contentInputs)
 
         guard let phaseValues = outputs.preferences.reducedValue(for: ScrollPhasePreferenceKey.self, in: graph) else {
@@ -206,7 +206,7 @@ struct OnScrollGeometryChangeModifier<T: Equatable>: ViewModifier, MultiViewModi
         }
 
         var contentInputs = inputs
-        contentInputs.preferences.keys.insert(ScrollGeometryPreferenceKey.self)
+        contentInputs.preferences.keys.add(ScrollGeometryPreferenceKey.self)
         let outputs = body(_Graph(), contentInputs)
 
         if let geometryValues = outputs.preferences.reducedValue(for: ScrollGeometryPreferenceKey.self, in: graph) {

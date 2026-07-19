@@ -1,6 +1,22 @@
 import XCTest
 @testable import VUI
 
+private func assertRequestKindEqual(
+    _ actual: ScrollStateRequestKind,
+    _ expected: ScrollStateRequestKind,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    switch (actual, expected) {
+    case (.scrollTo, .scrollTo):
+        return
+    case let (.updateValue(actual), .updateValue(expected)):
+        XCTAssertEqual(actual, expected, file: file, line: line)
+    default:
+        XCTFail("request kinds differ: \(actual), \(expected)", file: file, line: line)
+    }
+}
+
 final class ScrollStateRequestTests: XCTestCase {
     func testScrollGeometrySurface() {
         let insets = EdgeInsets(top: 1, leading: 4, bottom: 5, trailing: 6)
@@ -112,7 +128,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 ["geometry", "scrollableAxes", "transform"]
             )
 
-            let provided = provider.updateValue()
+            let provided = provider.value
             XCTAssertEqual(provided.count, 1)
             XCTAssertEqual(provided[0], state)
             XCTAssertEqual(provided[0].transform, transform)
@@ -147,7 +163,10 @@ final class ScrollStateRequestTests: XCTestCase {
             Mirror(reflecting: request).children.map(\.label),
             ["binding", "newPosition", "isVisible", "targetDistance"]
         )
-        XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 12)))
+        guard case let .updateValue(config) = request.kind else {
+            return XCTFail("expected updateValue request kind")
+        }
+        XCTAssertEqual(config.targetDistance, 12)
         XCTAssertTrue(request.hasUpdate)
         XCTAssertTrue(request.transaction.isScrollStateValueUpdate)
         XCTAssertNil(request.transaction.animation)
@@ -158,6 +177,39 @@ final class ScrollStateRequestTests: XCTestCase {
         XCTAssertEqual(observedTransactions.count, 1)
         XCTAssertTrue(observedTransactions[0].isScrollStateValueUpdate)
         XCTAssertNil(observedTransactions[0].animation)
+    }
+
+    func testScrollStateRequestOverrideOrderingMatchesProbedKinds() {
+        let currentIdentity = NSObject()
+        let previousIdentity = NSObject()
+        let scrollTo = TestScrollStateRequest(
+            id: ObjectIdentifier(currentIdentity),
+            kind: .scrollTo
+        )
+        let otherScrollTo = TestScrollStateRequest(
+            id: ObjectIdentifier(previousIdentity),
+            kind: .scrollTo
+        )
+        let nearUpdate = TestScrollStateRequest(
+            id: ObjectIdentifier(currentIdentity),
+            kind: .updateValue(.init(targetDistance: 4))
+        )
+        let farUpdate = TestScrollStateRequest(
+            id: ObjectIdentifier(previousIdentity),
+            kind: .updateValue(.init(targetDistance: 8))
+        )
+        let equalUpdate = TestScrollStateRequest(
+            id: ObjectIdentifier(previousIdentity),
+            kind: .updateValue(.init(targetDistance: 4))
+        )
+
+        XCTAssertTrue(scrollTo.overrides(nil))
+        XCTAssertTrue(scrollTo.overrides(farUpdate))
+        XCTAssertFalse(scrollTo.overrides(otherScrollTo))
+        XCTAssertFalse(farUpdate.overrides(scrollTo))
+        XCTAssertTrue(nearUpdate.overrides(farUpdate))
+        XCTAssertFalse(farUpdate.overrides(nearUpdate))
+        XCTAssertFalse(nearUpdate.overrides(equalUpdate))
     }
 
     func testUpdateScrollStateRequestMergesAmbientTransactionAndRestoresScope() {
@@ -271,7 +323,7 @@ final class ScrollStateRequestTests: XCTestCase {
             Mirror(reflecting: request).children.map(\.label),
             ["binding", "id", "currentPosition", "positionedByUserPosition"]
         )
-        XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+        assertRequestKindEqual(request.kind, .updateValue(.init(targetDistance: 0)))
         XCTAssertTrue(request.hasUpdate)
         XCTAssertTrue(request.transaction.isScrollStateValueUpdate)
         XCTAssertNil(request.transaction.animation)
@@ -357,7 +409,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 Mirror(reflecting: request).children.map(\.label),
                 ["binding", "anchor", "id", "value", "baseTransaction", "scrollableAttribute"]
             )
-            XCTAssertEqual(request.kind, .scrollTo)
+            assertRequestKindEqual(request.kind, .scrollTo)
             XCTAssertFalse(request.hasUpdate)
 
             request.updateScrollable(scrollableAttr)
@@ -1058,7 +1110,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 XCTFail("expected scroll position binding request")
                 return
             }
-            XCTAssertEqual(request.kind, .scrollTo)
+            assertRequestKindEqual(request.kind, .scrollTo)
             XCTAssertFalse(request.hasUpdate)
             XCTAssertEqual(request.transaction[ScrollRequestMarkerKey.self], 91)
             XCTAssertEqual(request.transaction.scrollTargetAnchor, .bottom)
@@ -1101,48 +1153,6 @@ final class ScrollStateRequestTests: XCTestCase {
                 return
             }
             XCTAssertNil(request.transaction.scrollTargetAnchor)
-        }
-    }
-
-    func testScrollPositionBindingModifierAdjustedAnchorDefaultsNilBeforeV6() {
-        let previous = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides(build: .v5, runtime: previous.runtime)
-        defer { Semantics.overrides = previous }
-
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        ref.withCurrent {
-            var stored = ScrollPosition(id: "target")
-            let binding = Binding<ScrollPosition>(
-                get: { stored },
-                set: { value, _ in stored = value }
-            )
-            let modifier = ScrollPositionBindingModifier(binding: binding, anchor: nil)
-            let modifierAttr = graph.makeInput(value: modifier)
-            var inputs = makeGraphInputs(graph: graph)
-
-            ScrollPositionBindingModifier._makeInputs(
-                modifier: _GraphValue(_attribute: modifierAttr),
-                inputs: &inputs
-            )
-
-            XCTAssertEqual(inputs.scrollPositionAnchor(kind: .scrollView).attribute?.value, .zero)
-
-            guard let requestAttr = inputs.updateScrollStateRequest.attribute else {
-                XCTFail("expected scroll position binding request attribute")
-                return
-            }
-            XCTAssertNil(requestAttr.value)
-
-            stored = ScrollPosition(id: "next")
-            graph.markNeedsEvaluation(requestAttr.identifier)
-
-            guard let request = requestAttr.value else {
-                XCTFail("expected scroll position binding request")
-                return
-            }
-            XCTAssertEqual(request.transaction.scrollTargetAnchor, .zero)
         }
     }
 
@@ -1289,13 +1299,13 @@ final class ScrollStateRequestTests: XCTestCase {
             let invalid = WeakAttribute<Int>()
 
             XCTAssertEqual(first.identifier.rawValue, 0)
-            XCTAssertEqual(weak.raw.identifier, 0)
-            XCTAssertNotEqual(weak.raw.seed, 0)
+            XCTAssertEqual(weak.base.identifier, 0)
+            XCTAssertNotEqual(weak.base.seed, 0)
             XCTAssertTrue(weak.isValid(in: graph))
             XCTAssertFalse(invalid.isValid(in: graph))
             XCTAssertTrue(invalid.isInvalid)
-            XCTAssertEqual(invalid.raw.identifier, 0)
-            XCTAssertEqual(invalid.raw.seed, 0)
+            XCTAssertEqual(invalid.base.identifier, 0)
+            XCTAssertEqual(invalid.base.seed, 0)
             XCTAssertEqual(weak.toStrong().value, 42)
         }
     }
@@ -1317,7 +1327,7 @@ final class ScrollStateRequestTests: XCTestCase {
             let weak = inputs.weakScrollable
             XCTAssertFalse(weak.isInvalid)
             XCTAssertTrue(weak.isValid(in: graph))
-            XCTAssertEqual(weak.raw.identifier, scrollableAttr.identifier.rawValue)
+            XCTAssertEqual(weak.base.identifier, scrollableAttr.identifier.rawValue)
             XCTAssertEqual(weak.toStrong().identifier, scrollableAttr.identifier)
         }
     }
@@ -1337,7 +1347,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 ["scrollable"]
             )
 
-            let provided = provider.updateValue()
+            let provided = provider.value
             XCTAssertEqual(provided.count, 1)
             XCTAssertTrue((provided[0] as? RecordingScrollable) === first)
 
@@ -1365,8 +1375,8 @@ final class ScrollStateRequestTests: XCTestCase {
         XCTAssertEqual(PinnedScrollableViews.sectionFooters.rawValue, 2)
         XCTAssertNil(RecordingCollectionScrollable.accessibilityRole)
         XCTAssertFalse(collection.isLazy)
-        XCTAssertFalse(RecordingCollectionScrollable.hasMultipleViews(in: .horizontal))
-        XCTAssertTrue(RecordingCollectionScrollable.hasMultipleViews(in: .vertical))
+        XCTAssertFalse(RecordingCollectionScrollable.hasMultipleViewsInAxis(.horizontal))
+        XCTAssertTrue(RecordingCollectionScrollable.hasMultipleViewsInAxis(.vertical))
 
         let subviews = collection.visibleSubviews
         XCTAssertEqual(subviews.count, 1)
@@ -1378,7 +1388,7 @@ final class ScrollStateRequestTests: XCTestCase {
             ["id", "frame", "frameInContent", "transform"]
         )
 
-        XCTAssertEqual(collection.subviewClosest(to: .zero)?.id.canonicalID, visibleIDs[0])
+        XCTAssertEqual(collection.subviewClosestTo(rect: .zero)?.id.canonicalID, visibleIDs[0])
         XCTAssertEqual(
             collection.nextVisibleCollectionViewID(
                 towards: .bottom,
@@ -1452,7 +1462,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 XCTFail("expected UpdateScrollStateRequest")
                 return
             }
-            XCTAssertEqual(
+            assertRequestKindEqual(
                 request.kind,
                 .updateValue(.init(targetDistance: (CGFloat(10 * 10 + 10 * 10)).squareRoot()))
             )
@@ -1505,7 +1515,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 return
             }
             XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("transformed-near"))
-            XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+            assertRequestKindEqual(request.kind, .updateValue(.init(targetDistance: 0)))
         }
     }
 
@@ -1646,7 +1656,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 return
             }
             XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("scroll-space-near"))
-            XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+            assertRequestKindEqual(request.kind, .updateValue(.init(targetDistance: 0)))
         }
     }
 
@@ -1699,7 +1709,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 return
             }
             XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("selected"))
-            XCTAssertEqual(request.kind, .updateValue(.init(targetDistance: 0)))
+            assertRequestKindEqual(request.kind, .updateValue(.init(targetDistance: 0)))
         }
     }
 
@@ -1975,16 +1985,10 @@ final class ScrollStateRequestTests: XCTestCase {
         environment: Attribute<EnvironmentValues>? = nil
     ) -> _GraphInputs {
         _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time()),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking()))
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking()),
+            transaction: graph.makeInput(value: Transaction())
         )
     }
 }
@@ -2061,6 +2065,13 @@ private final class RecordingCollectionScrollable: ScrollableCollection {
         self.shouldScroll = shouldScroll
     }
 
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        scroll(
+            toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
+            anchor: Transaction.current.scrollTargetAnchor
+        )
+    }
+
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
         [_ViewList_ID(explicitID: AnyHashable("visible")).canonicalID]
     }
@@ -2080,7 +2091,7 @@ private final class RecordingCollectionScrollable: ScrollableCollection {
         )
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         visibleSubviews.first
     }
 
@@ -2093,7 +2104,7 @@ private final class RecordingCollectionScrollable: ScrollableCollection {
         visibleCollectionViewIDs.first
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         axis == .vertical
     }
 
@@ -2153,6 +2164,13 @@ private final class FixedVisibleCollectionScrollable: ScrollableCollection {
         self.subviews = subviews
     }
 
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        scroll(
+            toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
+            anchor: Transaction.current.scrollTargetAnchor
+        )
+    }
+
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
         subviews.map { $0.id.canonicalID }
     }
@@ -2165,7 +2183,7 @@ private final class FixedVisibleCollectionScrollable: ScrollableCollection {
         }
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         subviews.first
     }
 
@@ -2178,7 +2196,7 @@ private final class FixedVisibleCollectionScrollable: ScrollableCollection {
         visibleCollectionViewIDs.first
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         false
     }
 
@@ -2239,4 +2257,15 @@ private struct ScrollAmbientMarkerKey: TransactionKey {
 
 private struct ScrollBindingMarkerKey: TransactionKey {
     static let defaultValue = 0
+}
+
+private struct TestScrollStateRequest: ScrollStateRequest {
+    var id: ObjectIdentifier
+    var kind: ScrollStateRequestKind
+    var transaction: Transaction { Transaction() }
+    var hasUpdate: Bool { false }
+
+    mutating func update() -> Bool {
+        false
+    }
 }

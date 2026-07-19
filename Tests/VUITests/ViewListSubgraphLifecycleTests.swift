@@ -2,6 +2,21 @@ import XCTest
 @testable import VUI
 
 final class ViewListSubgraphLifecycleTests: XCTestCase {
+    func testSubgraphHolderCanBeCreatedWithoutGraphHostContext() {
+        let graph = _AGGraph()
+        var childSubgraph: AGSubgraph!
+        var retainedSubgraph: _ViewList_Subgraph!
+
+        _AGGraph.withCurrent(graph) {
+            childSubgraph = AGSubgraph()
+            retainedSubgraph = _ViewList_Subgraph(subgraph: childSubgraph)
+            retainedSubgraph.release()
+        }
+
+        XCTAssertEqual(retainedSubgraph.refcount, 0)
+        XCTAssertFalse(AGSubgraphIsValid(childSubgraph))
+    }
+
     func testFinalReleaseDispatchesWillRemoveBeforeInvalidatingSubgraph() throws {
         let host = GraphHost()
         let recorder = ViewListSubgraphRecorder()
@@ -67,6 +82,43 @@ final class ViewListSubgraphLifecycleTests: XCTestCase {
 
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
         XCTAssertFalse(AGSubgraphIsValid(childSubgraph))
+    }
+
+    func testRetainedReleaseTokenCanFinalizeOutsideGraphContext() throws {
+        let host = GraphHost()
+        let recorder = ViewListSubgraphRecorder()
+        let storage = _ViewList_SublistSubgraphStorage()
+        var childSubgraph: AGSubgraph!
+        var retainedSubgraph: _ViewList_Subgraph!
+        var releaseToken: _ViewList_SubgraphRelease?
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                childSubgraph = AGSubgraph()
+            }
+            AGSubgraph.withCurrent(childSubgraph) {
+                let attr = host.data.graph.makeStatefulRule(
+                    ViewListSubgraphRecorderRule(recorder: recorder)
+                )
+                _ = attr.value
+            }
+            retainedSubgraph = _ViewList_Subgraph(subgraph: childSubgraph)
+            storage.subgraphs.append(retainedSubgraph)
+            releaseToken = storage.retain()
+            XCTAssertNotNil(releaseToken)
+            XCTAssertEqual(retainedSubgraph.refcount, 2)
+
+            retainedSubgraph.release()
+            XCTAssertEqual(retainedSubgraph.refcount, 1)
+            XCTAssertTrue(AGSubgraphIsValid(childSubgraph))
+        }
+
+        releaseToken = nil
+
+        XCTAssertEqual(recorder.events, ["update", "willRemove"])
+        XCTAssertEqual(retainedSubgraph.refcount, 0)
+        XCTAssertFalse(AGSubgraphIsValid(childSubgraph))
+        XCTAssertNil(childSubgraph.parent)
     }
 
     func testSubgraphStorageRetainSkipsInvalidSubgraphs() throws {

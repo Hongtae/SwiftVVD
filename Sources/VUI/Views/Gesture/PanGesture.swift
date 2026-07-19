@@ -8,7 +8,7 @@
 import Foundation
 
 protocol ResponderBoundEvent: EventType {
-    var binding: EventBinding? { get }
+    var binding: EventBinding? { get set }
 }
 
 struct WheelEvent: ResponderBoundEvent, Equatable {
@@ -33,8 +33,8 @@ struct WheelEvent: ResponderBoundEvent, Equatable {
 }
 
 /// Cross-platform wheel carrier used by the logical hosting scroll view.
-/// The separate carrier preserves both axes without changing the mirrored
-/// scalar WheelEvent used by the legacy scroll gesture chain.
+/// The separate carrier preserves both axes while the scalar event remains
+/// available to single-axis gesture chains.
 struct SystemWheelEvent: ResponderBoundEvent, Equatable {
     var timestamp: Time
     var phase: EventPhase
@@ -56,7 +56,7 @@ struct SystemWheelEvent: ResponderBoundEvent, Equatable {
     }
 }
 
-struct PanGesture: Gesture, PrimitiveGesture {
+struct PanGesture: Gesture, PubliclyPrimitiveGesture {
     struct Value: Equatable {
         var timestamp: Time
         var translation: CGSize
@@ -76,35 +76,21 @@ struct PanGesture: Gesture, PrimitiveGesture {
 
     typealias Body = Never
 
+    typealias InternalBody = ModifierGesture<DependentGesture<Value>, RawPanGesture>
+
+    var internalBody: InternalBody {
+        RawPanGesture(
+            minimumDistance: minimumDistance,
+            allowedDirections: allowedDirections
+        )
+        .dependency(.pausedWhileActive)
+    }
+
     static func _makeGesture(
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Value> {
-        guard let graph = _AGGraph.current else {
-            fatalError("PanGesture._makeGesture requires AG context")
-        }
-        let raw = graph.makeInput(value: RawPanGesture(
-            minimumDistance: gesture._attribute.value.minimumDistance,
-            allowedDirections: gesture._attribute.value.allowedDirections
-        ))
-        let modifier = graph.makeInput(value: DependentGesture<Value>(
-            dependency: .pausedWhileActive
-        ))
-        return DependentGesture<Value>.makeGesture(
-            modifier: _GraphValue(_attribute: modifier),
-            inputs: inputs
-        ) { inputs in
-            RawPanGesture._makeGesture(
-                gesture: _GraphValue(_attribute: raw),
-                inputs: inputs
-            )
-        }
-    }
-}
-
-extension PanGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 
@@ -146,12 +132,6 @@ struct RawPanGesture: Gesture, PrimitiveGesture {
             resetSeedAttr: inputs.resetSeed
         ))
         return source.withPhase(phase)
-    }
-}
-
-extension RawPanGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self
     }
 }
 
@@ -219,12 +199,12 @@ private struct RawPanGesturePhase: StatefulRule, ResettableGestureRule {
                     height: delta.height / elapsed
                 )
             } else {
-                velocity = event.delta
+                velocity = delta
             }
             let value = PanGesture.Value(
                 timestamp: currentTime,
                 translation: translation,
-                touchType: .indirect,
+                touchType: event.touchType,
                 velocity: _Velocity(valuePerSecond: velocity)
             )
             wasActive = true
@@ -241,7 +221,7 @@ private struct RawPanGesturePhase: StatefulRule, ResettableGestureRule {
             let value = PanGesture.Value(
                 timestamp: currentTime,
                 translation: event.translation,
-                touchType: .indirect,
+                touchType: event.touchType,
                 velocity: lastValue.velocity
             )
             wasActive = false

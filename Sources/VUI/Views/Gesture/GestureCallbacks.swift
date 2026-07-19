@@ -55,25 +55,24 @@ struct ChangedCallbacks<Value>: GestureCallbacks {
     func cancel(state: Void) -> (() -> ())? { nil }
 }
 
-/// State for FullGestureCallbacks.
-/// Tracks whether the gesture has become active and the last dispatched phase.
-struct FullGestureCallbacksState<Value: Equatable> {
-    var hasBecomeActive: Bool = false
-    var lastPhase: GesturePhase<Value> = .possible(nil)
-}
-
 /// Container for .onEnded + .onChanged + (optional) .onFailed + (optional) .onPossible callbacks.
 /// cancel() ignores state and returns self.failed.
 struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
+    struct StateType: GestureStateProtocol {
+        var hasBecomeActive: Bool = false
+        var lastPhase: GesturePhase<Value> = .possible(nil)
+
+        init() {}
+    }
+
     var possible: ((Optional<Value>) -> ())?
     var changed:  ((Value) -> ())?
     var ended:    ((Value) -> ())?
     var failed:   (() -> ())?
 
-    typealias StateType = FullGestureCallbacksState<Value>
-    static var initialState: FullGestureCallbacksState<Value> { .init() }
+    static var initialState: StateType { .init() }
 
-    func dispatch(phase: GesturePhase<Value>, state: inout FullGestureCallbacksState<Value>) -> (() -> ())? {
+    func dispatch(phase: GesturePhase<Value>, state: inout StateType) -> (() -> ())? {
         guard phase != state.lastPhase else { return nil }
         defer { state.lastPhase = phase }
         switch phase {
@@ -104,7 +103,7 @@ struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
     }
 
     // Cancel ignores state and returns the failure callback.
-    func cancel(state: FullGestureCallbacksState<Value>) -> (() -> ())? {
+    func cancel(state: StateType) -> (() -> ())? {
         return failed
     }
 }
@@ -259,7 +258,7 @@ struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
     typealias BodyValue = Callbacks.Value
     typealias Body = Never
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<BodyValue>
@@ -294,7 +293,7 @@ struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
 /// Body = ModifierGesture<CallbacksGesture<EndedCallbacks<Content.Value>>, Content>,
 /// so Value == Body.Value and the default Gesture._makeGesture delegate is used:
 ///   gesture[\.body] -> ModifierGesture._makeGesture -> CallbacksGesture.makeGesture
-public struct _EndedGesture<Content: Gesture>: Gesture {
+public struct _EndedGesture<Content: Gesture>: Gesture, PrimitiveGesture {
     public typealias Value = Content.Value
     public typealias Body = Never
 
@@ -312,24 +311,13 @@ public struct _EndedGesture<Content: Gesture>: Gesture {
     }
 }
 
-extension _EndedGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(Content.self, eventType: eventType)
-    }
-}
-
-extension _EndedGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(_body.body, eventType: eventType)
-    }
-}
-
 // _ChangedGesture
 
 /// Wraps a gesture to fire a callback whenever its value changes (while active).
 ///
 /// Sets options.allowsIncompleteEventSequences (bit 5) before delegating to Body._makeGesture.
-public struct _ChangedGesture<Content: Gesture>: Gesture where Content.Value: Equatable {
+public struct _ChangedGesture<Content: Gesture>: Gesture, PrimitiveGesture
+where Content.Value: Equatable {
     public typealias Value = Content.Value
     public typealias Body = Never
 
@@ -343,18 +331,6 @@ public struct _ChangedGesture<Content: Gesture>: Gesture where Content.Value: Eq
         modifiedInputs.options.insert(.allowsIncompleteEventSequences)
         return type(of: gesture._attribute.value._body)
             ._makeGesture(gesture: gesture[\._body], inputs: modifiedInputs)
-    }
-}
-
-extension _ChangedGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(Content.self, eventType: eventType)
-    }
-}
-
-extension _ChangedGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(_body.body, eventType: eventType)
     }
 }
 

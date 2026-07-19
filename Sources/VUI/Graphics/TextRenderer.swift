@@ -576,7 +576,7 @@ struct TextRendererInput: ViewInput {
     }
 }
 
-public struct _TextRendererViewModifier<Renderer: TextRenderer>: ViewModifier {
+public struct _TextRendererViewModifier<Renderer: TextRenderer> {
     var renderer: Renderer
 
     init(renderer: Renderer) {
@@ -622,7 +622,7 @@ public struct _TextRendererViewModifier<Renderer: TextRenderer>: ViewModifier {
     }
 }
 
-extension _TextRendererViewModifier: _ViewInputsModifier {
+extension _TextRendererViewModifier: ViewInputsModifier, PrimitiveViewModifier {
 }
 
 extension View {

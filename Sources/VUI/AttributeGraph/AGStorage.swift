@@ -9,6 +9,30 @@ import Foundation
 import Synchronization
 
 extension _AGGraph {
+    private static func valueComparator<Value>(for type: Value.Type) -> (Any, Any) -> Bool {
+        { lhs, rhs in
+            guard let lhs = lhs as? Value,
+                  let rhs = rhs as? Value else {
+                return false
+            }
+            return compareValues(lhs, rhs, options: AGComparisonOptions(rawValue: 3))
+        }
+    }
+
+    @discardableResult
+    private func publishComputedValue<Value>(_ value: Value, for id: AGAttribute) -> Bool {
+        let index = Int(id.rawValue)
+        guard let node = slots[index].node else {
+            fatalError("publishComputedValue called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+        let changed = node.value.map { !node.valuesEqual($0, value) } ?? true
+        slots[index].node!.value = value
+        if changed {
+            slots[index].node!.valueVersion &+= 1
+        }
+        return changed
+    }
+
     func graphCounter(lane: UInt32) -> UInt {
         switch lane {
         case 1:
@@ -23,6 +47,62 @@ extension _AGGraph {
         let index = Int(id.rawValue)
         guard index < slots.count else { return false }
         return slots[index].node?.value != nil
+    }
+
+    func valueState(for id: AGAttribute) -> AGValueState {
+        assert(_AGGraph.current === self)
+        id._debugValidate()
+        let index = Int(id.rawValue)
+        guard index < slots.count, let node = slots[index].node else {
+            fatalError("valueState(for:) called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+
+        var rawValue: UInt32 = 0
+        if node.needsEvaluation { rawValue |= 1 << 0 }
+        if node.isEvaluating { rawValue |= 1 << 1 }
+        if node.inputsChanged { rawValue |= 1 << 2 }
+        if node.value != nil { rawValue |= 1 << 3 }
+        if node.forceEvaluation { rawValue |= 1 << 4 }
+        if !node.changedInputs.isEmpty { rawValue |= 1 << 5 }
+        if node.transaction != nil { rawValue |= 1 << 6 }
+        return AGValueState(rawValue: rawValue)
+    }
+
+    func hasNode(_ id: AGAttribute) -> Bool {
+        let index = Int(id.rawValue)
+        return slots.indices.contains(index) && slots[index].node != nil
+    }
+
+    func setSubgraph(_ subgraph: AGSubgraphRef, for id: AGAttribute) {
+        nodeSubgraphs[id.rawValue] = WeakObject(subgraph)
+    }
+
+    func subgraph(for id: AGAttribute) -> AGSubgraphRef? {
+        nodeSubgraphs[id.rawValue]?.value
+    }
+
+    func flags(for id: AGAttribute) -> AGAttributeFlags {
+        assert(_AGGraph.current === self)
+        guard let node = slots[Int(id.rawValue)].node else {
+            fatalError("flags(for:) called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+        return node.flags
+    }
+
+    func setFlags(
+        _ flags: AGAttributeFlags,
+        mask: AGAttributeFlags,
+        for id: AGAttribute
+    ) {
+        assert(_AGGraph.current === self)
+        let index = Int(id.rawValue)
+        guard slots[index].node != nil else {
+            fatalError("setFlags(_:mask:for:) called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+        let old = slots[index].node!.flags.rawValue
+        slots[index].node!.flags = AGAttributeFlags(
+            rawValue: (old & ~mask.rawValue) | (flags.rawValue & mask.rawValue)
+        )
     }
 
     static var currentRuleContextAttribute: AGAttribute? {
@@ -92,6 +172,38 @@ extension _AGGraph {
         return index
     }
 
+    private func registerAttributeInfo<Value>(
+        at index: UInt32,
+        valueType: Value.Type,
+        body: (any _AnyAttributeBodyBox)? = nil
+    ) {
+        attributeInfos[index] = AttributeInfo(valueType: valueType, body: body)
+    }
+
+    func bodyType(for id: AGAttribute) -> Any.Type {
+        assert(_AGGraph.current === self)
+        guard let body = attributeInfos[id.rawValue]?.body else {
+            fatalError("AGAttribute @\(id.rawValue) does not have a stored attribute body.")
+        }
+        return body.bodyType
+    }
+
+    func bodyPointer(for id: AGAttribute) -> UnsafeRawPointer {
+        assert(_AGGraph.current === self)
+        guard let body = attributeInfos[id.rawValue]?.body else {
+            fatalError("AGAttribute @\(id.rawValue) does not have a stored attribute body.")
+        }
+        return UnsafeRawPointer(body.bodyPointer)
+    }
+
+    func valueType(for id: AGAttribute) -> Any.Type {
+        assert(_AGGraph.current === self)
+        guard let valueType = attributeInfos[id.rawValue]?.valueType else {
+            fatalError("AGAttribute @\(id.rawValue) does not have registered value metadata.")
+        }
+        return valueType
+    }
+
     /// Reads the current cached output of the executing StatefulRule node.
     ///
     /// Returns the value stored by the most recent setStatefulOutput call
@@ -124,6 +236,41 @@ extension _AGGraph {
         return graph.slots[Int(nodeID.rawValue)].node?.changedInputs.contains(attribute.rawValue) ?? true
     }
 
+    func valueAndFlags<Value>(
+        for input: Attribute<Value>,
+        relativeTo context: AGAttribute?,
+        options: AGValueOptions
+    ) -> (value: Value, flags: AGChangedValueFlags) {
+        assert(_AGGraph.current === self)
+
+        // Native option bit 2 routes a context read through the direct-value
+        // path instead of installing an input edge. The Swift graph uses the
+        // same boundary for dependency-isolated reads.
+        if options.rawValue & 0x4 != 0 {
+            let value = _AGGraph.withoutTracking {
+                self.value(for: input.identifier) as! Value
+            }
+            return (value, AGChangedValueFlags(rawValue: 0))
+        }
+
+        let read: () -> (Value, Bool) = {
+            let value = self.value(for: input.identifier) as! Value
+            let changed = context.map {
+                self.slots[Int($0.rawValue)].node?.changedInputs.contains(input.identifier.rawValue) ?? true
+            } ?? true
+            return (value, changed)
+        }
+        let result = if let context {
+            _AGGraph.withRuleContext(context, body: read)
+        } else {
+            read()
+        }
+        return (
+            result.0,
+            AGChangedValueFlags(rawValue: result.1 ? 1 : 0)
+        )
+    }
+
     /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
     ///
     /// Must be called on `_AGGraph.current` while `updateValue()` is executing.
@@ -135,24 +282,61 @@ extension _AGGraph {
         guard let nodeID = _AGGraph.currentlyEvaluatingNode else {
             fatalError("setStatefulOutput called outside of a StatefulRule.updateValue() call.")
         }
-        graph.slots[Int(nodeID.rawValue)].node!.value = value
+        graph.publishComputedValue(value, for: nodeID)
     }
 
     /// Creates a source-of-truth input node (e.g., @State)
     func makeInput<Value>(value: Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: value, kind: .input, needsEvaluation: false)
+        let body = _LowLevelAttributeBox(
+            body: _External(),
+            flags: _External.flags,
+            update: { _, _ in }
+        )
+        slots[Int(index)].node = Node(
+            value: value,
+            valuesEqual: Self.valueComparator(for: Value.self),
+            kind: .input,
+            needsEvaluation: false
+        )
+        registerAttributeInfo(at: index, valueType: Value.self, body: body)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         return attr
+    }
+
+    /// Creates an external input slot without an initialized value.
+    func makeInput<Value>(type: Value.Type) -> Attribute<Value> {
+        assert(_AGGraph.current === self)
+        let index = allocateSlot()
+        let body = _LowLevelAttributeBox(
+            body: _External(),
+            flags: _External.flags,
+            update: { _, _ in }
+        )
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: Value.self),
+            kind: .input,
+            needsEvaluation: false
+        )
+        registerAttributeInfo(at: index, valueType: Value.self, body: body)
+        let attribute = Attribute<Value>(AGAttribute(rawValue: index))
+        AGSubgraph.current?.register(attribute.identifier)
+        return attribute
     }
 
     /// Creates a computed node with a rule (e.g., a View's body or a derived property)
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: false))
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: Value.self),
+            kind: .rule(rule, isSideEffect: false)
+        )
+        registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         return attr
@@ -160,7 +344,170 @@ extension _AGGraph {
 
     /// Creates a computed node backed by a Rule struct (pure, stateless).
     func makeRule<R: Rule>(_ rule: R) -> Attribute<R.Value> {
-        makeRule(rule: { rule.updateValue() })
+        makeRule(rule, initialValue: R.initialValue)
+    }
+
+    func makeRule<R: Rule>(
+        _ rule: R,
+        initialValue: R.Value
+    ) -> Attribute<R.Value> {
+        makeRule(rule, initialValue: Optional(initialValue))
+    }
+
+    func cachedRuleValue<R: Rule & Hashable>(
+        for rule: R,
+        options: AGCachedValueOptions,
+        owner: AGAttribute?,
+        hashValue: Int,
+        createIfMissing: Bool
+    ) -> UnsafePointer<R.Value>? {
+        assert(_AGGraph.current === self)
+        _ = options
+        // A supplied owner selects its subgraph. Otherwise the active update's
+        // attribute subgraph wins, followed by the explicitly current subgraph.
+        // Options affect the read/input edge and are not part of cache identity.
+        let cacheSubgraph = owner.flatMap(subgraph(for:))
+            ?? Self.currentlyEvaluatingNode.flatMap(subgraph(for:))
+            ?? AGSubgraphRef.current
+        let key = CachedRuleKey(
+            subgraph: cacheSubgraph.map(ObjectIdentifier.init),
+            ruleHashValue: hashValue,
+            body: AnyHashable(rule)
+        )
+
+        if let entry = cachedRuleEntries[key] {
+            if !entry.attribute.isValid(in: self) {
+                cachedRuleEntries.removeValue(forKey: key)
+            } else {
+                guard let typedEntry = entry as? TypedCachedRuleEntry<R.Value> else {
+                    fatalError("Cached Rule value type changed for an identical cache key.")
+                }
+                let attribute = Attribute<R.Value>(identifier: entry.attribute.toStrong())
+                guard createIfMissing || hasCachedValue(for: attribute.identifier) else {
+                    return nil
+                }
+                typedEntry.store(attribute.value)
+                return typedEntry.pointer
+            }
+        }
+
+        guard createIfMissing else { return nil }
+        let attribute = AGSubgraphRef.withCurrent(cacheSubgraph) {
+            makeRule(rule)
+        }
+        let value = attribute.value
+        let entry = TypedCachedRuleEntry(
+            attribute: attribute.asWeak().base,
+            value: value
+        )
+        cachedRuleEntries[key] = entry
+        return entry.pointer
+    }
+
+    private func makeRule<R: Rule>(
+        _ rule: R,
+        initialValue: R.Value?
+    ) -> Attribute<R.Value> {
+        assert(_AGGraph.current === self)
+        let index = allocateSlot()
+        let box = _RuleBox(rule)
+        slots[Int(index)].node = Node(
+            value: initialValue,
+            valuesEqual: Self.valueComparator(for: R.Value.self),
+            kind: .ruleBody(box),
+            forceEvaluation: initialValue != nil
+        )
+        registerAttributeInfo(at: index, valueType: R.Value.self, body: box)
+        let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
+        AGSubgraph.current?.register(attr.identifier)
+        return attr
+    }
+
+    func makeLowLevelAttribute<Body: _AttributeBody, Value>(
+        body: Body,
+        value: Value?,
+        flags: AGAttributeTypeFlags,
+        update: @escaping (UnsafeMutableRawPointer, AGAttribute) -> Void
+    ) -> Attribute<Value> {
+        assert(_AGGraph.current === self)
+        let index = allocateSlot()
+        let box = _LowLevelAttributeBox(
+            body: body,
+            flags: flags,
+            update: update
+        )
+        slots[Int(index)].node = Node(
+            value: value,
+            valuesEqual: Self.valueComparator(for: Value.self),
+            kind: .lowLevelBody(box),
+            forceEvaluation: value != nil
+        )
+        registerAttributeInfo(at: index, valueType: Value.self, body: box)
+        let attribute = Attribute<Value>(AGAttribute(rawValue: index))
+        AGSubgraph.current?.register(attribute.identifier)
+        return attribute
+    }
+
+    func mutateRule<R: Rule>(
+        _ id: AGAttribute,
+        as type: R.Type = R.self,
+        invalidating: Bool = false,
+        _ body: (inout R) -> Void
+    ) {
+        assert(_AGGraph.current === self)
+        let index = Int(id.rawValue)
+        guard index < slots.count,
+              let node = slots[index].node else {
+            return
+        }
+        guard case .ruleBody(let box) = node.kind,
+              let typedBox = box as? _RuleBox<R> else {
+            return
+        }
+        typedBox.mutateRule(body)
+        if invalidating {
+            markNeedsEvaluation(id)
+        }
+    }
+
+    func mutateBody<Body>(
+        _ id: AGAttribute,
+        as type: Body.Type,
+        invalidating: Bool,
+        _ body: (inout Body) -> Void
+    ) {
+        assert(_AGGraph.current === self)
+        let index = Int(id.rawValue)
+        guard index < slots.count,
+              slots[index].node != nil else {
+            fatalError("mutateBody called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+
+        let didMutate = attributeInfos[id.rawValue]?.body?.mutateBody(
+            as: type,
+            body
+        ) ?? false
+        guard didMutate else {
+            fatalError("mutateBody type mismatch for AGAttribute @\(id.rawValue).")
+        }
+        if invalidating {
+            invalidateAttribute(id)
+        }
+    }
+
+    func visitBody<Visitor: AttributeBodyVisitor>(
+        _ id: AGAttribute,
+        visitor: inout Visitor
+    ) {
+        assert(_AGGraph.current === self)
+        let index = Int(id.rawValue)
+        guard index < slots.count, slots[index].node != nil else {
+            fatalError("visitBody called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+        guard let body = attributeInfos[id.rawValue]?.body else {
+            fatalError("visitBody requires an attribute backed by a stored Swift body.")
+        }
+        body.visitBody(&visitor)
     }
 
     /// Creates a computed AG node backed by a `StatefulRule`.
@@ -169,9 +516,30 @@ extension _AGGraph {
     /// Use this instead of `makeRule` when the rule needs to lazily initialize a persistent
     /// object (e.g. a ViewResponder) and update only its properties on subsequent calls.
     func makeStatefulRule<R: StatefulRule>(_ rule: R) -> Attribute<R.Value> {
+        makeStatefulRule(rule, initialValue: R.initialValue)
+    }
+
+    func makeStatefulRule<R: StatefulRule>(
+        _ rule: R,
+        initialValue: R.Value
+    ) -> Attribute<R.Value> {
+        makeStatefulRule(rule, initialValue: Optional(initialValue))
+    }
+
+    private func makeStatefulRule<R: StatefulRule>(
+        _ rule: R,
+        initialValue: R.Value?
+    ) -> Attribute<R.Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: nil, kind: .stateful(_StatefulBox(rule)))
+        let box = _StatefulBox(rule)
+        slots[Int(index)].node = Node(
+            value: initialValue,
+            valuesEqual: Self.valueComparator(for: R.Value.self),
+            kind: .stateful(box),
+            forceEvaluation: initialValue != nil
+        )
+        registerAttributeInfo(at: index, valueType: R.Value.self, body: box)
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         return attr
@@ -193,7 +561,7 @@ extension _AGGraph {
               let typedBox = box as? _StatefulBox<R> else {
             return
         }
-        body(&typedBox.rule)
+        typedBox.mutateRule(body)
         if invalidating {
             markNeedsEvaluation(id)
         }
@@ -206,10 +574,8 @@ extension _AGGraph {
     ///   - The rule exists purely for its side effects: firing callbacks, updating external
     ///     objects, writing to non-AG state (e.g. gesture recognizers, @State mutations)
     ///
-    /// The rule is evaluated once immediately upon creation to register its AG dependencies.
-    /// After that it is re-evaluated synchronously inside `markNeedsEvaluation` whenever an
-    /// input changes, i.e. within the same `setValue` call stack, not deferred to the next
-    /// layout pass.
+    /// The rule is evaluated once upon creation to register its AG dependencies. If creation
+    /// occurs during an active graph update, it joins that graph-local update work list.
     ///
     /// The node is registered in the current AGSubgraph and removed when the AGSubgraph is
     /// invalidated (e.g. when the owning view is removed from the tree).
@@ -217,18 +583,60 @@ extension _AGGraph {
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: true))
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: Value.self),
+            kind: .rule(rule, isSideEffect: true)
+        )
+        registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
-        // Evaluate immediately so the rule body runs once and AG records which input
-        // attributes it reads, establishing the dependency edges that will trigger
-        // future eager re-evaluations.
-        evaluateNodeForUpdate(AGAttribute(rawValue: index))
+        scheduleSideEffectEvaluation(AGAttribute(rawValue: index))
         return attr
     }
 
+    private func enqueuePendingSideEffectEvaluation(_ id: AGAttribute) {
+        if pendingSideEffectEvaluationSet.insert(id.rawValue).inserted {
+            pendingSideEffectEvaluations.append(id.rawValue)
+        }
+    }
+
+    private func drainPendingSideEffectEvaluations() {
+        while !pendingSideEffectEvaluations.isEmpty {
+            let pending = pendingSideEffectEvaluations
+            pendingSideEffectEvaluations.removeAll(keepingCapacity: true)
+            pendingSideEffectEvaluationSet.removeAll(keepingCapacity: true)
+
+            for rawID in pending {
+                let index = Int(rawID)
+                guard index < slots.count,
+                      slots[index].node?.kind.isSideEffect == true,
+                      slots[index].node?.needsEvaluation == true else {
+                    continue
+                }
+                evaluateSideEffectIfNeeded(AGAttribute(rawValue: rawID))
+            }
+        }
+    }
+
+    private func evaluateSideEffectIfNeeded(_ id: AGAttribute) {
+        withGraphUpdateCounterIfNeeded {
+            evaluateNodeForUpdate(id)
+        }
+    }
+
+    private func scheduleSideEffectEvaluation(_ id: AGAttribute) {
+        let isUpdating = _AGGraph.currentlyUpdatingGraphs?
+            .contains(ObjectIdentifier(self)) == true
+        if isUpdating {
+            enqueuePendingSideEffectEvaluation(id)
+        } else {
+            evaluateSideEffectIfNeeded(id)
+        }
+    }
+
     // MARK: - Cross-Graph Reference
-    // Allows a node in one _AGGraph to reactively mirror a node from another.
+    // Allows a node in one graph to reactively observe a node from another.
     // Used by GestureGraph <- ViewGraph geometry nodes (GestureResponder hit-test)
     // and sheet WindowController <- parent ViewGraph content rule (makeContent reactivity).
     //
@@ -242,7 +650,7 @@ extension _AGGraph {
     /// value from graph A while graph B is current. No evaluation is triggered. The source
     /// graph must have already evaluated and cached the value. fatalError if the node has
     /// never been evaluated (no cached value available yet).
-    func cachedValue(for id: AGAttribute) -> Any? {
+    func cachedValue(for id: AGAttribute) -> Any {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else {
             fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
@@ -319,7 +727,7 @@ extension _AGGraph {
         }
     }
 
-    /// Creates a cross-graph mirror node in this graph that reflects a node from `sourceGraph`.
+    /// Creates a cross-graph proxy node that observes a node from `sourceGraph`.
     ///
     /// Must be called within this graph's context (self == _AGGraph.current).
     /// The source and target graphs must be different.
@@ -336,11 +744,13 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            valuesEqual: Self.valueComparator(for: V.self),
             kind: .crossGraphRef(
                 sourceAttr: source.identifier,
                 sourceGraph: WeakObject(sourceGraph)
             )
         )
+        registerAttributeInfo(at: index, valueType: V.self)
         let attr = Attribute<V>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         sourceGraph.addCrossGraphObserver(
@@ -364,44 +774,45 @@ extension _AGGraph {
         recordRemovedNodeTombstone(id: id, node: removingNode)
 #endif
 
-        if case .stateful(let box) = removingNode.kind {
-            box.callDestroy()
-        }
+        attributeInfos[id.rawValue]?.body?.callDestroy()
 
         // 1. Break input connections (removes this node from its inputs' output sets)
         clearInputs(for: id, includingStatic: true)
 
-        // 2. Collect outputs and clean up their back-references. A side-effect
-        // rule can retain the removed attribute in its closure while also having
-        // another dependency (for example, the key-path parent recorded during
-        // projection). Detach that rule from every input so a later write cannot
-        // eagerly re-enter the stale closure before its owning subgraph is removed.
+        // 2. Collect outputs and clean up their back-references.
         let outputs = slots[index].node!.outputs
-        var detachedSideEffects: Set<UInt32> = []
         for outputIndex in outputs {
-            let outputID = AGAttribute(rawValue: outputIndex)
-            if slots[Int(outputIndex)].node?.kind.isSideEffect == true {
-                clearInputs(for: outputID, includingStatic: true)
-                slots[Int(outputIndex)].node?.needsEvaluation = false
-                slots[Int(outputIndex)].node?.inputsChanged = false
-                slots[Int(outputIndex)].node?.changedInputs.removeAll()
-                slots[Int(outputIndex)].node?.transaction = nil
-                detachedSideEffects.insert(outputIndex)
-            } else {
-                slots[Int(outputIndex)].node?.inputs.remove(id.rawValue)
-            }
+            slots[Int(outputIndex)].node?.inputs.remove(id.rawValue)
         }
 
         // 3. Remove from KeyPath cache / cross-graph observer registry if applicable
         switch slots[index].node?.kind {
         case .keyPath(let parent, let kp):
             pathIDs.removeValue(forKey: RelativePath(parentID: parent.rawValue, keyPath: kp))
+        case .offset(let parent, let byteOffset, let valueType, _):
+            offsetPathIDs.removeValue(forKey: RelativeOffsetPath(
+                parentID: parent.rawValue,
+                byteOffset: byteOffset,
+                valueType: valueType
+            ))
+        case .rawOffset(let parent, let byteOffset):
+            rawOffsetPathIDs.removeValue(forKey: RawOffsetPath(
+                parentID: parent.rawValue,
+                byteOffset: byteOffset
+            ))
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             // Unregister from the source graph's observer list so it stops notifying us.
             sourceGraphRef.value?.removeCrossGraphObserver(
                 for: sourceAttr, targetGraph: self, targetNode: id)
         default:
             break
+        }
+        indirectDefaultSources.removeValue(forKey: id.rawValue)
+        indirectDependencies.removeValue(forKey: id.rawValue)
+        nodeSubgraphs.removeValue(forKey: id.rawValue)
+        attributeInfos.removeValue(forKey: id.rawValue)
+        cachedRuleEntries = cachedRuleEntries.filter {
+            $0.value.attribute.identifier != id.rawValue
         }
         // Remove any cross-graph observers that were watching this node (it was a source).
         crossGraphObservers.removeValue(forKey: id.rawValue)
@@ -416,14 +827,14 @@ extension _AGGraph {
         // evaluateSideEffects:false because the node is gone. Side-effect rules that depended
         // on it must NOT fire now (they would crash reading a freed attribute).
         // They are simply marked dirty and will be removed or re-evaluated later.
-        for outputIndex in outputs where !detachedSideEffects.contains(outputIndex) {
+        for outputIndex in outputs {
             markNeedsEvaluation(AGAttribute(rawValue: outputIndex), evaluateSideEffects: false)
         }
     }
 
     // MARK: Value Access
 
-    func value(for id: AGAttribute) -> Any? {
+    func value(for id: AGAttribute) -> Any {
         assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard slots[index].node != nil else {
@@ -440,21 +851,46 @@ extension _AGGraph {
         }
 
         let shouldEvaluate = node.needsEvaluation && !node.isEvaluating
+        let evaluator = _AGGraph.currentlyEvaluatingNode
 
         // Implicit dependency tracking
-        if let evaluator = _AGGraph.currentlyEvaluatingNode, evaluator != id {
+        if let evaluator, evaluator != id {
             addDependency(from: evaluator, dependsOn: id)
         }
 
         // Lazy evaluation
         if shouldEvaluate {
-            evaluateNodeForUpdate(id)
+            if isUpdatingOnCurrentThread {
+                // A rule can discover a previously unknown input while it is
+                // evaluating. Pull that input directly instead of nesting a
+                // second iterative traversal and graph-update scope. The outer
+                // traversal still owns the update counter and deferred-effect
+                // drain, while the direct pull keeps first-evaluation chains
+                // from exhausting a cooperative worker's stack.
+                evaluateNodeForUpdate(id)
+            } else {
+                withGraphUpdateCounterIfNeeded {
+                    updateNodeIfNeeded(id)
+                }
+            }
         }
 
-        return slots[index].node?.value
+        if let evaluator, evaluator != id,
+           slots.indices.contains(Int(evaluator.rawValue)),
+           slots[Int(evaluator.rawValue)].node != nil,
+           slots[index].node != nil {
+            slots[Int(evaluator.rawValue)].node!.inputVersions[id.rawValue] =
+                slots[index].node!.valueVersion
+        }
+
+        guard let value = slots[index].node?.value else {
+            fatalError("AGAttribute @\(id.rawValue) has no value after evaluation.")
+        }
+        return value
     }
 
-    func setValue<Value: Equatable>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
+    @discardableResult
+    func setValue<Value: Equatable>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) -> Bool {
         assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
@@ -462,52 +898,62 @@ extension _AGGraph {
         }
         if let oldValue = slots[index].node!.value as? Value,
            _AGGraph.compareValues(oldValue, newValue, options: AGComparisonOptions(rawValue: 3)) {
-            return
+            return false
         }
         slots[index].node!.value = newValue
+        slots[index].node!.valueVersion &+= 1
         Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
-        for outputIndex in outputs {
-            markNeedsEvaluation(
-                AGAttribute(rawValue: outputIndex),
-                transaction: transactionToPropagate,
-                propagateTransaction: true,
-                changedInput: attribute.identifier.rawValue
-            )
-        }
+        // Mark every outgoing edge before an eager side effect can pull a
+        // shared downstream node. Otherwise a diamond path can evaluate that
+        // node before its direct changed-input edge has been recorded.
+        markOutputsNeedEvaluation(
+            outputs,
+            transaction: transactionToPropagate,
+            propagateTransaction: true,
+            changedInput: attribute.identifier.rawValue,
+            forceStarts: false
+        )
         notifyCrossGraphObservers(
             for: attribute.identifier.rawValue,
             transaction: transactionToPropagate
         )
         _AGGraph.changeSet?.record(attribute.identifier)
+        return true
     }
 
-    func setValue<Value>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
+    @discardableResult
+    func setValue<Value>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) -> Bool {
         assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
-        guard slots[index].node != nil else {
+        guard let node = slots[index].node else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
+        if let oldValue = node.value,
+           node.valuesEqual(oldValue, newValue) {
+            return false
+        }
         slots[index].node!.value = newValue
+        slots[index].node!.valueVersion &+= 1
         Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
-        for outputIndex in outputs {
-            markNeedsEvaluation(
-                AGAttribute(rawValue: outputIndex),
-                transaction: transactionToPropagate,
-                propagateTransaction: true,
-                changedInput: attribute.identifier.rawValue
-            )
-        }
+        markOutputsNeedEvaluation(
+            outputs,
+            transaction: transactionToPropagate,
+            propagateTransaction: true,
+            changedInput: attribute.identifier.rawValue,
+            forceStarts: false
+        )
         notifyCrossGraphObservers(
             for: attribute.identifier.rawValue,
             transaction: transactionToPropagate
         )
         _AGGraph.changeSet?.record(attribute.identifier)
+        return true
     }
 
     func invalidateAttribute(
@@ -520,14 +966,13 @@ extension _AGGraph {
         guard let node = slots[index].node else { return }
 
         if case .input = node.kind {
-            for outputIndex in node.outputs {
-                markNeedsEvaluation(
-                    AGAttribute(rawValue: outputIndex),
-                    transaction: transaction,
-                    propagateTransaction: propagateTransaction,
-                    changedInput: id.rawValue
-                )
-            }
+            markOutputsNeedEvaluation(
+                node.outputs,
+                transaction: transaction,
+                propagateTransaction: propagateTransaction,
+                changedInput: id.rawValue,
+                forceStarts: true
+            )
             notifyCrossGraphObservers(for: id.rawValue, transaction: transaction)
         } else {
             markNeedsEvaluation(
@@ -550,9 +995,104 @@ extension _AGGraph {
         // the same side effect recursively.
         guard !slots[index].node!.isEvaluating else { return }
         slots[index].node!.isEvaluating = true
-        withGraphUpdateCounterIfNeeded {
+        if isUpdatingOnCurrentThread {
             evaluateNode(id)
+        } else {
+            withGraphUpdateCounterIfNeeded {
+                evaluateNode(id)
+            }
         }
+    }
+
+    private func updateNodeIfNeeded(_ rootID: AGAttribute) {
+        updateTraversal &+= 1
+        if updateTraversal == 0 {
+            for index in slots.indices where slots[index].node != nil {
+                slots[index].node!.updateTraversal = 0
+                slots[index].node!.updateTraversalState = 0
+            }
+            updateTraversal = 1
+        }
+        let traversal = updateTraversal
+        var stack: [(id: UInt32, afterInputs: Bool)] = [
+            (rootID.rawValue, false)
+        ]
+        stack.reserveCapacity(64)
+
+        while let frame = stack.popLast() {
+            let index = Int(frame.id)
+            guard slots.indices.contains(index), slots[index].node != nil else {
+                continue
+            }
+
+            if frame.afterInputs {
+                guard slots[index].node!.needsEvaluation else {
+                    slots[index].node!.updateTraversal = traversal
+                    slots[index].node!.updateTraversalState = 2
+                    continue
+                }
+
+                var requiresEvaluation = slots[index].node!.forceEvaluation
+                    || slots[index].node!.value == nil
+                if !requiresEvaluation {
+                    for inputIndex in slots[index].node!.inputs {
+                        guard let currentVersion = slots[Int(inputIndex)].node?.valueVersion,
+                              slots[index].node!.inputVersions[inputIndex] == currentVersion else {
+                            requiresEvaluation = true
+                            break
+                        }
+                    }
+                }
+                if requiresEvaluation {
+                    evaluateNodeForUpdate(AGAttribute(rawValue: frame.id))
+                } else {
+                    finishEvaluationWithoutUpdating(AGAttribute(rawValue: frame.id))
+                }
+                if slots.indices.contains(index), slots[index].node != nil {
+                    slots[index].node!.updateTraversal = traversal
+                    slots[index].node!.updateTraversalState = 2
+                }
+                continue
+            }
+
+            guard slots[index].node!.needsEvaluation else {
+                slots[index].node!.updateTraversal = traversal
+                slots[index].node!.updateTraversalState = 2
+                continue
+            }
+            if slots[index].node!.isEvaluating
+                || (slots[index].node!.updateTraversal == traversal
+                    && slots[index].node!.updateTraversalState == 1) {
+                guard slots[index].node!.value != nil else {
+                    fatalError("_AGGraph: cycle detected at @\(frame.id) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
+                }
+                continue
+            }
+
+            slots[index].node!.updateTraversal = traversal
+            slots[index].node!.updateTraversalState = 1
+            // Traverse every dependency that is already known before evaluating
+            // the node, including the first pull of an uncached node. Key-path
+            // and indirect nodes install fixed inputs at construction time. If
+            // an uncached node bypasses those inputs here, each projection pulls
+            // its parent recursively from evaluateNode(), which can exhaust the
+            // small stack used by a cooperative task while constructing a large
+            // view graph.
+            stack.append((frame.id, true))
+            for inputIndex in slots[index].node!.inputs {
+                stack.append((inputIndex, false))
+            }
+        }
+    }
+
+    private func finishEvaluationWithoutUpdating(_ id: AGAttribute) {
+        let index = Int(id.rawValue)
+        guard slots[index].node != nil else { return }
+        slots[index].node!.needsEvaluation = false
+        slots[index].node!.forceEvaluation = false
+        slots[index].node!.inputsChanged = false
+        slots[index].node!.changedInputs.removeAll()
+        slots[index].node!.isEvaluating = false
     }
 
     func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
@@ -609,8 +1149,14 @@ extension _AGGraph {
         updateCounter &+= 1
         activeGraphs.insert(graphID)
         return _AGGraph.withCurrentlyUpdatingGraphs(activeGraphs) {
-            body()
+            let result = body()
+            drainPendingSideEffectEvaluations()
+            return result
         }
+    }
+
+    private var isUpdatingOnCurrentThread: Bool {
+        _AGGraph.currentlyUpdatingGraphs?.contains(ObjectIdentifier(self)) == true
     }
 
     private func evaluateNode(_ id: AGAttribute) {
@@ -634,6 +1180,20 @@ extension _AGGraph {
                 box.callUpdate()
             }
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
+            slots[index].node!.isEvaluating = false
+            Update.end()
+
+        case .lowLevelBody(let box):
+            clearInputs(for: id)
+            Update.begin()
+            _AGGraph.withCurrentlyEvaluatingNode(id) {
+                box.callUpdate(attribute: id)
+            }
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
             slots[index].node!.inputsChanged = false
             slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
@@ -643,26 +1203,63 @@ extension _AGGraph {
             // KeyPath node: project value from parent via the stored key path.
             // clearInputs is intentionally omitted. The dependency on parent is fixed
             // at creation time in subscriptNode() and never changes.
-            // Note: value(for: parent) runs while currentlyEvaluatingNode is still set to
-            // the outer caller, so the caller also acquires a direct dependency on parent
-            // (in addition to its dependency on this KeyPath node). The redundant edge is
-            // cleaned up by clearInputs on the caller's next re-evaluation.
-            let parentValue = value(for: parent)
-            slots[index].node!.value = parentValue[keyPath: kp]
+            let parentValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
+                value(for: parent)
+            }
+            publishComputedValue(parentValue[keyPath: kp], for: id)
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
+            slots[index].node!.isEvaluating = false
+
+        case .offset(let parent, _, _, let project):
+            let parentValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
+                value(for: parent)
+            }
+            publishComputedValue(project(parentValue), for: id)
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
+            slots[index].node!.isEvaluating = false
+
+        case .rawOffset(let parent, _):
+            _ = _AGGraph.withCurrentlyEvaluatingNode(id) {
+                value(for: parent)
+            }
+            // Raw offsets are dependency-only handles. Advance their version
+            // after the parent settles, but intentionally keep value == nil so
+            // typed reads and metadata queries remain invalid.
+            slots[index].node!.valueVersion &+= 1
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
             slots[index].node!.inputsChanged = false
             slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
 
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
-            // Cross-graph mirror node: read the cached value from the source graph.
+            // Cross-graph proxy node: read the cached value from the source graph.
             // No context switch. cachedValue(for:) bypasses the current-graph assertion.
             // If the source graph has been deallocated, retain the last cached value.
             if let sourceGraph = sourceGraphRef.value {
-                slots[index].node!.value = sourceGraph.cachedValue(for: sourceAttr)
+                publishComputedValue(sourceGraph.cachedValue(for: sourceAttr), for: id)
             }
             // else: source graph gone, keep last cached value silently.
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
+            slots[index].node!.isEvaluating = false
+
+        case .ruleBody(let box):
+            clearInputs(for: id)
+            let newValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
+                box.callUpdate()
+            }
+            publishComputedValue(newValue, for: id)
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
             slots[index].node!.inputsChanged = false
             slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
@@ -673,23 +1270,29 @@ extension _AGGraph {
             let newValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
                 rule()
             }
-            slots[index].node!.value = newValue
+            publishComputedValue(newValue, for: id)
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
             slots[index].node!.inputsChanged = false
             slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
 
-        case .indirect(let target):
+        case .indirect(let target, let defaultValue):
             // Indirect node: clears old dynamic dep (preserves static deps), then re-reads target.
-            // When target is nil, the stored default value is retained unchanged.
+            // When target is nil, restore the immutable placeholder default.
             clearInputs(for: id)
             if let target {
                 let targetValue = _AGGraph.withCurrentlyEvaluatingNode(id) {
                     value(for: target)
                 }
-                slots[index].node!.value = targetValue
+                publishComputedValue(targetValue, for: id)
+            } else if let defaultValue {
+                publishComputedValue(defaultValue, for: id)
+            } else {
+                slots[index].node!.value = nil
             }
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.forceEvaluation = false
             slots[index].node!.inputsChanged = false
             slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
@@ -709,51 +1312,112 @@ extension _AGGraph {
         transaction: Transaction? = nil,
         propagateTransaction: Bool = false,
         inputsChanged: Bool = true,
-        changedInput: UInt32? = nil
+        changedInput: UInt32? = nil,
+        forceStart: Bool = true
     ) {
         assert(_AGGraph.current === self)
+        var queue: [(id: UInt32, changedInput: UInt32?)] = [
+            (startID.rawValue, changedInput)
+        ]
+        markNeedsEvaluation(
+            queue: &queue,
+            forcedStart: forceStart ? startID.rawValue : nil,
+            forcedStarts: nil,
+            evaluateSideEffects: evaluateSideEffects,
+            transaction: transaction,
+            propagateTransaction: propagateTransaction,
+            inputsChanged: inputsChanged
+        )
+    }
+
+    private func markOutputsNeedEvaluation(
+        _ startIDs: Set<UInt32>,
+        evaluateSideEffects: Bool = true,
+        transaction: Transaction? = nil,
+        propagateTransaction: Bool = false,
+        inputsChanged: Bool = true,
+        changedInput: UInt32? = nil,
+        forceStarts: Bool
+    ) {
+        guard !startIDs.isEmpty else { return }
+        var queue: [(id: UInt32, changedInput: UInt32?)] = []
+        queue.reserveCapacity(max(64, startIDs.count))
+        for startID in startIDs {
+            queue.append((startID, changedInput))
+        }
+        markNeedsEvaluation(
+            queue: &queue,
+            forcedStart: nil,
+            forcedStarts: forceStarts ? startIDs : nil,
+            evaluateSideEffects: evaluateSideEffects,
+            transaction: transaction,
+            propagateTransaction: propagateTransaction,
+            inputsChanged: inputsChanged
+        )
+    }
+
+    private func markNeedsEvaluation(
+        queue: inout [(id: UInt32, changedInput: UInt32?)],
+        forcedStart: UInt32?,
+        forcedStarts: Set<UInt32>?,
+        evaluateSideEffects: Bool,
+        transaction: Transaction?,
+        propagateTransaction: Bool,
+        inputsChanged: Bool
+    ) {
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
         // Side-effect nodes are collected separately and evaluated after the BFS completes,
         // so that cascading setValue calls (from inside the side-effect rule) create their
         // own BFS + evaluation chain without interfering with the current traversal.
-        var queue: [(id: UInt32, changedInput: UInt32?)] = [(startID.rawValue, changedInput)]
-        var visited: Set<UInt32> = []
+        queue.reserveCapacity(64)
         var sideEffects: [UInt32] = []
-        var sideEffectSet: Set<UInt32> = []
+        invalidationTraversal &+= 1
+        if invalidationTraversal == 0 {
+            for index in slots.indices where slots[index].node != nil {
+                slots[index].node!.invalidationTraversal = 0
+            }
+            invalidationTraversal = 1
+        }
+        let traversal = invalidationTraversal
         var i = 0
         while i < queue.count {
             let (rawID, incomingChangedInput) = queue[i]
             i += 1
-            let firstVisit = visited.insert(rawID).inserted
             let index = Int(rawID)
-            guard var node = slots[index].node else { continue }  // freed slot, skip
+            guard slots.indices.contains(index), slots[index].node != nil else {
+                continue
+            }
+            let firstVisit = slots[index].node!.invalidationTraversal != traversal
+            if firstVisit {
+                slots[index].node!.invalidationTraversal = traversal
+            }
             if propagateTransaction {
-                node.transaction = transaction
+                slots[index].node!.transaction = transaction
             }
             if inputsChanged {
-                node.inputsChanged = true
+                slots[index].node!.inputsChanged = true
                 if let incomingChangedInput {
-                    node.changedInputs.insert(incomingChangedInput)
+                    slots[index].node!.changedInputs.insert(incomingChangedInput)
                 }
             }
-            if !node.needsEvaluation {
-                node.needsEvaluation = true
-                slots[index].node = node
-            } else if propagateTransaction || inputsChanged {
-                slots[index].node = node
+            if !slots[index].node!.needsEvaluation {
+                slots[index].node!.needsEvaluation = true
             }
-            if node.kind.isSideEffect {
-                if sideEffectSet.insert(UInt32(index)).inserted {
-                    sideEffects.append(UInt32(index))
-                }
+            if rawID == forcedStart || forcedStarts?.contains(rawID) == true {
+                slots[index].node!.forceEvaluation = true
+            }
+            if firstVisit && slots[index].node!.kind.isSideEffect {
+                sideEffects.append(UInt32(index))
             }
             guard firstVisit else { continue }
             // Even when a node is already dirty, keep walking its outputs.
             // Structural updates can leave intermediate preference/layout nodes
             // dirty. Later source changes still need to reach side-effect refresh
             // rules that may have been evaluated and cleared in the meantime.
-            queue.append(contentsOf: node.outputs.map { ($0, UInt32(index)) })
-            // Propagate to cross-graph mirror nodes watching this node.
+            for output in slots[index].node!.outputs {
+                queue.append((output, UInt32(index)))
+            }
+            // Propagate to cross-graph proxy nodes watching this node.
             notifyCrossGraphObservers(
                 for: UInt32(index),
                 transaction: propagateTransaction ? transaction : nil
@@ -766,7 +1430,7 @@ extension _AGGraph {
             let index = Int(id)
             guard slots[index].node != nil else { continue }  // may have been freed
             guard slots[index].node!.needsEvaluation else { continue }  // already evaluated by cascade
-            evaluateNodeForUpdate(AGAttribute(rawValue: id))
+            scheduleSideEffectEvaluation(AGAttribute(rawValue: id))
         }
     }
 
@@ -791,6 +1455,70 @@ extension _AGGraph {
         slots[childIndex].node!.outputs.insert(parent.rawValue)
     }
 
+    /// Registers an explicit input edge without reading the input value.
+    ///
+    /// The native runtime stores additional per-edge option bits. The Swift
+    /// graph currently has one dependency behavior, so every observed option
+    /// value uses that behavior while the raw carrier remains in the API.
+    func addInput(
+        to attribute: AGAttribute,
+        input: AGAttribute,
+        options: AGInputOptions
+    ) {
+        assert(_AGGraph.current === self)
+        guard attribute != input else {
+            fatalError("An attribute cannot add itself as an input.")
+        }
+        addDependency(from: attribute, dependsOn: input)
+        let attributeIndex = Int(attribute.rawValue)
+        let inputIndex = Int(input.rawValue)
+        slots[attributeIndex].node!.inputVersions[input.rawValue] =
+            slots[inputIndex].node!.valueVersion
+        _ = options
+    }
+
+    /// Searches dependency edges in breadth-first order.
+    ///
+    /// The owner filter is inert because every local node has the same owner.
+    func breadthFirstSearch(
+        from start: AGAttribute,
+        options: AGSearchOptions,
+        _ predicate: (AGAttribute) -> Bool
+    ) -> Bool {
+        assert(_AGGraph.current === self)
+        guard hasNode(start) else {
+            fatalError("breadthFirstSearch called on AGAttribute @\(start.rawValue) that does not exist.")
+        }
+
+        var visited: Set<UInt32> = [start.rawValue]
+        var queue: [UInt32] = [start.rawValue]
+        var index = 0
+
+        while index < queue.count {
+            let rawValue = queue[index]
+            index += 1
+            let attribute = AGAttribute(rawValue: rawValue)
+            guard hasNode(attribute) else { continue }
+            if predicate(attribute) {
+                return true
+            }
+
+            let node = slots[Int(rawValue)].node!
+            if options.rawValue & 1 != 0 {
+                for input in node.inputs.sorted() where visited.insert(input).inserted {
+                    queue.append(input)
+                }
+            }
+            if options.rawValue & 2 != 0 {
+                for output in node.outputs.sorted() where visited.insert(output).inserted {
+                    queue.append(output)
+                }
+            }
+        }
+        return false
+    }
+
+
     /// Clears dependency edges from `id` to its inputs.
     /// - Parameter includingStatic: When false (default, used during re-evaluation), static inputs
     ///   registered via `setIndirectDependency` are preserved. When true (used during `removeNode`),
@@ -806,8 +1534,12 @@ extension _AGGraph {
         if includingStatic {
             slots[index].node!.inputs.removeAll()
             slots[index].node!.staticInputs.removeAll()
+            slots[index].node!.inputVersions.removeAll()
         } else {
             slots[index].node!.inputs = slots[index].node!.staticInputs
+            slots[index].node!.inputVersions = slots[index].node!.inputVersions.filter {
+                slots[index].node!.staticInputs.contains($0.key)
+            }
         }
         for inputIndex in toClear {
             slots[Int(inputIndex)].node?.outputs.remove(id.rawValue)
@@ -825,11 +1557,31 @@ extension _AGGraph {
         let index = allocateSlot()
         // needsEvaluation: false because default value is already stored. Evaluation is triggered
         // only after setIndirectTarget is called (which calls markNeedsEvaluation).
-        slots[Int(index)].node = Node(value: defaultValue, kind: .indirect(target: nil),
-                                      needsEvaluation: false)
+        slots[Int(index)].node = Node(
+            value: defaultValue,
+            valuesEqual: Self.valueComparator(for: V.self),
+            kind: .indirect(target: nil, defaultValue: defaultValue),
+            needsEvaluation: false
+        )
+        registerAttributeInfo(at: index, valueType: V.self)
         let attr = Attribute<V>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         return attr
+    }
+
+    func makeIndirectAttribute<V>(source: Attribute<V>) -> Attribute<V> {
+        assert(_AGGraph.current === self)
+        let index = allocateSlot()
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: V.self),
+            kind: .indirect(target: source.identifier, defaultValue: nil)
+        )
+        registerAttributeInfo(at: index, valueType: V.self)
+        let attribute = Attribute<V>(AGAttribute(rawValue: index))
+        indirectDefaultSources[attribute.identifier.rawValue] = source.identifier
+        AGSubgraph.current?.register(attribute.identifier)
+        return attribute
     }
 
     /// Points `indirect` at `concrete` (or nil to detach).
@@ -837,10 +1589,13 @@ extension _AGGraph {
     func setIndirectTarget(_ indirect: AGAttribute, to concrete: AGAttribute?) {
         assert(_AGGraph.current === self)
         let index = Int(indirect.rawValue)
-        guard case .indirect = slots[index].node?.kind else {
+        guard case let .indirect(_, defaultValue) = slots[index].node?.kind else {
             fatalError("setIndirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
-        slots[index].node!.kind = .indirect(target: concrete)
+        slots[index].node!.kind = .indirect(
+            target: concrete,
+            defaultValue: defaultValue
+        )
         markNeedsEvaluation(indirect)
     }
 
@@ -849,21 +1604,49 @@ extension _AGGraph {
         setIndirectTarget(indirect.identifier, to: concrete?.identifier)
     }
 
+    func indirectTarget(_ indirect: AGAttribute) -> AGAttribute? {
+        guard case let .indirect(target, _) = slots[Int(indirect.rawValue)].node?.kind else {
+            fatalError("indirectTarget: @\(indirect.rawValue) is not an indirect node.")
+        }
+        return target
+    }
+
+    func resetIndirectTarget(_ indirect: AGAttribute) {
+        setIndirectTarget(indirect, to: indirectDefaultSources[indirect.rawValue])
+    }
+
     /// Registers a permanent dependency: when `dep` changes, `indirect` is invalidated.
     /// Unlike rule-computed inputs, this edge is NOT cleared on re-evaluation.
-    func setIndirectDependency(_ indirect: AGAttribute, dependsOn dep: AGAttribute) {
+    func setIndirectDependency(_ indirect: AGAttribute, dependsOn dep: AGAttribute?) {
         assert(_AGGraph.current === self)
         let iIdx = Int(indirect.rawValue)
-        let dIdx = Int(dep.rawValue)
         guard slots[iIdx].node != nil else {
             fatalError("setIndirectDependency: indirect node @\(indirect.rawValue) does not exist.")
         }
+        if let previous = indirectDependencies.removeValue(forKey: indirect.rawValue) {
+            slots[iIdx].node!.inputs.remove(previous.rawValue)
+            slots[iIdx].node!.staticInputs.remove(previous.rawValue)
+            slots[iIdx].node!.inputVersions.removeValue(forKey: previous.rawValue)
+            slots[Int(previous.rawValue)].node?.outputs.remove(indirect.rawValue)
+        }
+        guard let dep else {
+            markNeedsEvaluation(indirect)
+            return
+        }
+        let dIdx = Int(dep.rawValue)
         guard slots[dIdx].node != nil else {
             fatalError("setIndirectDependency: dep node @\(dep.rawValue) does not exist.")
         }
+        indirectDependencies[indirect.rawValue] = dep
         slots[iIdx].node!.inputs.insert(dep.rawValue)
         slots[iIdx].node!.staticInputs.insert(dep.rawValue)
+        slots[iIdx].node!.inputVersions[dep.rawValue] = slots[dIdx].node!.valueVersion
         slots[dIdx].node!.outputs.insert(indirect.rawValue)
+        markNeedsEvaluation(indirect)
+    }
+
+    func indirectDependency(_ indirect: AGAttribute) -> AGAttribute? {
+        indirectDependencies[indirect.rawValue]
     }
 
     // MARK: KeyPath Nodes
@@ -878,12 +1661,81 @@ extension _AGGraph {
         }
 
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: nil, kind: .keyPath(parent: parent.identifier, kp: keyPath))
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: U.self),
+            kind: .keyPath(parent: parent.identifier, kp: keyPath)
+        )
+        registerAttributeInfo(at: index, valueType: U.self)
         pathIDs[rp] = index
         addDependency(from: AGAttribute(rawValue: index), dependsOn: parent.identifier)
         let attr = Attribute<U>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
         return attr
+    }
+
+    func subscriptNode<T, U>(
+        parent: Attribute<T>,
+        offset: PointerOffset<T, U>
+    ) -> Attribute<U> {
+        assert(_AGGraph.current === self)
+        let path = RelativeOffsetPath(
+            parentID: parent.identifier.rawValue,
+            byteOffset: offset.byteOffset,
+            valueType: ObjectIdentifier(U.self)
+        )
+        if let existingIndex = offsetPathIDs[path] {
+            return Attribute(AGAttribute(rawValue: existingIndex))
+        }
+
+        let index = allocateSlot()
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: Self.valueComparator(for: U.self),
+            kind: .offset(
+                parent: parent.identifier,
+                byteOffset: offset.byteOffset,
+                valueType: ObjectIdentifier(U.self),
+                project: { parentValue in
+                    var value = parentValue as! T
+                    return withUnsafePointer(to: &value) { pointer in
+                        (pointer + offset).pointee
+                    }
+                }
+            )
+        )
+        registerAttributeInfo(at: index, valueType: U.self)
+        offsetPathIDs[path] = index
+        addDependency(from: AGAttribute(rawValue: index), dependsOn: parent.identifier)
+        let attribute = Attribute<U>(AGAttribute(rawValue: index))
+        AGSubgraph.current?.register(attribute.identifier)
+        return attribute
+    }
+
+    func rawOffsetNode(parent: AGAttribute, byteOffset: Int) -> AGAttribute {
+        assert(_AGGraph.current === self)
+        let path = RawOffsetPath(
+            parentID: parent.rawValue,
+            byteOffset: byteOffset
+        )
+        if let existingIndex = rawOffsetPathIDs[path] {
+            return AGAttribute(rawValue: existingIndex)
+        }
+
+        let index = allocateSlot()
+        slots[Int(index)].node = Node(
+            value: nil,
+            valuesEqual: { _, _ in false },
+            kind: .rawOffset(parent: parent, byteOffset: byteOffset)
+        )
+        rawOffsetPathIDs[path] = index
+        addDependency(
+            from: AGAttribute(rawValue: index),
+            dependsOn: parent
+        )
+        let attribute = AGAttribute(rawValue: index)
+        AGSubgraph.current?.register(attribute)
+        return attribute
     }
 
     func parent(of id: AGAttribute) -> AGAttribute? {
@@ -953,16 +1805,24 @@ extension _AGGraph {
             }
             let path = parts.reversed().joined(separator: " -> ")
             return "@\(id.rawValue)(path: \(path))"
+        case .offset(let parent, let byteOffset, _, _):
+            return "@\(id.rawValue)(offset: @\(parent.rawValue) + \(byteOffset))"
+        case .rawOffset(let parent, let byteOffset):
+            return "@\(id.rawValue)(rawOffset: @\(parent.rawValue) + \(byteOffset))"
         case .rule(_, let isSideEffect):
             return "@\(id.rawValue)(\(isSideEffect ? "sideEffect" : "rule"))"
+        case .ruleBody:
+            return "@\(id.rawValue)(ruleBody)"
         case .stateful:
             return "@\(id.rawValue)(stateful)"
+        case .lowLevelBody:
+            return "@\(id.rawValue)(lowLevelBody)"
         case .input:
             return "@\(id.rawValue)(input)"
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             let srcDesc = sourceGraphRef.value != nil ? "@\(sourceAttr.rawValue)" : "@\(sourceAttr.rawValue)(dead)"
             return "@\(id.rawValue)(crossRef->\(srcDesc))"
-        case .indirect(let target):
+        case .indirect(let target, _):
             if let target {
                 return "@\(id.rawValue)(indirect->@\(target.rawValue))"
             }
@@ -985,10 +1845,8 @@ extension _AGGraph {
 // currentlyEvaluating at removal time. This does not print logs. Inspect it
 // from the debugger. Add VUI_AG_RECORD_REMOVAL_STACKS=1 only when the removal
 // stack is needed. Thread.callStackSymbols is expensive enough to add visible
-// latency when many nodes are removed in one structural update. It caused the
-// context-menu live-refresh count-6 stall after the "Removed Live" row dropped.
-// If a similar stall appears only with stack collection enabled, suspect this
-// instrumentation first. Keep stack capture off by default.
+// latency when many nodes are removed in one structural update. Keep stack
+// capture off by default.
 //
 // When debugging, evaluate:
 //   expr -l Swift -- graph.debugRemovedNodeTombstone(forRawValue: rawID)
@@ -1057,13 +1915,21 @@ extension _AGGraph {
             return "input"
         case .rule(_, let isSideEffect):
             return isSideEffect ? "sideEffectRule" : "rule"
+        case .ruleBody(let box):
+            return "ruleBody(\(String(describing: type(of: box))))"
         case .stateful(let box):
             return "stateful(\(String(describing: type(of: box))))"
+        case .lowLevelBody(let box):
+            return "lowLevelBody(\(String(describing: type(of: box))))"
         case .keyPath(let parent, let keyPath):
             return "keyPath(parent: @\(parent.rawValue), keyPath: \(keyPath))"
+        case .offset(let parent, let byteOffset, _, _):
+            return "offset(parent: @\(parent.rawValue), byteOffset: \(byteOffset))"
+        case .rawOffset(let parent, let byteOffset):
+            return "rawOffset(parent: @\(parent.rawValue), byteOffset: \(byteOffset))"
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             return "crossGraphRef(source: @\(sourceAttr.rawValue), sourceGraphAlive: \(sourceGraphRef.value != nil))"
-        case .indirect(let target):
+        case .indirect(let target, _):
             return "indirect(target: \(debugAttributeDescription(target)))"
         }
     }

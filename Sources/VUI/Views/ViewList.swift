@@ -154,10 +154,15 @@ struct BaseViewList: ViewList {
         self.traits = ViewTraitCollection()
     }
 
-    init(elements: any _ViewList_Elements, implicitID: Int = 0, traits: ViewTraitCollection) {
+    init(
+        elements: any _ViewList_Elements,
+        implicitID: Int = 0,
+        traitKeys: ViewTraitKeys? = nil,
+        traits: ViewTraitCollection
+    ) {
         self.elements = elements
         self.implicitID = implicitID
-        self.traitKeys = nil
+        self.traitKeys = traitKeys
         self.traits = traits
     }
 
@@ -176,7 +181,7 @@ struct BaseViewList: ViewList {
             start: from,
             count: elements.count,
             id: _ViewList_ID(implicitID: implicitID),
-            elements: elements,
+            elements: _ViewList_SubgraphElements(base: elements),
             traits: traits,
             list: list
         )
@@ -239,7 +244,7 @@ struct _ViewList_ID {
         }
     }
 
-    struct Canonical: Hashable {
+    struct Canonical: Hashable, CustomStringConvertible {
         var _index: Int32
         var implicitID: Int32
         var explicitID: AnyHashable?
@@ -266,6 +271,12 @@ struct _ViewList_ID {
 
         var requiresImplicitID: Bool {
             implicitID >= 0
+        }
+
+        var description: String {
+            let base = explicitID?.base
+            let explicitType = base.map { type(of: $0) }
+            return "ViewList.ID.Canonical(index: \(index), implicitID: \(implicitID), explicitID: \(String(describing: base))[\(String(describing: explicitType))])"
         }
     }
 
@@ -513,10 +524,658 @@ extension _ViewList_ID: Hashable {
 /// Describes a change that occurred to a specific ViewList item.
 enum _ViewList_Edit: Hashable { case inserted, removed }
 
-// MARK: - ID / accumulator stubs
+// MARK: - ID collections / accumulator
 
-struct _ViewList_ID_Views {}
-struct HeterogeneousViewIDsAccumulator {}
+class _ViewList_ID_Views: RandomAccessCollection, Equatable {
+    typealias Index = Int
+    typealias Element = _ViewList_ID
+
+    let isDataDependent: Bool
+
+    required init(isDataDependent: Bool) {
+        self.isDataDependent = isDataDependent
+    }
+
+    var startIndex: Int { 0 }
+
+    var endIndex: Int {
+        preconditionFailure("abstract _ViewList_ID_Views.endIndex")
+    }
+
+    subscript(position: Int) -> _ViewList_ID {
+        preconditionFailure("abstract _ViewList_ID_Views subscript")
+    }
+
+    func isEqual(to other: _ViewList_ID_Views) -> Bool {
+        preconditionFailure("abstract _ViewList_ID_Views.isEqual(to:)")
+    }
+
+    static func == (lhs: _ViewList_ID_Views, rhs: _ViewList_ID_Views) -> Bool {
+        lhs.isEqual(to: rhs)
+    }
+
+    func withDataDependency() -> _ViewList_ID_Views {
+        if isDataDependent {
+            return self
+        }
+        return _ViewList_ID._Views(self, isDataDependent: true)
+    }
+}
+
+extension _ViewList_ID {
+    final class _Views<Base>: _ViewList_ID_Views
+    where Base: RandomAccessCollection,
+          Base.Index == Int,
+          Base.Element == _ViewList_ID {
+        let base: Base
+
+        init(_ base: Base, isDataDependent: Bool) {
+            self.base = base
+            super.init(isDataDependent: isDataDependent)
+        }
+
+        required init(isDataDependent: Bool) {
+            fatalError("_ViewList_ID._Views requires a base collection")
+        }
+
+        override var endIndex: Int { base.endIndex }
+
+        override subscript(position: Int) -> _ViewList_ID {
+            base[position]
+        }
+
+        override func isEqual(to other: _ViewList_ID_Views) -> Bool {
+            guard let other = other as? _Views<Base> else {
+                return false
+            }
+            return base.elementsEqual(other.base)
+        }
+    }
+
+    final class JoinedViews: _ViewList_ID_Views {
+        let views: [(views: _ViewList_ID_Views, endOffset: Int)]
+        let count: Int
+
+        init(_ source: [_ViewList_ID_Views], isDataDependent: Bool) {
+            var endOffset = 0
+            self.views = source.map { viewIDs in
+                endOffset += viewIDs.count
+                return (viewIDs, endOffset)
+            }
+            self.count = endOffset
+            super.init(isDataDependent: isDataDependent)
+        }
+
+        required init(isDataDependent: Bool) {
+            self.views = []
+            self.count = 0
+            super.init(isDataDependent: isDataDependent)
+        }
+
+        override var endIndex: Int { count }
+
+        override subscript(position: Int) -> _ViewList_ID {
+            precondition(indices.contains(position), "View ID index out of range")
+            for entry in views where position < entry.endOffset {
+                let startOffset = entry.endOffset - entry.views.count
+                return entry.views[position - startOffset]
+            }
+            preconditionFailure("View ID index out of range")
+        }
+
+        override func isEqual(to other: _ViewList_ID_Views) -> Bool {
+            guard let other = other as? JoinedViews,
+                  count == other.count,
+                  views.count == other.views.count else {
+                return false
+            }
+            return zip(views, other.views).allSatisfy { pair in
+                let (lhs, rhs) = pair
+                return lhs.endOffset == rhs.endOffset && lhs.views == rhs.views
+            }
+        }
+    }
+}
+
+private protocol AbstractContiguousArray {
+    associatedtype Element: Hashable
+
+    func asContiguousArray<ID: Hashable>(
+        of type: ID.Type
+    ) -> ContiguousArray<ID>?
+    var contiguousArray: ContiguousArray<Element> { get }
+    var count: Int { get }
+    var isEmpty: Bool { get }
+}
+
+extension ContiguousArray: AbstractContiguousArray where Element: Hashable {
+    fileprivate func asContiguousArray<ID: Hashable>(
+        of type: ID.Type
+    ) -> ContiguousArray<ID>? {
+        self as? ContiguousArray<ID>
+    }
+
+    fileprivate var contiguousArray: ContiguousArray<Element> { self }
+}
+
+private func makeHomogeneousCollection<Buffer: AbstractContiguousArray>(
+    _ buffer: Buffer
+) -> AbstractHomogeneousCollection {
+    HomogeneousCollection(buffer.contiguousArray)
+}
+
+class AbstractHomogeneousCollection {
+    let elementTypeID: ObjectIdentifier
+    let count: Int
+
+    init(elementTypeID: ObjectIdentifier, count: Int) {
+        self.elementTypeID = elementTypeID
+        self.count = count
+    }
+
+    func isElementEqual(
+        at index: Int,
+        toElementIn other: AbstractHomogeneousCollection,
+        at otherIndex: Int
+    ) -> Bool {
+        preconditionFailure("abstract homogeneous collection equality")
+    }
+
+    func element(at index: Int) -> Any {
+        preconditionFailure("abstract homogeneous collection element access")
+    }
+
+    func forEach(_ body: (Any) -> Void) {
+        preconditionFailure("abstract homogeneous collection traversal")
+    }
+}
+
+final class HomogeneousCollection<Element: Hashable>: AbstractHomogeneousCollection {
+    let wrapped: ContiguousArray<Element>
+
+    init(_ wrapped: ContiguousArray<Element>) {
+        self.wrapped = wrapped
+        super.init(elementTypeID: ObjectIdentifier(Element.self), count: wrapped.count)
+    }
+
+    override func isElementEqual(
+        at index: Int,
+        toElementIn other: AbstractHomogeneousCollection,
+        at otherIndex: Int
+    ) -> Bool {
+        guard let other = other as? HomogeneousCollection<Element> else {
+            return false
+        }
+        return wrapped[index] == other.wrapped[otherIndex]
+    }
+
+    override func element(at index: Int) -> Any {
+        wrapped[index]
+    }
+
+    override func forEach(_ body: (Any) -> Void) {
+        wrapped.forEach { body($0) }
+    }
+}
+
+final class HomogeneousLookupTable {
+    var indices: [AnyHashable: Int]
+
+    init(indices: [AnyHashable: Int]) {
+        self.indices = indices
+    }
+}
+
+struct HeterogeneousIndexLookupTable {
+    var homogenousLookupTable: [ObjectIdentifier: HomogeneousLookupTable]
+    var count: Int
+
+    init(_ values: [_ViewList_ID.Canonical]) {
+        var indices: [AnyHashable: Int] = [:]
+        indices.reserveCapacity(values.count)
+        for (index, value) in values.enumerated() where indices[AnyHashable(value)] == nil {
+            indices[AnyHashable(value)] = index
+        }
+        homogenousLookupTable = [
+            ObjectIdentifier(_ViewList_ID.Canonical.self): HomogeneousLookupTable(indices: indices)
+        ]
+        count = values.count
+    }
+
+    func index<ID: Hashable>(for id: ID) -> Int? {
+        homogenousLookupTable[ObjectIdentifier(ID.self)]?.indices[AnyHashable(id)]
+    }
+}
+
+struct HeterogeneousCollection {
+    var subCollections: ContiguousArray<AbstractHomogeneousCollection>
+    var runningTotal: [UInt32]
+    var lookupTableCache: HeterogeneousIndexLookupTable?
+
+    init(_ subCollections: ContiguousArray<AbstractHomogeneousCollection> = []) {
+        self.subCollections = subCollections
+        var total: UInt32 = 0
+        self.runningTotal = subCollections.map { collection in
+            total &+= UInt32(collection.count)
+            return total
+        }
+        self.lookupTableCache = nil
+    }
+
+    var count: Int {
+        Int(runningTotal.last ?? 0)
+    }
+
+    func element(at index: Int) -> Any {
+        precondition(index >= 0 && index < count, "heterogeneous collection index out of range")
+        var start = 0
+        for (collectionIndex, collection) in subCollections.enumerated() {
+            let end = Int(runningTotal[collectionIndex])
+            if index < end {
+                return collection.element(at: index - start)
+            }
+            start = end
+        }
+        preconditionFailure("heterogeneous collection index out of range")
+    }
+
+    func forEach(_ body: (Any) -> Void) {
+        subCollections.forEach { $0.forEach(body) }
+    }
+
+    func map<Result>(_ transform: (Any) -> Result) -> [Result] {
+        var result: [Result] = []
+        result.reserveCapacity(count)
+        forEach { result.append(transform($0)) }
+        return result
+    }
+
+    mutating func makeIndexLookupTableIfNeeded(
+        canonicalValues: [_ViewList_ID.Canonical]
+    ) -> HeterogeneousIndexLookupTable {
+        if let lookupTableCache {
+            return lookupTableCache
+        }
+        let table = HeterogeneousIndexLookupTable(canonicalValues)
+        lookupTableCache = table
+        return table
+    }
+}
+
+private protocol CanonicalViewIDProtocol {
+    func asCanonical() -> _ViewList_ID.Canonical
+}
+
+private struct Nil: Hashable {}
+
+struct TypedCanonicalViewID<ExplicitID: Hashable>: Hashable, CanonicalViewIDProtocol {
+    var index: Int32
+    var implicitID: Int32
+    var explicitID: ExplicitID
+
+    func asCanonical() -> _ViewList_ID.Canonical {
+        _ViewList_ID.Canonical(
+            _index: index,
+            implicitID: implicitID,
+            explicitID: ExplicitID.self == Nil.self ? nil : AnyHashable(explicitID)
+        )
+    }
+}
+
+struct HeterogeneousViewIDs {
+    var collection: HeterogeneousCollection
+
+    init() {
+        collection = HeterogeneousCollection()
+    }
+
+    init(_ collection: HeterogeneousCollection) {
+        self.collection = collection
+    }
+
+    init(_ list: any ViewList) {
+        var accumulator = HeterogeneousViewIDsAccumulator()
+        list.appendViewIDs(into: &accumulator)
+        self = accumulator.finalize()
+    }
+
+    static var empty: HeterogeneousViewIDs {
+        HeterogeneousViewIDs()
+    }
+
+    var count: Int {
+        collection.count
+    }
+
+    subscript(index: Int) -> _ViewList_ID.Canonical {
+        makeCanonical(collection.element(at: index))
+    }
+
+    func asCanonical() -> [_ViewList_ID.Canonical] {
+        collection.map(makeCanonical)
+    }
+
+    func forEach(_ body: (_ViewList_ID.Canonical) -> Void) {
+        collection.forEach { body(makeCanonical($0)) }
+    }
+
+    mutating func makeIndexLookupTableIfNeeded() -> HeterogeneousViewIDIndexLookupTable {
+        HeterogeneousViewIDIndexLookupTable(
+            lookupTable: collection.makeIndexLookupTableIfNeeded(
+                canonicalValues: asCanonical()
+            )
+        )
+    }
+
+    private func makeCanonical(_ value: Any) -> _ViewList_ID.Canonical {
+        if let canonical = value as? _ViewList_ID.Canonical {
+            return canonical
+        }
+        if let typed = value as? any CanonicalViewIDProtocol {
+            return typed.asCanonical()
+        }
+        if value is Nil {
+            return _ViewList_ID.Canonical(
+                _index: 0,
+                implicitID: -1,
+                explicitID: nil
+            )
+        }
+        if let explicitID = value as? AnyHashable {
+            return _ViewList_ID.Canonical(
+                _index: 0,
+                implicitID: -1,
+                explicitID: explicitID
+            )
+        }
+        preconditionFailure("heterogeneous view ID element is not Hashable")
+    }
+}
+
+struct HeterogeneousViewIDIndexLookupTable {
+    var lookupTable: HeterogeneousIndexLookupTable
+
+    func index(for id: _ViewList_ID.Canonical) -> Int? {
+        lookupTable.index(for: id)
+    }
+}
+
+struct HeterogeneousViewIDsAccumulator {
+    private var collections: ContiguousArray<AbstractHomogeneousCollection>
+    private var _count: Int
+    private var currentCollection: (any AbstractContiguousArray)?
+    private var currentExplicitID: (any Hashable, isUnary: Bool)?
+
+    init() {
+        collections = []
+        _count = 0
+        currentCollection = nil
+        currentExplicitID = nil
+    }
+
+    var count: Int {
+        _count + (currentCollection?.count ?? 0)
+    }
+
+    var isEmpty: Bool {
+        _count == 0 && (currentCollection?.isEmpty ?? true)
+    }
+
+    func finalize() -> HeterogeneousViewIDs {
+        var finalizedCollections = collections
+        if let currentCollection, !currentCollection.isEmpty {
+            finalizedCollections.append(makeHomogeneousCollection(currentCollection))
+        }
+        return HeterogeneousViewIDs(HeterogeneousCollection(finalizedCollections))
+    }
+
+    mutating func withBuffer<ID: Hashable>(
+        of type: ID.Type,
+        body: (inout ContiguousArray<ID>) -> Void
+    ) {
+        if var buffer = currentCollection as? ContiguousArray<ID> {
+            body(&buffer)
+            currentCollection = buffer
+            return
+        }
+
+        flushCurrentCollection()
+        var buffer = ContiguousArray<ID>()
+        body(&buffer)
+        currentCollection = buffer
+    }
+
+    mutating func append<ID: Hashable>(contentsOf values: ContiguousArray<ID>) {
+        guard !values.isEmpty else { return }
+        withBuffer(of: ID.self) { $0.append(contentsOf: values) }
+    }
+
+    mutating func withExplicitID<ID: Hashable>(
+        _ id: ID,
+        isUnary: Bool,
+        body: (inout HeterogeneousViewIDsAccumulator) -> Void
+    ) {
+        let previous = currentExplicitID
+        currentExplicitID = (id, isUnary)
+        body(&self)
+        currentExplicitID = previous
+    }
+
+    mutating func append(_ id: _ViewList_ID.Canonical) {
+        if let explicitID = id.explicitID {
+            append(index: id._index, implicitID: id.implicitID, explicitID: explicitID)
+        } else {
+            append(index: id._index, implicitID: id.implicitID)
+        }
+    }
+
+    mutating func append<ID: Hashable>(
+        index: Int32 = 0,
+        implicitID: Int32 = -1,
+        explicitID: ID
+    ) {
+        if index == 0 && implicitID == -1 {
+            withBuffer(of: ID.self) { $0.append(explicitID) }
+        } else {
+            append(
+                TypedCanonicalViewID(
+                    index: index,
+                    implicitID: implicitID,
+                    explicitID: explicitID
+                )
+            )
+        }
+    }
+
+    mutating func append(index: Int32, implicitID: Int32) {
+        if let currentExplicitID {
+            appendCurrentExplicitID(
+                currentExplicitID.0,
+                isUnary: currentExplicitID.isUnary,
+                index: index,
+                implicitID: implicitID
+            )
+        } else {
+            append(
+                TypedCanonicalViewID(
+                    index: index,
+                    implicitID: implicitID,
+                    explicitID: Nil()
+                )
+            )
+        }
+    }
+
+    mutating func append<ID: Hashable>(
+        indices: Range<Int32>,
+        implicitID: Int32,
+        explicitID: ID
+    ) {
+        guard !indices.isEmpty else { return }
+        if implicitID == -1, indices.contains(0) {
+            append(
+                indices: indices.lowerBound..<0,
+                implicitID: implicitID,
+                explicitID: explicitID
+            )
+            append(index: 0, implicitID: -1, explicitID: explicitID)
+            append(
+                indices: 1..<indices.upperBound,
+                implicitID: implicitID,
+                explicitID: explicitID
+            )
+            return
+        }
+        withBuffer(of: TypedCanonicalViewID<ID>.self) { buffer in
+            buffer.reserveCapacity(buffer.count + indices.count)
+            for index in indices {
+                buffer.append(
+                    TypedCanonicalViewID(
+                        index: index,
+                        implicitID: implicitID,
+                        explicitID: explicitID
+                    )
+                )
+            }
+        }
+    }
+
+    mutating func appendWithoutExplicitID(
+        indices: Range<Int32>,
+        implicitID: Int32
+    ) {
+        guard !indices.isEmpty else { return }
+        if let currentExplicitID {
+            appendCurrentExplicitID(
+                currentExplicitID.0,
+                isUnary: currentExplicitID.isUnary,
+                indices: indices,
+                implicitID: implicitID
+            )
+        } else {
+            append(
+                indices: indices,
+                implicitID: implicitID,
+                explicitID: Nil()
+            )
+        }
+    }
+
+    struct UnsafeOutputBuffer {
+        var pointer: UnsafeMutableRawPointer
+        var count: Int
+        var stride: Int
+        var indexOffset: Int
+        var implicitIDOffset: Int
+        var explicitIDOffset: Int
+
+        func initialize<ID: Hashable>(
+            at position: Int,
+            index: Int32,
+            implicitID: Int32,
+            explicitID: ID
+        ) {
+            precondition(position >= 0 && position < count)
+            let element = pointer.advanced(by: position * stride)
+            element.advanced(by: indexOffset)
+                .assumingMemoryBound(to: Int32.self)
+                .initialize(to: index)
+            element.advanced(by: implicitIDOffset)
+                .assumingMemoryBound(to: Int32.self)
+                .initialize(to: implicitID)
+            element.advanced(by: explicitIDOffset)
+                .assumingMemoryBound(to: ID.self)
+                .initialize(to: explicitID)
+        }
+
+        func initialize(
+            at position: Int,
+            index: Int32,
+            implicitID: Int32
+        ) {
+            initialize(
+                at: position,
+                index: index,
+                implicitID: implicitID,
+                explicitID: Nil()
+            )
+        }
+
+        func mutableExplicitIDPointer<ID: Hashable>(
+            at position: Int,
+            for type: ID.Type = ID.self
+        ) -> UnsafeMutablePointer<ID> {
+            precondition(position >= 0 && position < count)
+            return pointer
+                .advanced(by: position * stride + explicitIDOffset)
+                .assumingMemoryBound(to: ID.self)
+        }
+    }
+
+    mutating func appendWithUnsafeOutputBuffer<ID: Hashable>(
+        explicitID type: ID.Type = ID.self,
+        count: Int,
+        body: (UnsafeOutputBuffer) -> Void
+    ) {
+        guard count > 0 else { return }
+        let pointer = UnsafeMutablePointer<TypedCanonicalViewID<ID>>.allocate(capacity: count)
+        let rawPointer = UnsafeMutableRawPointer(pointer)
+        let buffer = UnsafeOutputBuffer(
+            pointer: rawPointer,
+            count: count,
+            stride: MemoryLayout<TypedCanonicalViewID<ID>>.stride,
+            indexOffset: MemoryLayout<TypedCanonicalViewID<ID>>.offset(of: \.index)!,
+            implicitIDOffset: MemoryLayout<TypedCanonicalViewID<ID>>.offset(of: \.implicitID)!,
+            explicitIDOffset: MemoryLayout<TypedCanonicalViewID<ID>>.offset(of: \.explicitID)!
+        )
+        body(buffer)
+        let values = ContiguousArray(
+            UnsafeBufferPointer(start: pointer, count: count)
+        )
+        pointer.deinitialize(count: count)
+        pointer.deallocate()
+        append(contentsOf: values)
+    }
+
+    private mutating func append<ID: Hashable>(_ value: TypedCanonicalViewID<ID>) {
+        withBuffer(of: TypedCanonicalViewID<ID>.self) { $0.append(value) }
+    }
+
+    private mutating func appendCurrentExplicitID<ID: Hashable>(
+        _ explicitID: ID,
+        isUnary: Bool,
+        index: Int32,
+        implicitID: Int32
+    ) {
+        append(
+            index: index,
+            implicitID: isUnary ? -1 : implicitID,
+            explicitID: explicitID
+        )
+    }
+
+    private mutating func appendCurrentExplicitID<ID: Hashable>(
+        _ explicitID: ID,
+        isUnary: Bool,
+        indices: Range<Int32>,
+        implicitID: Int32
+    ) {
+        append(
+            indices: indices,
+            implicitID: isUnary ? -1 : implicitID,
+            explicitID: explicitID
+        )
+    }
+
+    private mutating func flushCurrentCollection() {
+        guard let currentCollection else { return }
+        if !currentCollection.isEmpty {
+            collections.append(makeHomogeneousCollection(currentCollection))
+            _count += currentCollection.count
+        }
+        self.currentCollection = nil
+    }
+}
 
 // MARK: - _ViewList_SublistTransform
 
@@ -532,7 +1191,7 @@ struct _ViewList_SublistTransform_ItemFlags: OptionSet {
 
 protocol _ViewList_SublistTransform_Item {
     static var flags: _ViewList_SublistTransform_ItemFlags { get }
-    func apply(to sublist: inout _ViewList_Sublist)
+    func apply(sublist: inout _ViewList_Sublist)
     func bindID(_ id: inout _ViewList_ID)
     func wrapSubgraph(into storage: inout _ViewList_SublistSubgraphStorage)
 }
@@ -567,7 +1226,7 @@ struct _ViewList_SublistTransform {
 
     func apply(to sublist: inout _ViewList_Sublist) {
         for item in items.reversed() {
-            item.apply(to: &sublist)
+            item.apply(sublist: &sublist)
         }
     }
 
@@ -828,7 +1487,7 @@ struct ModifiedElements: _ViewList_Elements {
         modifier: _GraphValue<M>,
         inputs: _GraphInputs
     ) -> ModifiedElements {
-        let weakMod = modifier._attribute.asWeak().raw
+        let weakMod = modifier._attribute.asWeak().base
         return ModifiedElements(
             base: base,
             modifier: weakMod,
@@ -898,7 +1557,7 @@ struct ModifiedElements: _ViewList_Elements {
 
 /// Refcounted subgraph holder used by retained ViewList slices.
 /// Stores an AGSubgraph object plus a manual retain count for list slices.
-final class _ViewList_Subgraph {
+class _ViewList_Subgraph {
     var subgraph: AGSubgraph
     var refcount: UInt32 = 1
 
@@ -911,17 +1570,35 @@ final class _ViewList_Subgraph {
         refcount -= 1
         if refcount == 0 {
             invalidate()
+            invalidateSubgraph()
         }
     }
 
+    /// Subclass hook invoked exactly once when the manual retain count reaches zero.
+    /// The actual graph invalidation is performed by `release()` after this hook returns.
     func invalidate() {
-        guard AGSubgraphIsValid(subgraph) else { return }
-        guard let graph = _AGGraph.current else {
-            fatalError("_ViewList_Subgraph.invalidate() called outside an active _AGGraph context.")
+    }
+
+    private func invalidateSubgraph() {
+        guard AGSubgraphIsValid(subgraph), let graph = subgraph.graph else {
+            return
         }
+        if _AGGraph.current === graph {
+            invalidateInCurrentContext(graph: graph)
+        } else {
+            _AGGraph.withCurrent(graph) {
+                invalidateInCurrentContext(graph: graph)
+            }
+        }
+    }
+
+    private func invalidateInCurrentContext(graph: _AGGraph) {
+        guard AGSubgraphIsValid(subgraph) else { return }
         Update.begin()
         defer { Update.end() }
-        subgraph.willRemove()
+        if subgraph.isInserted {
+            subgraph.willRemove()
+        }
         subgraph.invalidate()
         graph.drainActionOutbox()
         subgraph.removeFromParent()
@@ -1148,7 +1825,7 @@ private struct _ViewList_GroupEntryTransform: _ViewList_SublistTransform_Item {
 
     private static let reuseID = Int(bitPattern: ObjectIdentifier(_ViewList_GroupEntryTransform.self))
 
-    func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(sublist: inout _ViewList_Sublist) {
         bindID(&sublist.id)
     }
 
@@ -1188,7 +1865,7 @@ struct _ViewList_Sublist {
     var start: Int
     var count: Int
     var id: _ViewList_ID
-    var elements: any _ViewList_Elements
+    var elements: _ViewList_SubgraphElements
     var traits: ViewTraitCollection
     var list: Attribute<any ViewList>?
 }
@@ -1196,10 +1873,67 @@ struct _ViewList_Sublist {
 /// View wrapper used by `_VariadicView_Children.Element`.
 struct _ViewList_View {
     var elements: _ViewList_SubgraphElements
+    var releaseElements: _ViewList_SubgraphRelease?
     var id: _ViewList_ID
     var index: Int
     var count: Int
     var contentSubgraph: AGSubgraph?
+
+    init(
+        elements: _ViewList_SubgraphElements,
+        id: _ViewList_ID,
+        index: Int,
+        count: Int,
+        contentSubgraph: AGSubgraph?
+    ) {
+        self.elements = elements
+        self.releaseElements = elements.retain()
+        self.id = id
+        self.index = index
+        self.count = count
+        self.contentSubgraph = contentSubgraph
+    }
+
+    var elementID: _ViewList_ID {
+        var result = id
+        result._index = Int32(index)
+        return result
+    }
+
+    var viewID: AnyHashable {
+        if let explicitID = id.explicitIDs.first {
+            if explicitID.isUnary {
+                if count == 1 {
+                    return explicitID.id
+                }
+                return AnyHashable(
+                    _ViewList_ID.Canonical(
+                        _index: Int32(index),
+                        implicitID: -1,
+                        explicitID: explicitID.id
+                    )
+                )
+            }
+            if count == 1 && id.implicitID < 0 {
+                return explicitID.id
+            }
+        }
+        return AnyHashable(
+            _ViewList_ID.Canonical(
+                _index: Int32(index),
+                implicitID: id.implicitID,
+                explicitID: id.explicitIDs.first?.id
+            )
+        )
+    }
+
+    var reuseIdentifier: Int {
+        elementID.reuseIdentifier
+    }
+
+    var subviewID: _ViewList_ID {
+        elementID
+    }
 
     /// _VariadicView_Children.Element._makeView delegates here.
     /// This creates placeholder outputs, then uses `PlaceholderInfo` to attach
@@ -1220,8 +1954,10 @@ struct _ViewList_View {
     }
 }
 
+extension _ViewList_View: PrimitiveView, UnaryView {}
+
 /// Stateful placeholder rule for `_ViewList_View._makeView`.
-private struct PlaceholderInfo: StatefulRule {
+private struct PlaceholderInfo: StatefulRule, ObservedAttribute, AsyncAttribute {
     typealias Value = _ViewOutputs
 
     var view: Attribute<_ViewList_View>
@@ -1283,6 +2019,10 @@ private struct PlaceholderInfo: StatefulRule {
         lastID = nil
         lastIndex = nil
         lastContentSubgraph = nil
+    }
+
+    mutating func destroy() {
+        eraseItem()
     }
 }
 
@@ -1407,8 +2147,21 @@ struct ViewTraitKeys {
     }
 }
 
-/// Scroll content offset. Stub.
-struct ViewContentOffset {}
+enum ViewContentOffset: _ViewTraitKey {
+    static var defaultValue: ViewContentOffset? { nil }
+
+    case staticCount(Int, Bool)
+    case dynamic(Attribute<Int>, Int)
+
+    var offset: Int {
+        switch self {
+        case .staticCount(let count, _):
+            return count
+        case .dynamic(let count, let offset):
+            return count.value + offset
+        }
+    }
+}
 
 // MARK: - ListModifier
 
@@ -1427,7 +2180,7 @@ class ListModifier: _ViewList_SublistTransform_Item {
                           inputs: _GraphInputs) {
         self.pred = pred
         self.modifierType = M.self
-        self.modifier = modifier.asWeak().raw
+        self.modifier = modifier.asWeak().base
         self.baseInputs = inputs
         self.project = { rawAttr, mergedInputs, outerBody in
             let modAttr = Attribute<M>(rawAttr)
@@ -1444,9 +2197,9 @@ class ListModifier: _ViewList_SublistTransform_Item {
         list = modified
     }
 
-    func apply(to sublist: inout _ViewList_Sublist) {
-        sublist.elements = ModifiedElements(
-            base: sublist.elements,
+    func apply(sublist: inout _ViewList_Sublist) {
+        sublist.elements.base = ModifiedElements(
+            base: sublist.elements.base,
             modifier: modifier,
             baseInputs: baseInputs,
             project: project
@@ -1487,7 +2240,7 @@ extension _ViewList_TemporarySublistTransform {
         guard let storage else { return }
         let items = storage.items
         for item in items.reversed() {
-            item.apply(to: &sublist)
+            item.apply(sublist: &sublist)
         }
     }
 
@@ -1609,7 +2362,7 @@ struct ApplyModifiers: Rule {
     var source: Attribute<any ViewList>
     var listModifier: ListModifier
 
-    func updateValue() -> any ViewList {
+    var value: any ViewList {
         var list: any ViewList = source.value   // registers AG dependency on source ViewList
         listModifier.apply(to: &list)
         return list

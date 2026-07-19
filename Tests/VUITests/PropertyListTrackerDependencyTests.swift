@@ -67,7 +67,7 @@ final class PropertyListTrackerDependencyTests: XCTestCase {
             let fallbackAttr = graph.makeInput(value: fallbackValues)
             let mergedAttr: Attribute<EnvironmentValues> = graph.makeRule(
                 MergedEnvironment(
-                    selfWeak: primaryAttr.asWeak().raw,
+                    selfWeak: primaryAttr.asWeak().base,
                     otherRaw: fallbackAttr.identifier.rawValue
                 )
             )

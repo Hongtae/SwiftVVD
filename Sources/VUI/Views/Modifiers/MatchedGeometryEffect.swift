@@ -31,6 +31,11 @@ private struct MatchedGeometryKey: Hashable {
     var namespace: Namespace.ID
 }
 
+typealias MatchedGeometrySharedValue = (
+    frame: ViewFrame?,
+    source: AnyOptionalAttribute
+)
+
 final class MatchedGeometryScope: PropertyKey {
     struct ViewRegistration {
         var attribute: AGAttribute
@@ -46,7 +51,7 @@ final class MatchedGeometryScope: PropertyKey {
     final class Frame {
         var key: AnyHashable
         var views: [ViewRegistration] = []
-        var sharedFrame: Attribute<ViewFrame?>?
+        var sharedFrame: Attribute<MatchedGeometrySharedValue>?
         var sourcePhase: Attribute<Phase>?
         var sourceTransaction: Attribute<Transaction>?
 
@@ -83,7 +88,7 @@ final class MatchedGeometryScope: PropertyKey {
         index: inout Int?,
         for key: AnyHashable,
         view: ViewRegistration
-    ) -> Attribute<ViewFrame?> {
+    ) -> MatchedGeometrySharedValue {
         guard let graph, graph === _AGGraph.current else {
             fatalError("MatchedGeometryScope.frame called outside its owning graph context.")
         }
@@ -114,7 +119,7 @@ final class MatchedGeometryScope: PropertyKey {
             frame.views.append(view)
             invalidateSharedFrame(frame)
         }
-        return makeSharedFrameIfNeeded(at: frameIndex)
+        return makeSharedFrameIfNeeded(at: frameIndex).value
     }
 
     func releaseFrame(index: Int, owner: AGAttribute) {
@@ -131,6 +136,8 @@ final class MatchedGeometryScope: PropertyKey {
         guard frames.indices.contains(frameIndex) else { return nil }
         let frame = frames[frameIndex]
         let sources = frame.views.filter { $0.args.value.isSource }
+        guard !sources.isEmpty else { return nil }
+        let soleSource = frame.views.count == 1 ? sources.first : nil
         let activeSource = sources.first(where: {
             !$0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
         })
@@ -142,7 +149,7 @@ final class MatchedGeometryScope: PropertyKey {
                 $0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
             })
             : nil
-        let source = activeSource ?? deferredSource
+        let source = soleSource ?? activeSource ?? deferredSource
         guard let source else { return nil }
 
         let args = source.args.value
@@ -157,11 +164,9 @@ final class MatchedGeometryScope: PropertyKey {
             x: anchorPosition.x - size.value.width * args.anchor.x,
             y: anchorPosition.y - size.value.height * args.anchor.y
         )
-        let transaction = graph?.transaction(for: source.position.identifier) ??
-            graph?.transaction(for: source.size.identifier) ??
-            source.transaction.value
+        let transaction = source.transaction.value
         var phase = source.phase.value
-        if activeSource == nil {
+        if soleSource == nil, activeSource == nil {
             // A replacement source can exist before its parent layout has
             // assigned target geometry. Keep the retained source authoritative
             // during that gap instead of retargeting the shared frame to the
@@ -172,12 +177,13 @@ final class MatchedGeometryScope: PropertyKey {
             frame: ViewFrame(origin: origin, size: size),
             phase: phase,
             transaction: transaction,
-            positionAttribute: source.position.identifier,
-            sizeAttribute: source.size.identifier
+            sourceAttribute: source.attribute
         )
     }
 
-    private func makeSharedFrameIfNeeded(at index: Int) -> Attribute<ViewFrame?> {
+    private func makeSharedFrameIfNeeded(
+        at index: Int
+    ) -> Attribute<MatchedGeometrySharedValue> {
         let frame = frames[index]
         if let sharedFrame = frame.sharedFrame {
             return sharedFrame
@@ -189,7 +195,7 @@ final class MatchedGeometryScope: PropertyKey {
         let attributes = AGSubgraph.withCurrent(rootSubgraph) { () -> (
             Attribute<Phase>,
             Attribute<Transaction>,
-            Attribute<ViewFrame?>
+            Attribute<MatchedGeometrySharedValue>
         ) in
             let sourcePhase: Attribute<Phase> = graph.makeRule { [weak self] in
                 self?.sourceInfo(frameIndex: index)?.phase ?? self?.inputs.base.phase.value ?? Phase()
@@ -198,7 +204,7 @@ final class MatchedGeometryScope: PropertyKey {
                 self?.sourceInfo(frameIndex: index)?.transaction ??
                     self?.inputs.base.transaction.value ?? Transaction()
             }
-            let sharedFrame: Attribute<ViewFrame?> = graph.makeStatefulRule(
+            let sharedFrame: Attribute<MatchedGeometrySharedValue> = graph.makeStatefulRule(
                 MatchedGeometrySharedFrame(
                     scope: self,
                     frameIndex: index,
@@ -227,17 +233,17 @@ struct MatchedGeometrySourceInfo {
     var frame: ViewFrame
     var phase: Phase
     var transaction: Transaction
-    var positionAttribute: AGAttribute
-    var sizeAttribute: AGAttribute
+    var sourceAttribute: AGAttribute
 }
 
-private struct MatchedGeometrySharedFrame: StatefulRule {
-    typealias Value = ViewFrame?
+private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, AsyncAttribute {
+    typealias Value = MatchedGeometrySharedValue
 
     weak var scope: MatchedGeometryScope?
     var frameIndex: Int
     var helper: AnimatableAttributeHelper<ViewFrame>
     var environment: Attribute<EnvironmentValues>
+    var lastSourceAttribute = AnyOptionalAttribute()
 
     init(
         scope: MatchedGeometryScope,
@@ -260,30 +266,33 @@ private struct MatchedGeometrySharedFrame: StatefulRule {
     mutating func updateValue() {
         guard let info = scope?.sourceInfo(frameIndex: frameIndex) else {
             helper.finishAndClearAnimatorState()
-            _AGGraph.setStatefulOutput(Optional<ViewFrame>.none)
+            lastSourceAttribute = AnyOptionalAttribute()
+            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                frame: nil,
+                source: AnyOptionalAttribute()
+            ))
             return
         }
-        guard let graph = _AGGraph.current else {
-            fatalError("MatchedGeometrySharedFrame.updateValue called outside an active graph.")
-        }
-
         var value = (value: info.frame, changed: false)
         let update = helper.beginStandaloneUpdate(
             value: &value,
             defaultAnimation: nil,
             transactionForChangedTarget: {
-                graph.transaction(for: info.positionAttribute) ??
-                    graph.transaction(for: info.sizeAttribute) ??
-                    info.transaction
+                info.transaction
             }
         )
-        let stored: ViewFrame?? = _AGGraph.currentStatefulOutput(Optional<ViewFrame>.self)
-        let previous = stored ?? nil
+        let stored: MatchedGeometrySharedValue? = _AGGraph.currentStatefulOutput()
+        let previous = stored?.frame
+        let source = AnyOptionalAttribute(info.sourceAttribute)
+        lastSourceAttribute = source
 
         if update.didReset || previous == nil {
             helper.finishAndClearAnimatorState()
             helper.commitTarget(update.target)
-            _AGGraph.setStatefulOutput(Optional(update.target))
+            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                frame: update.target,
+                source: source
+            ))
             return
         }
 
@@ -302,13 +311,19 @@ private struct MatchedGeometrySharedFrame: StatefulRule {
             case .noAnimation:
                 helper.finishAndClearAnimatorState()
                 helper.commitTarget(update.target)
-                _AGGraph.setStatefulOutput(Optional(update.target))
+                _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                    frame: update.target,
+                    source: source
+                ))
                 return
             }
         }
 
         guard helper.isAnimating else {
-            _AGGraph.setStatefulOutput(Optional(previous ?? update.target))
+            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                frame: previous ?? update.target,
+                source: source
+            ))
             return
         }
         helper.update(
@@ -316,7 +331,10 @@ private struct MatchedGeometrySharedFrame: StatefulRule {
             environment: environment,
             advancesDelayedSecondSample: true
         )
-        _AGGraph.setStatefulOutput(Optional(value.value))
+        _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+            frame: value.value,
+            source: helper.isAnimating ? AnyOptionalAttribute() : source
+        ))
     }
 
     mutating func destroy() {
@@ -324,8 +342,8 @@ private struct MatchedGeometrySharedFrame: StatefulRule {
     }
 }
 
-private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, RemovableAttribute {
-    typealias Value = Attribute<ViewFrame?>
+private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, ObservedAttribute, RemovableAttribute, AsyncAttribute {
+    typealias Value = MatchedGeometrySharedValue
 
     var modifier: Attribute<_MatchedGeometryEffect<ID>>
     var args: Attribute<MatchedGeometryArguments>
@@ -338,6 +356,7 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
     weak var scope: MatchedGeometryScope?
     var frameIndex: Int?
     var selfAttribute: AGAttribute = .invalid
+    var resetSeed: UInt32 = 0
     var isRemoved = false
 
     mutating func updateValue() {
@@ -349,15 +368,27 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
             fatalError("MatchedGeometryRegistration has no current attribute.")
         }
         selfAttribute = owner
+        let currentResetSeed = phase.value.resetSeed
+        if resetSeed != currentResetSeed {
+            resetSeed = currentResetSeed
+            if let frameIndex {
+                scope.releaseFrame(index: frameIndex, owner: owner)
+                self.frameIndex = nil
+            }
+        }
+        if isRemoved {
+            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                frame: nil,
+                source: AnyOptionalAttribute()
+            ))
+            return
+        }
         let value = modifier.value
         let key = AnyHashable(MatchedGeometryKey(
             id: AnyHashable(value.id),
             namespace: value.namespace
         ))
-        if isRemoved, let frameIndex {
-            scope.releaseFrame(index: frameIndex, owner: owner)
-        }
-        let sharedFrame = scope.frame(
+        let sharedValue = scope.frame(
             index: &frameIndex,
             for: key,
             view: MatchedGeometryScope.ViewRegistration(
@@ -371,10 +402,7 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
                 transform: transform
             )
         )
-        if isRemoved, let frameIndex {
-            scope.releaseFrame(index: frameIndex, owner: owner)
-        }
-        _AGGraph.setStatefulOutput(sharedFrame)
+        _AGGraph.setStatefulOutput(sharedValue)
     }
 
     mutating func destroy() {
@@ -384,20 +412,28 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Removabl
     }
 
     static func willRemove(attribute: AGAttribute) {
-        _AGGraph.current?.mutateStatefulRule(attribute, as: Self.self) { rule in
-            rule.isRemoved = true
+        _AGGraph.current?.mutateStatefulRule(
+            attribute,
+            as: Self.self,
+            invalidating: true
+        ) { rule in
             if let frameIndex = rule.frameIndex {
                 rule.scope?.releaseFrame(index: frameIndex, owner: attribute)
+                rule.frameIndex = nil
             }
+            rule.isRemoved = true
         }
     }
 
     static func didReinsert(attribute: AGAttribute) {
         guard let graph = _AGGraph.current else { return }
-        graph.mutateStatefulRule(attribute, as: Self.self) { rule in
+        graph.mutateStatefulRule(
+            attribute,
+            as: Self.self,
+            invalidating: true
+        ) { rule in
             rule.isRemoved = false
         }
-        graph.invalidateAttribute(attribute)
         (_AGGraphContext.current?.context as? GraphHost)?.graphDelegate?.graphDidChange()
     }
 }
@@ -414,18 +450,24 @@ extension _ViewInputs {
     }
 }
 
-private struct MatchedGeometryFrame: Rule {
-    var sharedFrame: Attribute<Attribute<ViewFrame?>>
+private struct MatchedFrame: Rule, AsyncAttribute {
+    var sharedFrame: Attribute<MatchedGeometrySharedValue>
     var args: Attribute<MatchedGeometryArguments>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
+    // The target position is authoritative for self geometry, while coordinate
+    // conversion must use the origin represented by the current transform.
+    var transformPosition: Attribute<CGPoint>
+    var transform: Attribute<ViewTransform>
     var childLayoutComputer: OptionalAttribute<LayoutComputer>
 
-    func updateValue() -> ViewFrame {
+    var value: ViewFrame {
         let ownSize = size.value
         let ownPosition = position.value
         let arguments = args.value
-        guard let shared = sharedFrame.value.value else {
+        let sharedValue = sharedFrame.value
+        guard let shared = sharedValue.frame,
+              sharedValue.source.identifier != sharedFrame.identifier else {
             return ViewFrame(origin: ownPosition, size: ownSize)
         }
 
@@ -436,8 +478,8 @@ private struct MatchedGeometryFrame: Rule {
             // scale the already-rendered content as a projection effect would.
             let proposal = ProposedViewSize(shared.size.value)
             resolvedSize = ViewSize(
-                layoutComputer.sizeThatFits(proposal),
-                proposal: proposal
+                layoutComputer.sizeThatFits(_ProposedSize(proposal)),
+                proposal: _ProposedSize(proposal)
             )
         } else {
             resolvedSize = ownSize
@@ -445,15 +487,17 @@ private struct MatchedGeometryFrame: Rule {
 
         let resolvedOrigin: CGPoint
         if arguments.properties.contains(.position) {
-            // Preserve the size accepted by the child, then place that result
-            // so its requested anchor coincides with the shared-frame anchor.
-            let targetAnchor = CGPoint(
+            var targetAnchor = [CGPoint(
                 x: shared.origin.x + shared.size.value.width * arguments.anchor.x,
                 y: shared.origin.y + shared.size.value.height * arguments.anchor.y
-            )
+            )]
+            transform.value.convertGlobal(to: .local, points: &targetAnchor)
+            let coordinateOrigin = transformPosition.value
             resolvedOrigin = CGPoint(
-                x: targetAnchor.x - resolvedSize.value.width * arguments.anchor.x,
-                y: targetAnchor.y - resolvedSize.value.height * arguments.anchor.y
+                x: coordinateOrigin.x + targetAnchor[0].x
+                    - resolvedSize.value.width * arguments.anchor.x,
+                y: coordinateOrigin.y + targetAnchor[0].y
+                    - resolvedSize.value.height * arguments.anchor.y
             )
         } else {
             resolvedOrigin = ownPosition
@@ -462,18 +506,50 @@ private struct MatchedGeometryFrame: Rule {
     }
 }
 
+private struct MatchedDisplayList: Rule, AsyncAttribute {
+    var identity: _DisplayList_Identity
+    var sharedFrame: Attribute<MatchedGeometrySharedValue>
+    var args: Attribute<MatchedGeometryArguments>
+    var content: Attribute<DisplayList>
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var containerPosition: Attribute<CGPoint>
+
+    var value: DisplayList {
+        let content = content.value
+        let presentationPosition = position.value
+        let frame = CGRect(
+            origin: CGPoint(
+                x: presentationPosition.x - containerPosition.value.x,
+                y: presentationPosition.y - containerPosition.value.y
+            ),
+            size: size.value.value
+        )
+
+        var result = DisplayList()
+        result.appendEffect(
+            .identity,
+            contents: content,
+            frame: frame,
+            identity: identity,
+            version: DisplayList.Version(forUpdate: ())
+        )
+        return result
+    }
+}
+
 private struct MatchedGeometrySourcePhase: Rule {
     var phase: Attribute<Phase>
     var transitionPhase: Attribute<TransitionPhase>
 
-    func updateValue() -> Phase {
+    var value: Phase {
         var value = phase.value
         value.isBeingRemoved = transitionPhase.value == .didDisappear
         return value
     }
 }
 
-public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
+public struct _MatchedGeometryEffect<ID: Hashable>: MultiViewModifier, PrimitiveViewModifier {
     public var id: ID
     public var namespace: Namespace.ID
     public var args: (
@@ -512,29 +588,9 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
         var modifiedInputs = inputs
         modifiedInputs.needsGeometry = true
         let args = modifier[\.args]._attribute
-        let animatedLayoutFrame = inputs.base.cachedEnvironment.value.animatedFrame
-        let targetPosition = animatedLayoutFrame?.position ?? inputs.position
-        let targetSize = animatedLayoutFrame?.size ?? inputs.size
-        let targetGeometryFrame: Attribute<ViewFrame> = graph.makeRule {
-            ViewFrame(origin: targetPosition.value, size: targetSize.value)
-        }
-        let targetTransform: Attribute<ViewTransform>
-        if animatedLayoutFrame != nil {
-            let presentationTransform = inputs.transform
-            targetTransform = graph.makeRule {
-                var transform = presentationTransform.value
-                // Layout animation exposes its current presentation origin through
-                // inputs.position, while the cached frame retains the newly placed
-                // target origin. Matched source arbitration must start from that
-                // target geometry; otherwise a newly inserted source is registered
-                // at the layout bridge's initial zero frame and flies in from the
-                // window origin.
-                transform.appendPosition(targetPosition.value)
-                return transform
-            }
-        } else {
-            targetTransform = inputs.transform
-        }
+        let targetPosition = inputs.position
+        let targetSize = inputs.size
+        let targetTransform = inputs.transform
         let sourcePhase: Attribute<Phase>
         if let transitionPhase = inputs[
             DynamicContainerTransitionPhaseInput.self
@@ -548,11 +604,13 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
         } else {
             sourcePhase = inputs.base.phase
         }
-        let registration: Attribute<Attribute<ViewFrame?>> = graph.makeStatefulRule(
+        let registration: Attribute<MatchedGeometrySharedValue> = graph.makeStatefulRule(
             MatchedGeometryRegistration(
                 modifier: modifier._attribute,
                 args: args,
-                transaction: inputs.base.transaction,
+                transaction: inputs[
+                    LayoutPlacementTransactionInput.self
+                ].attribute ?? inputs.base.transaction,
                 phase: sourcePhase,
                 placement: inputs[LayoutPlacementStateInput.self],
                 size: targetSize,
@@ -565,63 +623,72 @@ public struct _MatchedGeometryEffect<ID: Hashable>: ViewModifier {
             defaultValue: LayoutComputer.defaultValue
         )
         let matchedFrame: Attribute<ViewFrame> = graph.makeRule(
-            MatchedGeometryFrame(
+            MatchedFrame(
                 sharedFrame: registration,
                 args: args,
-                size: inputs.size,
-                position: inputs.position,
+                size: targetSize,
+                position: targetPosition,
+                transformPosition: inputs.position,
+                transform: inputs.transform,
                 childLayoutComputer: OptionalAttribute(childLayoutComputer)
             )
         )
-        let transformedInputs: _ViewInputs = {
-            var value = modifiedInputs
-            value[LayoutPlacementAnimationsDisabledInput.self] = true
-            value[LayoutPlacementProjectionInput.self] = LayoutPlacementProjection(
-                targetFrame: targetGeometryFrame,
-                presentationFrame: matchedFrame
-            )
-            let parentTransform = modifiedInputs.transform
-            value.position = graph.makeRule { matchedFrame.value.origin }
-            value.size = graph.makeRule { matchedFrame.value.size }
-            value.transform = graph.makeRule {
-                var transform = parentTransform.value
-                transform.appendPosition(matchedFrame.value.origin)
-                return transform
-            }
-            return value
-        }()
-        let outputs = body(_Graph(), transformedInputs)
+        let matchedPosition = graph.subscriptNode(
+            parent: matchedFrame,
+            keyPath: \ViewFrame.origin
+        )
+        let matchedSize = graph.subscriptNode(
+            parent: matchedFrame,
+            keyPath: \ViewFrame.size
+        )
+        var matchedInputs = modifiedInputs
+        matchedInputs.copyCaches()
+        matchedInputs.position = matchedPosition
+        matchedInputs.size = matchedSize
+        var presentationEnvironment = matchedInputs.base.cachedEnvironment.value
+        let bodyContainerPosition = presentationEnvironment.animatedPosition(
+            for: matchedInputs
+        )
+        matchedInputs.base.cachedEnvironment.value = presentationEnvironment
+
+        var bodyInputs = matchedInputs
+        bodyInputs.containerPosition = bodyContainerPosition
+        bodyInputs.requestsLayoutComputer = true
+        bodyInputs[LayoutPlacementAnimationsDisabledInput.self] = true
+        let outputs = body(_Graph(), bodyInputs)
         graph.setIndirectTarget(
             childLayoutComputer,
             to: outputs._layoutComputer.attribute
         )
-        guard let innerLayoutComputer = outputs._layoutComputer.attribute else {
-            return outputs
-        }
-        // The parent measures the view in its target layout, while descendants
-        // must be placed in the current matched presentation frame. Replacing
-        // only the outer position and size would leave overlays at the target
-        // or previous layout position while the matched content is in flight.
-        let projectedLayoutComputer: Attribute<LayoutComputer> = graph.makeRule {
-            let inner = innerLayoutComputer.value
-            let frame = targetGeometryFrame.value
-            return LayoutComputer(
-                sizeThatFits: { inner.sizeThatFits($0) },
-                spacing: inner.spacing,
-                place: { _, anchor, _ in
-                    let proposal = ProposedViewSize(frame.size.value)
-                    let position = CGPoint(
-                        x: frame.origin.x + frame.size.value.width * anchor.x,
-                        y: frame.origin.y + frame.size.value.height * anchor.y
-                    )
-                    inner.place(at: position, anchor: anchor, proposal: proposal)
-                },
-                priority: inner.priority,
-                explicitAlignment: { inner.explicitAlignment($0, at: $1) }
+        var projectedOutputs = outputs
+        if let content = outputs.preferences.reducedValue(
+            for: DisplayList.Key.self,
+            in: graph
+        ) {
+            var presentationEnvironment = matchedInputs.base.cachedEnvironment.value
+            let animatedPosition = presentationEnvironment.animatedPosition(
+                for: matchedInputs
+            )
+            let animatedSize = presentationEnvironment.animatedSize(
+                for: matchedInputs
+            )
+            matchedInputs.base.cachedEnvironment.value = presentationEnvironment
+            let displayList = graph.makeRule(
+                MatchedDisplayList(
+                    identity: _DisplayList_Identity(),
+                    sharedFrame: registration,
+                    args: args,
+                    content: content,
+                    position: animatedPosition,
+                    size: animatedSize,
+                    containerPosition: inputs.containerPosition
+                )
+            )
+            projectedOutputs.preferences.setValue(
+                displayList.identifier,
+                for: DisplayList.Key.self
             )
         }
-        var projectedOutputs = outputs
-        projectedOutputs._layoutComputer = OptionalAttribute(projectedLayoutComputer)
         return projectedOutputs
     }
 

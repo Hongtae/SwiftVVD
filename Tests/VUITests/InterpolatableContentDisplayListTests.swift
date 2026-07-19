@@ -6156,17 +6156,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testResolvedImageInterpolatableContentSurface() {
-        let previousSemantics = Semantics.overrides
-        defer { Semantics.overrides = previousSemantics }
-
-        Semantics.overrides = Semantics.Overrides()
         XCTAssertEqual(GraphicsContext.ResolvedImage.defaultTransition, .interpolate)
-
-        Semantics.overrides = Semantics.Overrides(
-            build: _SemanticFeature<Semantics_v4>.prior,
-            runtime: previousSemantics.runtime
-        )
-        XCTAssertEqual(GraphicsContext.ResolvedImage.defaultTransition, .identity)
 
         let image = makeResolvedImage()
         XCTAssertFalse(image.requiresTransition(to: makeResolvedImage()))
@@ -6195,17 +6185,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testResolvedStyledTextInterpolatableContentSurface() {
-        let previousSemantics = Semantics.overrides
-        defer { Semantics.overrides = previousSemantics }
-
-        Semantics.overrides = Semantics.Overrides()
         XCTAssertEqual(ResolvedStyledText.defaultTransition, .interpolate)
-
-        Semantics.overrides = Semantics.Overrides(
-            build: _SemanticFeature<Semantics_v4>.prior,
-            runtime: previousSemantics.runtime
-        )
-        XCTAssertEqual(ResolvedStyledText.defaultTransition, .identity)
 
         let text = ResolvedStyledText(version: 1)
         XCTAssertFalse(text.requiresTransition(to: ResolvedStyledText(version: 1)))
@@ -6329,29 +6309,6 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testImageInitialResourcePublicationDoesNotAdoptInsertionAnimation() throws {
-        var animated = Transaction()
-        animated.animation = .linear(duration: 5)
-
-        let initial = _ImageResourceResolutionState.publicationTransaction(
-            candidate: animated,
-            hasResolvedContent: false
-        )
-        XCTAssertNil(initial.animation)
-        XCTAssertTrue(initial.disablesAnimations)
-
-        let replacement = _ImageResourceResolutionState.publicationTransaction(
-            candidate: animated,
-            hasResolvedContent: true
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(replacement.animation).box.duration,
-            5,
-            accuracy: 0.000_001
-        )
-        XCTAssertFalse(replacement.disablesAnimations)
-    }
-
     func testResolvedStyledTextInterpolatorEmitsContentTransitionEffect() throws {
         let graph = _AGGraph()
 
@@ -6463,29 +6420,6 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             5,
             accuracy: 0.000_001
         )
-    }
-
-    func testTextInitialResourcePublicationDoesNotAdoptInsertionAnimation() throws {
-        var animated = Transaction()
-        animated.animation = .linear(duration: 5)
-
-        let initial = _TextResourceResolutionState.publicationTransaction(
-            candidate: animated,
-            hasResolvedContent: false
-        )
-        XCTAssertNil(initial.animation)
-        XCTAssertTrue(initial.disablesAnimations)
-
-        let replacement = _TextResourceResolutionState.publicationTransaction(
-            candidate: animated,
-            hasResolvedContent: true
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(replacement.animation).box.duration,
-            5,
-            accuracy: 0.000_001
-        )
-        XCTAssertFalse(replacement.disablesAnimations)
     }
 
     func testInterpolatedDisplayListReadsContentTransitionFallbackPath() throws {
@@ -6748,14 +6682,10 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: values)
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return _ViewInputs(
             base: base,

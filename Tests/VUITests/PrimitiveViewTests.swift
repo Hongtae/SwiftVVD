@@ -19,18 +19,10 @@ private struct UnaryBodyProbe: View, UnaryView {
 private func makeViewListCountInputs(graph: _AGGraph) -> _ViewListCountInputs {
     _ViewListCountInputs(
         base: _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(
-                    environment: graph.makeInput(value: EnvironmentValues())
-                )
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: graph.makeInput(value: EnvironmentValues()),
+            transaction: graph.makeInput(value: Transaction())
         )
     )
 }

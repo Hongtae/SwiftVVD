@@ -68,7 +68,7 @@ enum _GeometryEffectSupport {
                 let list = Attribute<DisplayList>(weakNode.toStrong()).value
                 DisplayList.Key.reduce(value: &combined) { list }
             }
-            return displayList(
+            return projectedDisplayList(
                 combined,
                 applying: effect.value,
                 at: position.value
@@ -82,7 +82,7 @@ enum _GeometryEffectSupport {
         preferences.append(DisplayList.Key.self, node: transformedAttr.identifier)
     }
 
-    private static func displayList(
+    static func projectedDisplayList(
         _ source: DisplayList,
         applying transform: ProjectionTransform,
         at position: CGPoint
@@ -100,7 +100,11 @@ enum _GeometryEffectSupport {
         for effect in source.effects {
             result.appendEffect(
                 effect.effect,
-                contents: displayList(effect.contents, applying: transform, at: position)
+                contents: projectedDisplayList(
+                    effect.contents,
+                    applying: transform,
+                    at: position
+                )
             )
         }
         for item in items {
@@ -233,17 +237,10 @@ public struct _IgnoredByLayoutEffect<Base>: GeometryEffect where Base: GeometryE
     public typealias Body = Never
 }
 
+extension _IgnoredByLayoutEffect: Equatable where Base: Equatable {}
+
 @available(*, unavailable)
 extension _IgnoredByLayoutEffect: Sendable {
-}
-
-extension _IgnoredByLayoutEffect: Equatable where Base: Equatable {
-    public static func == (
-        lhs: _IgnoredByLayoutEffect<Base>,
-        rhs: _IgnoredByLayoutEffect<Base>
-    ) -> Bool {
-        lhs.base == rhs.base
-    }
 }
 
 extension GeometryEffect {

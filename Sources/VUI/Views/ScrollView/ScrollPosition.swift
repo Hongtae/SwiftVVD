@@ -230,7 +230,7 @@ public struct ScrollPosition: Sendable {
         axes: Axis.Set,
         layoutDirection: LayoutDirection
     ) -> CGPoint? {
-        guard isBuildBaselineOnOrAfter(.v6_4) else { return nil }
+        guard isLinkedOnOrAfter(.v6_4) else { return nil }
 
         let maximumX = max(contentFrame.width - containerSize.width, 0)
         let maximumY = max(contentFrame.height - containerSize.height, 0)

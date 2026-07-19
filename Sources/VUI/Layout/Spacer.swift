@@ -11,7 +11,7 @@ protocol PrimitiveSpacer: View where Body == Never {
     var minLength: CGFloat? { get }
 }
 
-private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule {
+private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
     var spacer: Attribute<S>
@@ -34,33 +34,23 @@ private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule {
             isEnabled
         }
 
-        func spacing() -> ViewSpacing {
-            guard isEnabled else { return ViewSpacing() }
+        func spacing() -> Spacing {
+            guard isEnabled else { return Spacing() }
 
             // ViewSpacing currently models the ordinary edge category. The text
             // baseline spacer's additional private categories collapse to the
             // same zero-distance result in this reduced representation.
             switch orientation {
             case .horizontal:
-                return ViewSpacing(
-                    top: nil,
-                    leading: 0,
-                    bottom: nil,
-                    trailing: 0
-                )
+                return .horizontal(0)
             case .vertical:
-                return ViewSpacing(
-                    top: 0,
-                    leading: nil,
-                    bottom: 0,
-                    trailing: nil
-                )
+                return .vertical(0)
             case nil:
                 return .zero
             }
         }
 
-        func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             guard isEnabled else { return .zero }
 
             let minimum = spacer.minLength ?? ViewSpacing.defaultSpacing
@@ -198,6 +188,7 @@ extension Spacer: Sendable {
 extension Spacer: PrimitiveView, UnaryView, PrimitiveSpacer {
 }
 
+
 public struct _TextBaselineRelativeSpacer: View {
     public var minLength: CGFloat?
 
@@ -231,6 +222,7 @@ extension _HSpacer: PrimitiveView, UnaryView, PrimitiveSpacer {
     var minLength: CGFloat? { minWidth }
 }
 
+
 public struct _VSpacer: View {
     public var minHeight: CGFloat?
 
@@ -247,6 +239,7 @@ extension _VSpacer: Sendable {
 extension _VSpacer: PrimitiveView, UnaryView, PrimitiveSpacer {
     var minLength: CGFloat? { minHeight }
 }
+
 
 struct ConditionalSpacer: View {
     var isEnabled: Bool
@@ -372,7 +365,7 @@ extension Divider {
         var stackOrientation: Axis?
         var dynamicStackOrientation: OptionalAttribute<Axis?>
 
-        func updateValue() -> ResolvedDivider {
+        var value: ResolvedDivider {
             let dynamicOrientation: Axis?
             if let dynamicAttribute = dynamicStackOrientation.attribute {
                 dynamicOrientation = dynamicAttribute.value

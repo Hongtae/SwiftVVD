@@ -99,7 +99,7 @@ private struct GeometryEffectProjectionTransform<Base: GeometryEffect>: Rule {
     var _base: Attribute<Base>
     var _size: Attribute<CGSize>
 
-    func updateValue() -> ProjectionTransform {
+    var value: ProjectionTransform {
         _base.value.effectValue(size: _size.value)
     }
 }
@@ -167,7 +167,7 @@ struct CombinedVisualEffect<First: VisualEffect, Second: VisualEffect>:
         var _first: OptionalAttribute<ProjectionTransform>
         var _second: OptionalAttribute<ProjectionTransform>
 
-        func updateValue() -> ProjectionTransform {
+        var value: ProjectionTransform {
             switch (_first.attribute?.value, _second.attribute?.value) {
             case let (first?, second?):
                 return first.concatenating(second)
@@ -379,7 +379,7 @@ private struct VisualEffectModifier<Effect: VisualEffect>: ViewModifier {
         return outputs
     }
 
-    private struct Child: StatefulRule {
+    private struct Child: StatefulRule, AsyncAttribute {
         typealias Value = Effect
 
         var _modifier: Attribute<VisualEffectModifier>

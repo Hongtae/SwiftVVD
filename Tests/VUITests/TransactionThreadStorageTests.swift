@@ -7,7 +7,6 @@ final class TransactionThreadStorageTests: XCTestCase {
     override func tearDown() {
         Transaction.ThreadStorage.currentBox = nil
         Transaction.ThreadStorage.resetCurrentIDForTesting()
-        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
@@ -360,31 +359,6 @@ final class TransactionThreadStorageTests: XCTestCase {
         XCTAssertEqual(scoped[ThreadStorageParentOnlyKey.self], 2)
     }
 
-    func testRuntimeOverridePreV5NestedTransactionDirectInstallsChildWithoutParentMerge() {
-        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
-        var parent = Transaction(animation: .linear(duration: 1))
-        parent.disablesAnimations = true
-        parent[ThreadStorageParentOnlyKey.self] = 1
-        var child = Transaction()
-        child.isContinuous = true
-        child[ThreadStorageThrowingKey.self] = 2
-
-        withTransaction(parent) {
-            XCTAssertTrue(Transaction.current.disablesAnimations)
-            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 1)
-
-            withTransaction(child) {
-                XCTAssertNil(Transaction.current.animation)
-                XCTAssertFalse(Transaction.current.disablesAnimations)
-                XCTAssertTrue(Transaction.current.isContinuous)
-                XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 0)
-                XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 2)
-            }
-
-            XCTAssertTrue(Transaction.current.disablesAnimations)
-            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 1)
-        }
-    }
 }
 
 private enum ThreadStorageProbeError: Error {

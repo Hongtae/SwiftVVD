@@ -18,6 +18,8 @@ public protocol View {
     static func _viewListCount(inputs: _ViewListCountInputs) -> Int?
 }
 
+protocol MultiView: View {}
+
 extension View {
     // Default: unknown count. Primitive views and most containers return nil.
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? { nil }
@@ -135,274 +137,22 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
 extension Never: View {
 }
 
-// File-scope state class. Swift cannot nest it inside a generic function.
-private final class _OptionalViewState {
-    var hasValue: Bool? = nil
-    var lastWrappedValue: Any? = nil
-    var subgraph: AGSubgraph? = nil
-    var lcAttr: Attribute<LayoutComputer>? = nil
-    var activeOutputs: PreferencesOutputs? = nil
-}
-
-private final class _OptionalListViewState {
-    var hasValue: Bool? = nil
-    var isUpdating = false
-    var lastWrappedValue: Any? = nil
-    var subgraph: AGSubgraph? = nil
-    var managedSubgraph: _ViewList_Subgraph? = nil
-    var activeListOutputs: _ViewListOutputs? = nil
-    let id = UniqueID()
-}
-
-private struct _OptionalIdentityViewList: ViewList {
-    var base: any ViewList
-    var id: UniqueID
-    var owner: AGAttribute
-    var isUnary: Bool
-    var reuseID: Int
-    var subgraph: _ViewList_Subgraph
-
-    func count(style: _ViewList_IteratorStyle) -> Int {
-        base.count(style: style)
-    }
-
-    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
-        base.estimatedCount(style: style)
-    }
-
-    var traitKeys: ViewTraitKeys? { base.traitKeys }
-    var traits: ViewTraitCollection { base.traits }
-
-    func applyNodes(
-        from: inout Int,
-        style: _ViewList_IteratorStyle,
-        list: Attribute<any ViewList>?,
-        transform: _ViewList_TemporarySublistTransform,
-        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
-    ) -> Bool {
-        base.applyNodes(
-            from: &from,
-            style: style,
-            list: list,
-            transform: transform.withPushedItem(
-                _OptionalIdentityTransform(
-                    id: id,
-                    owner: owner,
-                    isUnary: isUnary,
-                    reuseID: reuseID,
-                    subgraph: subgraph
-                )
-            ),
-            to: to
-        )
-    }
-}
-
-private struct _OptionalIdentityTransform: _ViewList_SublistTransform_Item {
-    var id: UniqueID
-    var owner: AGAttribute
-    var isUnary: Bool
-    var reuseID: Int
-    var subgraph: _ViewList_Subgraph
-
-    func apply(to sublist: inout _ViewList_Sublist) {
-        bindID(&sublist.id)
-        sublist.traits[CanTransitionTraitKey.self] = true
-        if var elements = sublist.elements as? _ViewList_SubgraphElements {
-            elements.wrap(subgraph: subgraph)
-            sublist.elements = elements
-        } else {
-            var elements = _ViewList_SubgraphElements(base: sublist.elements)
-            elements.wrap(subgraph: subgraph)
-            sublist.elements = elements
-        }
-    }
-
-    func bindID(_ id: inout _ViewList_ID) {
-        id.bind(
-            explicitID: self.id,
-            owner: owner,
-            isUnary: isUnary,
-            reuseID: reuseID
-        )
-    }
-}
-
 extension Optional: View where Wrapped: View {
     public typealias Body = Never
 
-    /// Dynamic-subgraph implementation for optional views.
-    ///
-    /// When `.none` changes to `.some`, creates an AGSubgraph and wires `Wrapped._makeView` into it.
-    /// When `.some` changes to `.none`, invalidates the subgraph. The master rule returns `.fixed(.zero)`.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-
-        let state = _OptionalViewState()
-        state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
-
-        func updateActiveBranchIfNeeded() {
-            guard let graph = _AGGraph.current else {
-                fatalError("Optional<\(Wrapped.self)> branch update evaluated outside an active _AGGraph context.")
-            }
-            let nowHas = view._attribute.value != nil
-            guard state.hasValue != nowHas else { return }
-            state.subgraph?.invalidate()
-            state.hasValue = nowHas
-
-            if nowHas {
-                guard let wrappedValue = view._attribute.value else {
-                    fatalError("Optional<\(Wrapped.self)> missing wrapped value while rebuilding active branch.")
-                }
-                state.lastWrappedValue = wrappedValue
-                let wrappedAttr: Attribute<Wrapped> = AGSubgraph.withCurrent(state.subgraph) {
-                    graph.makeRule {
-                        if let current = view._attribute.value {
-                            state.lastWrappedValue = current
-                            return current
-                        }
-                        guard let snapshot = state.lastWrappedValue as? Wrapped else {
-                            fatalError("Optional<\(Wrapped.self)> lost wrapped value during branch teardown.")
-                        }
-                        return snapshot
-                    }
-                }
-                let outputs = AGSubgraph.withCurrent(state.subgraph) {
-                    Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
-                }
-                state.lcAttr = outputs._layoutComputer.attribute
-                state.activeOutputs = outputs.preferences
-            } else {
-                state.lcAttr = nil
-                state.activeOutputs = nil
-            }
-        }
-
-        let masterLC: Attribute<LayoutComputer> = graph.makeRule {
-            guard _AGGraph.current != nil else {
-                fatalError("Optional<\(Wrapped.self)> rule evaluated outside an active _AGGraph context.")
-            }
-
-            updateActiveBranchIfNeeded()
-
-            return state.lcAttr?.value ?? LayoutComputer.fixed(.zero)
-        }
-
-        // Optional creates a stable relay for each requested preference key so
-        // nil/some switches preserve the parent's output shape.
-        var outPrefs = PreferencesOutputs()
-        for key in inputs.preferences.keys.keys {
-            func addRelay<K: PreferenceKey>(_ k: K.Type) {
-                let relayAttr: Attribute<K.Value> = graph.makeRule {
-                    updateActiveBranchIfNeeded()
-                    guard let prefs = state.activeOutputs else { return K.defaultValue }
-                    var combined = K.defaultValue
-                    for kv in prefs.preferences {
-                        guard ObjectIdentifier(kv.key) == ObjectIdentifier(k) else { continue }
-                        let val = Attribute<K.Value>(kv.value).value
-                        K.reduce(value: &combined) { val }
-                    }
-                    return combined
-                }
-                outPrefs.append(k, node: relayAttr.identifier)
-            }
-            addRelay(key)
-        }
-
-        return _ViewOutputs(preferences: outPrefs,
-                            layoutComputer: OptionalAttribute(masterLC))
+        makeDynamicView(
+            metadata: makeConditionalMetadata(ViewDescriptor.self),
+            view: view,
+            inputs: inputs
+        )
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
-        }
-
-        let state = _OptionalListViewState()
-        let initialSubgraph = AGSubgraph()
-        state.subgraph = initialSubgraph
-        state.managedSubgraph = _ViewList_Subgraph(subgraph: initialSubgraph)
-
-        func makeWrappedOutputs() -> _ViewListOutputs? {
-            guard let wrappedValue = view._attribute.value else { return nil }
-            state.lastWrappedValue = wrappedValue
-            let wrappedAttr: Attribute<Wrapped> = AGSubgraph.withCurrent(state.subgraph) {
-                graph.makeRule {
-                    if let current = view._attribute.value {
-                        state.lastWrappedValue = current
-                        return current
-                    }
-                    guard let snapshot = state.lastWrappedValue as? Wrapped else {
-                        fatalError("Optional<\(Wrapped.self)> lost wrapped value during list teardown.")
-                    }
-                    return snapshot
-                }
-            }
-            return AGSubgraph.withCurrent(state.subgraph) {
-                Wrapped._makeViewList(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
-            }
-        }
-
-        do {
-            let initialHasValue = view._attribute.value != nil
-            state.hasValue = initialHasValue
-            state.activeListOutputs = makeWrappedOutputs()
-        }
-
-        func updateActiveBranchIfNeeded() {
-            guard _AGGraph.current != nil else {
-                fatalError("Optional<\(Wrapped.self)> list update evaluated outside an active _AGGraph context.")
-            }
-            let nowHasValue = view._attribute.value != nil
-            guard state.hasValue != nowHasValue else { return }
-            guard !state.isUpdating else { return }
-            state.isUpdating = true
-            state.activeListOutputs = nil
-            // The dynamic container can retain the outgoing elements for a removal
-            // transition. Release only this producer's ownership; the final token
-            // invalidates the branch subgraph after retained rendering completes.
-            state.managedSubgraph?.release()
-            let nextSubgraph = AGSubgraph()
-            state.subgraph = nextSubgraph
-            state.managedSubgraph = _ViewList_Subgraph(subgraph: nextSubgraph)
-            state.hasValue = nowHasValue
-            state.activeListOutputs = makeWrappedOutputs()
-            state.isUpdating = false
-        }
-
-        func resolvedList(from outputs: _ViewListOutputs) -> any ViewList {
-            switch outputs.views {
-            case .staticList(let elements):
-                return BaseViewList(elements: elements)
-            case .dynamicList(let listAttr, _):
-                return listAttr.value
-            }
-        }
-
-        let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-            updateActiveBranchIfNeeded()
-            guard let outputs = state.activeListOutputs else {
-                return EmptyViewList()
-            }
-            guard let managedSubgraph = state.managedSubgraph else {
-                fatalError("Optional<\(Wrapped.self)> lost its active list subgraph.")
-            }
-            return _OptionalIdentityViewList(
-                base: resolvedList(from: outputs),
-                id: state.id,
-                owner: view._attribute.identifier,
-                isUnary: outputs.staticCount == 1,
-                reuseID: Int(bitPattern: ObjectIdentifier(Wrapped.self)),
-                subgraph: managedSubgraph
-            )
-        }
-
-        return _ViewListOutputs(
-            views: .dynamicList(viewListAttr, nil),
-            nextImplicitID: 0,
-            staticCount: nil
+        makeDynamicViewList(
+            metadata: makeConditionalMetadata(ViewDescriptor.self),
+            view: view,
+            inputs: inputs
         )
     }
 }
@@ -410,7 +160,50 @@ extension Optional: View where Wrapped: View {
 extension Optional: PrimitiveView where Self: View {
 }
 
-struct IDView<Content, ID>: View where Content: View, ID: Hashable {
+extension Optional: DynamicView where Wrapped: View {
+    typealias Metadata = ConditionalMetadata<ViewDescriptor>
+    typealias ID = UniqueID
+
+    static var canTransition: Bool { true }
+
+    static func makeConditionalMetadata(
+        _ descriptor: ViewDescriptor.Type
+    ) -> ConditionalMetadata<ViewDescriptor> {
+        ConditionalMetadata(desc: conditionalTypeDescriptor)
+    }
+
+    func childInfo(metadata: Metadata) -> (type: Any.Type, id: UniqueID?) {
+        metadata.childInfo(source: self as Any)
+    }
+
+    func makeChildView(
+        metadata: Metadata,
+        view: Attribute<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        metadata.childView(source: view, inputs: inputs)
+    }
+
+    func makeChildViewList(
+        metadata: Metadata,
+        view: Attribute<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        metadata.childViewList(source: view, inputs: inputs)
+    }
+}
+
+extension Optional: ConditionalTypeDescriptorProvider where Wrapped: View {
+    static var conditionalTypeDescriptor: ConditionalTypeDescriptor<ViewDescriptor> {
+        let wrapped = makeConditionalTypeDescriptor(for: Wrapped.self)
+        return ConditionalTypeDescriptor(
+            storage: .optional(Self.self, wrapped),
+            count: wrapped.count + 1
+        )
+    }
+}
+
+struct IDView<Content, ID>: View, DynamicView where Content: View, ID: Hashable {
     var content: Content
     var id: ID
 
@@ -423,6 +216,41 @@ struct IDView<Content, ID>: View where Content: View, ID: Hashable {
     var body: Never {
         fatalError("body() should not be called on \(Self.self).")
     }
+
+    typealias Metadata = Void
+
+    static var canTransition: Bool { true }
+    static var traitKeysDependOnView: Bool { false }
+
+    static func makeID() -> ID {
+        fatalError("IDView requires an explicit identifier")
+    }
+
+    func childInfo(metadata: Void) -> (type: Any.Type, id: ID?) {
+        (Content.self, id)
+    }
+
+    func makeChildView(
+        metadata: Void,
+        view: Attribute<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        Content._makeView(
+            view: _GraphValue(_attribute: view)[\.content],
+            inputs: inputs
+        )
+    }
+
+    func makeChildViewList(
+        metadata: Void,
+        view: Attribute<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        Content._makeViewList(
+            view: _GraphValue(_attribute: view)[\.content],
+            inputs: inputs
+        )
+    }
 }
 
 extension View {
@@ -433,120 +261,12 @@ extension View {
 
 extension IDView {
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        Content._makeView(view: view[\.content], inputs: inputs)
+        makeDynamicView(metadata: (), view: view, inputs: inputs)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("IDView._makeViewList called outside an active _AGGraph context.")
-        }
-        let outputs = Content._makeViewList(view: view[\.content], inputs: inputs)
-        let source = viewListAttribute(from: outputs, graph: graph)
-        let idAttribute = view[\.id]._attribute
-        let owner = view._attribute.identifier
-        let listAttr: Attribute<any ViewList> = graph.makeRule {
-            IDTransformedViewList(
-                base: source.value,
-                id: idAttribute,
-                owner: owner,
-                isUnary: true,
-                reuseID: _viewListTypeReuseID(Content.self)
-            ) as any ViewList
-        }
-        return _ViewListOutputs(
-            views: .dynamicList(listAttr, nil),
-            nextImplicitID: outputs.nextImplicitID,
-            staticCount: outputs.staticCount
-        )
+        makeDynamicViewList(metadata: (), view: view, inputs: inputs)
     }
-
-    private static func viewListAttribute(
-        from outputs: _ViewListOutputs,
-        graph: _AGGraph
-    ) -> Attribute<any ViewList> {
-        switch outputs.views {
-        case .staticList(let elements):
-            return graph.makeRule {
-                BaseViewList(elements: elements) as any ViewList
-            }
-        case .dynamicList(let attribute, _):
-            return attribute
-        }
-    }
-}
-
-private struct IDTransformedViewList<ID: Hashable>: ViewList {
-    var base: any ViewList
-    var id: Attribute<ID>
-    var owner: AGAttribute
-    var isUnary: Bool
-    var reuseID: Int
-
-    func count(style: _ViewList_IteratorStyle) -> Int {
-        base.count(style: style)
-    }
-
-    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
-        base.estimatedCount(style: style)
-    }
-
-    var traitKeys: ViewTraitKeys? { base.traitKeys }
-    var traits: ViewTraitCollection { base.traits }
-
-    func applyNodes(
-        from: inout Int,
-        style: _ViewList_IteratorStyle,
-        list: Attribute<any ViewList>?,
-        transform: _ViewList_TemporarySublistTransform,
-        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
-    ) -> Bool {
-        let item = IDSublistTransformItem(
-            explicitID: id.value,
-            owner: owner,
-            isUnary: isUnary,
-            reuseID: reuseID
-        )
-        return base.applyNodes(
-            from: &from,
-            style: style,
-            list: list,
-            transform: transform.withPushedItem(item),
-            to: to
-        )
-    }
-
-    var debugDescription: String {
-        "IDTransformedViewList(\(base))"
-    }
-}
-
-private struct IDSublistTransformItem<ID: Hashable>: _ViewList_SublistTransform_Item {
-    var explicitID: ID
-    var owner: AGAttribute
-    var isUnary: Bool
-    var reuseID: Int
-
-    func apply(to sublist: inout _ViewList_Sublist) {
-        sublist.id.bind(
-            explicitID: explicitID,
-            owner: owner,
-            isUnary: isUnary,
-            reuseID: reuseID
-        )
-    }
-
-    func bindID(_ id: inout _ViewList_ID) {
-        id.bind(
-            explicitID: explicitID,
-            owner: owner,
-            isUnary: isUnary,
-            reuseID: reuseID
-        )
-    }
-}
-
-private func _viewListTypeReuseID(_ type: Any.Type) -> Int {
-    Int(bitPattern: ObjectIdentifier(type))
 }
 
 func makeView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -574,7 +294,7 @@ extension TypedUnaryViewGenerator {
         guard _AGGraph.current != nil else {
             fatalError("TypedUnaryViewGenerator init called outside an active _AGGraph context.")
         }
-        self.view = graphValue._attribute.asWeak().raw
+        self.view = graphValue._attribute.asWeak().base
         self.viewType = V.self
         self.baseInputs = baseInputs
     }
@@ -583,7 +303,7 @@ extension TypedUnaryViewGenerator {
         guard _AGGraph.current != nil else {
             fatalError("TypedUnaryViewGenerator init called outside an active _AGGraph context.")
         }
-        self.view = graphValue._attribute.asWeak().raw
+        self.view = graphValue._attribute.asWeak().base
         self.viewType = V.self
         self.baseInputs = inputs.base
         self.traitListAttr = inputs._traits
@@ -707,6 +427,10 @@ public struct _ViewInputs {
         }
     }
 
+    var needsLayout: Bool {
+        requestsLayoutComputer || needsGeometry
+    }
+
     // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
     // Used by view-specific inputs that should not be stored in the graph channel.
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
@@ -746,6 +470,8 @@ public struct _ViewInputs {
 /// Additional list-specific fields (`implicitID`, `options`, `_traits`, etc.) are reserved
 /// for ForEach ID tracking, ViewTrait propagation, and container-context injection respectively.
 public struct _ViewListInputs {
+    static let canTransitionOptions: UInt32 = 0x1
+    static let transitionOptionsMask: UInt32 = 0x3
     static let sectionListOptions: UInt32 = 0x100
 
     /// Shared graph-level inputs such as time, environment, and transaction.
@@ -935,6 +661,40 @@ public struct _ViewListOutputs {
 }
 
 extension _ViewListOutputs {
+    func makeAttribute(inputs: _ViewListInputs) -> Attribute<any ViewList> {
+        guard let graph = _AGGraph.current else {
+            fatalError("_ViewListOutputs.makeAttribute(inputs:) called outside an active graph.")
+        }
+        switch views {
+        case .dynamicList(let attribute, let modifier):
+            guard let modifier else { return attribute }
+            return graph.makeRule {
+                var list = attribute.value
+                modifier.apply(to: &list)
+                return list
+            }
+        case .staticList(let elements):
+            let implicitID = inputs.implicitID
+            let traitKeys = inputs.traitKeys
+            let traits = inputs._traits
+            let canTransition =
+                inputs.options & _ViewListInputs.transitionOptionsMask ==
+                _ViewListInputs.canTransitionOptions
+            return graph.makeRule {
+                var values = traits.attribute?.value ?? ViewTraitCollection()
+                if canTransition {
+                    values[CanTransitionTraitKey.self] = true
+                }
+                return BaseViewList(
+                    elements: elements,
+                    implicitID: implicitID,
+                    traitKeys: traitKeys,
+                    traits: values
+                ) as any ViewList
+            }
+        }
+    }
+
     static func unaryViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let generator = TypedUnaryViewGenerator(view, inputs: inputs)
         return _ViewListOutputs(

@@ -98,7 +98,7 @@ final class AnimatableValueSurfaceTests: XCTestCase {
     }
 
     func testViewSizeAnimatableDataPreservesProposalMetadata() {
-        let proposal = ProposedViewSize(width: 160, height: 34)
+        let proposal = _ProposedSize(width: 160, height: 34)
         var size = ViewSize(width: 80, height: 20, proposal: proposal)
 
         size.animatableData = CGSize(width: 120, height: 30).animatableData

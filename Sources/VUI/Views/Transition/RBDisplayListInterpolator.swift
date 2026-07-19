@@ -24,7 +24,7 @@ struct RBDisplayListInterpolatorOptionKey: RawRepresentable, Hashable {
 }
 
 // Interpolates between two DisplayList values for content-transition layers.
-// The local operation stream preserves item roles without mirroring RenderBox's private C++ ABI.
+// The operation stream preserves item roles throughout interpolation.
 final class RBDisplayListInterpolator: NSObject, NSCopying {
     private struct ItemInterpolationInput {
         var item: DisplayList.Item

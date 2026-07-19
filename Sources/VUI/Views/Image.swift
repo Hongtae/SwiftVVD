@@ -232,7 +232,7 @@ private struct ResolvedImageTransitionContent: InterpolatableContent {
     }
 }
 
-struct ImageViewChild: StatefulRule {
+struct ImageViewChild: StatefulRule, AsyncAttribute {
     struct ActivePulse {
         var id: Int
         var startTime: Time
@@ -322,13 +322,36 @@ struct ImageViewChild: StatefulRule {
         var symbolDrawFallbackOpacity: Double?
         var symbolDrawsReversed: Bool
         var isSymbolEffectActive: Bool
+        var retainsDrawHidePosition: Bool
+        var displayPosition: CGPoint?
+        var displaySize: ViewSize?
     }
 
     var resolvedImage: Attribute<GraphicsContext.ResolvedImage?>
     var environment: Attribute<EnvironmentValues>
     var transaction: Attribute<Transaction>
     var time: Attribute<Time>
+    var position: Attribute<CGPoint>?
+    var size: Attribute<ViewSize>?
     var phase = Phase()
+    private var previousTargetPosition: CGPoint?
+    private var retainedDrawHidePosition: CGPoint?
+
+    init(
+        resolvedImage: Attribute<GraphicsContext.ResolvedImage?>,
+        environment: Attribute<EnvironmentValues>,
+        transaction: Attribute<Transaction>,
+        time: Attribute<Time>,
+        position: Attribute<CGPoint>? = nil,
+        size: Attribute<ViewSize>? = nil
+    ) {
+        self.resolvedImage = resolvedImage
+        self.environment = environment
+        self.transaction = transaction
+        self.time = time
+        self.position = position
+        self.size = size
+    }
 
     mutating func updateValue() {
         let image = resolvedImage.value
@@ -496,6 +519,31 @@ struct ImageViewChild: StatefulRule {
         let variableColor = variableColorPresentation(at: now)
         let draw = drawPresentation(at: now)
         let isActive = pulse.isActive || variableColor.isActive || draw.isActive
+        let retainsDrawHidePosition = draw.isActive &&
+            phase.activeDraw?.targetProgress == 0
+        let targetPosition = position?.value
+        let displaySize = size?.value
+        let displayPosition: CGPoint?
+        if let targetPosition {
+            // Draw-to-hidden keeps the symbol at its pre-update origin while
+            // surrounding layout commits. Restore and other effects follow
+            // the current layout position.
+            if retainsDrawHidePosition {
+                if retainedDrawHidePosition == nil {
+                    retainedDrawHidePosition =
+                        previousTargetPosition ?? targetPosition
+                }
+                displayPosition = retainedDrawHidePosition ?? targetPosition
+            } else {
+                retainedDrawHidePosition = nil
+                displayPosition = targetPosition
+            }
+            previousTargetPosition = targetPosition
+        } else {
+            retainedDrawHidePosition = nil
+            previousTargetPosition = nil
+            displayPosition = nil
+        }
         if isActive,
            let ref = _AGGraphContext.current,
            let viewGraph = ref.context as? ViewGraph {
@@ -512,7 +560,10 @@ struct ImageViewChild: StatefulRule {
             symbolDrawProgresses: draw.progresses,
             symbolDrawFallbackOpacity: draw.fallbackOpacity,
             symbolDrawsReversed: draw.isReversed,
-            isSymbolEffectActive: isActive
+            isSymbolEffectActive: isActive,
+            retainsDrawHidePosition: retainsDrawHidePosition,
+            displayPosition: displayPosition,
+            displaySize: displaySize
         ))
     }
 
@@ -1335,16 +1386,6 @@ final class _ImageResourceResolutionState {
         pendingImage = nil
         pendingTransaction = Transaction()
     }
-
-    static func publicationTransaction(
-        candidate: Transaction,
-        hasResolvedContent: Bool
-    ) -> Transaction {
-        guard !hasResolvedContent else { return candidate }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        return transaction
-    }
 }
 
 extension Image {
@@ -1433,10 +1474,14 @@ extension Image: View {
         let resolvedSourceAttr = graph.makeInput(value: Image?.none)
         let resolvedImageTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _ImageResourceResolutionState()
+        let inheritedTransactionAttr = inputs.base.transaction
 
         let inbox = graph.inbox
-        let sizeAttr = inputs.size
-        let positionAttr = inputs.position
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         let envAttr = inputs.base.cachedEnvironment.value.environment
 
         // 2. Resource pass (Resource Rule)
@@ -1452,15 +1497,15 @@ extension Image: View {
                 return ResourceList()
             }
 
-            let candidateTransaction = _AGGraph.currentRuleContextAttribute
+            let contextualTransaction = _AGGraph.currentRuleContextAttribute
                 .flatMap { graph.transaction(for: $0) } ?? Transaction()
+            let inheritedTransaction = inheritedTransactionAttr.value
+            let candidateTransaction = contextualTransaction.isEmpty
+                ? inheritedTransaction
+                : contextualTransaction
             let resourceTransaction = resourceResolutionState.transaction(
                 for: image,
                 candidate: candidateTransaction
-            )
-            let publicationTransaction = _ImageResourceResolutionState.publicationTransaction(
-                candidate: resourceTransaction,
-                hasResolvedContent: resolvedImageAttr.value != nil
             )
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
@@ -1476,7 +1521,7 @@ extension Image: View {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
                     let resolved = context.resolve(image)
                     let boxedResolved = UnsafeBox(resolved)
-                    let boxedTransaction = UnsafeBox(publicationTransaction)
+                    let boxedTransaction = UnsafeBox(resourceTransaction)
 
                     // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                     let publish: @Sendable () -> Void = {
@@ -1493,7 +1538,7 @@ extension Image: View {
                     if _AGGraph.current === graph {
                         publish()
                     } else {
-                        inbox.enqueue(transaction: publicationTransaction, publish)
+                        inbox.enqueue(transaction: resourceTransaction, publish)
                     }
                 } // withValue
             }
@@ -1506,7 +1551,9 @@ extension Image: View {
                 resolvedImage: resolvedImageAttr,
                 environment: envAttr,
                 transaction: inputs.base.transaction,
-                time: inputs.base.time
+                time: inputs.base.time,
+                position: positionAttr,
+                size: sizeAttr
             )
         )
         let transitionContentAttr: Attribute<ResolvedImageTransitionContent> = graph.makeRule {
@@ -1515,8 +1562,10 @@ extension Image: View {
 
         // 3. Layout pass (Layout Rule)
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
-            let resolved = imageViewChildAttr.value.image
+            // Intrinsic size depends only on the resolved resource. Depending on
+            // presentation state here would make framed images read their own
+            // placement while the parent layout computer is still being built.
+            let resolved = resolvedImageAttr.value
 
             return LayoutComputer(
                 sizeThatFits: { _ in resolved?.size ?? .zero }
@@ -1526,15 +1575,13 @@ extension Image: View {
         // 4. Drawing pass (DisplayList Rule)
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let _ = view._attribute.value // Dependency: image changes
-            let viewSize = sizeAttr.value.value
-            let position = positionAttr.value
             let presentation = imageViewChildAttr.value
-            let resolved = presentation.image
+            let position = presentation.displayPosition ?? positionAttr.value
+            let viewSize = (presentation.displaySize ?? sizeAttr.value).value
             let environment = envAttr.value.untrackedCopy()
 
             var list = DisplayList()
-
-            if var resolved = resolved {
+            if var resolved = presentation.image {
                 let frame = CGRect(origin: position, size: viewSize)
                 var imageList = DisplayList()
                 resolved.symbolLayerOpacities = presentation.symbolLayerOpacities
@@ -1596,9 +1643,9 @@ extension Image: View {
     public typealias Body = Never
 }
 
-extension Image {
-    static let _mainNamedBundle: Bundle? = .main
+extension Image: PrimitiveView {
 }
 
-extension Image: PrimitiveView {
+extension Image {
+    static let _mainNamedBundle: Bundle? = .main
 }

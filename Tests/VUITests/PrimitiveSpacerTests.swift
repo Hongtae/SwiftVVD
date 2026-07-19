@@ -22,6 +22,10 @@ private func isUnarySpacerView(_ type: Any.Type) -> Bool {
     type is any UnaryView.Type
 }
 
+private func spacingDistance(_ spacing: Spacing, at edge: AbsoluteEdge) -> CGFloat? {
+    spacing.minima[Spacing.Key(category: .default, edge: edge)]?.value
+}
+
 final class PrimitiveSpacerTests: XCTestCase {
     func testSpacerUsesInheritedStackOrientationAndDefaultMinimum() {
         withGraph { graph in
@@ -32,15 +36,15 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(horizontal.sizeThatFits(.unspecified), CGSize(width: 8, height: 0))
             XCTAssertEqual(
-                horizontal.sizeThatFits(ProposedViewSize(width: 100, height: 50)),
+                horizontal.sizeThatFits(_ProposedSize(width: 100, height: 50)),
                 CGSize(width: 100, height: 0)
             )
-            XCTAssertEqual(horizontal.priority, -.infinity)
+            XCTAssertEqual(horizontal.layoutPriority(), -.infinity)
             XCTAssertTrue(horizontal.box.requiresSpacingProjection_())
-            XCTAssertEqual(horizontal.spacing.leading, 0)
-            XCTAssertEqual(horizontal.spacing.trailing, 0)
-            XCTAssertNil(horizontal.spacing.top)
-            XCTAssertNil(horizontal.spacing.bottom)
+            XCTAssertEqual(spacingDistance(horizontal.spacing(), at: .left), 0)
+            XCTAssertEqual(spacingDistance(horizontal.spacing(), at: .right), 0)
+            XCTAssertNil(spacingDistance(horizontal.spacing(), at: .top))
+            XCTAssertNil(spacingDistance(horizontal.spacing(), at: .bottom))
 
             let vertical = makeLayoutComputer(
                 Spacer(),
@@ -49,7 +53,7 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(vertical.sizeThatFits(.unspecified), CGSize(width: 0, height: 8))
             XCTAssertEqual(
-                vertical.sizeThatFits(ProposedViewSize(width: 100, height: 50)),
+                vertical.sizeThatFits(_ProposedSize(width: 100, height: 50)),
                 CGSize(width: 0, height: 50)
             )
 
@@ -60,7 +64,7 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(neutral.sizeThatFits(.unspecified), CGSize(width: 8, height: 8))
             XCTAssertEqual(
-                neutral.sizeThatFits(ProposedViewSize(width: 100, height: 50)),
+                neutral.sizeThatFits(_ProposedSize(width: 100, height: 50)),
                 CGSize(width: 100, height: 50)
             )
         }
@@ -76,7 +80,7 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(horizontal.sizeThatFits(.unspecified), CGSize(width: 12, height: 0))
             XCTAssertEqual(
-                horizontal.sizeThatFits(ProposedViewSize(width: 4, height: 50)),
+                horizontal.sizeThatFits(_ProposedSize(width: 4, height: 50)),
                 CGSize(width: 12, height: 0)
             )
 
@@ -99,7 +103,7 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(horizontal.sizeThatFits(.unspecified), CGSize(width: 12, height: 0))
             XCTAssertEqual(
-                horizontal.sizeThatFits(ProposedViewSize(width: 100, height: 50)),
+                horizontal.sizeThatFits(_ProposedSize(width: 100, height: 50)),
                 CGSize(width: 100, height: 0)
             )
 
@@ -110,7 +114,7 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(vertical.sizeThatFits(.unspecified), CGSize(width: 0, height: 12))
             XCTAssertEqual(
-                vertical.sizeThatFits(ProposedViewSize(width: 100, height: 50)),
+                vertical.sizeThatFits(_ProposedSize(width: 100, height: 50)),
                 CGSize(width: 0, height: 50)
             )
         }
@@ -143,8 +147,8 @@ final class PrimitiveSpacerTests: XCTestCase {
             )
             XCTAssertEqual(disabled.sizeThatFits(.unspecified), .zero)
             XCTAssertFalse(disabled.box.requiresSpacingProjection_())
-            XCTAssertNil(disabled.spacing.leading)
-            XCTAssertNil(disabled.spacing.trailing)
+            XCTAssertNil(spacingDistance(disabled.spacing(), at: .left))
+            XCTAssertNil(spacingDistance(disabled.spacing(), at: .right))
 
             let enabled = makeLayoutComputer(
                 ConditionalSpacer(isEnabled: true, minLength: 12),
@@ -220,16 +224,10 @@ final class PrimitiveSpacerTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         return _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: environment)
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(

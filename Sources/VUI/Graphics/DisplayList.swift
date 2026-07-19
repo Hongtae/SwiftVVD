@@ -210,7 +210,7 @@ extension _DisplayList_StableIdentityMap: ProtobufEncodableMessage, ProtobufDeco
 // Ordered collection of rendering commands produced by the view tree.
 // Propagated to the scene root via the DisplayList.Key preference.
 // TODO: Replace closure-backed draw bodies with backend commands as typed coverage is proven.
-struct DisplayList {
+struct DisplayList: Equatable, CustomStringConvertible {
     final class LocalContents: RBDisplayListContents {
         var list: DisplayList
 
@@ -229,7 +229,7 @@ struct DisplayList {
         }
     }
 
-    struct Version {
+    struct Version: Comparable, Hashable {
         let value: Int
 
         nonisolated(unsafe) private static var lastValue: Int = 0
@@ -258,6 +258,10 @@ struct DisplayList {
             if other.value > value {
                 self = other
             }
+        }
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            lhs.value < rhs.value
         }
     }
 
@@ -450,6 +454,7 @@ struct DisplayList {
         case state(StrongHash)
         case contentTransition(ContentTransition.State)
         case shader(Shader.ResolvedShader)
+        case geometryGroup
         case interpolatorRoot(InterpolatorGroup, CGPoint, CGSize)
         case interpolatorLayer(InterpolatorGroup, UInt32)
         case interpolatorAnimation(InterpolatorAnimation)
@@ -1457,7 +1462,7 @@ struct DisplayList {
         }
     }
 
-    struct Item {
+    struct Item: Equatable, CustomStringConvertible {
         enum Value {
             case content(Content)
             case effect(Effect, DisplayList)
@@ -1471,6 +1476,14 @@ struct DisplayList {
         var identity: _DisplayList_Identity
         var opacity: Float
         var styleChain = StyleChain()
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.identity == rhs.identity && lhs.version == rhs.version
+        }
+
+        var description: String {
+            "(display-list-item \(identity) \(version.value))"
+        }
 
         init(
             command: ItemCommand,
@@ -1677,6 +1690,17 @@ struct DisplayList {
     private var activeStyleChain = StyleChain()
     // Backend-local bounds used by display-list interpolation before exact private command storage exists.
     var interpolationBounds: CGRect?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.items == rhs.items
+    }
+
+    var description: String {
+        guard !items.isEmpty else {
+            return "(display-list)"
+        }
+        return "(display-list \(items.map(\.description).joined(separator: " ")))"
+    }
 
     var itemRecords: [ItemRecord] {
         renderItems.map(\.record)
@@ -2236,9 +2260,21 @@ struct DisplayList {
         recordInterpolationBounds(bounds)
     }
 
-    mutating func appendEffect(_ effect: Effect, contents: DisplayList) {
-        appendRecordedItem(Item(effect: effect, contents: contents))
-        recordInterpolationBounds(contents.interpolationBounds)
+    mutating func appendEffect(
+        _ effect: Effect,
+        contents: DisplayList,
+        frame: CGRect? = nil,
+        identity: _DisplayList_Identity = .none,
+        version: Version = Version(value: 0)
+    ) {
+        appendRecordedItem(Item(
+            effect: effect,
+            contents: contents,
+            frame: frame,
+            identity: identity,
+            version: version
+        ))
+        recordInterpolationBounds(frame ?? contents.interpolationBounds)
     }
 
     mutating func appendAnimationStyle(
@@ -2743,6 +2779,7 @@ struct DisplayList {
                  .archive,
                  .state,
                  .contentTransition,
+                 .geometryGroup,
                  .interpolatorRoot,
                  .interpolatorLayer,
                  .interpolatorAnimation:
@@ -3032,6 +3069,7 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
         case state
         case contentTransition
         case shader
+        case geometryGroup
         case interpolatorRoot
         case interpolatorLayer
         case interpolatorAnimation
@@ -3103,6 +3141,8 @@ private extension DisplayList.Effect {
                 kind: .shader,
                 shader: shader
             )
+        case .geometryGroup:
+            return DisplayListEffectSurfaceRecord(kind: .geometryGroup)
         case let .interpolatorRoot(group, origin, size):
             return DisplayListEffectSurfaceRecord(
                 kind: .interpolatorRoot,
@@ -3189,7 +3229,7 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader:
+        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
             break
@@ -3207,7 +3247,7 @@ private extension DisplayList.Item {
             body(self)
         case let .effect(effect, contents):
             switch effect {
-            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader:
+            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
                 contents.forEachRenderItem(includeDebug: includeDebug, body)
             case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
                 break

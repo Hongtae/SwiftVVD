@@ -144,14 +144,10 @@ final class VisualEffectTests: XCTestCase {
         transform.appendSizedSpace(name: AnyHashable("outer"), size: CGSize(width: 200, height: 120))
 
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return _ViewInputs(
             base: base,

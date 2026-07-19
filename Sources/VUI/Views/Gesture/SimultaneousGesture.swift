@@ -7,7 +7,8 @@
 
 import Foundation
 
-public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, Second: Gesture {
+public struct SimultaneousGesture<First, Second>: Gesture, PrimitiveGesture,
+    PrimitiveDebuggableGesture where First: Gesture, Second: Gesture {
     public struct Value {
         public var first: First.Value?
         public var second: Second.Value?
@@ -66,20 +67,6 @@ public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, 
 extension SimultaneousGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension SimultaneousGesture.Value: Hashable where First.Value: Hashable, Second.Value: Hashable {}
 extension SimultaneousGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
-
-extension SimultaneousGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(First.self, eventType: eventType) ||
-            gestureTypeAcceptsEvent(Second.self, eventType: eventType)
-    }
-}
-
-extension SimultaneousGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(first, eventType: eventType) ||
-            gestureValueAcceptsEvent(second, eventType: eventType)
-    }
-}
 
 extension Gesture {
     @inlinable public func simultaneously<Other>(with other: Other) -> SimultaneousGesture<Self, Other> where Other: Gesture {

@@ -6,7 +6,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         let host = GraphHost()
         var events: [String] = []
 
-        host.runTransaction {
+        host.runTransaction (nil, do: {
             host.continueTransaction(
                 ContinueRecordingGraphMutation {
                     XCTAssertTrue(host.isUpdating)
@@ -15,12 +15,12 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             )
 
             XCTAssertTrue(events.isEmpty)
-            XCTAssertTrue(host.hasPendingGraphMutations)
             XCTAssertTrue(host.needsTransaction)
-        }
+            XCTAssertTrue(host.needsTransaction)
+        }, id: nil)
 
         XCTAssertEqual(events, ["mutation"])
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.isUpdating)
         XCTAssertEqual(host.data.transactionSeed, 1)
@@ -30,16 +30,16 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         let host = GraphHost()
         let storage = ContinueCombineStorage()
 
-        host.runTransaction {
+        host.runTransaction (nil, do: {
             host.continueTransaction(CombiningContinueMutation(name: "first", storage: storage))
             host.continueTransaction(CombiningContinueMutation(name: "second", storage: storage))
 
             XCTAssertEqual(storage.events, ["combine:first+second"])
-            XCTAssertTrue(host.hasPendingGraphMutations)
-        }
+            XCTAssertTrue(host.needsTransaction)
+        }, id: nil)
 
         XCTAssertEqual(storage.events, ["combine:first+second", "apply:first+second"])
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
     }
 
@@ -48,7 +48,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         let child = ChildGraphHost(parent: parent)
         var events: [String] = []
 
-        parent.runTransaction {
+        parent.runTransaction (nil, do: {
             child.continueTransaction(
                 ContinueRecordingGraphMutation {
                     XCTAssertTrue(parent.isUpdating)
@@ -57,12 +57,12 @@ final class GraphHostContinueTransactionTests: XCTestCase {
                 }
             )
 
-            XCTAssertTrue(parent.hasPendingGraphMutations)
-            XCTAssertFalse(child.hasPendingGraphMutations)
-        }
+            XCTAssertTrue(parent.needsTransaction)
+            XCTAssertFalse(child.needsTransaction)
+        }, id: nil)
 
         XCTAssertEqual(events, ["parent"])
-        XCTAssertFalse(parent.hasPendingGraphMutations)
+        XCTAssertFalse(parent.needsTransaction)
         XCTAssertFalse(parent.needsTransaction)
     }
 
@@ -77,7 +77,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         )
 
         XCTAssertEqual(events, [])
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertEqual(host.data.transactionSeed, 0)
         XCTAssertTrue(host.hasPendingTransactions)
@@ -112,7 +112,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         Update.end()
 
         XCTAssertEqual(events, [])
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertEqual(host.data.transactionSeed, 0)
         XCTAssertTrue(host.hasPendingTransactions)
@@ -145,7 +145,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         host.data.withCurrent {
             XCTAssertEqual(attribute.value, 2)
         }
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.hasPendingTransactions)
         XCTAssertEqual(host.data.transactionSeed, 1)
@@ -164,7 +164,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
                 evaluations += 1
                 return input.value * 2
             }
-            weakInput = input.asWeak().raw
+            weakInput = input.asWeak().base
 
             XCTAssertEqual(output.value, 6)
             XCTAssertEqual(evaluations, 1)
@@ -221,7 +221,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
                 evaluations += 1
                 return input.value * 2
             }
-            weakInput = input.asWeak().raw
+            weakInput = input.asWeak().base
 
             XCTAssertEqual(output.value, 6)
             XCTAssertEqual(evaluations, 1)
@@ -357,11 +357,11 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             weakAttribute = attribute.asWeak()
         }
 
-        host.runTransaction {
+        host.runTransaction (nil, do: {
             host.continueTransaction(setting: weakAttribute, to: 2)
             XCTAssertEqual(attribute.value, 1)
             XCTAssertTrue(host.needsTransaction)
-        }
+        }, id: nil)
 
         host.data.withCurrent {
             XCTAssertEqual(attribute.value, 2)
@@ -381,16 +381,16 @@ final class GraphHostContinueTransactionTests: XCTestCase {
                 evaluations += 1
                 return input.value * 2
             }
-            weakInput = input.asWeak().raw
+            weakInput = input.asWeak().base
 
             XCTAssertEqual(output.value, 6)
             XCTAssertEqual(evaluations, 1)
         }
 
-        host.runTransaction {
+        host.runTransaction (nil, do: {
             host.continueTransaction(invalidating: weakInput)
             XCTAssertEqual(evaluations, 1)
-        }
+        }, id: nil)
 
         host.data.withCurrent {
             XCTAssertEqual(output.value, 6)
@@ -404,7 +404,7 @@ private final class ChildGraphHost: GraphHost {
 
     init(parent: GraphHost) {
         self.parent = parent
-        super.init()
+        super.init(data: Data())
     }
 
     override var parentHost: GraphHost? {

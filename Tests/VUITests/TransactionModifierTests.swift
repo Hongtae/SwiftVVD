@@ -41,7 +41,7 @@ private struct TransactionModifierReportingContent: View, TestPrimitiveView {
     }
 }
 
-private struct TransactionModifierForwardingModifier: ViewModifier {
+private struct TransactionModifierScopeReportingModifier: ViewModifier {
     typealias Body = Never
 
     static func _makeView(
@@ -49,7 +49,29 @@ private struct TransactionModifierForwardingModifier: ViewModifier {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
+        }
+        let modifierTransaction = inputs.base.transaction
+        let bodyOutputs = body(_Graph(), inputs)
+        guard let bodyLayout = bodyOutputs._layoutComputer.attribute else {
+            return bodyOutputs
+        }
+        let layout = graph.makeRule {
+            let transaction = modifierTransaction.value
+            let duration = transaction.animation?.box.duration ?? -1
+            let marker = transaction[TransactionModifierMarkerKey.self]
+            let bodySize = bodyLayout.value.sizeThatFits(.unspecified)
+            return LayoutComputer.fixed(
+                CGSize(
+                    width: CGFloat(marker) + CGFloat(duration * 100),
+                    height: bodySize.height
+                )
+            )
+        }
+        var outputs = bodyOutputs
+        outputs._layoutComputer = OptionalAttribute(layout)
+        return outputs
     }
 
     static func _makeViewList(
@@ -57,11 +79,51 @@ private struct TransactionModifierForwardingModifier: ViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+        let transaction = inputs.base.transaction.value
+        var outputs = body(_Graph(), inputs)
+        outputs.nextImplicitID = transaction[TransactionModifierMarkerKey.self]
+        return outputs
     }
 }
 
 final class TransactionModifierTests: XCTestCase {
+    func testGeometryTransactionUsesLastSavedTransaction() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var inputs = makeViewInputs(graph: graph, transaction: Transaction())
+            let ordinary = inputs.base.transaction
+            XCTAssertEqual(inputs.geometryTransaction().identifier, ordinary.identifier)
+
+            let firstSaved = graph.makeInput(value: Transaction())
+            let lastSaved = graph.makeInput(value: Transaction())
+            inputs.savedTransactions = [firstSaved, lastSaved]
+            inputs.base.transaction = graph.makeInput(value: Transaction())
+
+            XCTAssertEqual(inputs.geometryTransaction().identifier, lastSaved.identifier)
+        }
+    }
+
+    func testAnimatedFrameCacheUsesGeometryTransaction() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var inputs = makeViewInputs(graph: graph, transaction: Transaction())
+            inputs.base.options.insert(.viewNeedsGeometry)
+            let saved = graph.makeInput(value: Transaction(animation: .linear(duration: 0.25)))
+            inputs.savedTransactions = [saved]
+
+            var cachedEnvironment = inputs.base.cachedEnvironment.value
+            _ = cachedEnvironment.animatedPosition(for: inputs)
+            _ = cachedEnvironment.animatedSize(for: inputs)
+
+            let cachedFrame = try XCTUnwrap(cachedEnvironment.animatedFrame)
+            XCTAssertEqual(cachedFrame.transaction.identifier, saved.identifier)
+        }
+    }
+
     func testTransactionModifierAppliesTransformOverLiveParentTransaction() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -478,7 +540,7 @@ final class TransactionModifierTests: XCTestCase {
         }
     }
 
-    func testPushPopTransactionModifierAppliesBaseTransformBeforeWrappedModifier() throws {
+    func testPushPopTransactionModifierKeepsTransformedModifierAndRestoresBodyTransaction() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
 
@@ -487,7 +549,7 @@ final class TransactionModifierTests: XCTestCase {
             parent[TransactionModifierMarkerKey.self] = 700
             let modifier = graph.makeInput(
                 value: _PushPopTransactionModifier(
-                    content: TransactionModifierForwardingModifier()
+                    content: TransactionModifierScopeReportingModifier()
                 ) { transaction in
                     transaction[TransactionModifierMarkerKey.self] += 25
                     transaction.animation = .linear(duration: 0.25)
@@ -498,7 +560,7 @@ final class TransactionModifierTests: XCTestCase {
             )
 
             let outputs = _PushPopTransactionModifier<
-                TransactionModifierForwardingModifier
+                TransactionModifierScopeReportingModifier
             >._makeView(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: makeViewInputs(graph: graph, transaction: parent)
@@ -510,11 +572,11 @@ final class TransactionModifierTests: XCTestCase {
             }
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
-            assertLayout(layout, width: 10, height: 750)
+            assertLayout(layout, width: 750, height: 800)
         }
     }
 
-    func testPushPopTransactionModifierAppliesBaseTransformBeforeWrappedModifierViewList() {
+    func testPushPopTransactionModifierViewListRestoresBodyTransaction() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
 
@@ -523,7 +585,7 @@ final class TransactionModifierTests: XCTestCase {
             parent[TransactionModifierMarkerKey.self] = 700
             let modifier = graph.makeInput(
                 value: _PushPopTransactionModifier(
-                    content: TransactionModifierForwardingModifier()
+                    content: TransactionModifierScopeReportingModifier()
                 ) { transaction in
                     transaction[TransactionModifierMarkerKey.self] += 25
                     transaction.animation = .linear(duration: 0.25)
@@ -531,13 +593,13 @@ final class TransactionModifierTests: XCTestCase {
             )
 
             let outputs = _PushPopTransactionModifier<
-                TransactionModifierForwardingModifier
+                TransactionModifierScopeReportingModifier
             >._makeViewList(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: makeViewListInputs(graph: graph, transaction: parent)
             ) { _, inputs in
                 let transaction = inputs.base.transaction.value
-                self.assertTransaction(transaction, marker: 725, duration: 0.25)
+                self.assertTransaction(transaction, marker: 700, duration: 1.0)
                 return _ViewListOutputs(
                     views: .staticList(.merged([])),
                     nextImplicitID: transaction[TransactionModifierMarkerKey.self],
@@ -546,7 +608,7 @@ final class TransactionModifierTests: XCTestCase {
             }
 
             XCTAssertEqual(outputs.nextImplicitID, 725)
-            XCTAssertEqual(outputs.staticCount, 25)
+            XCTAssertEqual(outputs.staticCount, 100)
         }
     }
 
@@ -572,7 +634,7 @@ final class TransactionModifierTests: XCTestCase {
             )
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
-            assertLayout(layout, width: 10, height: 750)
+            assertLayout(layout, width: 10, height: 800)
         }
     }
 
@@ -595,7 +657,7 @@ final class TransactionModifierTests: XCTestCase {
             )
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute)
-            assertLayout(layout, width: 10, height: 725)
+            assertLayout(layout, width: 10, height: 800)
         }
     }
 
@@ -629,18 +691,10 @@ final class TransactionModifierTests: XCTestCase {
     ) -> (inputs: _GraphInputs, parent: Attribute<Transaction>) {
         let parent = graph.makeInput(value: transaction)
         let inputs = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(
-                    environment: graph.makeInput(value: EnvironmentValues())
-                )
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: parent,
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: graph.makeInput(value: EnvironmentValues()),
+            transaction: parent
         )
         return (inputs, parent)
     }

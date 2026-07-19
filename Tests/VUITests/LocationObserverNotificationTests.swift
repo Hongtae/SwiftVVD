@@ -15,7 +15,7 @@ final class LocationObserverNotificationTests: XCTestCase {
 
         host.data.withCurrent {
             let signalInput = host.data.graph.makeInput(value: ())
-            signal = signalInput.asWeak().raw
+            signal = signalInput.asWeak().base
             output = host.data.graph.makeRule {
                 evaluations += 1
                 _ = signalInput.value
@@ -119,7 +119,7 @@ final class LocationObserverNotificationTests: XCTestCase {
 
         firstHost.data.withCurrent {
             let signalInput = firstHost.data.graph.makeInput(value: ())
-            firstSignal = signalInput.asWeak().raw
+            firstSignal = signalInput.asWeak().base
             firstOutput = firstHost.data.graph.makeRule {
                 firstEvaluations += 1
                 _ = signalInput.value
@@ -132,7 +132,7 @@ final class LocationObserverNotificationTests: XCTestCase {
 
         secondHost.data.withCurrent {
             let signalInput = secondHost.data.graph.makeInput(value: ())
-            secondSignal = signalInput.asWeak().raw
+            secondSignal = signalInput.asWeak().base
             secondOutput = secondHost.data.graph.makeRule {
                 secondEvaluations += 1
                 _ = signalInput.value
@@ -248,7 +248,7 @@ final class LocationObserverNotificationTests: XCTestCase {
         staleHost.data.withCurrent {
             staleSubgraph = AGSubgraph()
             AGSubgraph.withCurrent(staleSubgraph) {
-                staleSignal = staleHost.data.graph.makeInput(value: ()).asWeak().raw
+                staleSignal = staleHost.data.graph.makeInput(value: ()).asWeak().base
             }
         }
 
@@ -270,7 +270,7 @@ final class LocationObserverNotificationTests: XCTestCase {
     private func makeSignal(in host: GraphHost) -> AGWeakAttribute {
         var signal: AGWeakAttribute!
         host.data.withCurrent {
-            signal = host.data.graph.makeInput(value: ()).asWeak().raw
+            signal = host.data.graph.makeInput(value: ()).asWeak().base
         }
         return signal
     }

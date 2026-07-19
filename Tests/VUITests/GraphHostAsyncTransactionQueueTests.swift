@@ -309,7 +309,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
         let host = GraphHost()
         var events: [String] = []
 
-        host.runTransaction {
+        host.runTransaction (nil, do: {
             host.asyncTransaction(
                 Transaction(),
                 id: Transaction.ID(value: 31),
@@ -319,7 +319,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
             )
             XCTAssertTrue(host.hasPendingTransactions)
             XCTAssertTrue(events.isEmpty)
-        }
+        }, id: nil)
 
         XCTAssertTrue(host.hasPendingTransactions)
         XCTAssertTrue(events.isEmpty)

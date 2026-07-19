@@ -15,7 +15,7 @@ import Foundation
 //
 // Used with Gesture.updating(_:body:) to produce GestureStateGesture<Base, State>.
 //
-// Internal layout mirrors State<Value>: the actual storage is an AnyLocation<Value>
+// The actual storage is an AnyLocation<Value> reference
 // wired up by _makeProperty before the gesture wiring pass runs.
 @propertyWrapper public struct GestureState<Value>: DynamicProperty {
     @usableFromInline
@@ -85,7 +85,7 @@ extension GestureState where Value: ExpressibleByNilLiteral {
 extension GestureState: @unchecked Sendable where Value: Sendable {}
 
 // _makeProperty wires GestureState into the AG graph.
-// Mirrors State._makeProperty: creates an AG input node backed by a FunctionalLocation,
+// Creates an AG input node backed by a FunctionalLocation,
 // then patches the GestureState struct inside the DynamicProperty buffer so that
 // wrappedValue reads/writes go through the AG node.
 extension GestureState {
@@ -162,7 +162,7 @@ extension Gesture {
     }
 }
 
-public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
+public struct GestureStateGesture<Base, State>: PrimitiveGesture where Base: Gesture {
     public typealias Value = Base.Value
     public var base: Base
     public var state: GestureState<State>
@@ -196,7 +196,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         // will be nil and we fall back to a local Attribute.
         let selfAttr = gesture._attribute
 
-        // Create a local AG input that mirrors the GestureState's storage.
+        // Create a local graph input connected to the gesture state's storage.
         // When the GestureState has a proper location (via _makeProperty), we use that;
         // otherwise this attribute acts as the sole storage.
         let stateAttr: Attribute<State> = graph.makeInput(
@@ -242,7 +242,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
             case .ended, .failed:
                 guard !didRunTerminalReset.value else { break }
                 didRunTerminalReset.value = true
-                enqueuePhaseAction(beforeCallbacks: true) {
+                enqueuePhaseAction {
                     // Gesture terminated: apply reset and restore initial value.
                     var resetValue = Self.projectedStateBinding(
                         location: location,
@@ -284,10 +284,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         )
     }
 
-    private static func enqueuePhaseAction(
-        beforeCallbacks: Bool = false,
-        _ action: @escaping () -> Void
-    ) {
+    private static func enqueuePhaseAction(_ action: @escaping () -> Void) {
         guard let graphRef = _AGGraphContext.current else {
             Update.enqueueAction(action)
             return
@@ -300,27 +297,11 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         }
 
         if let gestureGraph = graphRef.context as? GestureGraph {
-            if beforeCallbacks {
-                gestureGraph.enqueueActionBeforeCallbacks(scopedAction)
-            } else {
-                gestureGraph.enqueueAction(scopedAction)
-            }
+            gestureGraph.enqueueAction(scopedAction)
         } else {
             Update.enqueueAction(scopedAction)
         }
     }
 
     public typealias Body = Never
-}
-
-extension GestureStateGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(Base.self, eventType: eventType)
-    }
-}
-
-extension GestureStateGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(base, eventType: eventType)
-    }
 }

@@ -2,7 +2,7 @@
 //  File: PaddingLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -18,47 +18,64 @@ public struct _PaddingLayout: ViewModifier, Animatable {
     public typealias Body = Never
 }
 
-extension _PaddingLayout: UnaryLayout {
-    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        let resolvedInsets = insets ?? EdgeInsets(_all: 16)
-        let top      = edges.contains(.top)      ? resolvedInsets.top      : 0
-        let bottom   = edges.contains(.bottom)   ? resolvedInsets.bottom   : 0
-        let leading  = edges.contains(.leading)  ? resolvedInsets.leading  : 0
-        let trailing = edges.contains(.trailing) ? resolvedInsets.trailing : 0
-        let horizontal = leading + trailing
-        let vertical   = top + bottom
+extension _PaddingLayout: Sendable {}
 
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                let childProposal = ProposedViewSize(
-                    width:  proposal.width.map  { max(0, $0 - horizontal) },
-                    height: proposal.height.map { max(0, $0 - vertical) }
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                return CGSize(
-                    width:  childSize.width  + horizontal,
-                    height: childSize.height + vertical
-                )
-            },
-            spacing: lc.spacing,
-            place: { position, anchor, proposal in
-                let childProposal = ProposedViewSize(
-                    width:  proposal.width.map  { max(0, $0 - horizontal) },
-                    height: proposal.height.map { max(0, $0 - vertical) }
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                let parentW = childSize.width  + horizontal
-                let parentH = childSize.height + vertical
-                // Compute the top-left origin of the padded frame, then offset inward
-                let origin = CGPoint(
-                    x: position.x - parentW * anchor.x + leading,
-                    y: position.y - parentH * anchor.y + top
-                )
-                lc.place(at: origin, anchor: .topLeading, proposal: childProposal)
-            },
-            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+extension _PaddingLayout: UnaryLayout {
+    private var resolvedInsets: EdgeInsets {
+        insets ?? EdgeInsets(_all: 16)
+    }
+
+    private var appliedInsets: EdgeInsets {
+        let resolved = resolvedInsets
+        return EdgeInsets(
+            top: edges.contains(.top) ? resolved.top : 0,
+            leading: edges.contains(.leading) ? resolved.leading : 0,
+            bottom: edges.contains(.bottom) ? resolved.bottom : 0,
+            trailing: edges.contains(.trailing) ? resolved.trailing : 0
         )
     }
+
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        let insets = appliedInsets
+        let horizontal = insets.leading + insets.trailing
+        let vertical = insets.top + insets.bottom
+        let childProposal = _ProposedSize(
+            width: proposal.width.map { max(0, $0 - horizontal) },
+            height: proposal.height.map { max(0, $0 - vertical) }
+        )
+        let childSize = child.dimensions(in: childProposal).size.value
+        return CGSize(
+            width: childSize.width + horizontal,
+            height: childSize.height + vertical
+        )
+    }
+
+    func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+        let insets = appliedInsets
+        let horizontal = insets.leading + insets.trailing
+        let vertical = insets.top + insets.bottom
+        let proposal = _ProposedSize(
+            width: context.proposedSize.width.map { max(0, $0 - horizontal) },
+            height: context.proposedSize.height.map { max(0, $0 - vertical) }
+        )
+        return _Placement(
+            proposedSize: proposal.fixingUnspecifiedDimensions(),
+            anchoring: .topLeading,
+            at: CGPoint(x: insets.leading, y: insets.top)
+        )
+    }
+
+    func spacing(
+        in context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> Spacing {
+        child.layoutComputer.spacing()
+    }
+
 }
 
 extension View {
@@ -83,4 +100,3 @@ struct DefaultPaddingEdgeInsetsProperty: PropertyKey {
         "DefaultPaddingEdgeInsetsProperty"
     }
 }
-

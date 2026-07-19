@@ -24,56 +24,36 @@ public struct _FrameLayout: ViewModifier, Animatable, Sendable {
 }
 
 extension _FrameLayout: UnaryLayout {
-    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        let w = self.width
-        let h = self.height
-        let alignment = self.alignment
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                let childProposal = ProposedViewSize(
-                    width:  w != nil ? w : proposal.width,
-                    height: h != nil ? h : proposal.height
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                return CGSize(
-                    width:  w ?? childSize.width,
-                    height: h ?? childSize.height
-                )
-            },
-            spacing: lc.spacing,
-            place: { position, anchor, proposal in
-                let childProposal = ProposedViewSize(
-                    width:  w != nil ? w : proposal.width,
-                    height: h != nil ? h : proposal.height
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                let frameWidth  = w ?? childSize.width
-                let frameHeight = h ?? childSize.height
-                // top-left origin of the frame
-                let ox = position.x - frameWidth  * anchor.x
-                let oy = position.y - frameHeight * anchor.y
-                // determine child position based on alignment
-                let cx: CGFloat
-                let ax: CGFloat
-                switch alignment.horizontal {
-                case .leading:   cx = ox;                    ax = 0
-                case .center:    cx = ox + frameWidth * 0.5; ax = 0.5
-                case .trailing:  cx = ox + frameWidth;       ax = 1
-                default:         cx = ox + frameWidth * 0.5; ax = 0.5
-                }
-                let cy: CGFloat
-                let ay: CGFloat
-                switch alignment.vertical {
-                case .top:       cy = oy;                     ay = 0
-                case .center:    cy = oy + frameHeight * 0.5; ay = 0.5
-                case .bottom:    cy = oy + frameHeight;       ay = 1
-                default:         cy = oy + frameHeight * 0.5; ay = 0.5
-                }
-                lc.place(at: CGPoint(x: cx, y: cy),
-                         anchor: UnitPoint(x: ax, y: ay),
-                         proposal: childProposal)
-            },
-            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+    private func childProposal(for proposal: _ProposedSize) -> _ProposedSize {
+        _ProposedSize(
+            width: width ?? proposal.width,
+            height: height ?? proposal.height
+        )
+    }
+
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        let childSize = child.dimensions(in: childProposal(for: proposal)).size.value
+        return CGSize(width: width ?? childSize.width, height: height ?? childSize.height)
+    }
+
+    func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+        let proposal = childProposal(for: context.proposedSize)
+        let childSize = child.dimensions(in: proposal).size.value
+        let anchor = UnitPoint(
+            x: alignment.horizontal == .leading ? 0 : alignment.horizontal == .trailing ? 1 : 0.5,
+            y: alignment.vertical == .top ? 0 : alignment.vertical == .bottom ? 1 : 0.5
+        )
+        return _Placement(
+            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
+            anchoring: anchor,
+            at: CGPoint(
+                x: context.size.width * anchor.x,
+                y: context.size.height * anchor.y
+            )
         )
     }
 }
@@ -116,135 +96,92 @@ public struct _FlexFrameLayout: ViewModifier, Animatable, Sendable {
 }
 
 extension _FlexFrameLayout: UnaryLayout {
-    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        let minW = minWidth,  idealW = idealWidth,  maxW = maxWidth
-        let minH = minHeight, idealH = idealHeight, maxH = maxHeight
+    private func constrainedProposal(
+        _ value: CGFloat?,
+        min: CGFloat?,
+        ideal: CGFloat?,
+        max: CGFloat?
+    ) -> CGFloat? {
+        guard var value = value ?? ideal else { return nil }
+        if let min { value = Swift.max(value, min) }
+        if let max { value = Swift.min(value, max) }
+        return value
+    }
 
-        func childProposal(for proposal: ProposedViewSize) -> ProposedViewSize {
-            // Clamp the proposed child dimension between min and max, using
-            // the ideal value only when the parent left that axis unspecified.
-            let childW = constrainedProposal(axisProposal: proposal.width,
-                                             min: minW,
-                                             ideal: idealW,
-                                             max: maxW)
-            let childH = constrainedProposal(axisProposal: proposal.height,
-                                             min: minH,
-                                             ideal: idealH,
-                                             max: maxH)
+    private func childProposal(for proposal: _ProposedSize) -> _ProposedSize {
+        _ProposedSize(
+            width: constrainedProposal(
+                proposal.width,
+                min: minWidth,
+                ideal: idealWidth,
+                max: maxWidth
+            ),
+            height: constrainedProposal(
+                proposal.height,
+                min: minHeight,
+                ideal: idealHeight,
+                max: maxHeight
+            )
+        )
+    }
 
-            return ProposedViewSize(width: childW, height: childH)
-        }
-
-        func computeSize(proposal: ProposedViewSize) -> CGSize {
-            let childProposal = childProposal(for: proposal)
-            let childSize = lc.sizeThatFits(childProposal)
-
-            let w = resolvedDimension(axisProposal: proposal.width,
-                                      childActual: childSize.width,
-                                      min: minW,
-                                      ideal: idealW,
-                                      max: maxW)
-            let h = resolvedDimension(axisProposal: proposal.height,
-                                      childActual: childSize.height,
-                                      min: minH,
-                                      ideal: idealH,
-                                      max: maxH)
-
-            return CGSize(width: w, height: h)
-        }
-
-        func constrainedProposal(axisProposal: CGFloat?,
-                                 min: CGFloat?,
-                                 ideal: CGFloat?,
-                                 max: CGFloat?) -> CGFloat? {
-            guard var value = axisProposal ?? ideal else {
-                return nil
-            }
-            if let min {
-                value = Swift.max(value, min)
-            }
+    private func resolvedDimension(
+        _ proposed: CGFloat?,
+        child: CGFloat,
+        min: CGFloat?,
+        ideal: CGFloat?,
+        max: CGFloat?
+    ) -> CGFloat {
+        if let proposed {
             if let max {
-                value = Swift.min(value, max)
+                return Swift.min(Swift.max(proposed, min ?? -.infinity), max)
             }
-            return value
+            return Swift.max(child, min ?? -.infinity)
         }
+        var value = ideal ?? child
+        if let min { value = Swift.max(value, min) }
+        if let max { value = Swift.min(value, max) }
+        return value
+    }
 
-        func resolvedDimension(axisProposal: CGFloat?,
-                               childActual: CGFloat,
-                               min: CGFloat?,
-                               ideal: CGFloat?,
-                               max: CGFloat?) -> CGFloat {
-            // When the parent proposes an axis, that proposal is clamped to the
-            // frame limits; otherwise resolve from ideal or the measured child.
-            if let axisProposal {
-                if let max {
-                    return Swift.min(Swift.max(axisProposal, min ?? -.infinity), max)
-                }
-                return Swift.max(childActual, min ?? -.infinity)
-            }
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        let childSize = child.dimensions(in: childProposal(for: proposal)).size.value
+        return CGSize(
+            width: resolvedDimension(
+                proposal.width,
+                child: childSize.width,
+                min: minWidth,
+                ideal: idealWidth,
+                max: maxWidth
+            ),
+            height: resolvedDimension(
+                proposal.height,
+                child: childSize.height,
+                min: minHeight,
+                ideal: idealHeight,
+                max: maxHeight
+            )
+        )
+    }
 
-            var value = ideal ?? childActual
-            if let min {
-                value = Swift.max(value, min)
-            }
-            if let max {
-                value = Swift.min(value, max)
-            }
-            return value
-        }
-
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                computeSize(proposal: proposal)
-            },
-            spacing: lc.spacing,
-            place: { position, anchor, proposal in
-                let frameSize = computeSize(proposal: proposal)
-                let placementProposal = ProposedViewSize(frameSize)
-                let frameOrigin = CGPoint(
-                    x: position.x - frameSize.width * anchor.x,
-                    y: position.y - frameSize.height * anchor.y
-                )
-
-                let x: CGFloat
-                let childAnchorX: CGFloat
-                switch alignment.horizontal {
-                case .leading:
-                    x = frameOrigin.x
-                    childAnchorX = 0
-                case .center:
-                    x = frameOrigin.x + frameSize.width * 0.5
-                    childAnchorX = 0.5
-                case .trailing:
-                    x = frameOrigin.x + frameSize.width
-                    childAnchorX = 1
-                default:
-                    x = frameOrigin.x + frameSize.width * 0.5
-                    childAnchorX = 0.5
-                }
-
-                let y: CGFloat
-                let childAnchorY: CGFloat
-                switch alignment.vertical {
-                case .top:
-                    y = frameOrigin.y
-                    childAnchorY = 0
-                case .center:
-                    y = frameOrigin.y + frameSize.height * 0.5
-                    childAnchorY = 0.5
-                case .bottom:
-                    y = frameOrigin.y + frameSize.height
-                    childAnchorY = 1
-                default:
-                    y = frameOrigin.y + frameSize.height * 0.5
-                    childAnchorY = 0.5
-                }
-
-                lc.place(at: CGPoint(x: x, y: y),
-                         anchor: UnitPoint(x: childAnchorX, y: childAnchorY),
-                         proposal: placementProposal)
-            },
-            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+    func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+        let proposal = childProposal(for: context.proposedSize)
+        let childSize = child.dimensions(in: proposal).size.value
+        let anchor = UnitPoint(
+            x: alignment.horizontal == .leading ? 0 : alignment.horizontal == .trailing ? 1 : 0.5,
+            y: alignment.vertical == .top ? 0 : alignment.vertical == .bottom ? 1 : 0.5
+        )
+        return _Placement(
+            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
+            anchoring: anchor,
+            at: CGPoint(
+                x: context.size.width * anchor.x,
+                y: context.size.height * anchor.y
+            )
         )
     }
 }

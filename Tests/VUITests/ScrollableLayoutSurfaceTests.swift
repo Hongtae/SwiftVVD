@@ -138,7 +138,7 @@ private final class ScrollableLayoutDelegateGraphHost: GraphHost {
 
     init(delegate: ScrollableLayoutGraphDelegateRecorder) {
         self.delegateRecorder = delegate
-        super.init()
+        super.init(data: Data())
         delegate.host = self
     }
 
@@ -182,7 +182,7 @@ private struct ScrollableRecordingRow: View, TestPrimitiveView {
         let layout = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                    proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 },
                 place: { _, _, _ in
                     row.recorder.currentPlacement.append(row.id)
@@ -233,7 +233,7 @@ private struct ScrollableLifecycleRow: View, TestPrimitiveView {
         let layout = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                    proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 },
                 place: { _, _, _ in
                     row.recorder.currentPlacement.append(row.id)
@@ -360,7 +360,7 @@ private struct ScrollableOrdinaryPreferenceRow: View, TestPrimitiveView {
         let layout = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                    proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 }
             )
         }
@@ -415,27 +415,28 @@ private struct ScrollViewInputRecordingProvider: _ScrollableContentProvider {
 }
 
 private final class ScrollViewTestResponder: ViewResponder {
-    let hitTestKey: UInt32 = 0xFEED
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
     var resetCount = 0
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func resetGesture() {
+    override func resetGesture() {
         resetCount += 1
     }
 
-    func containsGlobalPoints(
+    override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
-        options: ContainsPointsOptions
-    ) -> ContainsPointsResult {
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
         let count = min(points.count, 64)
         let mask = count == 64 ? UInt64.max : ((UInt64(1) << UInt64(count)) - 1)
-        return ContainsPointsResult(mask: mask, priority: 16, children: [])
+        return ViewResponder.ContainsPointsResult(
+            mask: BitVector64(rawValue: mask),
+            priority: 16,
+            children: []
+        )
     }
 }
 
@@ -453,6 +454,27 @@ private enum RecordingLayoutGestureEventBindingStore {
     }
 }
 
+private func layoutTestEvent(
+    location: CGPoint,
+    phase: EventPhase
+) -> VUI.MouseEvent {
+    VUI.MouseEvent(
+        timestamp: .zero,
+        binding: nil,
+        button: .primary,
+        phase: phase,
+        location: location,
+        globalLocation: location,
+        modifiers: []
+    )
+}
+
+private func testResponderGroup(_ children: [ViewResponder]) -> MultiViewResponder {
+    let responder = MultiViewResponder()
+    responder.children = children
+    return responder
+}
+
 private struct LayoutGesturePreferenceKey: PreferenceKey {
     static var defaultValue: [String] { [] }
 
@@ -461,34 +483,35 @@ private struct LayoutGesturePreferenceKey: PreferenceKey {
     }
 }
 
-private final class LayoutGesturePreferenceResponder: MultiViewResponder, ViewResponder {
-    let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
+private final class LayoutGesturePreferenceResponder: MultiViewResponder {
     var value: String
     var makeGestureCount = 0
 
     init(hitTestKey: UInt32, value: String) {
-        self.hitTestKey = hitTestKey
+        _ = hitTestKey
         self.value = value
         super.init()
     }
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func containsGlobalPoints(
+    override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
-        options: ContainsPointsOptions
-    ) -> ContainsPointsResult {
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
         let count = min(points.count, 64)
         let mask = count == 64 ? UInt64.max : ((UInt64(1) << UInt64(count)) - 1)
-        return ContainsPointsResult(mask: mask, priority: 16, children: [])
+        return ViewResponder.ContainsPointsResult(
+            mask: BitVector64(rawValue: mask),
+            priority: 16,
+            children: []
+        )
     }
 
-    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+    override func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
         guard let graph = _AGGraph.current else {
             fatalError("LayoutGesturePreferenceResponder.makeGesture requires AG context.")
         }
@@ -505,15 +528,11 @@ private final class LayoutGesturePreferenceResponder: MultiViewResponder, ViewRe
     }
 }
 
-private struct RecordingLayoutGesture: LayoutGesture, LayoutGestureResponderProvider {
+private struct RecordingLayoutGesture: LayoutGesture {
     var responder: MultiViewResponder
 
     typealias Value = Void
     typealias Body = Never
-
-    var layoutGestureResponder: MultiViewResponder {
-        responder
-    }
 
     static func updateEventBindings(
         _ eventBindings: inout [EventID: any EventType],
@@ -523,8 +542,10 @@ private struct RecordingLayoutGesture: LayoutGesture, LayoutGestureResponderProv
         if let (eventID, event) = eventBindings.first,
            proxy.indices.contains(0) {
             _ = proxy.bindChild(index: 0, event: event, id: eventID)
-            if let location = event.location {
-                firstChildContainsEventLocation = proxy[0].containsGlobalLocation(location)
+            if let event = event as? any HitTestableEventType {
+                firstChildContainsEventLocation = proxy[0].containsGlobalLocation(
+                    event.hitTestLocation
+                )
             }
         }
         RecordingLayoutGestureEventBindingStore.calls.append(
@@ -537,15 +558,11 @@ private struct RecordingLayoutGesture: LayoutGesture, LayoutGestureResponderProv
     }
 }
 
-private struct RecordingPreferenceLayoutGesture: LayoutGesture, LayoutGestureResponderProvider {
+private struct RecordingPreferenceLayoutGesture: LayoutGesture {
     var responder: MultiViewResponder
 
     typealias Value = Void
     typealias Body = Never
-
-    var layoutGestureResponder: MultiViewResponder {
-        responder
-    }
 
     static func updateEventBindings(
         _ eventBindings: inout [EventID: any EventType],
@@ -575,7 +592,7 @@ private struct ScrollViewResponderContent: View, TestPrimitiveView {
         }
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layout))
         if inputs.preferences.keys.contains(ViewRespondersKey.self) {
-            let responders: Attribute<[any ViewResponder]> = graph.makeInput(value: [content.responder])
+            let responders: Attribute<[ViewResponder]> = graph.makeInput(value: [content.responder])
             outputs.preferences.append(ViewRespondersKey.self, node: responders.identifier)
         }
         return outputs
@@ -635,7 +652,7 @@ private struct ScrollableMeasuringRow: View, TestPrimitiveView {
             LayoutComputer(
                 sizeThatFits: { proposal in
                     let row = view._attribute.value
-                    let resolved = proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                    let resolved = proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                     let size = CGSize(
                         width: resolved.width + CGFloat(row.id),
                         height: resolved.height + CGFloat(row.id)
@@ -735,7 +752,7 @@ private struct ScrollablePreferenceRow: View, TestPrimitiveView {
         let layout = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    proposal.replacingUnspecifiedDimensions(by: CGSize(width: 30, height: 20))
+                    proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 }
             )
         }
@@ -1747,7 +1764,15 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 pageSize: CGSize(width: 100, height: 80)
             ))
             let contentOffset = graph.makeInput(value: CGPoint(x: 12, y: 34))
-            let modifier = graph.makeInput(value: ScrollViewChildModifier())
+            let node = ScrollViewNode(
+                graphRef: _AGGraphContext(graph: graph),
+                contentOffset: contentOffset,
+                config: config,
+                pixelLength: graph.makeInput(value: CGFloat(1))
+            )
+            let modifier: Attribute<ScrollViewChildModifier.Value> = graph.makeRule(
+                ScrollViewChildModifier(_proxy: proxy, node: node)
+            )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.position = graph.makeInput(value: CGPoint(x: 100, y: 200))
@@ -1758,7 +1783,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
             var childPosition: CGPoint?
             var childSize: CGSize?
-            _ = ScrollViewChildModifier._makeView(
+            _ = ScrollViewChildModifier.Value._makeView(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: inputs
             ) { _, rewrittenInputs in
@@ -1785,7 +1810,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ViewRespondersKey.self)
+            inputs.preferences.keys.add(ViewRespondersKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -1796,29 +1821,19 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertEqual(responders.count, 1)
 
             let responder = try XCTUnwrap(responders.first as? DefaultLayoutViewResponder)
-            XCTAssertEqual(responder.responders.count, 1)
-            XCTAssertTrue(responder.responders.first === childResponder)
-            XCTAssertTrue(childResponder.nextResponder === responder)
+            XCTAssertEqual(responder.children.count, 1)
+            XCTAssertTrue(responder.children.first === childResponder)
+            XCTAssertTrue(childResponder.parent === responder)
 
             let result = responder.containsGlobalPoints(
                 [CGPoint(x: 10, y: 10)],
                 cacheKey: nil,
-                options: ContainsPointsOptions()
+                options: ViewResponder.ContainsPointsOptions()
             )
-            XCTAssertEqual(result.mask, 1)
+            XCTAssertEqual(result.mask.rawValue, 1)
             XCTAssertEqual(result.priority, 0)
             XCTAssertEqual(result.children.count, 1)
             XCTAssertTrue(result.children.first === childResponder)
-
-            let target = responder.scrollTarget(
-                in: ScrollGeometry(
-                    contentOffset: .zero,
-                    contentSize: CGSize(width: 100, height: 120),
-                    containerSize: CGSize(width: 100, height: 80)
-                ),
-                layoutDirection: .leftToRight
-            )
-            XCTAssertNil(target)
         }
     }
 
@@ -1828,113 +1843,40 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         _AGGraph.withCurrent(graph) {
             let firstChild = ScrollViewTestResponder()
             let secondChild = ScrollViewTestResponder()
-            let children: Attribute<[any ViewResponder]> = graph.makeInput(
-                value: [firstChild as any ViewResponder]
+            let children: Attribute<[ViewResponder]> = graph.makeInput(
+                value: [firstChild as ViewResponder]
             )
-            let responder = DefaultLayoutViewResponder()
-            let output: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
+            let responder = MultiViewResponder()
+            let output: Attribute<[ViewResponder]> = graph.makeStatefulRule(
                 DefaultLayoutResponderFilter(children: children, responder: responder)
             )
 
             let initialOutput = output.value
             XCTAssertEqual(initialOutput.count, 1)
             XCTAssertTrue(initialOutput.first === responder)
-            XCTAssertEqual(responder.responders.count, 1)
-            XCTAssertTrue(responder.responders.first === firstChild)
-            XCTAssertTrue(firstChild.nextResponder === responder)
+            XCTAssertEqual(responder.children.count, 1)
+            XCTAssertTrue(responder.children.first === firstChild)
+            XCTAssertTrue(firstChild.parent === responder)
 
-            responder.scrollTarget = { geometry, _ in
-                ScrollTarget(
-                    rect: CGRect(origin: geometry.contentOffset, size: geometry.containerSize),
-                    anchor: .topLeading
-                )
-            }
-            children.setValue([secondChild as any ViewResponder])
+            children.setValue([secondChild as ViewResponder])
 
             let updatedOutput = output.value
             XCTAssertEqual(updatedOutput.count, 1)
             XCTAssertTrue(updatedOutput.first === responder)
-            XCTAssertEqual(responder.responders.count, 1)
-            XCTAssertTrue(responder.responders.first === secondChild)
-            XCTAssertTrue(secondChild.nextResponder === responder)
-            XCTAssertNotNil(
-                responder.scrollTarget(
-                    in: ScrollGeometry(
-                        contentOffset: CGPoint(x: 2, y: 3),
-                        contentSize: CGSize(width: 80, height: 90),
-                        containerSize: CGSize(width: 40, height: 50)
-                    ),
-                    layoutDirection: .leftToRight
-                )
-            )
+            XCTAssertEqual(responder.children.count, 1)
+            XCTAssertTrue(responder.children.first === secondChild)
+            XCTAssertTrue(secondChild.parent === responder)
 
             let manualChild = ScrollViewTestResponder()
-            responder.responders = [manualChild]
+            responder.children = [manualChild]
             graph.invalidateAttribute(output.identifier)
 
             let invalidatedOutput = output.value
             XCTAssertEqual(invalidatedOutput.count, 1)
             XCTAssertTrue(invalidatedOutput.first === responder)
-            XCTAssertEqual(responder.responders.count, 1)
-            XCTAssertTrue(responder.responders.first === manualChild)
+            XCTAssertEqual(responder.children.count, 1)
+            XCTAssertTrue(responder.children.first === manualChild)
         }
-    }
-
-    func testDefaultLayoutResponderResetClearsScrollTargetAndChildren() {
-        let childResponder = ScrollViewTestResponder()
-        let responder = DefaultLayoutViewResponder(
-            responders: [childResponder],
-            scrollTarget: { geometry, _ in
-                ScrollTarget(
-                    rect: CGRect(origin: geometry.contentOffset, size: geometry.containerSize),
-                    anchor: .topLeading
-                )
-            }
-        )
-
-        let initialTarget = responder.scrollTarget(
-            in: ScrollGeometry(
-                contentOffset: CGPoint(x: 4, y: 8),
-                contentSize: CGSize(width: 100, height: 120),
-                containerSize: CGSize(width: 40, height: 30)
-            ),
-            layoutDirection: .leftToRight
-        )
-        XCTAssertNotNil(initialTarget)
-
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        ref.withCurrent {
-            let gestureSubgraph1 = AGSubgraph()
-            AGSubgraph.withCurrent(gestureSubgraph1) {
-                _ = graph.makeInput(value: 1)
-            }
-            let gestureSubgraph2 = AGSubgraph()
-            AGSubgraph.withCurrent(gestureSubgraph2) {
-                _ = graph.makeInput(value: 2)
-            }
-            responder.gestureSubgraph1 = gestureSubgraph1
-            responder.gestureSubgraph2 = gestureSubgraph2
-
-            responder.resetGesture()
-
-            XCTAssertNil(responder.gestureSubgraph1)
-            XCTAssertNil(responder.gestureSubgraph2)
-            XCTAssertFalse(gestureSubgraph1.isValid)
-            XCTAssertFalse(gestureSubgraph2.isValid)
-        }
-
-        let resetTarget = responder.scrollTarget(
-            in: ScrollGeometry(
-                contentOffset: CGPoint(x: 4, y: 8),
-                contentSize: CGSize(width: 100, height: 120),
-                containerSize: CGSize(width: 40, height: 30)
-            ),
-            layoutDirection: .leftToRight
-        )
-        XCTAssertNil(resetTarget)
-        XCTAssertEqual(childResponder.resetCount, 1)
     }
 
     func testGestureGraphResetEventsResetsRootResponders() {
@@ -1948,11 +1890,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testDefaultLayoutGestureUpdateEventBindingsDefaultIsNoOp() {
-        let firstID = EventID(type: TappableEvent.self, serial: 1)
-        let secondID = EventID(type: TappableEvent.self, serial: 2)
+        let firstID = EventID(type: VUI.MouseEvent.self, serial: 1)
+        let secondID = EventID(type: VUI.MouseEvent.self, serial: 2)
         var events: [EventID: any EventType] = [
-            firstID: TappableEvent(location: CGPoint(x: 1, y: 2), phase: .began),
-            secondID: TappableEvent(location: CGPoint(x: 3, y: 4), phase: .moved)
+            firstID: layoutTestEvent(location: CGPoint(x: 1, y: 2), phase: .began),
+            secondID: layoutTestEvent(location: CGPoint(x: 3, y: 4), phase: .active)
         ]
 
         DefaultLayoutGesture.updateEventBindings(&events, proxy: LayoutGestureChildProxy())
@@ -1966,9 +1908,9 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         defer { RecordingLayoutGestureEventBindingStore.reset() }
 
         let gestureGraph = GestureGraph()
-        let child = DefaultLayoutViewResponder()
-        let root = DefaultLayoutViewResponder(responders: [child])
-        let eventID = EventID(type: TappableEvent.self, serial: 31)
+        let child = MultiViewResponder()
+        let root = testResponderGroup([child])
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 31)
 
         gestureGraph.data.withCurrent {
             func assertPossibleNil(_ phase: GesturePhase<Void>, file: StaticString = #filePath, line: UInt = #line) {
@@ -1982,7 +1924,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
             let events = graph.makeInput(value: [
-                eventID: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began)
+                eventID: layoutTestEvent(location: CGPoint(x: 4, y: 5), phase: .began)
             ] as [EventID: any EventType])
             let resetSeed = graph.makeInput(value: UInt32(0))
             let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
@@ -2019,7 +1961,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls.count, 1)
 
             events.setValue([
-                eventID: TappableEvent(location: CGPoint(x: 6, y: 7), phase: .moved)
+                eventID: layoutTestEvent(location: CGPoint(x: 6, y: 7), phase: .active)
             ])
             assertPossibleNil(outputs.phase.value)
             XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls.count, 2)
@@ -2030,17 +1972,17 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let gestureGraph = GestureGraph()
         let first = LayoutGesturePreferenceResponder(hitTestKey: 91, value: "first")
         let second = LayoutGesturePreferenceResponder(hitTestKey: 92, value: "second")
-        let root = DefaultLayoutViewResponder(responders: [first, second])
-        let firstID = EventID(type: TappableEvent.self, serial: 1)
-        let secondID = EventID(type: TappableEvent.self, serial: 2)
+        let root = testResponderGroup([first, second])
+        let firstID = EventID(type: VUI.MouseEvent.self, serial: 1)
+        let secondID = EventID(type: VUI.MouseEvent.self, serial: 2)
 
         try gestureGraph.data.withCurrent {
             let graph = gestureGraph.data.graph
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
             let events = graph.makeInput(value: [
-                firstID: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
-                secondID: TappableEvent(location: CGPoint(x: 6, y: 7), phase: .began)
+                firstID: layoutTestEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+                secondID: layoutTestEvent(location: CGPoint(x: 6, y: 7), phase: .began)
             ] as [EventID: any EventType])
             let resetSeed = graph.makeInput(value: UInt32(0))
             let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
@@ -2055,7 +1997,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 gesturePreferenceKeys: preferenceKeys
             )
             inputs.options = .gestureGraph
-            inputs.preferences.keys.insert(LayoutGesturePreferenceKey.self)
+            inputs.preferences.keys.add(LayoutGesturePreferenceKey.self)
 
             let gesture = graph.makeInput(value: RecordingPreferenceLayoutGesture(responder: root))
             let outputs = RecordingPreferenceLayoutGesture._makeGesture(
@@ -2075,9 +2017,9 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testLayoutGestureChildProxyCollectionUsesResponderChildren() {
-        let first = DefaultLayoutViewResponder()
-        let second = DefaultLayoutViewResponder()
-        let root = DefaultLayoutViewResponder(responders: [first, second])
+        let first = MultiViewResponder()
+        let second = MultiViewResponder()
+        let root = testResponderGroup([first, second])
         let proxy = LayoutGestureChildProxy(responder: root)
 
         XCTAssertEqual(proxy.startIndex, 0)
@@ -2088,18 +2030,18 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testLayoutGestureChildProxyBindChildRoutesThroughEventBindingManager() {
-        let child = DefaultLayoutViewResponder()
-        let root = DefaultLayoutViewResponder(responders: [child])
+        let child = MultiViewResponder()
+        let root = testResponderGroup([child])
         let eventBindingManager = EventBindingManager()
         let proxy = LayoutGestureChildProxy(
             responder: root,
             eventBindingManager: eventBindingManager
         )
-        let eventID = EventID(type: TappableEvent.self, serial: 7)
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 7)
 
         let result = proxy.bindChild(
             index: 0,
-            event: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+            event: layoutTestEvent(location: CGPoint(x: 4, y: 5), phase: .began),
             id: eventID
         )
 
@@ -2108,7 +2050,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === child)
         XCTAssertNil(LayoutGestureChildProxy(responder: root).bindChild(
             index: 0,
-            event: TappableEvent(location: CGPoint(x: 4, y: 5), phase: .began),
+            event: layoutTestEvent(location: CGPoint(x: 4, y: 5), phase: .began),
             id: eventID
         ))
     }
@@ -2118,10 +2060,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         defer { RecordingLayoutGestureEventBindingStore.reset() }
 
         let eventBindingManager = EventBindingManager()
-        let child = DefaultLayoutViewResponder()
-        let root = DefaultLayoutViewResponder(responders: [child])
+        let child = MultiViewResponder()
+        let root = testResponderGroup([child])
         let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
-        let eventID = EventID(type: TappableEvent.self, serial: 41)
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 41)
 
         box.updateResponder(root)
 
@@ -2129,7 +2071,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let initialSeed = box.childSeed(at: 0)
 
         box.willSendEvents([
-            eventID: TappableEvent(location: CGPoint(x: 3, y: 4), phase: .began)
+            eventID: layoutTestEvent(location: CGPoint(x: 3, y: 4), phase: .began)
         ], gesture: RecordingLayoutGesture(responder: root))
 
         XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls, [
@@ -2147,12 +2089,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
     func testLayoutGestureBoxBumpsPreviousChildSeedWhenBindingMoves() {
         let eventBindingManager = EventBindingManager()
-        let first = DefaultLayoutViewResponder()
-        let second = DefaultLayoutViewResponder()
-        let root = DefaultLayoutViewResponder(responders: [first, second])
+        let first = MultiViewResponder()
+        let second = MultiViewResponder()
+        let root = testResponderGroup([first, second])
         let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
         let proxy = LayoutGestureChildProxy(box: box)
-        let eventID = EventID(type: TappableEvent.self, serial: 42)
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 42)
 
         box.updateResponder(root)
         eventBindingManager.rebindEvent(eventID, to: first)
@@ -2163,7 +2105,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         let movement = proxy.bindChild(
             index: 1,
-            event: TappableEvent(location: CGPoint(x: 8, y: 9), phase: .moved),
+            event: layoutTestEvent(location: CGPoint(x: 8, y: 9), phase: .active),
             id: eventID
         )
 
@@ -2179,8 +2121,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let graph = _AGGraph()
 
         _AGGraph.withCurrent(graph) {
-            let child = DefaultLayoutViewResponder()
-            let root = DefaultLayoutViewResponder(responders: [child])
+            let child = MultiViewResponder()
+            let root = testResponderGroup([child])
             let box = LayoutGestureBox()
             let childSubgraph = AGSubgraph()
 
@@ -2205,10 +2147,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let graph = _AGGraph()
 
         _AGGraph.withCurrent(graph) {
-            let removed = DefaultLayoutViewResponder()
-            let kept = DefaultLayoutViewResponder()
-            let initialRoot = DefaultLayoutViewResponder(responders: [removed, kept])
-            let updatedRoot = DefaultLayoutViewResponder(responders: [kept])
+            let removed = MultiViewResponder()
+            let kept = MultiViewResponder()
+            let initialRoot = testResponderGroup([removed, kept])
+            let updatedRoot = testResponderGroup([kept])
             let box = LayoutGestureBox()
             let removedSubgraph = AGSubgraph()
             let keptSubgraph = AGSubgraph()
@@ -2235,10 +2177,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let graph = _AGGraph()
 
         _AGGraph.withCurrent(graph) {
-            let first = DefaultLayoutViewResponder()
-            let second = DefaultLayoutViewResponder()
-            let initialRoot = DefaultLayoutViewResponder(responders: [first, second])
-            let updatedRoot = DefaultLayoutViewResponder(responders: [second, first])
+            let first = MultiViewResponder()
+            let second = MultiViewResponder()
+            let initialRoot = testResponderGroup([first, second])
+            let updatedRoot = testResponderGroup([second, first])
             let box = LayoutGestureBox()
             let firstSubgraph = AGSubgraph()
             let secondSubgraph = AGSubgraph()
@@ -2270,8 +2212,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let graph = _AGGraph()
 
         _AGGraph.withCurrent(graph) {
-            let child = DefaultLayoutViewResponder()
-            let root = DefaultLayoutViewResponder(responders: [child])
+            let child = MultiViewResponder()
+            let root = testResponderGroup([child])
             let box = LayoutGestureBox()
             let childSubgraph = AGSubgraph()
 
@@ -2302,76 +2244,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testDefaultLayoutResponderMakeGestureBuildsStoredSubgraphs() throws {
-        let graph = _AGGraph()
-
-        try _AGGraph.withCurrent(graph) {
-            func assertPossibleNil(_ phase: GesturePhase<Void>, file: StaticString = #filePath, line: UInt = #line) {
-                guard case .possible(nil) = phase else {
-                    XCTFail("expected possible(nil)", file: file, line: line)
-                    return
-                }
-            }
-
-            let responder = DefaultLayoutViewResponder()
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
-            let events = graph.makeInput(value: [:] as [EventID: any EventType])
-            let resetSeed = graph.makeInput(value: UInt32(0))
-            let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
-            let preferenceKeys = graph.makeInput(value: PreferenceKeys())
-
-            var invalidInputs = _GestureInputs(
-                viewInputs,
-                viewSubgraph: nil,
-                events: events,
-                time: viewInputs.base.time,
-                resetSeed: resetSeed,
-                inheritedPhase: inheritedPhase,
-                gesturePreferenceKeys: preferenceKeys
-            )
-            invalidInputs.options = .gestureGraph
-
-            let invalidOutputs = responder.makeGesture(inputs: invalidInputs)
-            assertPossibleNil(invalidOutputs.phase.value)
-            XCTAssertNil(responder.gestureSubgraph1)
-            XCTAssertNil(responder.gestureSubgraph2)
-            XCTAssertNil(responder.scrollTarget)
-
-            let viewSubgraph = AGSubgraph()
-            var validInputs = _GestureInputs(
-                viewInputs,
-                viewSubgraph: viewSubgraph,
-                events: events,
-                time: viewInputs.base.time,
-                resetSeed: resetSeed,
-                inheritedPhase: inheritedPhase,
-                gesturePreferenceKeys: preferenceKeys
-            )
-            validInputs.options = .gestureGraph
-
-            let outputs = responder.makeGesture(inputs: validInputs)
-            assertPossibleNil(outputs.phase.value)
-
-            let firstSubgraph = try XCTUnwrap(responder.gestureSubgraph1)
-            let secondSubgraph = try XCTUnwrap(responder.gestureSubgraph2)
-            XCTAssertTrue(firstSubgraph.parent === viewSubgraph)
-            XCTAssertTrue(secondSubgraph.parent === firstSubgraph)
-            XCTAssertTrue(viewSubgraph.children.contains { $0 === firstSubgraph })
-            XCTAssertTrue(firstSubgraph.children.contains { $0 === secondSubgraph })
-            XCTAssertTrue(secondSubgraph.nodes.contains(outputs.phase.identifier))
-
-            XCTAssertNil(responder.scrollTarget)
-
-            responder.resetGesture()
-            XCTAssertNil(responder.gestureSubgraph1)
-            XCTAssertNil(responder.gestureSubgraph2)
-            XCTAssertFalse(firstSubgraph.isValid)
-            XCTAssertFalse(secondSubgraph.isValid)
-            XCTAssertNil(responder.scrollTarget)
-        }
-    }
-
     func testDefaultLayoutResponderChildrenChangeInvalidatesStoredLayoutGesture() throws {
         let host = GraphHost()
 
@@ -2379,25 +2251,27 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let graph = host.data.graph
             let initialChild = ScrollViewTestResponder()
             let updatedChild = ScrollViewTestResponder()
-            let children: Attribute<[any ViewResponder]> = graph.makeInput(
-                value: [initialChild as any ViewResponder]
+            let children: Attribute<[ViewResponder]> = graph.makeInput(
+                value: [initialChild as ViewResponder]
             )
-            let responder = DefaultLayoutViewResponder()
-            let output: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
+            let viewSubgraph = AGSubgraph()
+            let responder = DefaultLayoutViewResponder(
+                inputs: viewInputs,
+                viewSubgraph: viewSubgraph
+            )
+            let output: Attribute<[ViewResponder]> = graph.makeStatefulRule(
                 DefaultLayoutResponderFilter(children: children, responder: responder)
             )
 
             XCTAssertTrue(output.value.first === responder)
             XCTAssertFalse(host.hasPendingTransactions)
 
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            let viewInputs = makeViewInputs(graph: graph, size: sizeAttr)
             let events = graph.makeInput(value: [:] as [EventID: any EventType])
             let resetSeed = graph.makeInput(value: UInt32(0))
             let inheritedPhase = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
             let preferenceKeys = graph.makeInput(value: PreferenceKeys())
-            let viewSubgraph = AGSubgraph()
-
             var gestureInputs = _GestureInputs(
                 viewInputs,
                 viewSubgraph: viewSubgraph,
@@ -2416,10 +2290,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             }
             XCTAssertFalse(host.hasPendingTransactions)
 
-            children.setValue([updatedChild as any ViewResponder])
+            children.setValue([updatedChild as ViewResponder])
             XCTAssertTrue(output.value.first === responder)
-            XCTAssertEqual(responder.responders.count, 1)
-            XCTAssertTrue(responder.responders.first === updatedChild)
+            XCTAssertEqual(responder.children.count, 1)
+            XCTAssertTrue(responder.children.first === updatedChild)
             XCTAssertTrue(host.hasPendingTransactions)
         }
     }
@@ -2572,7 +2446,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         )
         let wheel = WheelEvent(
             timestamp: Time(seconds: 2),
-            phase: .moved,
+            phase: .active,
             binding: nil,
             offset: 12
         )
@@ -2850,7 +2724,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -2908,7 +2782,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 size: sizeAttr,
                 environment: environmentAttr
             )
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -2968,7 +2842,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             let transactionAttr = inputs.base.transaction
             let timeAttr = inputs.base.time
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -3029,7 +2903,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 )
                 let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
                 var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-                inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+                inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
                 let outputs = Scroll.Main._makeView(
                     view: _GraphValue(_attribute: mainAttr),
@@ -3080,7 +2954,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             let transactionAttr = inputs.base.transaction
             let timeAttr = inputs.base.time
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -3141,7 +3015,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             let transactionAttr = inputs.base.transaction
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
@@ -3203,8 +3077,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let bindingAttr = graph.makeInput(value: binding)
             let anchorAttr = graph.makeInput(value: Optional<UnitPoint>.some(.bottom))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
-            inputs.preferences.keys.insert(UpdateScrollStateRequestKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(UpdateScrollStateRequestKey.self)
             inputs.base.setScrollPosition(storage: .binding(bindingAttr), kind: .scrollContent)
             inputs.base.setScrollPositionAnchor(OptionalAttribute(anchorAttr), kind: .scrollContent)
 
@@ -3265,7 +3139,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertEqual(stoppedIndex, 2)
 
             let closest = try XCTUnwrap(
-                collection.subviewClosest(to: CGRect(x: 0, y: 48, width: 40, height: 20))
+                collection.subviewClosestTo(rect: CGRect(x: 0, y: 48, width: 40, height: 20))
             )
             XCTAssertEqual(closest.id.canonicalID, _ViewList_ID(explicitID: AnyHashable(2)).canonicalID)
             XCTAssertEqual(closest.frame, CGRect(x: 0, y: 48, width: 40, height: 20))
@@ -3294,7 +3168,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
@@ -3332,7 +3206,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
@@ -3377,7 +3251,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.position = graph.makeInput(value: CGPoint(x: 5, y: 7))
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
@@ -3429,7 +3303,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
             let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
@@ -3484,7 +3358,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 40))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
             let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
@@ -3542,7 +3416,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 size: sizeAttr,
                 transform: transformAttr
             )
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
             let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
@@ -3598,7 +3472,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
             let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
@@ -3653,7 +3527,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
             let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
@@ -3764,7 +3638,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
 
             let measuredContentSize = layoutAttr.value.sizeThatFits(
-                ProposedViewSize(CGSize(width: 100, height: 80))
+                _ProposedSize(CGSize(width: 100, height: 80))
             )
             XCTAssertEqual(measuredContentSize, CGSize(width: 51, height: 31))
         }
@@ -3791,11 +3665,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
             let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
 
-            _ = layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(recorder.templateMeasuredSizes, [CGSize(width: 51, height: 31)])
 
             sizeAttr.setValue(ViewSize(width: 140, height: 80))
-            _ = layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(recorder.templateMeasuredSizes, [CGSize(width: 51, height: 31)])
 
             let changedRows = [
@@ -3805,7 +3679,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             viewAttr.setValue(
                 _ScrollableLayoutView(data: changedRows, layout: MeasuringScrollableLayout(recorder: recorder))
             )
-            _ = layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(recorder.templateMeasuredSizes, [
                 CGSize(width: 51, height: 31),
                 CGSize(width: 57, height: 37),
@@ -3841,7 +3715,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
 
             XCTAssertEqual(
-                layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80))),
+                layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80))),
                 CGSize(width: 200, height: 220)
             )
         }
@@ -3877,14 +3751,14 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
                 inputs: inputs
             )
             layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
-            _ = layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
 
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
@@ -3917,7 +3791,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertTrue(request.update())
             XCTAssertEqual(stored, target)
 
-            _ = layoutAttr.value.sizeThatFits(ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(
                 recorder.proxyInputs.last,
                 ScrollableProxyInputRecord(
@@ -4328,7 +4202,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.insert(ScrollableOrdinaryPreferenceKey.self)
+            inputs.preferences.keys.add(ScrollableOrdinaryPreferenceKey.self)
             inputs.needsGeometry = true
 
             let outputs = _ScrollableLayoutView<[ScrollableOrdinaryPreferenceRow], VisibleCountScrollableLayout>
@@ -4451,18 +4325,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     ) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time()),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(
-                        environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking())
-                    )
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking()),
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(

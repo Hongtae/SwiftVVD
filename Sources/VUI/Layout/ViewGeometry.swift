@@ -22,6 +22,31 @@ struct ViewGeometry: Equatable {
         self.origin = origin
         self.dimensions = dimensions
     }
+
+    static var zero: ViewGeometry {
+        ViewGeometry(
+            origin: .zero,
+            dimensions: ViewDimensions(
+                guideComputer: .defaultValue,
+                size: .zero
+            )
+        )
+    }
+}
+
+extension ViewGeometry: Animatable {
+    typealias AnimatableData = AnimatablePair<CGPoint.AnimatableData, CGSize.AnimatableData>
+
+    var animatableData: AnimatableData {
+        get {
+            AnimatablePair(origin.animatableData, dimensions.size.value.animatableData)
+        }
+        set {
+            origin.animatableData = newValue.first
+            dimensions.size.value.animatableData = newValue.second
+            dimensions.size.proposal = _ProposedSize(dimensions.size.value)
+        }
+    }
 }
 
 // MARK: - ViewSize
@@ -32,16 +57,16 @@ struct ViewGeometry: Equatable {
 /// animation system to interpolate between layout frames.
 struct ViewSize: Equatable, Sendable {
     var value: CGSize
-    var proposal: ProposedViewSize
+    var proposal: _ProposedSize
 
     var width:  CGFloat { get { value.width  } set { value.width  = newValue } }
     var height: CGFloat { get { value.height } set { value.height = newValue } }
 
-    init(_ value: CGSize, proposal: ProposedViewSize = .unspecified) {
+    init(_ value: CGSize, proposal: _ProposedSize = .unspecified) {
         self.value = value
         self.proposal = proposal
     }
-    init(width: CGFloat, height: CGFloat, proposal: ProposedViewSize = .unspecified) {
+    init(width: CGFloat, height: CGFloat, proposal: _ProposedSize = .unspecified) {
         self.value = CGSize(width: width, height: height)
         self.proposal = proposal
     }
@@ -49,7 +74,7 @@ struct ViewSize: Equatable, Sendable {
     static let zero = ViewSize(.zero)
 
     static func fixed(_ cgSize: CGSize) -> ViewSize {
-        ViewSize(cgSize, proposal: ProposedViewSize(cgSize))
+        ViewSize(cgSize, proposal: _ProposedSize(cgSize))
     }
 }
 
@@ -206,7 +231,7 @@ extension CGSize {
 /// to compute a child view's global position from its parent-local offset:
 ///   1. Apply each `_transformItem` in **forward** order.
 ///   2. Add `_globalPosition`.
-struct ViewTransform: Equatable, Sendable {
+struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
     // Item
 
@@ -268,6 +293,19 @@ struct ViewTransform: Equatable, Sendable {
 
     var isEmpty: Bool {
         _transformItems.isEmpty && _globalPosition == .zero
+    }
+
+    var description: String {
+        var components = _transformItems.map { String(describing: $0) }
+        if _globalPosition != .zero {
+            components.append(
+                String(describing: CGSize(
+                    width: _globalPosition.x,
+                    height: _globalPosition.y
+                ))
+            )
+        }
+        return components.joined(separator: "; ")
     }
 
     // Append / mutate methods
@@ -673,7 +711,7 @@ struct ScrollViewContentTransformProvider: Rule {
         self.isClipped = isClipped
     }
 
-    func updateValue() -> ViewTransform {
+    var value: ViewTransform {
         var value = transform.value
         value.resetPosition(position.value)
         let scrollGeometry = geometry.value

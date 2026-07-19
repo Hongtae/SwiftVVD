@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TextSizeVariant: RawRepresentable, Hashable, Sendable {
+struct TextSizeVariant: RawRepresentable, Hashable, Comparable, Codable, Sendable {
     var rawValue: Int
 
     static let regular = TextSizeVariant(rawValue: 0)
@@ -22,6 +22,10 @@ struct TextSizeVariant: RawRepresentable, Hashable, Sendable {
 
     var nextDown: TextSizeVariant {
         TextSizeVariant(rawValue: rawValue + 1)
+    }
+
+    static func < (lhs: TextSizeVariant, rhs: TextSizeVariant) -> Bool {
+        lhs.rawValue < rhs.rawValue
     }
 }
 
@@ -165,11 +169,11 @@ struct SizeFittingTextCacheValue<Engine: LayoutEngine> {
     var engine: Engine
     var renderer: TextRendererBoxBase?
 
-    func truncates(in proposal: ProposedViewSize) -> Bool {
-        engine.truncates(proposal)
+    mutating func truncates(in proposal: ProposedViewSize) -> Bool {
+        engine.truncates(_ProposedSize(proposal))
     }
 
-    func fits(_ proposal: ProposedViewSize) -> Bool {
+    mutating func fits(_ proposal: ProposedViewSize) -> Bool {
         !truncates(in: proposal)
     }
 }
@@ -357,11 +361,12 @@ struct StyledTextLayoutEngine: LayoutEngine {
     var text: ResolvedStyledText
     var renderer: TextRendererBoxBase?
 
-    func spacing() -> ViewSpacing {
-        .text
+    func spacing() -> Spacing {
+        ViewSpacing.text.spacing
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        let proposal = ProposedViewSize(proposal)
         guard let resolved = text.resolvedText else { return .zero }
         if let renderer {
             return renderer.sizeThatFits(proposal: proposal, text: TextProxy(resolved))
@@ -379,7 +384,8 @@ struct StyledTextLayoutEngine: LayoutEngine {
         return resolved.measure(maxWidth: proposal.width, maxHeight: proposal.height)
     }
 
-    func truncates(_ proposal: ProposedViewSize) -> Bool {
+    func truncates(_ proposal: _ProposedSize) -> Bool {
+        let proposal = ProposedViewSize(proposal)
         guard let resolved = text.resolvedText else { return false }
         if renderer != nil {
             let ideal = sizeThatFits(.unspecified)
@@ -416,7 +422,7 @@ struct StyledTextLayoutEngine: LayoutEngine {
     }
 }
 
-struct SizeFittingTextFilter: StatefulRule {
+struct SizeFittingTextFilter: StatefulRule, AsyncAttribute {
     typealias Value = ResolvedStyledText
 
     var size: Attribute<ViewSize>
@@ -464,33 +470,37 @@ struct SizeFittingTextFilter: StatefulRule {
     }
 }
 
-struct SizeFittingTextLayoutComputer: StatefulRule {
+struct SizeFittingTextLayoutComputer: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
     struct Engine: LayoutEngine {
         var ctx: RuleContext<LayoutComputer>
         var cache: SizeFittingTextCache<ResolvedTextHelper, StickyTextSizeFittingLogic>
 
-        func spacing() -> ViewSpacing {
+        func spacing() -> Spacing {
             withValue(for: .unspecified) { $0.engine.spacing() }
         }
 
-        func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-            withValue(for: proposal) { $0.engine.sizeThatFits(proposal) }
+        func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            withValue(for: ProposedViewSize(proposal)) {
+                $0.engine.sizeThatFits(proposal)
+            }
         }
 
-        func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat {
-            withValue(for: proposal) { $0.engine.lengthThatFits(proposal, in: axis) }
+        func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
+            withValue(for: ProposedViewSize(proposal)) {
+                $0.engine.lengthThatFits(proposal, in: axis)
+            }
         }
 
         func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
-            withValue(for: size.proposal) {
+            withValue(for: ProposedViewSize(size.proposal)) {
                 $0.engine.childGeometries(at: size, origin: origin)
             }
         }
 
         func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
-            withValue(for: size.proposal) {
+            withValue(for: ProposedViewSize(size.proposal)) {
                 $0.engine.explicitAlignment(key, at: size)
             }
         }

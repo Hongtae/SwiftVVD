@@ -67,7 +67,7 @@ struct ScrollGeometryStateProvider: Rule {
         self.transform = transform
     }
 
-    func updateValue() -> [ScrollGeometryState] {
+    var value: [ScrollGeometryState] {
         [
             ScrollGeometryState(
                 geometry: geometry.value,

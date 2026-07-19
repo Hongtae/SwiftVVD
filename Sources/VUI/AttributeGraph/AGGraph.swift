@@ -18,7 +18,7 @@ import VVD
 // they are called. Violating this precondition causes a runtime assertion failure.
 // The unchecked Sendable conformance is not a thread-safety guarantee.
 
-final class _AGGraph: @unchecked Sendable {
+final class _AGGraph: Equatable, @unchecked Sendable {
     // MARK: Node Storage
 
     // Describes how a node computes its value.
@@ -44,18 +44,42 @@ final class _AGGraph: @unchecked Sendable {
         //               -> endedCallback() fires here, inside setValue call stack
         case rule(() -> Any, isSideEffect: Bool)
 
+        // A typed Rule body retained by the node. Unlike the closure form, the
+        // body can be mutated after a dependent subtree has been constructed.
+        // Evaluation remains pull-based.
+        case ruleBody(any _AnyRuleBox)
+
         // StatefulRule node. The box owns the rule struct and is reused across evaluations.
         // Output is written by calling _AGGraph.setStatefulOutput(_:) inside updateValue().
         // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
-        // The box receives destroy() once before node removal so stateful rules can release
-        // pending deferred work associated with the node's lifetime.
+        // Bodies that also conform to ObservedAttribute receive destroy() once before node
+        // removal so they can release work associated with the node's lifetime.
         case stateful(any _AnyStatefulBox)
+
+        // Exact-name low-level Attribute(body:value:flags:update:) construction.
+        // The box owns a stable Swift body allocation and invokes the supplied
+        // update function when the node is evaluated.
+        case lowLevelBody(any _AnyLowLevelAttributeBox)
 
         // KeyPath-derived node. Value is projected from a parent node via a key path.
         // The dependency on parent is fixed at creation time and never changes.
         case keyPath(parent: AGAttribute, kp: AnyKeyPath)
 
-        // Cross-graph mirror node. It reads its cached value from a node in another _AGGraph.
+        // Byte-offset-derived node. PointerOffset is the stored-property
+        // counterpart to a key-path projection.
+        case offset(
+            parent: AGAttribute,
+            byteOffset: Int,
+            valueType: ObjectIdentifier,
+            project: (Any) -> Any
+        )
+
+        // Untyped body-offset handle returned by raw AGAttribute.unsafeOffset.
+        // It participates in dependency invalidation but has no readable value
+        // or body/value metadata of its own.
+        case rawOffset(parent: AGAttribute, byteOffset: Int)
+
+        // Cross-graph proxy node. It reads a cached value from a node in another graph.
         // Evaluated lazily via cachedValue(for:) on the source graph (no context switch needed).
         // Invalidated reactively: when the source node changes, the source graph enqueues a
         // markNeedsEvaluation call into this graph's inbox. This graph drains the inbox at
@@ -66,7 +90,7 @@ final class _AGGraph: @unchecked Sendable {
         // the stored default value when target is nil.
         // Used for placeholder view outputs (_ViewOutputs), preference placeholders, and
         // per-child posAttr/sizeAttr in the static layout path.
-        case indirect(target: AGAttribute?)
+        case indirect(target: AGAttribute?, defaultValue: Any?)
 
         var isSideEffect: Bool {
             if case .rule(_, let se) = self { return se }
@@ -76,9 +100,28 @@ final class _AGGraph: @unchecked Sendable {
 
     struct Node {
         var value: Any?
+        var valuesEqual: (Any, Any) -> Bool
+        var flags: AGAttributeFlags = []
         var transaction: Transaction? = nil
         var kind: NodeKind
         var needsEvaluation: Bool = true
+        // Explicit invalidation bypasses input-version validation. Ordinary
+        // propagation can clear needsEvaluation without running this node when
+        // every input retains the version observed during the previous run.
+        var forceEvaluation: Bool = false
+        // Versions advance only when the cached output changes. They separate
+        // upstream dirty scheduling from downstream changed-value propagation.
+        var valueVersion: UInt64 = 0
+        var inputVersions: [UInt32: UInt64] = [:]
+        // Graph-local invalidation traversal marker. This avoids allocating a
+        // hash set for every source mutation while preserving one output walk
+        // per node in cyclic or diamond dependency graphs.
+        var invalidationTraversal: UInt64 = 0
+        // Dependency validation uses an explicit graph-local update stack.
+        // These fields provide cycle and duplicate-path detection without a
+        // temporary hash table for every pull.
+        var updateTraversal: UInt64 = 0
+        var updateTraversalState: UInt8 = 0
         var inputsChanged: Bool = true
         var changedInputs: Set<UInt32> = []
         var isEvaluating: Bool = false  // for cycle detection
@@ -95,6 +138,45 @@ final class _AGGraph: @unchecked Sendable {
         var node: Node?     // nil = free slot
     }
 
+    struct AttributeInfo {
+        var valueType: Any.Type
+        var body: (any _AnyAttributeBodyBox)?
+    }
+
+    struct CachedRuleKey: Hashable {
+        var subgraph: ObjectIdentifier?
+        var ruleHashValue: Int
+        var body: AnyHashable
+    }
+
+    protocol CachedRuleEntry: AnyObject {
+        var attribute: AGWeakAttribute { get }
+    }
+
+    final class TypedCachedRuleEntry<Value>: CachedRuleEntry {
+        let attribute: AGWeakAttribute
+        private let storage: UnsafeMutablePointer<Value>
+
+        init(attribute: AGWeakAttribute, value: Value) {
+            self.attribute = attribute
+            storage = .allocate(capacity: 1)
+            storage.initialize(to: value)
+        }
+
+        deinit {
+            storage.deinitialize(count: 1)
+            storage.deallocate()
+        }
+
+        func store(_ value: Value) {
+            storage.pointee = value
+        }
+
+        var pointer: UnsafePointer<Value> {
+            UnsafePointer(storage)
+        }
+    }
+
     struct RelativePath: Hashable {
         let parentID: UInt32
         let keyPath: AnyKeyPath
@@ -108,12 +190,38 @@ final class _AGGraph: @unchecked Sendable {
         }
     }
 
+    struct RelativeOffsetPath: Hashable {
+        let parentID: UInt32
+        let byteOffset: Int
+        let valueType: ObjectIdentifier
+    }
+
+    struct RawOffsetPath: Hashable {
+        let parentID: UInt32
+        let byteOffset: Int
+    }
+
     // Contiguous slot array: index == AGAttribute.rawValue
     var slots: ContiguousArray<NodeSlot> = []
     // Freed slot indices available for reuse
     var freeList: [UInt32] = []
+    // Type/body metadata is kept beside the slot map so the hot Node record
+    // does not grow merely to support infrequent raw metadata queries.
+    var attributeInfos: [UInt32: AttributeInfo] = [:]
+    // Hashable Rule cache entries are graph-owned Swift storage. The key keeps
+    // the selected subgraph and concrete rule identity separate.
+    var cachedRuleEntries: [CachedRuleKey: any CachedRuleEntry] = [:]
     // Cache for KeyPath-derived child nodes
     var pathIDs: [RelativePath: UInt32] = [:]
+    // Cache for PointerOffset-derived child nodes
+    var offsetPathIDs: [RelativeOffsetPath: UInt32] = [:]
+    // Cache for untyped raw body-offset handles.
+    var rawOffsetPathIDs: [RawOffsetPath: UInt32] = [:]
+    // Initial sources and optional permanent dependency slots for typed
+    // IndirectAttribute values.
+    var indirectDefaultSources: [UInt32: AGAttribute] = [:]
+    var indirectDependencies: [UInt32: AGAttribute] = [:]
+    var nodeSubgraphs: [UInt32: WeakObject<AGSubgraphRef>] = [:]
 #if DEBUG
     var removedNodeTombstones: [UInt32: RemovedNodeTombstone] = [:]
     var removedNodeTombstoneOrder: [UInt32] = []
@@ -125,10 +233,15 @@ final class _AGGraph: @unchecked Sendable {
     // Thread-safe bridge for scheduling AG invalidations from arbitrary threads.
     let inbox: AGInbox = AGInbox()
 
+    // The graph carries one non-owning host context pointer. Keeping the
+    // unretained storage explicit avoids a graph-host retain cycle while the
+    // public facade preserves the runtime's single-context contract.
+    var context: Unmanaged<AnyObject>?
+
     // Cross-graph observer registry.
-    // When a crossGraphRef node in another graph mirrors a node in this graph, an entry is
+    // When a cross-graph proxy observes a node in this graph, an entry is
     // registered here. On every setValue / markNeedsEvaluation for that source node, the
-    // target graph is notified via its inbox so that it can invalidate the mirror node when
+    // target graph is notified via its inbox so that it can invalidate the proxy node when
     // it next enters an AG context (e.g. GestureGraph.sendEvents -> data.withCurrent).
     struct CrossGraphObserver {
         weak var targetGraph: _AGGraph?
@@ -139,6 +252,18 @@ final class _AGGraph: @unchecked Sendable {
     // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
     // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
     var actionOutbox: [() -> Void] = []
+
+    // Side effects created while the graph is already updating join the same
+    // graph-local work list and are drained before the outer update returns.
+    var pendingSideEffectEvaluations: [UInt32] = []
+    var pendingSideEffectEvaluationSet: Set<UInt32> = []
+
+    // Monotonic marker used by markNeedsEvaluation's iterative graph walk.
+    // A nested invalidation starts only after the current walk has finished.
+    var invalidationTraversal: UInt64 = 0
+
+    // Monotonic marker used by the dependency update stack.
+    var updateTraversal: UInt64 = 0
 
     func drainActionOutbox() {
         while !actionOutbox.isEmpty {
@@ -177,6 +302,10 @@ final class _AGGraph: @unchecked Sendable {
     }
 
     init() {}
+
+    static func == (lhs: _AGGraph, rhs: _AGGraph) -> Bool {
+        lhs === rhs
+    }
 
 #if DEBUG
     private let debugExecutionState = Mutex(AGExecutionState())

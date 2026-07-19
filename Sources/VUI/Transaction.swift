@@ -313,7 +313,7 @@ extension Transaction {
         // Older runtime baselines install the child transaction
         // storage as-is. Current semantics merge parent keys first, while
         // keeping completion listener identity local to the child scope.
-        guard isRuntimeBaselineOnOrAfter(.v5) else {
+        guard isDeployedOnOrAfter(.v5) else {
             return self
         }
 

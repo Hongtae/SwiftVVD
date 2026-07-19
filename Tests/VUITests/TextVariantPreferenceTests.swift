@@ -22,7 +22,7 @@ private struct TextVariantInputRecorderContent: View, TestPrimitiveView {
 private struct TextVariantTestLayoutEngine: LayoutEngine {
     var marker: Int
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
         CGSize(width: marker, height: marker)
     }
 }
@@ -895,14 +895,10 @@ final class TextVariantPreferenceTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         return _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(

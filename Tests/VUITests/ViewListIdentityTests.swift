@@ -308,7 +308,7 @@ final class ViewListIdentityTests: XCTestCase {
             start: 0,
             count: 0,
             id: _ViewList_ID(implicitID: 0),
-            elements: EmptyViewListElements(),
+            elements: _ViewList_SubgraphElements(base: EmptyViewListElements()),
             traits: ViewTraitCollection(),
             list: nil
         )
@@ -376,6 +376,60 @@ final class ViewListIdentityTests: XCTestCase {
         ])
         XCTAssertEqual(ids.map(\.canonicalID._index), [1, 2])
     }
+
+    func testHeterogeneousViewIDsAccumulatorRestoresNestedExplicitIDScope() {
+        var accumulator = HeterogeneousViewIDsAccumulator()
+
+        accumulator.withExplicitID("outer", isUnary: true) { scoped in
+            scoped.append(index: 0, implicitID: 10)
+            scoped.withExplicitID("inner", isUnary: false) { nested in
+                nested.append(index: 1, implicitID: 11)
+            }
+            scoped.append(index: 2, implicitID: 12)
+        }
+
+        let ids = accumulator.finalize().asCanonical()
+        XCTAssertEqual(ids.count, 3)
+        XCTAssertEqual(ids[0]._index, 0)
+        XCTAssertEqual(ids[0].implicitID, -1)
+        XCTAssertEqual(ids[0].explicitID, AnyHashable("outer"))
+        XCTAssertEqual(ids[1]._index, 1)
+        XCTAssertEqual(ids[1].implicitID, 11)
+        XCTAssertEqual(ids[1].explicitID, AnyHashable("inner"))
+        XCTAssertEqual(ids[2]._index, 2)
+        XCTAssertEqual(ids[2].implicitID, -1)
+        XCTAssertEqual(ids[2].explicitID, AnyHashable("outer"))
+    }
+
+    func testHeterogeneousViewIDsAccumulatorFinalizesWithoutConsumingBufferedIDs() {
+        var accumulator = HeterogeneousViewIDsAccumulator()
+        accumulator.append(index: 3, implicitID: 7)
+
+        let first = accumulator.finalize().asCanonical()
+        let second = accumulator.finalize().asCanonical()
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(accumulator.count, 1)
+        XCTAssertFalse(accumulator.isEmpty)
+        XCTAssertEqual(first.first?._index, 3)
+        XCTAssertEqual(first.first?.implicitID, 7)
+        XCTAssertNil(first.first?.explicitID)
+    }
+
+    func testHeterogeneousViewIDsAccumulatorPreservesUnaryZeroInRange() {
+        var accumulator = HeterogeneousViewIDsAccumulator()
+        accumulator.append(indices: -1..<2, implicitID: -1, explicitID: "row")
+
+        let ids = accumulator.finalize().asCanonical()
+
+        XCTAssertEqual(ids.map(\._index), [-1, 0, 1])
+        XCTAssertEqual(ids.map(\.implicitID), [-1, -1, -1])
+        XCTAssertEqual(ids.map(\.explicitID), [
+            AnyHashable("row"),
+            AnyHashable("row"),
+            AnyHashable("row"),
+        ])
+    }
 }
 
 private final class TransformCallLog {
@@ -386,7 +440,7 @@ private struct RecordingTransformItem: _ViewList_SublistTransform_Item {
     var name: String
     var log: TransformCallLog
 
-    func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(sublist: inout _ViewList_Sublist) {
         log.events.append("apply:\(name)")
     }
 
@@ -403,7 +457,7 @@ private struct RecordingTransformItem: _ViewList_SublistTransform_Item {
 private struct ApplyingIDTransformItem: _ViewList_SublistTransform_Item {
     var id: String
 
-    func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(sublist: inout _ViewList_Sublist) {
         bindID(&sublist.id)
     }
 
@@ -443,7 +497,9 @@ private struct ExplicitSingleViewList: ViewList {
             start: from,
             count: 1,
             id: _ViewList_ID(explicitID: explicitID),
-            elements: FixedCountViewListElements(count: 1),
+            elements: _ViewList_SubgraphElements(
+                base: FixedCountViewListElements(count: 1)
+            ),
             traits: ViewTraitCollection(),
             list: list
         )

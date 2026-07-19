@@ -7,7 +7,215 @@
 
 import Foundation
 
-public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
+enum ImplicitRootLayout {
+    case zStack
+}
+
+struct ImplicitRootLayoutInput: ViewInput {
+    static var defaultValue: ImplicitRootLayout? { nil }
+}
+
+private func resolveSecondaryLayerGeometry(
+    alignment: Alignment,
+    layoutDirection: LayoutDirection,
+    primaryPosition: CGPoint,
+    primarySize: ViewSize,
+    primaryComputer: LayoutComputer,
+    secondaryComputer: LayoutComputer
+) -> ViewGeometry {
+    let primaryDimensions = ViewDimensions(
+        guideComputer: primaryComputer,
+        size: primarySize
+    )
+    let secondaryDimensions = secondaryComputer.dimensions(
+        in: _ProposedSize(primarySize.value)
+    )
+    var origin = CGPoint(
+        x: primaryPosition.x + primaryDimensions[alignment.horizontal]
+            - secondaryDimensions[alignment.horizontal],
+        y: primaryPosition.y + primaryDimensions[alignment.vertical]
+            - secondaryDimensions[alignment.vertical]
+    )
+    if layoutDirection == .rightToLeft {
+        let centeredOrigin = primaryPosition.x
+            + primaryDimensions[HorizontalAlignment.center]
+            - secondaryDimensions[HorizontalAlignment.center]
+        origin.x = centeredOrigin * 2 - origin.x
+    }
+    return ViewGeometry(origin: origin, dimensions: secondaryDimensions)
+}
+
+private struct SecondaryLayerGeometryQuery: Rule, AsyncAttribute {
+    var _alignment: OptionalAttribute<Alignment>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _primaryPosition: Attribute<CGPoint>
+    var _primarySize: Attribute<ViewSize>
+    var _primaryLayoutComputer: OptionalAttribute<LayoutComputer>
+    var _secondaryLayoutComputer: OptionalAttribute<LayoutComputer>
+
+    var value: ViewGeometry {
+        let primaryComputer =
+            _primaryLayoutComputer.attribute?.value ?? LayoutComputer.defaultValue
+        let primarySize = _primarySize.value
+        let alignment = _alignment.attribute?.value ?? .center
+        let primaryPosition = _primaryPosition.value
+        let secondaryComputer =
+            _secondaryLayoutComputer.attribute?.value ?? LayoutComputer.defaultValue
+        return resolveSecondaryLayerGeometry(
+            alignment: alignment,
+            layoutDirection: _layoutDirection.value,
+            primaryPosition: primaryPosition,
+            primarySize: primarySize,
+            primaryComputer: primaryComputer,
+            secondaryComputer: secondaryComputer
+        )
+    }
+}
+
+func makeSecondaryLayerView<Secondary: View>(
+    secondaryLayer: Attribute<Secondary>,
+    alignment: Attribute<Alignment>?,
+    inputs: _ViewInputs,
+    body: (_Graph, _ViewInputs) -> _ViewOutputs,
+    flipOrder: Bool
+) -> _ViewOutputs {
+    guard let graph = _AGGraph.current else {
+        fatalError("makeSecondaryLayerView called outside an active _AGGraph context.")
+    }
+
+    let primaryOutputs = body(_Graph(), inputs)
+    let primaryLayoutComputer = primaryOutputs._layoutComputer
+
+    let environment = inputs.base.cachedEnvironment.value.environment
+    let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
+        environment.value.layoutDirection
+    }
+    let geometry = graph.makeRule(
+        SecondaryLayerGeometryQuery(
+            _alignment: alignment.map(OptionalAttribute.init) ?? OptionalAttribute(),
+            _layoutDirection: layoutDirection,
+            _primaryPosition: inputs.position,
+            _primarySize: inputs.size,
+            _primaryLayoutComputer: primaryLayoutComputer,
+            _secondaryLayoutComputer: OptionalAttribute()
+        )
+    )
+    var secondaryInputs = inputs
+    secondaryInputs.copyCaches()
+    secondaryInputs.containerPosition = inputs.position
+    secondaryInputs.containerSize = OptionalAttribute(inputs.size)
+    secondaryInputs[ImplicitRootLayoutInput.self] = .zStack
+
+    let secondaryPosition = graph.subscriptNode(
+        parent: geometry,
+        keyPath: \ViewGeometry.origin
+    )
+    let secondarySize = graph.subscriptNode(
+        parent: geometry,
+        keyPath: \ViewGeometry.dimensions.size
+    )
+    secondaryInputs.position = secondaryPosition
+    secondaryInputs.size = secondarySize
+    let parentTransform = inputs.transform
+    secondaryInputs.transform = graph.makeRule {
+        var transform = parentTransform.value
+        transform.appendPosition(secondaryPosition.value)
+        return transform
+    }
+
+    let secondaryOutputs = Secondary._makeView(
+        view: _GraphValue(_attribute: secondaryLayer),
+        inputs: secondaryInputs
+    )
+    graph.mutateRule(
+        geometry.identifier,
+        as: SecondaryLayerGeometryQuery.self,
+        invalidating: true
+    ) { query in
+        query._secondaryLayoutComputer = secondaryOutputs._layoutComputer
+    }
+    let orderedPreferences = flipOrder
+        ? [secondaryOutputs.preferences, primaryOutputs.preferences]
+        : [primaryOutputs.preferences, secondaryOutputs.preferences]
+    let outputLayoutComputer: OptionalAttribute<LayoutComputer>
+    if let primaryAttribute = primaryLayoutComputer.attribute,
+       let secondaryAttribute = secondaryOutputs._layoutComputer.attribute {
+        let bridgedLayoutComputer: Attribute<LayoutComputer> = graph.makeRule {
+            let primaryComputer = primaryAttribute.value
+            let secondaryComputer = secondaryAttribute.value
+            let resolvedAlignment = alignment?.value ?? .center
+            let resolvedLayoutDirection = layoutDirection.value
+            var pendingPlacementTransaction =
+                graph.transaction(for: secondaryLayer.identifier) ??
+                graph.transaction(for: primaryAttribute.identifier) ??
+                graph.transaction(for: secondaryAttribute.identifier)
+            return LayoutComputer(
+                sizeThatFits: { primaryComputer.sizeThatFits($0) },
+                spacing: primaryComputer.spacing(),
+                place: { position, anchor, proposal in
+                    let placementTransaction =
+                        graph.transaction(for: secondaryLayer.identifier) ??
+                        graph.transaction(for: primaryAttribute.identifier) ??
+                        graph.transaction(for: secondaryAttribute.identifier) ??
+                        pendingPlacementTransaction ??
+                        Transaction.current
+                    pendingPlacementTransaction = nil
+                    Transaction.withScopedThreadTransaction(placementTransaction) {
+                        primaryComputer.place(
+                            at: position,
+                            anchor: anchor,
+                            proposal: proposal
+                        )
+
+                        let primarySize = ViewSize(
+                            primaryComputer.sizeThatFits(_ProposedSize(proposal)),
+                            proposal: _ProposedSize(proposal)
+                        )
+                        let primaryOrigin = CGPoint(
+                            x: position.x - primarySize.width * anchor.x,
+                            y: position.y - primarySize.height * anchor.y
+                        )
+                        let secondaryGeometry = resolveSecondaryLayerGeometry(
+                            alignment: resolvedAlignment,
+                            layoutDirection: resolvedLayoutDirection,
+                            primaryPosition: primaryOrigin,
+                            primarySize: primarySize,
+                            primaryComputer: primaryComputer,
+                            secondaryComputer: secondaryComputer
+                        )
+
+                        // Primitive children of the implicit layout still receive
+                        // their concrete geometry through LayoutComputer.place.
+                        // Keep construction lazy, then bridge placement only when
+                        // the enclosing primary layout is actually placed.
+                        secondaryComputer.place(
+                            at: secondaryGeometry.origin,
+                            anchor: .topLeading,
+                            proposal: ProposedViewSize(primarySize.value)
+                        )
+                    }
+                },
+                childGeometries: {
+                    primaryComputer.childGeometries(at: $0, origin: $1)
+                },
+                priority: primaryComputer.layoutPriority(),
+                explicitAlignment: {
+                    primaryComputer.explicitAlignment($0, at: $1)
+                },
+                changeCount: primaryComputer.changeCount
+            )
+        }
+        outputLayoutComputer = OptionalAttribute(bridgedLayoutComputer)
+    } else {
+        outputLayoutComputer = primaryLayoutComputer
+    }
+    return _ViewOutputs(
+        preferences: PreferencesOutputs.merge(orderedPreferences, in: graph),
+        layoutComputer: outputLayoutComputer
+    )
+}
+
+public struct _OverlayModifier<Overlay>: MultiViewModifier, PrimitiveViewModifier where Overlay: View {
     public let overlay: Overlay
     public let alignment: Alignment
 
@@ -17,132 +225,25 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        let mainOutputs = body(_Graph(), inputs)
-        guard let mainLCAttr = mainOutputs._layoutComputer.attribute else {
-            return mainOutputs
-        }
-        let ovPosAttr = graph.makeInput(value: CGPoint.zero)
-        let ovSizeAttr = graph.makeInput(value: ViewSize(.zero))
-        let ovInputs = _ViewInputs(
-            base: inputs.base,
-            customInputs: inputs.customInputs,
-            preferences: inputs.preferences,
-            transform: inputs.transform,
-            position: ovPosAttr,
-            containerPosition: inputs.position,
-            size: ovSizeAttr,
-            safeAreaInsets: inputs.safeAreaInsets,
-            containerSize: inputs.containerSize,
-            stackOrientation: inputs.stackOrientation
-        )
-        let zStackAttr: Attribute<ZStackLayout> = graph.makeRule {
-            ZStackLayout(alignment: modifier._attribute.value.alignment)
-        }
-        let zStackGraph = _GraphValue<ZStackLayout>(_attribute: zStackAttr)
-        let ovOutputs = ZStackLayout._makeLayoutView(root: zStackGraph, inputs: ovInputs) { _, childInputs in
-            Overlay._makeViewList(view: modifier[\.overlay], inputs: _ViewListInputs(from: childInputs))
-        }
-        guard let ovLCAttr = ovOutputs._layoutComputer.attribute else {
-            return mainOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let m = modifier._attribute.value   // dep: alignment changes
-            let mainLC = mainLCAttr.value       // dep: main content changes
-            let ovLC = ovLCAttr.value           // dep: overlay changes
-            var pendingPlacementTransaction =
-                graph.transaction(for: modifier._attribute.identifier) ??
-                graph.transaction(for: mainLCAttr.identifier) ??
-                graph.transaction(for: ovLCAttr.identifier)
-            return LayoutComputer(
-                sizeThatFits: { proposal in mainLC.sizeThatFits(proposal) },
-                spacing: mainLC.spacing,
-                place: { position, anchor, proposal in
-                    mainLC.place(at: position, anchor: anchor, proposal: proposal)
-                    let mainSize = mainLC.sizeThatFits(proposal)
-                    let ox = position.x - mainSize.width * anchor.x
-                    let oy = position.y - mainSize.height * anchor.y
-                    let frame = CGRect(x: ox, y: oy, width: mainSize.width, height: mainSize.height)
-
-                    var ovPosition = frame.origin
-                    var ovAnchor = UnitPoint()
-                    
-                    switch m.alignment.horizontal {
-                    case .leading:
-                        ovPosition.x = frame.minX
-                        ovAnchor.x = 0
-                    case .center:
-                        ovPosition.x = frame.midX
-                        ovAnchor.x = 0.5
-                    case .trailing:
-                        ovPosition.x = frame.maxX
-                        ovAnchor.x = 1
-                    default:
-                        ovPosition.x = frame.midX
-                        ovAnchor.x = 0.5
-                    }
-                    
-                    switch m.alignment.vertical {
-                    case .top:
-                        ovPosition.y = frame.minY
-                        ovAnchor.y = 0
-                    case .center:
-                        ovPosition.y = frame.midY
-                        ovAnchor.y = 0.5
-                    case .bottom:
-                        ovPosition.y = frame.maxY
-                        ovAnchor.y = 1
-                    default:
-                        ovPosition.y = frame.midY
-                        ovAnchor.y = 0.5
-                    }
-
-                    let ovProposal = ProposedViewSize(width: frame.width, height: frame.height)
-                    let ovSize = ovLC.sizeThatFits(ovProposal)
-                    
-                    let ovOriginX = ovPosition.x - ovSize.width * ovAnchor.x
-                    let ovOriginY = ovPosition.y - ovSize.height * ovAnchor.y
-                    
-                    let placementTransaction =
-                        graph.transaction(for: modifier._attribute.identifier) ??
-                        graph.transaction(for: mainLCAttr.identifier) ??
-                        graph.transaction(for: ovLCAttr.identifier) ??
-                        pendingPlacementTransaction ??
-                        Transaction.current
-                    pendingPlacementTransaction = nil
-                    ovPosAttr.setValue(
-                        CGPoint(x: ovOriginX, y: ovOriginY),
-                        transaction: placementTransaction
-                    )
-                    ovSizeAttr.setValue(
-                        ViewSize(ovSize, proposal: ovProposal),
-                        transaction: placementTransaction
-                    )
-                    Transaction.withScopedThreadTransaction(placementTransaction) {
-                        ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
-                    }
-                },
-                explicitAlignment: { mainLC.explicitAlignment($0, at: $1) }
-            )
-        }
-        let mergedPreferences = PreferencesOutputs.merge([mainOutputs.preferences, ovOutputs.preferences], in: graph)
-        return _ViewOutputs(
-            preferences: mergedPreferences,
-            layoutComputer: OptionalAttribute(lcAttr)
+        return makeSecondaryLayerView(
+            secondaryLayer: modifier[\.overlay]._attribute,
+            alignment: modifier[\.alignment]._attribute,
+            inputs: inputs,
+            body: body,
+            flipOrder: false
         )
     }
 }
 
-extension _OverlayModifier: Equatable where Overlay: Equatable {
-}
-
-extension _OverlayModifier: PrimitiveViewModifier, MultiViewModifier {
+@available(*, unavailable)
+extension _OverlayModifier: Sendable {
     public typealias Body = Never
 }
 
-public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
+public struct _OverlayStyleModifier<Style>: MultiViewModifier, PrimitiveViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
 
@@ -189,11 +290,12 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 }
 
-extension _OverlayStyleModifier: PrimitiveViewModifier, MultiViewModifier {
+@available(*, unavailable)
+extension _OverlayStyleModifier: Sendable {
     public typealias Body = Never
 }
 
-public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
+public struct _OverlayShapeModifier<Style, Bounds>: MultiViewModifier, PrimitiveViewModifier where Style: ShapeStyle, Bounds: Shape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -242,7 +344,8 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 }
 
-extension _OverlayShapeModifier: PrimitiveViewModifier, MultiViewModifier {
+@available(*, unavailable)
+extension _OverlayShapeModifier: Sendable {
     public typealias Body = Never
 }
 

@@ -2,6 +2,64 @@ import XCTest
 @testable import VUI
 
 final class SystemScrollViewHostTests: XCTestCase {
+    func testScrollViewContentFrameUsesUnspecifiedScrollableAxes() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            _ = graph.makeInput(value: ())
+            var observedProposal: _ProposedSize?
+            let contentComputer = LayoutComputer(sizeThatFits: { proposal in
+                observedProposal = proposal
+                return CGSize(width: 240, height: 30)
+            })
+
+            let frame = ScrollViewUtilities.contentFrame(
+                in: CGSize(width: 100, height: 80),
+                contentComputer: contentComputer,
+                axes: .horizontal
+            )
+
+            XCTAssertEqual(
+                observedProposal,
+                _ProposedSize(width: nil, height: 80)
+            )
+            XCTAssertEqual(frame.origin, .zero)
+            XCTAssertEqual(frame.size.value, CGSize(width: 240, height: 80))
+            XCTAssertEqual(
+                frame.size.proposal,
+                _ProposedSize(width: nil, height: 80)
+            )
+        }
+    }
+
+    func testScrollViewLayoutSizeKeepsSpecifiedNonScrollableAxis() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            _ = graph.makeInput(value: ())
+            var observedProposal: _ProposedSize?
+            let contentComputer = LayoutComputer(sizeThatFits: { proposal in
+                observedProposal = proposal
+                return CGSize(width: 75, height: 260)
+            })
+
+            let size = ScrollViewUtilities.sizeThatFits(
+                in: ProposedViewSize(width: 100, height: 180),
+                contentComputer: contentComputer,
+                axes: .vertical
+            )
+
+            XCTAssertEqual(
+                observedProposal,
+                _ProposedSize(width: 100, height: nil)
+            )
+            XCTAssertEqual(size, CGSize(width: 100, height: 260))
+            XCTAssertNil(ScrollViewUtilities.sizeThatFits(
+                in: ProposedViewSize(width: 100, height: 180),
+                contentComputer: contentComputer,
+                axes: []
+            ))
+        }
+    }
+
     func testHostingScrollViewAppliesBounceRoleAndSpringsBackFromOverscroll() {
         func makeHost(
             behavior: ScrollBounceBehavior
@@ -387,19 +445,19 @@ final class SystemScrollViewHostTests: XCTestCase {
         var adjustment = SystemScrollLayoutState(contentOffsetSeed: VersionSeed(value: 7))
         adjustment.updateContentOffset(mode: .adjustment(reason: .reset), updateSeed: 4)
         XCTAssertEqual(adjustment.contentOffsetMode, .adjustment(reason: .reset))
-        XCTAssertEqual(adjustment.contentOffsetSeed, VersionSeed(value: 2_340_873_906))
+        XCTAssertEqual(adjustment.contentOffsetSeed.value, 2_340_873_906)
 
         var target = SystemScrollLayoutState(contentOffsetSeed: VersionSeed(value: 7))
         target.updateContentOffset(mode: .target(nil, config: ScrollTargetConfiguration()), updateSeed: 4)
-        XCTAssertEqual(target.contentOffsetSeed, VersionSeed(value: 186_384_208))
+        XCTAssertEqual(target.contentOffsetSeed.value, 186_384_208)
 
         var system = SystemScrollLayoutState()
         system.updateContentOffset(mode: .system, updateSeed: 9)
-        XCTAssertEqual(system.contentOffsetSeed, VersionSeed(value: 9))
+        XCTAssertEqual(system.contentOffsetSeed.value, 9)
 
         var invalid = SystemScrollLayoutState(contentOffsetSeed: VersionSeed(value: .max))
         invalid.updateContentOffset(mode: .adjustment(reason: .alignment), updateSeed: 2)
-        XCTAssertEqual(invalid.contentOffsetSeed, VersionSeed(value: .max))
+        XCTAssertEqual(invalid.contentOffsetSeed.value, UInt32.max)
     }
 
     func testScrollTargetConfigurationCopiesObservedTransactionValues() {
@@ -1103,12 +1161,12 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertEqual(platformState.contentInsets, insets)
             XCTAssertEqual(platformState.systemContentInsets, insets)
             XCTAssertEqual(platformState.contentOffsetMode, .system)
-            XCTAssertEqual(platformState.contentOffsetSeed, VersionSeed())
+            XCTAssertEqual(platformState.contentOffsetSeed.value, 0)
 
             host.publishSystemContentOffset(CGPoint(x: 30, y: 40))
             XCTAssertEqual(state.value.contentOffset, CGPoint(x: 30, y: 40))
             XCTAssertEqual(state.value.contentOffsetMode, .system)
-            XCTAssertEqual(state.value.contentOffsetSeed, VersionSeed(value: 8))
+            XCTAssertEqual(state.value.contentOffsetSeed.value, 8)
         }
     }
 
@@ -1225,7 +1283,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             )
             XCTAssertEqual(adjusted.value.systemTranslation, CGSize(width: 2, height: 3))
             XCTAssertEqual(adjusted.value.contentOffsetMode, .adjustment(reason: .reset))
-            XCTAssertEqual(adjusted.value.contentOffsetSeed, VersionSeed(value: 3_470_406_040))
+            XCTAssertEqual(adjusted.value.contentOffsetSeed.value, 3_470_406_040)
 
             rawState.setValue(SystemScrollLayoutState(
                 contentOffset: CGPoint(x: 12, y: 34),
@@ -1236,7 +1294,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             ))
             XCTAssertEqual(adjusted.value.contentOffset, CGPoint(x: 12, y: 34))
             XCTAssertEqual(adjusted.value.contentOffsetMode, .system)
-            XCTAssertEqual(adjusted.value.contentOffsetSeed, VersionSeed(value: 6))
+            XCTAssertEqual(adjusted.value.contentOffsetSeed.value, 6)
 
             let host = graph.makeInput(value: HostingScrollView(
                 graphRef: graphRef,

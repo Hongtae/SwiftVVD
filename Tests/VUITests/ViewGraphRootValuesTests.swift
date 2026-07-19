@@ -23,7 +23,7 @@ final class ViewGraphRootValuesTests: XCTestCase {
             rendererHost: host
         )
         host.storage = viewGraph
-        let delegate = RecordingViewGraphDelegate()
+        let delegate = RecordingViewGraphDelegate(graph: viewGraph)
         viewGraph.viewDelegate = delegate
 
         host.invalidateProperties([.size], mayDeferUpdate: false)
@@ -61,10 +61,32 @@ private final class TestRootValueUpdaterHost: ViewRendererHost, ViewGraphRootVal
     func updateSize() {}
     func updateSafeArea() {}
     func updateContainerSize() {}
+
+    func requestUpdate(after: Double) {}
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        self as? T
+    }
 }
 
 private final class RecordingViewGraphDelegate: ViewGraphDelegate {
+    weak var graph: ViewGraph?
     var setNeedsUpdateCount = 0
+
+    init(graph: ViewGraph) {
+        self.graph = graph
+    }
+
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        guard let graph else {
+            fatalError("The view graph must outlive its delegate.")
+        }
+        return body(graph)
+    }
+
+    func graphDidChange() {
+        setNeedsUpdate()
+    }
 
     func setNeedsUpdate() {
         setNeedsUpdateCount += 1

@@ -318,40 +318,76 @@ final class ListenerPair: AnimationListener, @unchecked Sendable {
 private typealias AtomicBox<Value> = Mutex<Value>
 
 private struct PendingListeners {
-    final class WeakListener {
+    struct WeakListener {
         weak var listener: AnimationListener?
+        var time: DispatchTime
 
-        init(_ listener: AnimationListener) {
+        init(_ listener: AnimationListener, time: DispatchTime) {
             self.listener = listener
+            self.time = time
         }
     }
 
-    var listeners: [WeakListener] = []
-    var isDispatchScheduled = false
+    var pending: [WeakListener] = []
+    var next: DispatchTime?
 }
 
 private let pendingListeners = AtomicBox(PendingListeners())
 
 extension Transaction {
     static func addPendingListener(_ listener: AnimationListener) {
-        let shouldSchedule = pendingListeners.withLock { storage in
-            storage.listeners.append(PendingListeners.WeakListener(listener))
-            if storage.isDispatchScheduled {
-                return false
+        let time = DispatchTime.now() + .milliseconds(10)
+        let next = pendingListeners.withLock { storage -> DispatchTime? in
+            storage.pending.append(
+                PendingListeners.WeakListener(listener, time: time)
+            )
+            if let next = storage.next, next <= time {
+                return nil
             }
-            storage.isDispatchScheduled = true
-            return true
+            storage.next = time
+            return time
         }
 
-        guard shouldSchedule else {
+        guard let next else {
             return
         }
 
-        DispatchQueue.main.async {
-            let actions = Transaction.dispatchPendingListeners(
-                finalizingStandalonePending: true
-            )
-            enqueueAnimationCompletionActions(actions)
+        DispatchQueue.main.asyncAfter(deadline: next) {
+            Transaction.dispatchDuePendingListeners()
+        }
+    }
+
+    private static func dispatchDuePendingListeners() {
+        let now = DispatchTime.now()
+        let result = pendingListeners.withLock { storage in
+            var due: [AnimationListener] = []
+            var future: [PendingListeners.WeakListener] = []
+            future.reserveCapacity(storage.pending.count)
+
+            for weakListener in storage.pending {
+                if weakListener.time <= now {
+                    if let listener = weakListener.listener {
+                        due.append(listener)
+                    }
+                } else if weakListener.listener != nil {
+                    future.append(weakListener)
+                }
+            }
+
+            storage.pending = future
+            storage.next = future.map(\.time).min()
+            return (due, storage.next)
+        }
+
+        let actions = Update.ensure {
+            result.0.flatMap { $0.finalizeStandalonePendingTransaction() }
+        }
+        enqueueAnimationCompletionActions(actions)
+
+        if let next = result.1 {
+            DispatchQueue.main.asyncAfter(deadline: next) {
+                Transaction.dispatchDuePendingListeners()
+            }
         }
     }
 
@@ -359,9 +395,9 @@ extension Transaction {
         finalizingStandalonePending: Bool = false
     ) -> [() -> Void] {
         let pending = pendingListeners.withLock { storage in
-            let listeners = storage.listeners.compactMap(\.listener)
-            storage.listeners.removeAll()
-            storage.isDispatchScheduled = false
+            let listeners = storage.pending.compactMap(\.listener)
+            storage.pending.removeAll()
+            storage.next = nil
             return listeners
         }
         let actions = Update.ensure {
@@ -740,5 +776,3 @@ extension Transaction {
         }
     }
 }
-
-

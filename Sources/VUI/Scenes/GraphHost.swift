@@ -34,7 +34,7 @@ struct CustomGraphMutation: GraphMutation {
     }
 }
 
-struct EmptyGraphMutation: GraphMutation {
+private struct EmptyGraphMutation: GraphMutation {
     func apply() {}
 }
 
@@ -63,159 +63,353 @@ struct InvalidatingGraphMutation: GraphMutation {
 }
 
 struct AssignmentGraphMutation<Value>: GraphMutation {
-    var attribute: WeakAttribute<Value>
-    var value: Value
+    var target: WeakAttribute<Value>?
+    var newValue: Value
+
+    init(_ target: WeakAttribute<Value>?, newValue: Value) {
+        self.target = target
+        self.newValue = newValue
+    }
 
     func apply() {
         guard let graph = _AGGraph.current,
-              attribute.isValid(in: graph) else {
+              let target,
+              target.isValid(in: graph) else {
             return
         }
-        attribute.toStrong().setValue(value, transaction: Transaction.current)
+        target.toStrong().setValue(newValue, transaction: Transaction.current)
     }
 
     mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
         guard let mutation = mutation as? AssignmentGraphMutation<Value>,
-              attribute == mutation.attribute else {
+              target == mutation.target else {
             return false
         }
-        value = mutation.value
+        newValue = mutation.newValue
         return true
     }
 }
 
-enum _GraphMutation_Style: UInt8, Hashable {
-    case immediate = 0
-    case deferred = 1
+enum _GraphMutation_Style: Hashable {
+    case immediate
+    case deferred
 }
 
-// GraphHost is the root _AGGraph-owning base class.
-// `data` wraps the shared graph core with a per-host context pointer and the
-// per-host seed attributes used by graph/update transaction bookkeeping.
-// Multiple hosts can share one underlying _AGGraph while each holds its
-// own data wrapper.
-class GraphHost {
+private struct ConstantKey: Hashable {
+    var type: Any.Type
+    var id: GraphHost.ConstantID
+
+    static func == (lhs: ConstantKey, rhs: ConstantKey) -> Bool {
+        lhs.type == rhs.type && lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(type))
+        hasher.combine(id)
+    }
+}
+
+private enum TransactionHostProviderKey: Equatable {
+    case object(ObjectIdentifier)
+    case type(ObjectIdentifier)
+
+    init(_ hostProvider: any TransactionHostProvider) {
+        if Mirror(reflecting: hostProvider).displayStyle == .class {
+            self = .object(ObjectIdentifier(hostProvider as AnyObject))
+        } else {
+            self = .type(ObjectIdentifier(Swift.type(of: hostProvider)))
+        }
+    }
+}
+
+private struct AsyncTransaction {
+    var transaction: Transaction
+    var transactionID: Transaction.ID
+    var traceID: UInt32
+    var mutations: [any GraphMutation]
+
+    mutating func append<M>(_ mutation: M) where M: GraphMutation {
+        if !mutations.isEmpty {
+            let lastIndex = mutations.index(before: mutations.endIndex)
+            if mutations[lastIndex].combine(with: mutation) {
+                return
+            }
+        }
+        mutations.append(mutation)
+    }
+
+    func apply() {
+        for mutation in mutations {
+            mutation.apply()
+        }
+    }
+}
+
+private struct GlobalTransaction {
+    var hostProvider: any TransactionHostProvider
+    var base: AsyncTransaction
+
+    func matches(
+        hostProvider: any TransactionHostProvider,
+        id: Transaction.ID,
+        transaction: Transaction
+    ) -> Bool {
+        TransactionHostProviderKey(self.hostProvider) ==
+            TransactionHostProviderKey(hostProvider) &&
+        base.transactionID == id &&
+        base.transaction.plist.isEqual(to: transaction.plist)
+    }
+
+    mutating func append<M>(_ mutation: M) where M: GraphMutation {
+        base.append(mutation)
+    }
+
+    func apply() {
+        if let host = hostProvider.mutationHost {
+            host.runTransaction(
+                base.transaction,
+                do: { base.apply() },
+                id: base.transactionID.value
+            )
+            host.graphDelegate?.graphDidChange()
+        } else {
+            Transaction.withScopedThreadTransaction(base.transaction) {
+                base.apply()
+            }
+        }
+    }
+}
+
+enum CustomEventTrace {
+    enum InstantiationEventType: Int8, Hashable {
+        case assign
+        case instantiateBegin
+        case instantiateEnd
+        case uninstantiateBegin
+        case uninstantiateEnd
+        case recordNamedProperty
+
+        enum Kind: Int8, Hashable {
+            case graph
+            case app
+            case view
+            case gesture
+            case widget
+        }
+    }
+}
+
+class GraphHost: CustomReflectable {
     private static let maxTransactionUpdatePassCount = 8
 
-    struct RemovedState: OptionSet, Hashable {
+    struct RemovedState: OptionSet {
         let rawValue: UInt8
 
         static let unattached = RemovedState(rawValue: 1 << 0)
         static let hiddenForReuse = RemovedState(rawValue: 1 << 1)
     }
 
-    struct Data: @unchecked Sendable {
-        private var ref: _AGGraphContext
+    enum ConstantID: Int8, Hashable {
+        case defaultValue
+        case implicitViewRoot
+        case trueValue
+        case defaultValue3D
+        case failedValue
+        case placeholder
+        case preferenceKeyDefault
+    }
 
-        private(set) var globalSubgraph: AGSubgraph
-        private(set) var rootSubgraph: AGSubgraph
-        private(set) var updateSeedAttribute: Attribute<UInt32>
-        private(set) var transactionSeedAttribute: Attribute<UInt32>
-        private(set) var phaseAttribute: Attribute<Phase>
+    struct Data {
+        private var graphRef: AGGraphRef?
+        var globalSubgraph: AGSubgraphRef
+        var rootSubgraph: AGSubgraphRef
+        var isRemoved: Bool
+        var isHiddenForReuse: Bool
+        var _time: Attribute<Time>
+        var _environment: Attribute<EnvironmentValues>
+        var _phase: Attribute<_GraphInputs.Phase>
+        var _hostPreferenceKeys: Attribute<PreferenceKeys>
+        var _transaction: Attribute<Transaction>
+        var _updateSeed: Attribute<UInt32>
+        var _transactionSeed: Attribute<UInt32>
+        var inputs: _GraphInputs
 
-        init(graph: _AGGraph) {
-            let ref = _AGGraphContext(graph: graph)
-            var globalSubgraph: AGSubgraph!
-            var rootSubgraph: AGSubgraph!
-            var updateSeedAttribute: Attribute<UInt32>!
-            var transactionSeedAttribute: Attribute<UInt32>!
-            var phaseAttribute: Attribute<Phase>!
-            ref.withCurrent {
+        init() {
+            let graph = _AGGraph()
+            var globalSubgraph: AGSubgraphRef!
+            var rootSubgraph: AGSubgraphRef!
+            var time: Attribute<Time>!
+            var environment: Attribute<EnvironmentValues>!
+            var phase: Attribute<_GraphInputs.Phase>!
+            var hostPreferenceKeys: Attribute<PreferenceKeys>!
+            var transaction: Attribute<Transaction>!
+            var updateSeed: Attribute<UInt32>!
+            var transactionSeed: Attribute<UInt32>!
+            _AGGraph.withCurrent(graph) {
                 globalSubgraph = AGSubgraph()
                 AGSubgraph.withCurrent(globalSubgraph) {
                     rootSubgraph = AGSubgraph()
                 }
-                updateSeedAttribute = graph.makeInput(value: UInt32.zero)
-                transactionSeedAttribute = graph.makeInput(value: UInt32.zero)
-                phaseAttribute = graph.makeInput(value: Phase())
+                time = graph.makeInput(value: Time.zero)
+                environment = graph.makeInput(value: EnvironmentValues())
+                phase = graph.makeInput(value: _GraphInputs.Phase())
+                hostPreferenceKeys = graph.makeInput(value: PreferenceKeys())
+                transaction = graph.makeInput(value: Transaction())
+                updateSeed = graph.makeInput(value: UInt32.zero)
+                transactionSeed = graph.makeInput(value: UInt32.zero)
             }
-            self.ref = ref
+            self.graphRef = graph
             self.globalSubgraph = globalSubgraph
             self.rootSubgraph = rootSubgraph
-            self.updateSeedAttribute = updateSeedAttribute
-            self.transactionSeedAttribute = transactionSeedAttribute
-            self.phaseAttribute = phaseAttribute
+            self.isRemoved = false
+            self.isHiddenForReuse = false
+            self._time = time
+            self._environment = environment
+            self._phase = phase
+            self._hostPreferenceKeys = hostPreferenceKeys
+            self._transaction = transaction
+            self._updateSeed = updateSeed
+            self._transactionSeed = transactionSeed
+            self.inputs = _GraphInputs(
+                time: time,
+                phase: phase,
+                environment: environment,
+                transaction: transaction
+            )
         }
 
-        var graph: _AGGraph {
-            ref.graph
+        var time: Time {
+            get { withCurrent { _time.value } }
+            set { withCurrent { _time.setValue(newValue) } }
         }
 
-        var context: AnyObject? {
-            get { ref.context }
-            set { ref.context = newValue }
+        var environment: EnvironmentValues {
+            get { withCurrent { _environment.value } }
+            set { withCurrent { _environment.setValue(newValue) } }
+        }
+
+        var phase: _GraphInputs.Phase {
+            get { withCurrent { _phase.value } }
+            set { withCurrent { _phase.setValue(newValue) } }
+        }
+
+        var hostPreferenceKeys: PreferenceKeys {
+            get { withCurrent { _hostPreferenceKeys.value } }
+            set { withCurrent { _hostPreferenceKeys.setValue(newValue) } }
+        }
+
+        var transaction: Transaction {
+            get { withCurrent { _transaction.value } }
+            set { withCurrent { _transaction.setValue(newValue) } }
         }
 
         var updateSeed: UInt32 {
-            get { ref.withCurrent { updateSeedAttribute.value } }
-            nonmutating set { ref.withCurrent { updateSeedAttribute.setValue(newValue) } }
+            get { withCurrent { _updateSeed.value } }
+            set { withCurrent { _updateSeed.setValue(newValue) } }
         }
 
         var transactionSeed: UInt32 {
-            get { ref.withCurrent { transactionSeedAttribute.value } }
-            nonmutating set { ref.withCurrent { transactionSeedAttribute.setValue(newValue) } }
+            get { withCurrent { _transactionSeed.value } }
+            set { withCurrent { _transactionSeed.setValue(newValue) } }
         }
 
-        func incrementUpdateSeed() {
-            updateSeed = updateSeed &+ 1
+        var graph: AGGraphRef {
+            guard let graphRef else {
+                fatalError("GraphHost.Data used after invalidation.")
+            }
+            return graphRef
         }
 
-        func incrementTransactionSeed() {
-            transactionSeed = transactionSeed &+ 1
+        var isValid: Bool {
+            graphRef != nil
+        }
+
+        mutating func invalidate() {
+            guard graphRef != nil else { return }
+            withCurrent {
+                globalSubgraph.invalidate()
+            }
+            graphRef = nil
         }
 
         func withCurrent<R>(_ body: () throws -> R) rethrows -> R {
-            try ref.withCurrent(body)
+            guard let graph = graphRef else {
+                fatalError("GraphHost.Data used after invalidation.")
+            }
+            return try _AGGraphContext(graph: graph).withCurrent(body)
         }
     }
 
     var data: Data
-    private(set) var isUpdating: Bool = false
-    private(set) var needsTransaction: Bool = false
-    private(set) var isRemoved: Bool = false
-    private(set) var isHiddenForReuse: Bool = false
+    private var constants: [ConstantKey: AGAttribute] = [:]
+    private(set) var isInstantiated: Bool = false
+    var hostPreferenceValues = WeakAttribute<PreferenceValues>()
+    var lastHostPreferencesSeed = VersionSeed()
+    private var pendingTransactions: [AsyncTransaction] = []
+    private var inTransaction: Bool = false
+    private var continuations: [any GraphMutation] = []
+    private(set) var mayDeferUpdate: Bool = true
     var removedState: RemovedState = [] {
         didSet {
             updateRemovedState()
         }
     }
-    var hostPreferenceValues: WeakAttribute<PreferenceValues>?
-    private var mayDeferUpdateLatch: Bool = true
-    private var pendingTransactions: [AsyncTransaction] = []
-    private var pendingGraphMutations: [any GraphMutation] = []
 
     static var currentHost: GraphHost {
-        guard let ref = _AGGraphContext.current,
-              let host = ref.context as? GraphHost else {
+        guard let graph = _AGGraph.current,
+              let host = AGGraphGetContext(graph) as? GraphHost else {
             fatalError("GraphHost.currentHost accessed outside an active graph host context.")
         }
         return host
     }
 
-    /// Creates a new _AGGraph core and wraps it in an _AGGraphContext owned by self.
-    init() {
-        let graph = _AGGraph()
-        self.data = Data(graph: graph)
-        self.data.context = self
+    public var customMirror: Swift.Mirror {
+        Swift.Mirror(self, children: EmptyCollection<(label: String?, value: Any)>())
     }
 
-    /// Wraps an existing _AGGraph core in a new _AGGraphContext owned by self.
-    /// Used when a second GraphHost (e.g. GestureGraph) shares the same core as another.
-    init(graph: _AGGraph) {
-        self.data = Data(graph: graph)
-        self.data.context = self
+    init(data: Data) {
+        self.data = data
+        AGGraphSetContext(data.graph, self)
     }
 
     var hasPendingTransactions: Bool {
         !pendingTransactions.isEmpty
     }
 
-    var hasPendingGraphMutations: Bool {
-        !pendingGraphMutations.isEmpty
+    static var isUpdating: Bool {
+        _AGGraph.currentlyUpdatingGraphs != nil
     }
 
-    var mayDeferUpdate: Bool {
-        mayDeferUpdateLatch
+    var isUpdating: Bool {
+        inTransaction
+    }
+
+    var needsTransaction: Bool {
+        !continuations.isEmpty
+    }
+
+    var isValid: Bool {
+        data.isValid
+    }
+
+    var graph: AGGraphRef {
+        data.graph
+    }
+
+    var globalSubgraph: AGSubgraphRef {
+        data.globalSubgraph
+    }
+
+    var rootSubgraph: AGSubgraphRef {
+        data.rootSubgraph
+    }
+
+    var graphInputs: _GraphInputs {
+        data.inputs
+    }
+
+    var environment: EnvironmentValues {
+        data.environment
     }
 
     var parentHost: GraphHost? {
@@ -226,10 +420,114 @@ class GraphHost {
         nil
     }
 
-    func preferenceValues() -> PreferenceValues {
+    func instantiateOutputs() {}
+
+    func uninstantiateOutputs() {}
+
+    func timeDidChange() {}
+
+    func instantiateIfNeeded() {
+        if !isInstantiated {
+            instantiate()
+        }
+    }
+
+    func instantiate() {
+        guard !isInstantiated else { return }
+        if let graphDelegate {
+            graphDelegate.updateGraph { _ in
+                data.withCurrent {
+                    AGSubgraph.withCurrent(rootSubgraph) {
+                        instantiateOutputs()
+                    }
+                }
+            }
+        } else {
+            data.withCurrent {
+                AGSubgraph.withCurrent(rootSubgraph) {
+                    instantiateOutputs()
+                }
+            }
+        }
+        isInstantiated = true
+    }
+
+    func uninstantiate() {
+        uninstantiate(immediately: false)
+    }
+
+    func uninstantiate(immediately: Bool) {
+        guard isInstantiated else { return }
+        let oldRoot = data.rootSubgraph
         data.withCurrent {
-            guard let hostPreferenceValues,
-                  hostPreferenceValues.isValid(in: data.graph) else {
+            uninstantiateOutputs()
+            oldRoot.willRemove()
+            data.inputs.cachedEnvironment = MutableBox(
+                CachedEnvironment(environment: data._environment)
+            )
+            AGSubgraph.withCurrent(data.globalSubgraph) {
+                data.rootSubgraph = AGSubgraph()
+            }
+        }
+        isInstantiated = false
+
+        let invalidateOldRoot = { [data] in
+            data.withCurrent {
+                oldRoot.invalidate()
+                oldRoot.removeFromParent()
+            }
+        }
+        if immediately {
+            invalidateOldRoot()
+        } else {
+            Update.enqueueAction(reason: 0x11, invalidateOldRoot)
+        }
+    }
+
+    func invalidate() {
+        if isInstantiated {
+            data.withCurrent {
+                rootSubgraph.willRemove()
+            }
+            isInstantiated = false
+        }
+        data.invalidate()
+    }
+
+    func setTime(_ time: Time) {
+        data.withCurrent {
+            guard data._time.value != time else { return }
+            data._time.setValue(time)
+            timeDidChange()
+        }
+    }
+
+    func setEnvironment(_ environment: EnvironmentValues) {
+        data.withCurrent {
+            data._environment.setValue(environment)
+        }
+    }
+
+    func intern<Value>(
+        _ value: Value,
+        for type: Any.Type,
+        id: ConstantID
+    ) -> Attribute<Value> {
+        let key = ConstantKey(type: type, id: id)
+        if let attribute = constants[key] {
+            return Attribute<Value>(attribute)
+        }
+        let attribute = data.withCurrent {
+            graph.makeInput(value: value)
+        }
+        constants[key] = attribute.identifier
+        return attribute
+    }
+
+    func preferenceValues() -> PreferenceValues {
+        instantiateIfNeeded()
+        return data.withCurrent {
+            guard hostPreferenceValues.isValid(in: graph) else {
                 return PreferenceValues()
             }
             return hostPreferenceValues.toStrong().value
@@ -238,6 +536,10 @@ class GraphHost {
 
     func isHiddenForReuseDidChange() {}
 
+    func hostKind() -> CustomEventTrace.InstantiationEventType.Kind {
+        .graph
+    }
+
     func graphInvalidation(from attribute: AGAttribute?) {
         guard let attribute else {
             graphDelegate?.graphDidChange()
@@ -245,24 +547,24 @@ class GraphHost {
         }
 
         data.withCurrent {
-            guard let weakAttribute = data.graph.weakAttributeIfValid(for: attribute) else {
+            guard let weakAttribute = graph.weakAttributeIfValid(for: attribute) else {
                 return
             }
             continueTransaction(invalidating: weakAttribute)
         }
     }
 
-    func setPhase(_ phase: Phase) {
+    func setPhase(_ phase: _GraphInputs.Phase) {
         data.withCurrent {
-            data.phaseAttribute.setValue(phase)
+            data._phase.setValue(phase)
         }
     }
 
     func incrementPhase() {
         data.withCurrent {
-            var phase = data.phaseAttribute.value
+            var phase = data._phase.value
             phase.rawValue &+= 0x2
-            data.phaseAttribute.setValue(phase)
+            data._phase.setValue(phase)
         }
         graphDelegate?.graphDidChange()
     }
@@ -282,7 +584,7 @@ class GraphHost {
             nextRemoved = false
         }
 
-        if nextRemoved != isRemoved {
+        if nextRemoved != data.isRemoved {
             data.withCurrent {
                 if nextRemoved {
                     data.rootSubgraph.willRemove()
@@ -290,12 +592,12 @@ class GraphHost {
                     data.rootSubgraph.didReinsert()
                 }
             }
-            isRemoved = nextRemoved
+            data.isRemoved = nextRemoved
         }
 
         let nextHiddenForReuse = sourceState.contains(.hiddenForReuse)
-        if nextHiddenForReuse != isHiddenForReuse {
-            isHiddenForReuse = nextHiddenForReuse
+        if nextHiddenForReuse != data.isHiddenForReuse {
+            data.isHiddenForReuse = nextHiddenForReuse
             isHiddenForReuseDidChange()
         }
     }
@@ -321,7 +623,8 @@ class GraphHost {
         narrowMayDeferUpdate(mayDeferUpdate)
 
         if let index = pendingTransactions.lastIndex(where: { pending in
-            pending.id == id && pending.transaction.plist.isEqual(to: transaction.plist)
+            pending.transactionID == id &&
+                pending.transaction.plist.isEqual(to: transaction.plist)
         }) {
             pendingTransactions[index].append(mutation)
             let traceID = pendingTransactions[index].traceID
@@ -345,14 +648,50 @@ class GraphHost {
         pendingTransactions.append(
             AsyncTransaction(
                 transaction: transaction,
-                id: id,
-                mutations: [mutation],
-                style: style,
-                mayDeferUpdate: mayDeferUpdate,
-                traceID: traceID
+                transactionID: id,
+                traceID: traceID,
+                mutations: [mutation]
             )
         )
         return traceID
+    }
+
+    @discardableResult
+    func asyncTransaction<Value>(
+        _ transaction: Transaction = Transaction(),
+        id: Transaction.ID = Transaction.id,
+        setting target: WeakAttribute<Value>,
+        to newValue: Value,
+        style: _GraphMutation_Style = .deferred,
+        mayDeferUpdate: Bool = true
+    ) -> UInt32 {
+        asyncTransaction(
+            transaction,
+            id: id,
+            mutation: AssignmentGraphMutation(
+                target,
+                newValue: newValue
+            ),
+            style: style,
+            mayDeferUpdate: mayDeferUpdate
+        )
+    }
+
+    @discardableResult
+    func asyncTransaction<Value>(
+        _ transaction: Transaction = Transaction(),
+        id: Transaction.ID = Transaction.id,
+        invalidating target: WeakAttribute<Value>,
+        style: _GraphMutation_Style = .deferred,
+        mayDeferUpdate: Bool = true
+    ) -> UInt32 {
+        asyncTransaction(
+            transaction,
+            id: id,
+            mutation: InvalidatingGraphMutation(attribute: target.base),
+            style: style,
+            mayDeferUpdate: mayDeferUpdate
+        )
     }
 
     @discardableResult
@@ -402,11 +741,12 @@ class GraphHost {
         }
 
         host.appendGraphMutation(mutation)
-        host.needsTransaction = true
     }
 
     func continueTransaction<Value>(setting attribute: WeakAttribute<Value>, to value: Value) {
-        continueTransaction(AssignmentGraphMutation(attribute: attribute, value: value))
+        continueTransaction(
+            AssignmentGraphMutation(attribute, newValue: value)
+        )
     }
 
     func continueTransaction<M>(_ mutation: M) where M: GraphMutation {
@@ -427,7 +767,6 @@ class GraphHost {
         }
 
         host.appendGraphMutation(mutation)
-        host.needsTransaction = true
     }
 
     var hasPendingGlobalTransactions: Bool {
@@ -447,9 +786,12 @@ class GraphHost {
         hostProvider: any TransactionHostProvider
     ) where M: GraphMutation {
         globalTransactionState.withLock {
-            let providerKey = TransactionHostProviderKey(hostProvider)
             if let index = globalTransactionState.pendingTransactions.lastIndex(where: { pending in
-                pending.matches(providerKey: providerKey, id: id, transaction: transaction)
+                pending.matches(
+                    hostProvider: hostProvider,
+                    id: id,
+                    transaction: transaction
+                )
             }) {
                 // Same provider identity, transaction id, and transaction plist
                 // share one queued global transaction; only the mutation payload
@@ -463,15 +805,12 @@ class GraphHost {
             let wasEmpty = globalTransactionState.pendingTransactions.isEmpty
             globalTransactionState.pendingTransactions.append(
                 GlobalTransaction(
-                    providerKey: providerKey,
                     hostProvider: hostProvider,
-                    asyncTransaction: AsyncTransaction(
+                    base: AsyncTransaction(
                         transaction: transaction,
-                        id: id,
-                        mutations: [mutation],
-                        style: .deferred,
-                        mayDeferUpdate: true,
-                        traceID: traceID
+                        transactionID: id,
+                        traceID: traceID,
+                        mutations: [mutation]
                     )
                 )
             )
@@ -514,52 +853,100 @@ class GraphHost {
         let transactions = pendingTransactions
         pendingTransactions.removeAll()
         for transaction in transactions {
-            runTransaction(transaction.transaction, id: transaction.id.value) {
-                Transaction.withScopedThreadTransaction(transaction.transaction) {
-                    transaction.apply()
-                }
-            }
+            runTransaction(
+                transaction.transaction,
+                do: {
+                    Transaction.withScopedThreadTransaction(transaction.transaction) {
+                        transaction.apply()
+                    }
+                },
+                id: transaction.transactionID.value
+            )
         }
         graphDelegate?.graphDidChange()
         resetMayDeferUpdate()
     }
 
     func startTransactionUpdate(id: UInt32? = nil) {
-        isUpdating = true
-        data.incrementTransactionSeed()
-    }
-
-    func finishTransactionUpdate(id: UInt32? = nil) {
-        finishTransactionUpdate(in: nil, postUpdate: { _ in }, id: id)
+        inTransaction = true
+        data.transactionSeed &+= 1
     }
 
     func finishTransactionUpdate(
-        in subgraph: AGSubgraph? = nil,
-        postUpdate: (Bool) -> Void = { _ in },
-        id: UInt32? = nil
+        in subgraph: AGSubgraphRef,
+        postUpdate: (Bool) -> Void,
+        id: UInt32?
     ) {
         data.withCurrent {
             _ = id
-            drainGraphMutationPasses(in: subgraph ?? data.rootSubgraph, postUpdate: postUpdate)
+            drainGraphMutationPasses(in: subgraph, postUpdate: postUpdate)
         }
-        isUpdating = false
+        inTransaction = false
     }
 
-    func runTransaction<R>(
-        _ transaction: Transaction? = nil,
-        id: UInt32? = nil,
-        do body: () throws -> R
-    ) rethrows -> R {
-        try data.withCurrent {
+    func runTransaction(
+        _ transaction: Transaction?,
+        do body: () -> Void,
+        id: UInt32?
+    ) {
+        instantiateIfNeeded()
+        data.withCurrent {
+            _ = transaction
             startTransactionUpdate(id: id)
-            defer { finishTransactionUpdate(id: id) }
-            return try body()
+            body()
+            finishTransactionUpdate(
+                in: data.rootSubgraph,
+                postUpdate: { _ in },
+                id: id
+            )
         }
+    }
+
+    func runTransaction() {
+        runTransaction(nil, do: {}, id: nil)
+    }
+
+    func addPreference<Key>(_ key: Key.Type) where Key: HostPreferenceKey {
+        data.withCurrent {
+            var keys = data.hostPreferenceKeys
+            keys.add(key)
+            data.hostPreferenceKeys = keys
+        }
+    }
+
+    func removePreference<Key>(_ key: Key.Type) where Key: HostPreferenceKey {
+        data.withCurrent {
+            var keys = data.hostPreferenceKeys
+            keys.remove(key)
+            data.hostPreferenceKeys = keys
+        }
+    }
+
+    func preferenceValue<Key>(_ key: Key.Type) -> Key.Value
+    where Key: HostPreferenceKey {
+        let wasRegistered = data.hostPreferenceKeys.contains(key)
+        if !wasRegistered {
+            addPreference(key)
+        }
+        defer {
+            if !wasRegistered {
+                removePreference(key)
+            }
+        }
+        return preferenceValues().value(for: key).value
     }
 
     @discardableResult
     func updatePreferences() -> Bool {
-        false
+        let seed = data.withCurrent { () -> VersionSeed in
+            guard hostPreferenceValues.isValid(in: graph) else {
+                return .empty
+            }
+            return hostPreferenceValues.toStrong().value.seed
+        }
+        let changed = !lastHostPreferencesSeed.matches(seed)
+        lastHostPreferencesSeed = seed
+        return changed
     }
 
     private static func nextAsyncTransactionTrace() -> UInt32 {
@@ -567,11 +954,11 @@ class GraphHost {
     }
 
     private func narrowMayDeferUpdate(_ value: Bool) {
-        mayDeferUpdateLatch = mayDeferUpdateLatch && value
+        mayDeferUpdate = mayDeferUpdate && value
     }
 
     private func resetMayDeferUpdate() {
-        mayDeferUpdateLatch = true
+        mayDeferUpdate = true
     }
 
     private var updatingMutationHost: GraphHost? {
@@ -586,23 +973,26 @@ class GraphHost {
     }
 
     private func appendGraphMutation<M>(_ mutation: M) where M: GraphMutation {
-        if !pendingGraphMutations.isEmpty {
-            let lastIndex = pendingGraphMutations.index(before: pendingGraphMutations.endIndex)
-            if pendingGraphMutations[lastIndex].combine(with: mutation) {
+        if !continuations.isEmpty {
+            let lastIndex = continuations.index(before: continuations.endIndex)
+            if continuations[lastIndex].combine(with: mutation) {
                 return
             }
         }
-        pendingGraphMutations.append(mutation)
+        continuations.append(mutation)
     }
 
-    private func drainGraphMutationPasses(in subgraph: AGSubgraph, postUpdate: (Bool) -> Void) {
+    private func drainGraphMutationPasses(
+        in subgraph: AGSubgraphRef,
+        postUpdate: (Bool) -> Void
+    ) {
         var passCount = 0
 
         repeat {
             drainGraphMutationPass()
             subgraph.update(flags: 1)
 
-            let needsFollowUp = !pendingGraphMutations.isEmpty
+            let needsFollowUp = !continuations.isEmpty
             postUpdate(needsFollowUp)
 
             passCount += 1
@@ -613,11 +1003,10 @@ class GraphHost {
     }
 
     private func drainGraphMutationPass() {
-        guard !pendingGraphMutations.isEmpty else { return }
+        guard !continuations.isEmpty else { return }
 
-        let mutations = pendingGraphMutations
-        pendingGraphMutations = []
-        needsTransaction = false
+        let mutations = continuations
+        continuations = []
 
         for mutation in mutations {
             mutation.apply()
@@ -746,93 +1135,14 @@ class GraphHost {
         }
     }
 
-    private enum TransactionHostProviderKey: Equatable {
-        case object(ObjectIdentifier)
-        case type(ObjectIdentifier)
-
-        init(_ hostProvider: any TransactionHostProvider) {
-            if Mirror(reflecting: hostProvider).displayStyle == .class {
-                self = .object(ObjectIdentifier(hostProvider as AnyObject))
-            } else {
-                self = .type(ObjectIdentifier(Swift.type(of: hostProvider)))
-            }
-        }
-    }
-
-    private struct AsyncTransaction {
-        var transaction: Transaction
-        var id: Transaction.ID
-        var mutations: [any GraphMutation]
-        var style: _GraphMutation_Style
-        var mayDeferUpdate: Bool
-        var traceID: UInt32
-
-        mutating func append<M>(_ mutation: M) where M: GraphMutation {
-            if !mutations.isEmpty {
-                let lastIndex = mutations.index(before: mutations.endIndex)
-                if mutations[lastIndex].combine(with: mutation) {
-                    return
-                }
-            }
-            mutations.append(mutation)
-        }
-
-        func apply() {
-            for mutation in mutations {
-                mutation.apply()
-            }
-        }
-    }
-
-    private struct GlobalTransaction {
-        var providerKey: TransactionHostProviderKey
-        var hostProvider: any TransactionHostProvider
-        var asyncTransaction: AsyncTransaction
-
-        var traceID: UInt32 {
-            asyncTransaction.traceID
-        }
-
-        func matches(
-            providerKey: TransactionHostProviderKey,
-            id: Transaction.ID,
-            transaction: Transaction
-        ) -> Bool {
-            self.providerKey == providerKey &&
-            asyncTransaction.id == id &&
-            asyncTransaction.transaction.plist.isEqual(to: transaction.plist)
-        }
-
-        mutating func append<M>(_ mutation: M) where M: GraphMutation {
-            asyncTransaction.append(mutation)
-        }
-
-        func apply() {
-            if let host = hostProvider.mutationHost {
-                // A live host owns graph context, transaction seed mutation, and
-                // delegate notification for this global transaction.
-                host.runTransaction(asyncTransaction.transaction, id: asyncTransaction.id.value) {
-                    asyncTransaction.apply()
-                }
-                host.graphDelegate?.graphDidChange()
-            } else {
-                // Nil-host fallback still needs Transaction.current to reflect
-                // the queued transaction while the mutation runs, then restore
-                // the caller's thread-local box after the stored mutations drain.
-                Transaction.withScopedThreadTransaction(asyncTransaction.transaction) {
-                    asyncTransaction.apply()
-                }
-            }
-        }
-    }
 }
 
 // GraphDelegate provides transaction/update/change callbacks for graph hosts.
 protocol GraphDelegate: AnyObject {
-    func beginTransaction()
     func updateGraph<T>(body: (GraphHost) -> T) -> T
     func graphDidChange()
     func preferencesDidChange()
+    func beginTransaction()
 }
 
 extension GraphDelegate {

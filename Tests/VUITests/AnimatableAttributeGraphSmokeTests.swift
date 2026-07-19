@@ -351,8 +351,8 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
     }
 
     func testAnimatableAttributeViewSizeAnimatesPayloadButKeepsTargetProposal() {
-        let initialProposal = ProposedViewSize(width: 80, height: 34)
-        let targetProposal = ProposedViewSize(width: 160, height: 34)
+        let initialProposal = _ProposedSize(width: 80, height: 34)
+        let targetProposal = _ProposedSize(width: 160, height: 34)
         let harness = GenericAnimatableAttributeHarness(
             initialValue: ViewSize(width: 80, height: 34, proposal: initialProposal)
         )
@@ -435,6 +435,25 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(finalFrame.size.height, 60, accuracy: 0.000_001)
         XCTAssertEqual(harness.currentPosition().x, 100, accuracy: 0.000_001)
         XCTAssertEqual(harness.currentSize().width, 50, accuracy: 0.000_001)
+    }
+
+    func testAnimatableFrameAttributeUsesGeometryTransactionInsteadOfSourceMetadata() {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20)
+        )
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 40),
+            size: ViewSize(width: 50, height: 60),
+            transaction: Transaction(animation: .linear(duration: 1)),
+            geometryTransaction: Transaction()
+        )
+
+        let frame = harness.currentFrame()
+        XCTAssertEqual(frame.origin.x, 100, accuracy: 0.000_001)
+        XCTAssertEqual(frame.origin.y, 40, accuracy: 0.000_001)
+        XCTAssertEqual(frame.size.width, 50, accuracy: 0.000_001)
+        XCTAssertEqual(frame.size.height, 60, accuracy: 0.000_001)
     }
 
     func testAnimatableFrameAttributeOrthogonalRetargetKeepsSpringTrajectoryAndReverseContinuity() {
@@ -575,8 +594,8 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let initialProposal = ProposedViewSize(width: 80, height: 34)
-        let targetProposal = ProposedViewSize(width: 160, height: 34)
+        let initialProposal = _ProposedSize(width: 80, height: 34)
+        let targetProposal = _ProposedSize(width: 160, height: 34)
         let harness = AnimatableFrameAttributeHarness(
             initialPosition: .zero,
             initialSize: ViewSize(width: 80, height: 34, proposal: initialProposal),

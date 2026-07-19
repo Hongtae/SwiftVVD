@@ -153,10 +153,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(hGridLayout.pinnedViews, [.sectionFooters])
         XCTAssertEqual(vGridLayout.columns, [GridItem(.fixed(18), spacing: 2)])
         XCTAssertEqual(hGridLayout.rows, [GridItem(.fixed(12), spacing: 3)])
-        XCTAssertEqual(LazyHStackLayout._lazyLayoutProperties.axes, .horizontal)
-        XCTAssertEqual(LazyVStackLayout._lazyLayoutProperties.axes, .vertical)
-        XCTAssertEqual(LazyVGridLayout._lazyLayoutProperties.axes, .vertical)
-        XCTAssertEqual(LazyHGridLayout._lazyLayoutProperties.axes, .horizontal)
+        XCTAssertEqual(LazyHStackLayout.layoutProperties.axes, .horizontal)
+        XCTAssertEqual(LazyVStackLayout.layoutProperties.axes, .vertical)
+        XCTAssertEqual(LazyVGridLayout.layoutProperties.axes, .vertical)
+        XCTAssertEqual(LazyHGridLayout.layoutProperties.axes, .horizontal)
         XCTAssertTrue(LazyVStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyHStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyVGridLayout.AnimatableData.self == EmptyAnimatableData.self)
@@ -398,12 +398,22 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         layoutComputer: graph.makeInput(value: LayoutComputer.fixed(size))
                     )
                 }
+                let owner = graph.makeInput(value: ())
+                let environment = graph.makeInput(value: EnvironmentValues())
+                let context = AnyRuleContext(attribute: owner.identifier)
                 return LayoutComputer(
                     box: LayoutEngineBox(
                         engine: ViewLayoutEngine(
                             layout: layout,
-                            children: children,
-                            layoutDirection: .leftToRight
+                            context: SizeAndSpacingContext(
+                                context: context,
+                                owner: owner.identifier,
+                                environment: environment
+                            ),
+                            children: LayoutProxyCollection(
+                                context: context,
+                                attributes: children
+                            )
                         )
                     )
                 )
@@ -543,7 +553,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(measured.length, 55)
             XCTAssertEqual(measured.spacing, 7)
 
-            var placements: [(_LazyLayout_Subview, CGPoint, ProposedViewSize, UnitPoint)] = []
+            var placements: [(_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint)] = []
             layout.place(
                 subviews: subviews,
                 length: 80,
@@ -556,7 +566,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placements.map(\.1), [CGPoint(x: 0, y: 0), CGPoint(x: 30, y: 0)])
             XCTAssertEqual(
                 placements.map(\.2),
-                [ProposedViewSize(width: 30, height: 80), ProposedViewSize(width: 50, height: 80)]
+                [_ProposedSize(width: 30, height: 80), _ProposedSize(width: 50, height: 80)]
             )
             XCTAssertEqual(placements.map(\.3), [.leading, .trailing])
 
@@ -566,7 +576,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 spacing: nil,
                 pinnedViews: []
             )
-            var hPlacements: [(_LazyLayout_Subview, CGPoint, ProposedViewSize, UnitPoint)] = []
+            var hPlacements: [(_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint)] = []
             hLayout.place(
                 subviews: [subviews[0]],
                 length: 70,
@@ -577,7 +587,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             XCTAssertEqual(hPlacements.map(\.0.index), [0])
             XCTAssertEqual(hPlacements.map(\.1), [CGPoint(x: 0, y: 12)])
-            XCTAssertEqual(hPlacements.map(\.2), [ProposedViewSize(width: 70, height: 30)])
+            XCTAssertEqual(hPlacements.map(\.2), [_ProposedSize(width: 70, height: 30)])
             XCTAssertEqual(hPlacements.map(\.3), [.top])
         }
     }
@@ -592,7 +602,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -921,7 +932,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             let proposedSizes = _LazyLayout_ProposedSizes(subviews: [proposedSubview])
             XCTAssertTrue(proposedSizes.subviews[0].item === item)
-            XCTAssertEqual(proposedSizes.subviews[0].proposal, ProposedViewSize(width: 21, height: 22))
+            XCTAssertEqual(proposedSizes.subviews[0].proposal, _ProposedSize(width: 21, height: 22))
             XCTAssertEqual(proposedSizes.subviews[0].index, 6)
 
             let gridGeometry = HVGridGeometry(position: 23, size: 29, anchor: .topTrailing)
@@ -993,8 +1004,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 visibleExtent: CGFloat(6)..<CGFloat(30),
                 visibleLength: 24,
                 containerLength: 120,
-                estimations: estimations,
-                prefetchStride: 3
+                estimations: estimations
             )
             XCTAssertEqual(stackCache.minor?.count, 2)
             XCTAssertEqual(stackCache.endIndex, 12)
@@ -1004,7 +1014,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(stackCache.visibleLength, 24)
             XCTAssertEqual(stackCache.containerLength, 120)
             XCTAssertEqual(stackCache.estimations.lengthToCount[12], 2)
-            XCTAssertEqual(stackCache.prefetchStride, 3)
             stackCache.resetEstimates()
             XCTAssertEqual(stackCache.minor?.count, 2)
             XCTAssertTrue(stackCache.estimations.lengthToCount.isEmpty)
@@ -1614,7 +1623,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testStackPlacementSectionNodeStartsInsideContentWithoutReplayingHeader() throws {
+    func testStackPlacementSectionNodeStartsInsideContentReplaysBoundaryHeader() throws {
         let host = GraphHost()
 
         try host.data.withCurrent {
@@ -1623,7 +1632,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -1676,18 +1686,19 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 style: _ViewList_IteratorStyle()
             ))
             XCTAssertFalse(placement.skipFirst)
-            XCTAssertEqual(placement.placedSubviews.map(\.index), [3, 4])
+            XCTAssertEqual(placement.placedSubviews.map(\.index), [0, 3, 4])
             XCTAssertEqual(placement.placedSubviews.map(\.item.section), [
+                LazyLayoutCacheSection(id: 7, isHeader: true),
                 LazyLayoutCacheSection(id: 7),
                 LazyLayoutCacheSection(id: 7, isFooter: true),
             ])
-            XCTAssertEqual(placement.position, 190)
+            XCTAssertEqual(placement.position, 200)
             XCTAssertEqual(placement.index, 5)
 
             let bodyItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 3 }?.item)
-            XCTAssertEqual(bodyItem.placement?.anchorPosition, CGPoint(x: 0, y: 100))
+            XCTAssertEqual(bodyItem.placement?.anchorPosition, CGPoint(x: 0, y: 110))
             let footerItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 4 }?.item)
-            XCTAssertEqual(footerItem.placement?.anchorPosition, CGPoint(x: 0, y: 140))
+            XCTAssertEqual(footerItem.placement?.anchorPosition, CGPoint(x: 0, y: 150))
         }
     }
 
@@ -1700,7 +1711,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -1742,7 +1754,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             })
             XCTAssertEqual(headerItems.map(\.0), [10])
             XCTAssertEqual(headerItems.map(\.1), [LazyLayoutCacheSection(id: 7, isHeader: true)])
-            XCTAssertEqual(headerIDs.map(\._index), [10])
+            XCTAssertEqual(headerIDs.map(\._index), [0])
             XCTAssertTrue(headerIDs.allSatisfy(\.explicitIDs.isEmpty))
 
             var contentFrom = 0
@@ -1757,7 +1769,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 LazyLayoutCacheSection(id: 7),
                 LazyLayoutCacheSection(id: 7),
             ])
-            XCTAssertEqual(contentIDs.map(\._index), [11, 12])
+            XCTAssertEqual(contentIDs.map(\._index), [0, 1])
             XCTAssertTrue(contentIDs.allSatisfy(\.explicitIDs.isEmpty))
 
             var footerFrom = 0
@@ -1769,7 +1781,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             })
             XCTAssertEqual(footerItems.map(\.0), [13])
             XCTAssertEqual(footerItems.map(\.1), [LazyLayoutCacheSection(id: 7, isFooter: true)])
-            XCTAssertEqual(footerIDs.map(\._index), [13])
+            XCTAssertEqual(footerIDs.map(\._index), [0])
             XCTAssertTrue(footerIDs.allSatisfy(\.explicitIDs.isEmpty))
         }
     }
@@ -1994,6 +2006,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(headerIDs.count, 2)
             XCTAssertEqual(rowIDs.count, 2)
             XCTAssertEqual(footerIDs.count, 2)
+            XCTAssertEqual(headerIDs.map(\.implicitID), [0, 0])
+            XCTAssertEqual(rowIDs.map(\.implicitID), [0, 0])
+            XCTAssertEqual(footerIDs.map(\.implicitID), [1, 1])
             XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
@@ -2102,6 +2117,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(headerIDs.count, 2)
             XCTAssertEqual(rowIDs.count, 2)
             XCTAssertEqual(footerIDs.count, 2)
+            XCTAssertEqual(headerIDs.map(\.implicitID), [0, 2])
+            XCTAssertEqual(rowIDs.map(\.implicitID), [0, 0])
+            XCTAssertEqual(footerIDs.map(\.implicitID), [1, 3])
             XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
@@ -3646,7 +3664,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -3703,7 +3722,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -3764,7 +3784,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -3876,7 +3897,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -3988,7 +4010,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4089,7 +4112,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4190,7 +4214,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4303,7 +4328,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4416,7 +4442,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4511,7 +4538,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4606,7 +4634,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4716,7 +4745,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4826,7 +4856,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -4977,7 +5008,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _ sizes: [CGSize]
             ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
                 let list: any ViewList = BaseViewList(
-                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes),
+                    implicitID: Int(graph.makeInput(value: UniqueID()).identifier.rawValue)
                 )
                 return (list, graph.makeInput(value: list))
             }
@@ -5276,42 +5308,52 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             let subviews = cache.subviews(context: ruleContext)
 
-            var hCache = _LazyStack_Cache<LazyHStackLayout>(prefetchStride: 2)
+            let hCache = _LazyStack_Cache<LazyHStackLayout>()
             let hLayout = LazyHStackLayout(base: _HStackLayout(), pinnedViews: [])
-            let hProposed = hLayout.proposeSizes(
+            let hPlacementContext = _LazyLayout_PlacementContext(
+                base: context,
+                size: ViewSize(width: 90, height: 33)
+            )
+            var hProposed = _LazyLayout_ProposedSizes()
+            hLayout.proposeSizes(
                 at: 5,
                 subviews: subviews,
-                context: context,
-                cache: &hCache,
-                in: ProposedViewSize(width: 90, height: 33)
+                context: hPlacementContext,
+                cache: hCache,
+                in: &hProposed
             )
 
             let hSubview = try XCTUnwrap(hProposed.subviews.first)
             let hLayoutComputer = try XCTUnwrap(hSubview.item.outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(hProposed.subviews.count, 1)
             XCTAssertEqual(hSubview.index, 2)
-            XCTAssertEqual(hSubview.proposal, ProposedViewSize(width: nil, height: 33))
+            XCTAssertEqual(hSubview.proposal, _ProposedSize(width: nil, height: 33))
             XCTAssertEqual(hLayoutComputer.sizeThatFits(.unspecified), sizes[2])
             XCTAssertEqual(
                 hSubview.item.placement,
                 _Placement(proposedSize: CGSize(width: 10, height: 33))
             )
 
-            var vCache = _LazyStack_Cache<LazyVStackLayout>(prefetchStride: 2)
+            let vCache = _LazyStack_Cache<LazyVStackLayout>()
             let vLayout = LazyVStackLayout(base: _VStackLayout(), pinnedViews: [])
-            let vProposed = vLayout.proposeSizes(
+            let vPlacementContext = _LazyLayout_PlacementContext(
+                base: context,
+                size: ViewSize(width: 44, height: 90)
+            )
+            var vProposed = _LazyLayout_ProposedSizes()
+            vLayout.proposeSizes(
                 at: 7,
                 subviews: subviews,
-                context: context,
-                cache: &vCache,
-                in: ProposedViewSize(width: 44, height: 90)
+                context: vPlacementContext,
+                cache: vCache,
+                in: &vProposed
             )
 
             let vSubview = try XCTUnwrap(vProposed.subviews.first)
             let vLayoutComputer = try XCTUnwrap(vSubview.item.outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(vProposed.subviews.count, 1)
             XCTAssertEqual(vSubview.index, 3)
-            XCTAssertEqual(vSubview.proposal, ProposedViewSize(width: 44, height: nil))
+            XCTAssertEqual(vSubview.proposal, _ProposedSize(width: 44, height: nil))
             XCTAssertEqual(vLayoutComputer.sizeThatFits(.unspecified), sizes[3])
             XCTAssertEqual(
                 vSubview.item.placement,
@@ -5341,35 +5383,35 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let subviews = cache.subviews(context: ruleContext)
             let layout = LazyVStackLayout(base: _VStackLayout(), pinnedViews: [])
 
-            var passingCache = _LazyStack_Cache<LazyVStackLayout>(
-                visibleLength: 100,
-                prefetchStride: 1
+            let placementContext = _LazyLayout_PlacementContext(
+                base: context,
+                size: ViewSize(width: 44, height: 100)
             )
-            let passing = layout.proposeSizes(
+            let passingCache = _LazyStack_Cache<LazyVStackLayout>(visibleLength: 100)
+            var passing = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
                 at: 75,
                 subviews: subviews,
-                context: context,
-                cache: &passingCache,
-                in: ProposedViewSize(width: 44, height: 100)
+                context: placementContext,
+                cache: passingCache,
+                in: &passing
             )
             let passingSubview = try XCTUnwrap(passing.subviews.first)
             XCTAssertEqual(passing.subviews.count, 1)
             XCTAssertEqual(passingSubview.index, 75)
-            XCTAssertEqual(passingSubview.proposal, ProposedViewSize(width: 44, height: nil))
+            XCTAssertEqual(passingSubview.proposal, _ProposedSize(width: 44, height: nil))
 
             cache.items.removeAll()
             cache.lru.invalidate()
 
-            var blockedCache = _LazyStack_Cache<LazyVStackLayout>(
-                visibleLength: 100,
-                prefetchStride: 1
-            )
-            let blocked = layout.proposeSizes(
+            let blockedCache = _LazyStack_Cache<LazyVStackLayout>(visibleLength: 100)
+            var blocked = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
                 at: 76,
                 subviews: subviews,
-                context: context,
-                cache: &blockedCache,
-                in: ProposedViewSize(width: 44, height: 100)
+                context: placementContext,
+                cache: blockedCache,
+                in: &blocked
             )
             XCTAssertTrue(blocked.subviews.isEmpty)
             XCTAssertTrue(cache.items.isEmpty)
@@ -5518,7 +5560,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let elements = PhaseCapturingElements()
             let data = makeLazyData(
                 graph: graph,
-                id: _ViewList_ID(implicitID: 900),
+                id: _ViewList_ID(implicitID: 900).elementID(at: 0),
                 elements: _ViewList_SubgraphElements(base: elements)
             )
             let item = cache.item(data: data)
@@ -5645,13 +5687,20 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testConcreteLazyLayoutViewCacheResetRefreshesCacheStateBeforeBaseSeeds() {
+    func testConcreteLazyLayoutViewCacheResetRestoresInitialCacheBeforeBaseSeeds() {
         let host = GraphHost()
 
         host.data.withCurrent {
             let graph = host.data.graph
-            let layout = graph.makeInput(value: CountingLazyLayout(cacheValue: 10))
-            let cacheState = graph.makeInput(value: 0)
+            let layout = graph.makeInput(value: LazyVStackLayout(
+                base: _VStackLayout(),
+                pinnedViews: []
+            ))
+            let cacheState = graph.makeInput(value: _LazyStack_Cache<LazyVStackLayout>(
+                endIndex: 10,
+                placedIndices: 2..<4,
+                visibleLength: 40
+            ))
             let cache = _LazyLayoutViewCache(
                 layout: layout,
                 cacheState: cacheState,
@@ -5669,15 +5718,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
 
             cache.reset()
-            XCTAssertEqual(cacheState.value, 10)
+            XCTAssertNil(cacheState.value.endIndex)
+            XCTAssertTrue(cacheState.value.placedIndices.isEmpty)
+            XCTAssertEqual(cacheState.value.visibleLength, .infinity)
             XCTAssertEqual(cache.lru.usedSeed, 1)
             XCTAssertEqual(cache.lru.transactionSeed, 1)
-            XCTAssertEqual(cache.commitSeed, 1)
-            XCTAssertEqual(cache.placementSeed, 1)
-
-            layout.setValue(CountingLazyLayout(cacheValue: 20))
-            cache.reset()
-            XCTAssertEqual(cacheState.value, 20)
             XCTAssertEqual(cache.commitSeed, 1)
             XCTAssertEqual(cache.placementSeed, 1)
         }
@@ -6400,9 +6445,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheCommitPlacedSubviewsStampsRemovalSeedAndQueuesAllItemsPhaseMutation() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
         let (cache, placed, stale, state) = host.data.withCurrent {
@@ -6752,10 +6794,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCachePrefetchCapabilityUsesHookSemanticsAndRendererGate() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
+    func testLazyLayoutViewCachePrefetchCapabilityUsesHookAndRendererGate() {
 
         let host = GraphHost()
 
@@ -6776,10 +6815,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertFalse(prefetchCache.supportsViewHierarchyPrefetching)
 
             prefetchCache.inputs[UsingGraphicsRenderer.self] = false
-            Semantics.overrides = Semantics.Overrides(build: .v6, runtime: nil)
-            XCTAssertFalse(prefetchCache.supportsViewHierarchyPrefetching)
-
-            Semantics.overrides = Semantics.Overrides()
+            XCTAssertTrue(prefetchCache.supportsViewHierarchyPrefetching)
             prefetchCache.commitSeed = 41
             item.displayIndex = nil
             item.prefetchPhase = .pendingDisplay
@@ -6790,9 +6826,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testConcreteLazyLayoutViewCachePrefetchCapabilityUsesParentSubgraphAndAxis() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -6999,7 +7032,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let proposed = subview.proposeSize(ProposedViewSize(width: 24, height: 36))
 
             XCTAssertTrue(proposed.item === item)
-            XCTAssertEqual(proposed.proposal, ProposedViewSize(width: 24, height: 36))
+            XCTAssertEqual(proposed.proposal, _ProposedSize(width: 24, height: 36))
             XCTAssertEqual(proposed.index, 8)
             XCTAssertEqual(item.zIndex, 15)
             XCTAssertEqual(item.placement, _Placement(proposedSize: CGSize(width: 24, height: 36)))
@@ -7046,13 +7079,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
                             height: proposal.height ?? 200
                         )
                     },
-                    spacing: ViewSpacing(top: 5, leading: 11, bottom: nil, trailing: nil)
+                    spacing: ViewSpacing(top: 5, leading: 11, bottom: nil, trailing: nil).spacing
                 )))
             )
             predecessorItem.outputs = _ViewOutputs(
                 layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
                     sizeThatFits: { _ in CGSize(width: 1, height: 2) },
-                    spacing: ViewSpacing(top: nil, leading: nil, bottom: 7, trailing: 3)
+                    spacing: ViewSpacing(top: nil, leading: nil, bottom: 7, trailing: 3).spacing
                 )))
             )
 
@@ -7127,7 +7160,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             item.outputs = _ViewOutputs(
                 layoutComputer: OptionalAttribute(graph.makeInput(value: LayoutComputer(
                     sizeThatFits: { proposal in
-                        proposal.replacingUnspecifiedDimensions()
+                        proposal.fixingUnspecifiedDimensions()
                     }
                 )))
             )
@@ -9524,9 +9557,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheResetPrefetchPhasesClearsChildMaxDisplayListSubviews() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9575,9 +9605,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheUpdatePrefetchPhasesClearsDisplayedActivePrefetchState() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9618,9 +9645,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheUpdatePrefetchPhasesResetsDisplayedInactiveChildLimit() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9651,9 +9675,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheUpdatePrefetchPhasesClearsAgedPendingRemovalState() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9697,9 +9718,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheAdvancePrefetchDisplayMapsChildSchedulingResult() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9760,9 +9778,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutViewCacheAdvancePrefetchRemovalClearsPendingRemovalAndReturnsAll() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9810,9 +9825,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherResetsOnStateChangeAndHonorsAllowedEdges() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9858,9 +9870,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherResetSeedsRemovalBeforeLayoutResult() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9914,14 +9923,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
             XCTAssertEqual(item.id.canonicalID, _ViewList_ID(implicitID: 0).elementID(at: 0).canonicalID)
-            XCTAssertEqual(proposal, ProposedViewSize(width: 72, height: nil))
+            XCTAssertEqual(proposal, _ProposedSize(width: 72, height: nil))
         }
     }
 
     func testLazySubviewPrefetcherRetriesOutputHarvestBeforeLayoutDisplay() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -9956,7 +9962,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             prefetcher.lastCacheCommitSeed = cache.commitSeed
             prefetcher.operations = [
-                .layoutDisplay(layoutDisplayItem, ProposedViewSize(width: 72, height: nil)),
+                .layoutDisplay(layoutDisplayItem, _ProposedSize(width: 72, height: nil)),
                 .outputs,
             ]
 
@@ -9994,9 +10000,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherSchedulesDisplayAfterEmptyOutputHarvest() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10020,7 +10023,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             prefetcher.lastCacheCommitSeed = cache.commitSeed
             prefetcher.operations = [
-                .layoutDisplay(layoutDisplayItem, ProposedViewSize(width: 72, height: nil)),
+                .layoutDisplay(layoutDisplayItem, _ProposedSize(width: 72, height: nil)),
                 .outputs,
             ]
 
@@ -10042,9 +10045,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherConsumesDisplayAndRemovalOperationsFromStack() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10106,9 +10106,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherUpdateValueStopsAfterNotifiedDisplayPhase() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10159,9 +10156,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherUpdateValueRepeatsAfterUnnotifiedDisplayPhase() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10203,9 +10197,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherConsumesLayoutDisplayProposalPayload() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10229,7 +10220,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             prefetcher.lastCacheCommitSeed = cache.commitSeed
             prefetcher.operations = [
-                .layoutDisplay(item, ProposedViewSize(width: 72, height: nil))
+                .layoutDisplay(item, _ProposedSize(width: 72, height: nil))
             ]
 
             XCTAssertEqual(prefetcher.updateHostState(), .all)
@@ -10243,9 +10234,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazySubviewPrefetcherProducesStackLayoutDisplayProposalPayload() throws {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10293,11 +10281,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
-            let expectedID = _ViewList_ID(implicitID: 2).elementID(at: 2)
+            let expectedID = _ViewList_ID(implicitID: 2).elementID(at: 0)
             let layoutComputer = try XCTUnwrap(item.outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(item.id.canonicalID, expectedID.canonicalID)
             XCTAssertEqual(item.prefetchPhase, .notPrefetching)
-            XCTAssertEqual(proposal, ProposedViewSize(width: 72, height: nil))
+            XCTAssertEqual(proposal, _ProposedSize(width: 72, height: nil))
             XCTAssertEqual(layoutComputer.sizeThatFits(.unspecified), sizes[2])
 
             XCTAssertEqual(prefetcher.update(info: state, owner: stateAttribute.identifier), .all)
@@ -10341,16 +10329,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
-            let expectedHorizontalID = _ViewList_ID(implicitID: 1).elementID(at: 1)
+            let expectedHorizontalID = _ViewList_ID(implicitID: 1).elementID(at: 0)
             XCTAssertEqual(hItem.id.canonicalID, expectedHorizontalID.canonicalID)
-            XCTAssertEqual(hProposal, ProposedViewSize(width: nil, height: 33))
+            XCTAssertEqual(hProposal, _ProposedSize(width: nil, height: 33))
         }
     }
 
     func testLazySubviewPrefetcherProducesGridLayoutDisplayProposalPayload() throws {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10397,10 +10382,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
-            let expectedID = _ViewList_ID(implicitID: 2).elementID(at: 2)
+            let expectedID = _ViewList_ID(implicitID: 2).elementID(at: 0)
             let layoutComputer = try XCTUnwrap(item.outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(item.id.canonicalID, expectedID.canonicalID)
-            XCTAssertEqual(proposal, ProposedViewSize(width: 72, height: nil))
+            XCTAssertEqual(proposal, _ProposedSize(width: 72, height: nil))
             XCTAssertEqual(layoutComputer.sizeThatFits(.unspecified), sizes[2])
 
             let (hCache, _, _) = makeLazyCache(
@@ -10437,16 +10422,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
-            let expectedHorizontalID = _ViewList_ID(implicitID: 1).elementID(at: 1)
+            let expectedHorizontalID = _ViewList_ID(implicitID: 1).elementID(at: 0)
             XCTAssertEqual(hItem.id.canonicalID, expectedHorizontalID.canonicalID)
-            XCTAssertEqual(hProposal, ProposedViewSize(width: nil, height: 33))
+            XCTAssertEqual(hProposal, _ProposedSize(width: nil, height: 33))
         }
     }
 
     func testLazySubviewPrefetcherSkipsStackLayoutDisplayBeyondViewportWindow() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10502,15 +10484,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 XCTFail("expected layout-display prefetch operation")
                 return
             }
-            XCTAssertEqual(item.id.canonicalID, _ViewList_ID(implicitID: 75).elementID(at: 75).canonicalID)
-            XCTAssertEqual(proposal, ProposedViewSize(width: 72, height: nil))
+            XCTAssertEqual(item.id.canonicalID, _ViewList_ID(implicitID: 75).elementID(at: 0).canonicalID)
+            XCTAssertEqual(proposal, _ProposedSize(width: 72, height: nil))
         }
     }
 
     func testLazySubviewPrefetcherSkipsStackLayoutDisplayForDisjointScrollWindows() {
-        let previousSemantics = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previousSemantics }
 
         let host = GraphHost()
 
@@ -10613,8 +10592,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 XCTFail("expected layout-display prefetch operation")
                 return
             }
-            XCTAssertEqual(item.id.canonicalID, _ViewList_ID(implicitID: 2).elementID(at: 2).canonicalID)
-            XCTAssertEqual(proposal, ProposedViewSize(width: 72, height: nil))
+            XCTAssertEqual(item.id.canonicalID, _ViewList_ID(implicitID: 2).elementID(at: 0).canonicalID)
+            XCTAssertEqual(proposal, _ProposedSize(width: 72, height: nil))
         }
     }
 
@@ -11492,13 +11471,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
-            let initialSubviews = LayoutSubviews(
-                subviews: [],
-                layoutDirection: .leftToRight
-            )
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
-                cacheState: graph.makeInput(value: layout.makeCache(subviews: initialSubviews)),
+                cacheState: graph.makeInput(value: LazyVStackLayout.initialCache),
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
                 inputs: makeViewInputs(graph: graph),
@@ -11573,13 +11548,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
-            let initialSubviews = LayoutSubviews(
-                subviews: [],
-                layoutDirection: .rightToLeft
-            )
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
-                cacheState: graph.makeInput(value: layout.makeCache(subviews: initialSubviews)),
+                cacheState: graph.makeInput(value: LazyVStackLayout.initialCache),
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
                 inputs: makeViewInputs(graph: graph),
@@ -11646,13 +11617,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
-            let initialSubviews = LayoutSubviews(
-                subviews: [],
-                layoutDirection: .leftToRight
-            )
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
-                cacheState: graph.makeInput(value: layout.makeCache(subviews: initialSubviews)),
+                cacheState: graph.makeInput(value: LazyVStackLayout.initialCache),
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
                 inputs: makeViewInputs(graph: graph),
@@ -11730,7 +11697,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let source = graph.makeInput(value: stack)
             var inputs = makeViewInputs(graph: graph)
             inputs.size = graph.makeInput(value: ViewSize(width: 20, height: 20))
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = type(of: stack)._makeView(
                 view: _GraphValue(_attribute: source),
@@ -11738,7 +11705,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(
-                layout.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20))),
+                layout.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20))),
                 CGSize(width: 20, height: 20)
             )
 
@@ -11753,15 +11720,15 @@ final class LazyContainerSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
             let scrollable = try XCTUnwrap(
-                scrollables.compactMap { $0 as? LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>> }.first
+                scrollables.compactMap { $0 as? LazyScrollable<LazyVStackLayout> }.first
             )
             let cache = try XCTUnwrap(scrollable.cache)
 
             XCTAssertTrue(cache._list.value.count(style: _ViewList_IteratorStyle()) >= 2)
-            XCTAssertTrue(type(of: cache._layout.value.layout) == LazyVStackLayout.self)
+            XCTAssertTrue(type(of: cache._layout.value) == LazyVStackLayout.self)
             XCTAssertEqual(scrollable.visibleCollectionViewIDs.count, 2)
             XCTAssertEqual(cache.items.count, 2)
-            XCTAssertEqual(LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>>.accessibilityRole, .stack)
+            XCTAssertEqual(LazyScrollable<LazyVStackLayout>.accessibilityRole, .stack)
             XCTAssertTrue(firstRecorder.willRemoveBeforeInvalidation)
             XCTAssertTrue(secondRecorder.willRemoveBeforeInvalidation)
         }
@@ -11782,7 +11749,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let source = graph.makeInput(value: stack)
             var inputs = makeViewInputs(graph: graph)
             inputs.size = graph.makeInput(value: ViewSize(width: 20, height: 20))
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
             phaseAttr = inputs.base.phase
 
             let outputs = type(of: stack)._makeView(
@@ -11790,7 +11757,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: inputs
             )
             layoutComputer = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            _ = layoutComputer.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20)))
             scrollablesID = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
         }
 
@@ -11799,7 +11766,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
             let scrollable = try XCTUnwrap(
-                scrollables.compactMap { $0 as? LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>> }.first
+                scrollables.compactMap { $0 as? LazyScrollable<LazyVStackLayout> }.first
             )
             let cache = try XCTUnwrap(scrollable.cache)
 
@@ -11810,7 +11777,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var phase = phaseAttr.value
             phase.resetSeed = 2
             phaseAttr.setValue(phase)
-            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            _ = layoutComputer.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20)))
 
             XCTAssertEqual(cache.lru.transactionSeed, 2)
             XCTAssertEqual(cache.commitSeed, 1)
@@ -11834,16 +11801,16 @@ final class LazyContainerSurfaceTests: XCTestCase {
             }
             let source = graph.makeInput(value: stack)
             var inputs = makeViewInputs(graph: graph)
-            inputs.base.phase = viewGraph.data.phaseAttribute
+            inputs.base.phase = viewGraph.data._phase
             inputs.size = graph.makeInput(value: ViewSize(width: 20, height: 20))
-            inputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = type(of: stack)._makeView(
                 view: _GraphValue(_attribute: source),
                 inputs: inputs
             )
             layoutComputer = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            _ = layoutComputer.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20)))
             scrollablesID = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
         }
 
@@ -11852,7 +11819,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         try viewGraph.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
             let scrollable = try XCTUnwrap(
-                scrollables.compactMap { $0 as? LazyScrollable<LazyLayoutAdaptor_V1<LazyVStackLayout>> }.first
+                scrollables.compactMap { $0 as? LazyScrollable<LazyVStackLayout> }.first
             )
             let cache = try XCTUnwrap(scrollable.cache)
 
@@ -11865,9 +11832,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var newParentPhase = Phase()
             newParentPhase.resetSeed = 2
             viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
-            _ = layoutComputer.sizeThatFits(ProposedViewSize(CGSize(width: 20, height: 20)))
+            _ = layoutComputer.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20)))
 
-            XCTAssertEqual(viewGraph.data.phaseAttribute.value.resetSeed, 1)
+            XCTAssertEqual(viewGraph.data._phase.value.resetSeed, 1)
             XCTAssertEqual(cache.lru.transactionSeed, 2)
             XCTAssertEqual(cache.commitSeed, 1)
             XCTAssertEqual(cache.placementSeed, 2)
@@ -12131,15 +12098,16 @@ final class LazyContainerSurfaceTests: XCTestCase {
         )
     }
 
-    private func makeConcreteLazyGridCache<LayoutType: LazyLayout>(
+    private func makeConcreteLazyGridCache<LayoutType: LazyStack>(
         host: GraphHost,
         layout: LayoutType,
         nearestScrollableAxes: Axis.Set
-    ) -> _LazyLayoutViewCache<LayoutType> where LayoutType.Cache == Void {
+    ) -> _LazyLayoutViewCache<LayoutType>
+    where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
         let graph = host.data.graph
         return _LazyLayoutViewCache(
             layout: graph.makeInput(value: layout),
-            cacheState: graph.makeInput(value: ()),
+            cacheState: graph.makeInput(value: LayoutType.initialCache),
             viewGraph: host,
             parentSubgraph: AGSubgraph(),
             inputs: makeViewInputs(graph: graph),
@@ -12157,14 +12125,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return _ViewInputs(
             base: base,
@@ -12548,47 +12512,6 @@ private final class PrefetchCapableLazyLayoutViewCache: LazyLayoutViewCache {
     }
 }
 
-private struct CountingLazyLayout: LazyLayout {
-    var cacheValue: Int
-    var pinnedViews: PinnedScrollableViews { [] }
-
-    typealias Body = Never
-    typealias AnimatableData = EmptyAnimatableData
-    typealias Cache = Int
-
-    func makeCache(subviews: Subviews) -> Int {
-        _ = subviews
-        return cacheValue
-    }
-
-    func updateCache(_ cache: inout Int, subviews: Subviews) {
-        _ = subviews
-        cache = cacheValue
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Int
-    ) -> CGSize {
-        _ = subviews
-        _ = cache
-        return proposal.replacingUnspecifiedDimensions()
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Int
-    ) {
-        _ = bounds
-        _ = proposal
-        _ = subviews
-        _ = cache
-    }
-}
-
 private struct CountingViewListElements: _ViewList_Elements {
     var count: Int
 
@@ -12725,7 +12648,9 @@ private struct SegmentedLayoutViewList: ViewList {
                 start: 0,
                 count: 1,
                 id: _ViewList_ID(implicitID: index),
-                elements: IndexedLayoutViewListElements(graph: graph, sizes: [sizes[index]]),
+                elements: _ViewList_SubgraphElements(
+                    base: IndexedLayoutViewListElements(graph: graph, sizes: [sizes[index]])
+                ),
                 traits: ViewTraitCollection(),
                 list: list
             )

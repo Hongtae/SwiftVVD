@@ -11,45 +11,60 @@ import Foundation
 
 /// The resolved placement for a child view.
 /// Stores the child's anchor, parent-local anchor position, proposed size, and
-/// reserved storage kept for the mirrored placement surface.
+/// reserved storage used by placement dispatch.
 public struct _Placement: Equatable {
-    /// The unit point anchor within the child's bounds.
     public var anchor: UnitPoint
-    /// The anchor point in parent-local coordinates.
     public var anchorPosition: CGPoint
-    /// Proposed width as raw CGFloat. +Inf means unspecified.
-    var _proposedWidth: CGFloat
-    /// Proposed height as raw CGFloat. +Inf means unspecified.
-    var _proposedHeight: CGFloat
-    // Reserved internal storage. The runtime role is not modeled yet.
-    var _reserved0: CGFloat
-    var _reserved1: CGFloat
+    var proposedSize_: _ProposedSize
 
-    /// The proposed size as a CGSize (computed from raw fields).
     public var proposedSize: CGSize {
-        get { CGSize(width: _proposedWidth, height: _proposedHeight) }
-        set {
-            _proposedWidth = newValue.width
-            _proposedHeight = newValue.height
-        }
+        get { proposedSize_.fixingUnspecifiedDimensions() }
+        set { proposedSize_ = _ProposedSize(newValue) }
     }
 
-    public init(proposedSize: CGSize,
-                anchoring anchor: UnitPoint = .topLeading,
-                at anchorPosition: CGPoint = .zero) {
+    init(
+        proposedSize: _ProposedSize,
+        anchoring anchor: UnitPoint = .topLeading,
+        at anchorPosition: CGPoint = .zero
+    ) {
         self.anchor = anchor
         self.anchorPosition = anchorPosition
-        self._proposedWidth = proposedSize.width
-        self._proposedHeight = proposedSize.height
-        self._reserved0 = 0
-        self._reserved1 = 0
+        self.proposedSize_ = proposedSize
     }
 
-    public static func == (a: _Placement, b: _Placement) -> Bool {
-        a.anchor == b.anchor &&
-        a.anchorPosition == b.anchorPosition &&
-        a._proposedWidth == b._proposedWidth &&
-        a._proposedHeight == b._proposedHeight
+    public init(
+        proposedSize: CGSize,
+        anchoring anchor: UnitPoint = .topLeading,
+        at anchorPosition: CGPoint = .zero
+    ) {
+        self.init(
+            proposedSize: _ProposedSize(proposedSize),
+            anchoring: anchor,
+            at: anchorPosition
+        )
+    }
+
+    init(proposedSize: _ProposedSize, at position: CGPoint) {
+        self.init(proposedSize: proposedSize, anchoring: .topLeading, at: position)
+    }
+
+    init(proposedSize: _ProposedSize, aligning anchor: UnitPoint, in size: CGSize) {
+        self.init(
+            proposedSize: proposedSize,
+            anchoring: anchor,
+            at: CGPoint(x: size.width * anchor.x, y: size.height * anchor.y)
+        )
+    }
+
+    public init(proposedSize: CGSize, aligning anchor: UnitPoint, in size: CGSize) {
+        self.init(proposedSize: _ProposedSize(proposedSize), aligning: anchor, in: size)
+    }
+
+    func frameOrigin(childSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: anchorPosition.x - childSize.width * anchor.x,
+            y: anchorPosition.y - childSize.height * anchor.y
+        )
     }
 }
 
@@ -58,65 +73,142 @@ public struct _Placement: Equatable {
 /// Context passed to the position-aware child-placement vtable method.
 /// The internal fields are intentionally opaque until behavior requires modeling.
 struct _PositionAwarePlacementContext {
-    var _storage: (UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32)
-
-    init() { _storage = (0, 0, 0, 0, 0, 0, 0) }
 }
 
 // MARK: - LayoutEngine protocol
 
 /// Protocol for a layout engine stored inside a LayoutEngineBox.
 /// Methods cover sizing, spacing, child geometry generation, explicit alignment,
-/// and child placement. `place(at:anchor:proposal:)` is the backend hook for
-/// committing final placement to the renderer.
+/// and child placement.
 /// Internal because it uses internal types (ViewSize, ViewGeometry, AlignmentKey).
 protocol LayoutEngine {
+    var debugContentDescription: String? { get }
     func layoutPriority() -> Double
     func ignoresAutomaticPadding() -> Bool
     func requiresSpacingProjection() -> Bool
-    func spacing() -> ViewSpacing
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
-    func truncates(_ proposal: ProposedViewSize) -> Bool
-    func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat
-    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
-    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
-    func childPlacement(at size: ViewSize) -> _Placement
-    func childPlacement(at size: ViewSize,
-                        placementContext: _PositionAwarePlacementContext) -> _Placement
-    // Backend hook for committing final placement to the renderer.
-    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize)
+    mutating func spacing() -> Spacing
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize
+    mutating func truncates(_ proposal: _ProposedSize) -> Bool
+    mutating func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat
+    mutating func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
+    mutating func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
+    mutating func childPlacement(at size: ViewSize) -> _Placement
+    mutating func childPlacement(at size: ViewSize,
+                                 placementContext: _PositionAwarePlacementContext) -> _Placement
+}
+
+/// Renderer-side placement dispatch kept separate from the layout-engine
+/// protocol surface.
+protocol LayoutEnginePlacing {
+    mutating func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize)
 }
 
 extension LayoutEngine {
+    var debugContentDescription: String? { nil }
     func layoutPriority() -> Double { 0 }
     func ignoresAutomaticPadding() -> Bool { false }
     func requiresSpacingProjection() -> Bool { false }
-    func spacing() -> ViewSpacing { ViewSpacing() }
-    func truncates(_ proposal: ProposedViewSize) -> Bool {
+    func spacing() -> Spacing { Spacing() }
+    mutating func truncates(_ proposal: _ProposedSize) -> Bool {
         let ideal = sizeThatFits(.unspecified)
-        if let width = proposal.width, ideal.width > width {
-            return true
-        }
-        if let height = proposal.height, ideal.height > height {
-            return true
-        }
-        return false
+        return proposal.width.map { ideal.width > $0 } == true ||
+            proposal.height.map { ideal.height > $0 } == true
     }
-    func lengthThatFits(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat {
+    mutating func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
         let s = sizeThatFits(proposal)
         return axis == .horizontal ? s.width : s.height
     }
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] { [] }
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? { nil }
-    func childPlacement(at size: ViewSize) -> _Placement {
+    mutating func childPlacement(at size: ViewSize) -> _Placement {
         _Placement(proposedSize: CGSize(width: size.width, height: size.height),
                    anchoring: .topLeading, at: .zero)
     }
-    func childPlacement(at size: ViewSize,
-                        placementContext: _PositionAwarePlacementContext) -> _Placement {
+    mutating func childPlacement(at size: ViewSize,
+                                 placementContext: _PositionAwarePlacementContext) -> _Placement {
         childPlacement(at: size)
     }
-    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {}
+}
+
+extension StatefulRule where Value == LayoutComputer {
+    mutating func update<Engine: LayoutEngine>(
+        modify: (inout Engine) -> Void,
+        create: () -> Engine
+    ) {
+        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
+           current.withMutableEngine(type: Engine.self, do: modify) != nil {
+            current.changeCount &+= 1
+            _AGGraph.setStatefulOutput(current)
+        } else {
+            _AGGraph.setStatefulOutput(
+                LayoutComputer(box: LayoutEngineBox(engine: create()))
+            )
+        }
+    }
+
+    mutating func update<Engine: LayoutEngine>(to engine: Engine) {
+        update(modify: { $0 = engine }, create: { engine })
+    }
+
+    mutating func updateIfNotEqual<Engine>(to engine: Engine)
+    where Engine: LayoutEngine & Equatable {
+        if let current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
+           let box = current.box as? LayoutEngineBox<Engine>,
+           box.engine == engine {
+            return
+        }
+        update(to: engine)
+    }
+
+    mutating func updateLayoutComputer<L: Layout>(
+        layout: L,
+        environment: Attribute<EnvironmentValues>,
+        attributes: [LayoutProxyAttributes]
+    ) {
+        guard let attribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError("Layout computer update requires an active rule context.")
+        }
+        let context = AnyRuleContext(attribute: attribute)
+        let layoutContext = SizeAndSpacingContext(
+            context: context,
+            owner: attribute,
+            environment: environment
+        )
+        let children = LayoutProxyCollection(
+            context: context,
+            attributes: attributes
+        )
+        layout.updateLayoutComputer(
+            rule: &self,
+            layoutContext: layoutContext,
+            children: children
+        )
+    }
+}
+
+extension Layout {
+    func updateLayoutComputer<R: StatefulRule>(
+        rule: inout R,
+        layoutContext: SizeAndSpacingContext,
+        children: LayoutProxyCollection
+    ) where R.Value == LayoutComputer {
+        rule.update(
+            modify: { (engine: inout ViewLayoutEngine<Self>) in
+                engine.update(
+                    layout: self,
+                    context: layoutContext,
+                    children: children
+                )
+            },
+            create: {
+                ViewLayoutEngine(
+                    layout: self,
+                    context: layoutContext,
+                    children: children
+                )
+            }
+        )
+    }
 }
 
 // MARK: - _AnyLayoutEngineBoxDispatch
@@ -127,12 +219,12 @@ extension LayoutEngine {
 protocol _AnyLayoutEngineBoxDispatch: AnyObject {
     var currentAttribute: AGAttribute { get set }
     var isNilAttribute: Bool { get set }
-    func sizeThatFits_(_ proposal: ProposedViewSize) -> CGSize
-    func spacing_() -> ViewSpacing
+    func sizeThatFits_(_ proposal: _ProposedSize) -> CGSize
+    func spacing_() -> Spacing
     func layoutPriority_() -> Double
     func ignoresAutomaticPadding_() -> Bool
     func requiresSpacingProjection_() -> Bool
-    func lengthThatFits_(_ proposal: ProposedViewSize, in axis: Axis) -> CGFloat
+    func lengthThatFits_(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat
     func childGeometries_(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
     func explicitAlignment_(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
     func childPlacement_(at size: ViewSize) -> _Placement
@@ -146,7 +238,7 @@ protocol _AnyLayoutEngineBoxDispatch: AnyObject {
 /// the fourth replaces the oldest inserted entry.
 private struct LayoutSizeCache {
     private struct Entry {
-        var proposal: ProposedViewSize
+        var proposal: _ProposedSize
         var size: CGSize
     }
 
@@ -156,7 +248,7 @@ private struct LayoutSizeCache {
     private var replacementIndex = 0
 
     mutating func value(
-        for proposal: ProposedViewSize,
+        for proposal: _ProposedSize,
         makeValue: () -> CGSize
     ) -> CGSize {
         if let first, first.proposal == proposal { return first.size }
@@ -195,12 +287,12 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
 
     init(engine: E) { self.engine = engine }
 
-    func sizeThatFits_(_ p: ProposedViewSize) -> CGSize { engine.sizeThatFits(p) }
-    func spacing_() -> ViewSpacing { engine.spacing() }
+    func sizeThatFits_(_ p: _ProposedSize) -> CGSize { engine.sizeThatFits(p) }
+    func spacing_() -> Spacing { engine.spacing() }
     func layoutPriority_() -> Double { engine.layoutPriority() }
     func ignoresAutomaticPadding_() -> Bool { engine.ignoresAutomaticPadding() }
     func requiresSpacingProjection_() -> Bool { engine.requiresSpacingProjection() }
-    func lengthThatFits_(_ p: ProposedViewSize, in axis: Axis) -> CGFloat {
+    func lengthThatFits_(_ p: _ProposedSize, in axis: Axis) -> CGFloat {
         engine.lengthThatFits(p, in: axis)
     }
     func childGeometries_(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
@@ -215,7 +307,22 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
         engine.childPlacement(at: size, placementContext: placementContext)
     }
     func place_(_ position: CGPoint, _ anchor: UnitPoint, _ proposal: ProposedViewSize) {
-        engine.place(at: position, anchor: anchor, proposal: proposal)
+        // Closure layout computers are reference-backed renderer bridges. Their
+        // placement closure can read geometry through the same layout computer,
+        // so invoking the generic mutating witness directly would keep an
+        // exclusive modification access to `engine` across that reentrant read.
+        if let referenceEngine = engine as? ClosureLayoutEngine {
+            referenceEngine.place(at: position, anchor: anchor, proposal: proposal)
+            return
+        }
+        guard var placementEngine = engine as? any LayoutEnginePlacing else {
+            return
+        }
+        placementEngine.place(at: position, anchor: anchor, proposal: proposal)
+        guard let updatedEngine = placementEngine as? E else {
+            fatalError("LayoutEngine placement dispatch changed the concrete engine type.")
+        }
+        engine = updatedEngine
     }
 
 }
@@ -228,42 +335,47 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
 /// Bridges Layout protocol methods to the LayoutEngine dispatch surface.
 /// childGeometries creates PlacementData, exposes it through the thread layout data slot,
 /// and lets LayoutSubview.place write child geometries into that buffer.
-final class ViewLayoutEngine<L: Layout>: LayoutEngine {
+struct ViewLayoutEngine<L: Layout>: LayoutEngine, LayoutEnginePlacing {
     var layout: L
-    var layoutAttr: Attribute<L>?
-    var children: [LayoutProxyAttributes]
-    var _layoutDirection: LayoutDirection
-    private var cache: L.Cache
-    private var sizeCache = LayoutSizeCache()
-    private var cachedChildGeometries: (size: ViewSize, geometries: [ViewGeometry])?
+    var cache: L.Cache
+    var proxies: LayoutProxyCollection
+    var layoutDirection: LayoutDirection
+    var sizeCache: ViewSizeCache
+    var cachedAlignmentSize: ViewSize
+    var cachedAlignmentGeometry: [ViewGeometry]
+    var cachedAlignment: Cache3<CGFloat, CGFloat?>
+    var preferredSpacing: Spacing?
 
     init(
         layout: L,
-        layoutAttr: Attribute<L>? = nil,
-        children: [LayoutProxyAttributes],
-        layoutDirection: LayoutDirection
+        context: SizeAndSpacingContext,
+        children: LayoutProxyCollection
     ) {
         self.layout = layout
-        self.layoutAttr = layoutAttr
-        self.children = children
-        self._layoutDirection = layoutDirection
+        self.proxies = children
+        self.layoutDirection = context[dynamicMember: \.layoutDirection]
+        self.sizeCache = ViewSizeCache()
+        self.cachedAlignmentSize = .zero
+        self.cachedAlignmentGeometry = []
+        self.cachedAlignment = Cache3()
+        self.preferredSpacing = nil
         self.cache = layout.makeCache(
             subviews: Self.makeSubviews(
                 children: children,
-                layoutDirection: layoutDirection
+                layoutDirection: self.layoutDirection
             )
         )
     }
 
     private static func makeSubviews(
-        children: [LayoutProxyAttributes],
+        children: LayoutProxyCollection,
         layoutDirection: LayoutDirection
     ) -> LayoutSubviews {
         LayoutSubviews(
-            subviews: children.enumerated().map { idx, attrs in
+            subviews: children.indices.map { index in
                 LayoutSubview(
-                    proxy: LayoutProxy(attributes: attrs),
-                    placementIndex: Int32(idx),
+                    proxy: children[index],
+                    placementIndex: Int32(index),
                     layoutDirection: layoutDirection
                 )
             },
@@ -273,36 +385,36 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
 
     private func makeSubviews() -> LayoutSubviews {
         Self.makeSubviews(
-            children: children,
-            layoutDirection: _layoutDirection
+            children: proxies,
+            layoutDirection: layoutDirection
         )
     }
 
-    func update(
+    mutating func update(
         layout: L,
-        layoutAttr: Attribute<L>?,
-        children: [LayoutProxyAttributes],
-        layoutDirection: LayoutDirection
+        context: SizeAndSpacingContext,
+        children: LayoutProxyCollection
     ) {
         self.layout = layout
-        self.layoutAttr = layoutAttr
-        self.children = children
-        self._layoutDirection = layoutDirection
+        self.proxies = children
+        self.layoutDirection = context[dynamicMember: \.layoutDirection]
         self.layout.updateCache(&cache, subviews: makeSubviews())
-        sizeCache.invalidate()
-        cachedChildGeometries = nil
+        sizeCache = ViewSizeCache()
+        cachedAlignmentSize = .zero
+        cachedAlignmentGeometry = []
+        cachedAlignment = Cache3()
+        preferredSpacing = nil
     }
 
     private func placementTransaction() -> Transaction {
         guard let graph = _AGGraph.current else {
             return Transaction.current
         }
-        if let layoutAttr,
-           let transaction = graph.transaction(for: layoutAttr.identifier),
+        if let transaction = graph.transaction(for: proxies.context.attribute),
            !transaction.isEmpty {
             return transaction
         }
-        for child in children {
+        for child in proxies.attributes {
             guard let attr = child.layoutComputer.attribute,
                   let transaction = graph.transaction(for: attr.identifier),
                   !transaction.isEmpty else {
@@ -313,90 +425,114 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
         return Transaction.current
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        sizeCache.value(for: proposal) {
-            layout.sizeThatFits(
-                proposal: proposal,
-                subviews: makeSubviews(),
-                cache: &cache
-            )
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        let layout = layout
+        let subviews = makeSubviews()
+        return sizeCache.get(proposal) {
+            var result: CGSize!
+            proxies.context.update {
+                result = layout.sizeThatFits(
+                    proposal: ProposedViewSize(proposal),
+                    subviews: subviews,
+                    cache: &cache
+                )
+            }
+            return result
         }
     }
 
-    func spacing() -> ViewSpacing {
-        layout.spacing(subviews: makeSubviews(), cache: &cache)
+    mutating func spacing() -> Spacing {
+        if let preferredSpacing {
+            return preferredSpacing
+        }
+        let layout = layout
+        let subviews = makeSubviews()
+        var spacing: Spacing!
+        proxies.context.update {
+            spacing = layout.spacing(subviews: subviews, cache: &cache).spacing
+        }
+        preferredSpacing = spacing
+        return spacing
     }
 
-    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+    mutating func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
         let subviews = makeSubviews()
         let bounds = CGRect(origin: .zero, size: size.value)
 
-        switch key.axis {
-        case .horizontal:
-            return layout.explicitAlignment(of: HorizontalAlignment(alignmentKey: key.bits),
-                                            in: bounds,
-                                            proposal: size.proposal,
-                                            subviews: subviews,
-                                            cache: &cache)
-        case .vertical:
-            return layout.explicitAlignment(of: VerticalAlignment(alignmentKey: key.bits),
-                                            in: bounds,
-                                            proposal: size.proposal,
-                                            subviews: subviews,
-                                            cache: &cache)
+        var result: CGFloat?
+        proxies.context.update {
+            switch key.axis {
+            case .horizontal:
+                result = layout.explicitAlignment(of: HorizontalAlignment(alignmentKey: key.bits),
+                                                  in: bounds,
+                                                  proposal: ProposedViewSize(size.proposal),
+                                                  subviews: subviews,
+                                                  cache: &cache)
+            case .vertical:
+                result = layout.explicitAlignment(of: VerticalAlignment(alignmentKey: key.bits),
+                                                  in: bounds,
+                                                  proposal: ProposedViewSize(size.proposal),
+                                                  subviews: subviews,
+                                                  cache: &cache)
+            }
         }
+        return result
     }
 
-    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+    mutating func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
         if origin == .zero,
-           let cachedChildGeometries,
-           cachedChildGeometries.size == size,
-           cachedChildGeometries.geometries.count == children.count {
-            return cachedChildGeometries.geometries
+           cachedAlignmentSize == size,
+           cachedAlignmentGeometry.count == proxies.count {
+            return cachedAlignmentGeometry
         }
 
         let subviews = makeSubviews()
         var placementData = PlacementData(
-            count: children.count,
+            count: proxies.count,
             bounds: CGRect(origin: origin, size: size.value),
-            layoutDirection: _layoutDirection
+            layoutDirection: layoutDirection
         )
         return withUnsafeMutablePointer(to: &placementData) { pointer in
             ThreadLayoutData.withPlacementData(pointer) {
                 Transaction.withScopedThreadTransaction(placementTransaction()) {
-                    layout.placeSubviews(
-                        in: CGRect(origin: origin, size: size.value),
-                        proposal: ProposedViewSize(size.value),
-                        subviews: subviews,
-                        cache: &cache
-                    )
+                    proxies.context.update {
+                        layout.placeSubviews(
+                            in: CGRect(origin: origin, size: size.value),
+                            proposal: ProposedViewSize(size.value),
+                            subviews: subviews,
+                            cache: &cache
+                        )
+                    }
                 }
             }
             let geometries = pointer.pointee.resolvedGeometries(
-                children: children,
-                proposal: size.proposal
+                children: proxies.attributes,
+                proposal: ProposedViewSize(size.proposal)
             )
             if origin == .zero {
-                cachedChildGeometries = (size, geometries)
+                cachedAlignmentSize = size
+                cachedAlignmentGeometry = geometries
             }
             return geometries
         }
     }
 
-    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
+    mutating func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
         let subviews = makeSubviews()
-        let size = sizeThatFits(proposal)
+        let size = sizeThatFits(_ProposedSize(proposal))
         let origin = CGPoint(
             x: position.x - size.width * anchor.x,
             y: position.y - size.height * anchor.y
         )
         Transaction.withScopedThreadTransaction(placementTransaction()) {
-            layout.placeSubviews(
-                in: CGRect(origin: origin, size: size),
-                proposal: proposal,
-                subviews: subviews,
-                cache: &cache
-            )
+            proxies.context.update {
+                layout.placeSubviews(
+                    in: CGRect(origin: origin, size: size),
+                    proposal: proposal,
+                    subviews: subviews,
+                    cache: &cache
+                )
+            }
         }
     }
 }
@@ -405,17 +541,17 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
 
 /// Closure-based LayoutEngine bridging the closure-based LayoutComputer API
 /// to the LayoutEngine protocol required by LayoutEngineBox.
-final class ClosureLayoutEngine: LayoutEngine {
-    var _sizeThatFits: (ProposedViewSize) -> CGSize
-    var _spacing: ViewSpacing
+final class ClosureLayoutEngine: LayoutEngine, LayoutEnginePlacing {
+    var _sizeThatFits: (_ProposedSize) -> CGSize
+    var _spacing: Spacing
     var _place: (CGPoint, UnitPoint, ProposedViewSize) -> Void
     var _childGeometries: (ViewSize, CGPoint) -> [ViewGeometry]
     var _priority: Double
     var _explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)?
 
     init(
-        sizeThatFits: @escaping (ProposedViewSize) -> CGSize,
-        spacing: ViewSpacing = ViewSpacing(),
+        sizeThatFits: @escaping (_ProposedSize) -> CGSize,
+        spacing: Spacing = Spacing(),
         place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
         childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
         priority: Double = 0,
@@ -429,8 +565,8 @@ final class ClosureLayoutEngine: LayoutEngine {
         _explicitAlignment = explicitAlignment
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize { _sizeThatFits(proposal) }
-    func spacing() -> ViewSpacing { _spacing }
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize { _sizeThatFits(proposal) }
+    func spacing() -> Spacing { _spacing }
     func layoutPriority() -> Double { _priority }
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
         _childGeometries(size, origin)

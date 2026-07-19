@@ -9,7 +9,7 @@ import Foundation
 
 /// Default anchors used for initial placement, size changes, and undersized alignment.
 struct ScrollAnchorStorage: Equatable {
-    enum Role: Hashable, Sendable {
+    enum Role: Hashable, CaseIterable, Sendable {
         case initialOffset
         case sizeChanges
         case alignment
@@ -79,6 +79,73 @@ struct ScrollTargetConfiguration: Equatable {
 }
 
 enum ScrollViewUtilities {
+    static func contentFrame(
+        in containingSize: CGSize,
+        contentComputer: LayoutComputer?,
+        axes: Axis.Set
+    ) -> ViewFrame {
+        var proposal = ProposedViewSize(containingSize)
+        if axes.contains(.horizontal) {
+            proposal.width = nil
+        }
+        if axes.contains(.vertical) {
+            proposal.height = nil
+        }
+
+        var contentSize = containingSize
+        if !axes.isEmpty {
+            let measured = (contentComputer ?? LayoutComputer.defaultValue)
+                .sizeThatFits(_ProposedSize(proposal))
+            if axes.contains(.horizontal) {
+                contentSize.width = measured.width
+            }
+            if axes.contains(.vertical) {
+                contentSize.height = measured.height
+            }
+        }
+
+        let origin = CGPoint(
+            x: axes.contains(.horizontal)
+                ? 0
+                : max(containingSize.width - contentSize.width, 0) * 0.5,
+            y: axes.contains(.vertical)
+                ? 0
+                : max(containingSize.height - contentSize.height, 0) * 0.5
+        )
+        return ViewFrame(
+            origin: origin,
+            size: ViewSize(contentSize, proposal: _ProposedSize(proposal))
+        )
+    }
+
+    static func sizeThatFits(
+        in proposal: ProposedViewSize,
+        contentComputer: LayoutComputer?,
+        axes: Axis.Set
+    ) -> CGSize? {
+        guard !axes.isEmpty else {
+            return nil
+        }
+
+        var contentProposal = proposal
+        if axes.contains(.horizontal) {
+            contentProposal.width = nil
+        }
+        if axes.contains(.vertical) {
+            contentProposal.height = nil
+        }
+
+        var size = (contentComputer ?? LayoutComputer.defaultValue)
+            .sizeThatFits(_ProposedSize(contentProposal))
+        if !axes.contains(.horizontal), let width = proposal.width {
+            size.width = width
+        }
+        if !axes.contains(.vertical), let height = proposal.height {
+            size.height = height
+        }
+        return size
+    }
+
     static func animationOffset(
         targetFrame: CGRect,
         anchor: UnitPoint?,
@@ -189,7 +256,7 @@ struct SystemScrollLayoutState: Equatable {
             && lhs.systemTranslation == rhs.systemTranslation
             && lhs.contentRectToPrepare == rhs.contentRectToPrepare
             && lhs.contentOffsetMode == rhs.contentOffsetMode
-            && lhs.contentOffsetSeed == rhs.contentOffsetSeed
+            && lhs.contentOffsetSeed.matches(rhs.contentOffsetSeed)
     }
 
     mutating func updateContentOffset(
@@ -235,7 +302,7 @@ struct HostingScrollViewUpdateContext: Equatable {
     var safeInsets: EdgeInsets
 }
 
-/// Logical platform-host carrier. A backend can mirror this state while
+/// Logical host carrier. A backend can consume this state while
 /// graph-side scroll ownership remains in the graph layer.
 class HostingScrollView {
     private struct DragState {
@@ -272,6 +339,7 @@ class HostingScrollView {
     private let graphRef: _AGGraphContext
     private let layoutState: WeakAttribute<SystemScrollLayoutState>
     private let phaseState: WeakAttribute<ScrollPhaseState>
+    private let containerSize: WeakAttribute<CGSize>
     private var dragState: DragState?
     private var decelerationState: DecelerationState?
 
@@ -298,16 +366,19 @@ class HostingScrollView {
     init(
         graphRef: _AGGraphContext,
         layoutState: WeakAttribute<SystemScrollLayoutState>,
-        phaseState: WeakAttribute<ScrollPhaseState> = WeakAttribute()
+        phaseState: WeakAttribute<ScrollPhaseState> = WeakAttribute(),
+        containerSize: WeakAttribute<CGSize> = WeakAttribute()
     ) {
         self.graphRef = graphRef
         self.layoutState = layoutState
         self.phaseState = phaseState
+        self.containerSize = containerSize
     }
 
     @discardableResult
     func updateContext(_ context: HostingScrollViewUpdateContext) -> Bool {
         var context = context
+        publishContainerSize(context.containingSize)
         switch context.offsetMode {
         case let .target(targetProvider, config):
             animationTargetConfig = config
@@ -350,6 +421,20 @@ class HostingScrollView {
         pendingContext = context
         retargetContentOffsetIfNeeded()
         return false
+    }
+
+    private func publishContainerSize(_ size: CGSize) {
+        graphRef.withCurrent {
+            guard let graph = _AGGraph.current,
+                  containerSize.isValid(in: graph) else {
+                return
+            }
+            let attribute = containerSize.toStrong()
+            let current = graph.cachedValue(for: attribute.identifier) as? CGSize
+            if current != size {
+                attribute.setValue(size, transaction: Transaction.current)
+            }
+        }
     }
 
     func updateConfiguration(_ configuration: ScrollViewConfiguration) {
@@ -983,7 +1068,7 @@ struct ScrollViewAdjustedProperties: Rule {
     var _isEnabled: Attribute<Bool>
     var _isContainedInPlatter: OptionalAttribute<Bool>
 
-    func updateValue() -> ScrollEnvironmentProperties {
+    var value: ScrollEnvironmentProperties {
         let configuration = _configuration.value
         var properties = _scrollStorage.value.properties
         properties.layoutDirection = _layoutDirection.value
@@ -1019,7 +1104,7 @@ struct ScrollViewAlignmentAdjustment: Rule {
     var _contentFrame: Attribute<ViewFrame>
     var _size: Attribute<ViewSize>
 
-    func updateValue() -> CGSize {
+    var value: CGSize {
         guard _SemanticFeature<Semantics_v6>.isEnabled else {
             return .zero
         }
@@ -1048,7 +1133,7 @@ struct ScrollViewRTLAlignmentAdjustment: Rule {
     var _size: Attribute<ViewSize>
     var _layoutDirection: Attribute<LayoutDirection>
 
-    func updateValue() -> CGSize {
+    var value: CGSize {
         guard _SemanticFeature<Semantics_v6>.isEnabled,
               _configuration.value.axes.contains(.horizontal),
               _layoutDirection.value == .rightToLeft,
@@ -1073,7 +1158,7 @@ struct ScrollViewAdjustedSafeArea: Rule {
     var _alignmentAdjustment: Attribute<CGSize>
     var _rtlAdjustment: Attribute<CGSize>
 
-    func updateValue() -> EdgeInsets {
+    var value: EdgeInsets {
         var safeArea = _safeArea.value
         guard _SemanticFeature<Semantics_v6>.isEnabled else {
             return safeArea
@@ -1096,15 +1181,23 @@ struct MakeHostingScrollView: StatefulRule {
 
     var _layoutState: Attribute<SystemScrollLayoutState>
     var _phaseState: Attribute<ScrollPhaseState>
+    var _containerSize: Attribute<CGSize>
     var graphRef: _AGGraphContext
 
     init(
         _layoutState: Attribute<SystemScrollLayoutState>,
         _phaseState: Attribute<ScrollPhaseState>,
+        _containerSize: Attribute<CGSize>? = nil,
         graphRef: _AGGraphContext
     ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("MakeHostingScrollView.init requires AG context")
+        }
         self._layoutState = _layoutState
         self._phaseState = _phaseState
+        self._containerSize = _containerSize ?? graph.makeInput(
+            value: CGSize(width: -.infinity, height: -.infinity)
+        )
         self.graphRef = graphRef
     }
 
@@ -1118,6 +1211,7 @@ struct MakeHostingScrollView: StatefulRule {
         self.init(
             _layoutState: _layoutState,
             _phaseState: graph.makeInput(value: ScrollPhaseState()),
+            _containerSize: nil,
             graphRef: graphRef
         )
     }
@@ -1130,7 +1224,8 @@ struct MakeHostingScrollView: StatefulRule {
         _AGGraph.setStatefulOutput(HostingScrollView(
             graphRef: graphRef,
             layoutState: _layoutState.asWeak(),
-            phaseState: _phaseState.asWeak()
+            phaseState: _phaseState.asWeak(),
+            containerSize: _containerSize.asWeak()
         ))
     }
 }

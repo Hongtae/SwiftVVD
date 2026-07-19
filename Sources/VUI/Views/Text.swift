@@ -26,16 +26,6 @@ final class _TextResourceResolutionState {
         pendingVersion = nil
         pendingTransaction = Transaction()
     }
-
-    static func publicationTransaction(
-        candidate: Transaction,
-        hasResolvedContent: Bool
-    ) -> Transaction {
-        guard !hasResolvedContent else { return candidate }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        return transaction
-    }
 }
 
 final class _TextDisplayListContentState {
@@ -98,7 +88,7 @@ func _textTransitionRenderFrame(
 }
 
 // TextAlignment: horizontal alignment for multi-line text.
-public enum TextAlignment: Hashable {
+public enum TextAlignment: Hashable, CaseIterable {
     case leading
     case center
     case trailing
@@ -122,7 +112,14 @@ extension View {
 }
 
 
-class AnyTextStorage {
+class AnyTextStorage: CustomDebugStringConvertible {
+    var debugDescription: String {
+        let typeName = String(describing: type(of: self))
+        let pointer = Unmanaged.passUnretained(self).toOpaque()
+        let text = resolveText(in: EnvironmentValues())
+        return "<\(typeName): \(pointer)>: \(String(reflecting: text))"
+    }
+
     func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         fatalError("This method should be overridden by subclasses.")
     }
@@ -715,7 +712,7 @@ where Source: _TimeDataFormattingSource,
     }
 }
 
-// NOTE: No String.LocalizationValue for non-Apple platforms.
+// This carrier stores localization data without requiring a platform localization value.
 //typealias LocalizedStringKey = String.LocalizationValue
 public typealias LocalizedStringKey = String
 
@@ -1311,18 +1308,34 @@ extension Text: View {
         let resolvedStyledTextAttr = graph.makeInput(value: initialResolvedStyledText)
         let resolvedStyledTextTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _TextResourceResolutionState()
+        let inheritedTransactionAttr = inputs.base.transaction
         let displayListContentState = _TextDisplayListContentState()
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
         let environmentAttr = cachedEnvironmentAttr.value.environment
         let timeAttr = inputs.base.time
-        let animatedFrame = cachedEnvironmentAttr.value.animatedFrame
         let inbox = graph.inbox
-        let sizeAttr = animatedFrame?._animatedSize ?? inputs.size
-        let targetSizeAttr = animatedFrame?.size ?? inputs.size
-        let pixelLengthAttr = animatedFrame?.pixelLength
-        let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
+        let positionAttr: Attribute<CGPoint>
+        let sizeAttr: Attribute<ViewSize>
+        let targetSizeAttr: Attribute<ViewSize>
+        let pixelLengthAttr: Attribute<CGFloat>?
+        if inputs.needsGeometry {
+            var cachedEnvironment = cachedEnvironmentAttr.value
+            positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+            sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+            guard let animatedFrame = cachedEnvironment.animatedFrame else {
+                fatalError("Text geometry animation requires an animated frame.")
+            }
+            targetSizeAttr = animatedFrame.size
+            pixelLengthAttr = animatedFrame.pixelLength
+            cachedEnvironmentAttr.value = cachedEnvironment
+        } else {
+            positionAttr = inputs.position
+            sizeAttr = inputs.size
+            targetSizeAttr = inputs.size
+            pixelLengthAttr = nil
+        }
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
         let usesSizeFittingText = inputs.base[VariantThatFitsFlag.self]
@@ -1371,15 +1384,15 @@ extension Text: View {
                 return ResourceList()
             }
 
-            let candidateTransaction = _AGGraph.currentRuleContextAttribute
+            let contextualTransaction = _AGGraph.currentRuleContextAttribute
                 .flatMap { graph.transaction(for: $0) } ?? Transaction()
+            let inheritedTransaction = inheritedTransactionAttr.value
+            let candidateTransaction = contextualTransaction.isEmpty
+                ? inheritedTransaction
+                : contextualTransaction
             let resourceTransaction = resourceResolutionState.transaction(
                 for: currentVersion,
                 candidate: candidateTransaction
-            )
-            let publicationTransaction = _TextResourceResolutionState.publicationTransaction(
-                candidate: resourceTransaction,
-                hasResolvedContent: resolvedStyledText.resolvedText != nil
             )
 
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
@@ -1400,7 +1413,7 @@ extension Text: View {
                         referenceDate: referenceDate
                     ) : nil
                 )
-                let boxedTransaction = UnsafeBox(publicationTransaction)
+                let boxedTransaction = UnsafeBox(resourceTransaction)
                 let boxedLayoutProperties = UnsafeBox(layoutProperties)
 
                 // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
@@ -1463,7 +1476,7 @@ extension Text: View {
                 if _AGGraph.current === graph {
                     publish()
                 } else {
-                    inbox.enqueue(transaction: publicationTransaction, publish)
+                    inbox.enqueue(transaction: resourceTransaction, publish)
                 }
             }
 
@@ -1533,8 +1546,8 @@ extension Text: View {
                 }
 
                 return LayoutComputer(
-                    sizeThatFits: { sizeThatFits($0) },
-                    spacing: .text,
+                    sizeThatFits: { sizeThatFits(ProposedViewSize($0)) },
+                    spacing: ViewSpacing.text.spacing,
                     explicitAlignment: { key, size in
                         guard let resolved else { return nil }
                         if key == VerticalAlignment.firstTextBaseline.key {
@@ -1630,7 +1643,7 @@ extension Text: View {
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         var interpolatorInputs = inputs
         interpolatorInputs.base.transaction = resolvedStyledTextTransactionAttr
-        interpolatorInputs.size = animatedFrame?.size ?? inputs.size
+        interpolatorInputs.size = targetSizeAttr
         outputs.applyInterpolatorGroup(
             interpolatorGroup,
             content: displayedStyledTextAttr,

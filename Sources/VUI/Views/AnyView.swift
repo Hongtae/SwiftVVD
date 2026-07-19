@@ -14,59 +14,6 @@ class AnyViewBox {
     }
 }
 
-private struct AnyViewContainer: StatefulRule {
-    typealias Value = _ViewOutputs
-
-    var view: Attribute<AnyView>
-    var inputs: _ViewInputs
-    var placeholders: _ViewOutputs
-    var typeID: ObjectIdentifier?
-    var subgraph: AGSubgraph?
-
-    mutating func updateValue() {
-        guard let graph = _AGGraph.current else {
-            fatalError("AnyViewContainer.updateValue evaluated outside an active _AGGraph context.")
-        }
-
-        let currentView = view.value._view
-        let currentTypeID = ObjectIdentifier(type(of: currentView))
-
-        if typeID != currentTypeID {
-            eraseCurrentSubgraph()
-            typeID = currentTypeID
-
-            let subgraph = AGSubgraph()
-            self.subgraph = subgraph
-            let viewAttr = view
-            let childInputs = inputs
-
-            func makeConcreteView<V: View>(_: V) -> _ViewOutputs {
-                AGSubgraph.withCurrent(subgraph) {
-                    let concreteAttr: Attribute<V> = graph.makeRule {
-                        viewAttr.value._view as! V
-                    }
-                    return makeView(view: _GraphValue(_attribute: concreteAttr), inputs: childInputs)
-                }
-            }
-
-            let concrete = makeConcreteView(currentView)
-            AGSubgraph.withCurrent(subgraph) {
-                concrete.attachIndirectOutputs(to: placeholders)
-            }
-        }
-
-        _AGGraph.setStatefulOutput(placeholders)
-    }
-
-    private mutating func eraseCurrentSubgraph() {
-        guard let subgraph else { return }
-        placeholders.detachIndirectOutputs()
-        subgraph.invalidate()
-        subgraph.removeFromParent()
-        self.subgraph = nil
-    }
-}
-
 public struct AnyView: View {
     var storage: AnyViewBox
 
@@ -93,31 +40,12 @@ public struct AnyView: View {
         }
     }
 
-    /// Dynamic-subgraph implementation with type-erased dispatch.
-    ///
-    /// AnyView must return placeholder `_ViewOutputs`, not just a layout slot,
-    /// so DisplayList and other requested preference keys relay through type
-    /// erasure. The concrete child outputs are attached when the stateful rule
-    /// opens the wrapped existential.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-
-        let placeholders = inputs.makeIndirectOutputs()
-        let containerAttr: Attribute<AnyViewContainer.Value> = graph.makeStatefulRule(
-            AnyViewContainer(view: view._attribute, inputs: inputs, placeholders: placeholders)
-        )
-        placeholders.setIndirectDependency(containerAttr.identifier)
-        _ = graph.makeSideEffectRule {
-            _ = containerAttr.value
-            return ()
-        }
-        return placeholders
+        makeDynamicView(metadata: (), view: view, inputs: inputs)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+        makeDynamicViewList(metadata: (), view: view, inputs: inputs)
     }
 
     public typealias Body = Never
@@ -128,4 +56,64 @@ extension AnyView {
 }
 
 extension AnyView: PrimitiveView {
+}
+
+extension AnyView: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        "AnyView(\(String(reflecting: storage.view)))"
+    }
+}
+
+@available(*, unavailable)
+extension AnyView: Sendable {
+}
+
+extension AnyView: DynamicView {
+    typealias Metadata = Void
+    typealias ID = UniqueID
+
+    static var canTransition: Bool { false }
+
+    func childInfo(metadata: Void) -> (type: Any.Type, id: UniqueID?) {
+        (type(of: _view), nil)
+    }
+
+    func makeChildView(
+        metadata: Void,
+        view: Attribute<AnyView>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("AnyView.makeChildView called outside an active _AGGraph context.")
+        }
+        let concrete = view.value._view
+        func make<V: View>(_: V) -> _ViewOutputs {
+            let attribute: Attribute<V> = graph.makeRule {
+                view.value._view as! V
+            }
+            return V._makeView(view: _GraphValue(_attribute: attribute), inputs: inputs)
+        }
+        return make(concrete)
+    }
+
+    func makeChildViewList(
+        metadata: Void,
+        view: Attribute<AnyView>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("AnyView.makeChildViewList called outside an active _AGGraph context.")
+        }
+        let concrete = view.value._view
+        func make<V: View>(_: V) -> _ViewListOutputs {
+            let attribute: Attribute<V> = graph.makeRule {
+                view.value._view as! V
+            }
+            return V._makeViewList(
+                view: _GraphValue(_attribute: attribute),
+                inputs: inputs
+            )
+        }
+        return make(concrete)
+    }
 }

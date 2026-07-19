@@ -36,7 +36,7 @@ public struct LazyVGrid<Content>: View where Content: View {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         ResettableLazyLayoutRoot<_VariadicView.Tree<LazyVGridLayout, Content>>
-            ._makeLazyLayoutView(view: view[\.tree], inputs: inputs)
+            ._makeView(view: view[\.tree], inputs: inputs)
     }
 
     public typealias Body = Never
@@ -53,9 +53,9 @@ struct LazyVGridLayout: HVGrid {
 
     typealias Body = Never
     typealias AnimatableData = EmptyAnimatableData
-    typealias Cache = _LazyGridLayout.Cache
+    typealias Cache = _LazyStack_Cache<Self>
 
-    static var _lazyLayoutProperties: _LazyLayout_Properties {
+    static var layoutProperties: _LazyLayout_Properties {
         _LazyLayout_Properties(axes: .vertical)
     }
 
@@ -79,74 +79,4 @@ struct LazyVGridLayout: HVGrid {
         self.pinnedViews = pinnedViews
     }
 
-    private var layout: _LazyGridLayout {
-        _LazyGridLayout(
-            axis: .vertical,
-            items: self.columns,
-            horizontalAlignment: alignment,
-            verticalAlignment: .center,
-            spacing: spacing
-        )
-    }
-
-    func makeCache(subviews: Subviews) -> Cache {
-        layout.makeCache(subviews: subviews)
-    }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        layout.updateCache(&cache, subviews: subviews)
-    }
-
-    func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
-        layout.spacing(subviews: subviews, cache: &cache)
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func explicitAlignment(
-        of guide: HorizontalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        layout.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
-
-    func explicitAlignment(
-        of guide: VerticalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        layout.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
 }

@@ -48,7 +48,7 @@ struct ContextMenuRecognizer {
     }
 
     @discardableResult
-    mutating func handleMouseEvent(_ event: MouseEvent,
+    mutating func handleMouseEvent(_ event: PlatformMouseEvent,
                                    viewGraph: ViewGraph,
                                    rootResponder: MultiViewResponder,
                                    scheduleLongPress: (UInt64, TimeInterval) -> Void,
@@ -129,7 +129,7 @@ struct ContextMenuRecognizer {
         return opened
     }
 
-    private mutating func handlePendingMouseEvent(_ event: MouseEvent,
+    private mutating func handlePendingMouseEvent(_ event: PlatformMouseEvent,
                                                   viewGraph: ViewGraph,
                                                   rootResponder: MultiViewResponder,
                                                   open: (ContextMenuResponder, CGPoint) -> Void) -> Bool {
@@ -190,7 +190,7 @@ struct ContextMenuRecognizer {
         return squaredDistance > tolerance * tolerance
     }
 
-    private func canStartContextMenuSession(_ event: MouseEvent,
+    private func canStartContextMenuSession(_ event: PlatformMouseEvent,
                                             policy: ContextMenuTriggerPolicy) -> Bool {
         switch policy {
         case .automatic:

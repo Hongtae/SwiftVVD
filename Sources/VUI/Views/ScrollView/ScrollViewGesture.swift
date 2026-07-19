@@ -54,12 +54,6 @@ struct ScrollGesture: Gesture {
     }
 }
 
-extension ScrollGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self || eventType == WheelEvent.self
-    }
-}
-
 extension _ScrollViewGestureProvider {
     func gesture(proxy: _ScrollViewProxy) -> ScrollGesture {
         ScrollGesture(
@@ -71,7 +65,7 @@ extension _ScrollViewGestureProvider {
 
 /// Input chain for the logical hosting scroll view. Pointer/touch scrolling
 /// retains the pan recognizer, while discrete wheels bypass its distance gate.
-private struct SystemScrollGesture: Gesture {
+struct SystemScrollGesture: Gesture {
     typealias Value = ScrollGesture.Value
     typealias Body = ModifierGesture<
         CombineGesture<PanGesture.Value, SystemWheelEvent, Value>,
@@ -103,21 +97,21 @@ private struct SystemScrollGesture: Gesture {
     }
 }
 
-extension SystemScrollGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self || eventType == SystemWheelEvent.self
-    }
-}
-
 struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
     typealias Combiner = DefaultGestureCombiner
     typealias Value = ScrollGesture.Value
     typealias StateType = Void
     typealias Body = Never
+    typealias CallbackGesture = ModifierGesture<CallbacksGesture<Self>, ScrollGesture>
+    typealias ContentGesture = ModifierGesture<
+        CoordinateSpaceGesture<ScrollGesture.Value>,
+        CallbackGesture
+    >
 
     var proxy: _ScrollViewProxy
 
     static var initialState: Void { () }
+    var name: String? { nil }
 
     var gestureMask: GestureMask {
         guard proxy.config.isScrollEnabled else {
@@ -126,50 +120,21 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
         return proxy.config.gestureProvider.gestureMask(proxy: proxy)
     }
 
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self || eventType == WheelEvent.self
-    }
-
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        Self.acceptsEventType(eventType)
-    }
-
-    static func _makeSessionGesture(
-        modifier: _GraphValue<Self>,
-        inputs: _GestureInputs
-    ) -> _GestureOutputs<()> {
-        guard let graph = _AGGraph.current else {
-            fatalError("ScrollViewGesture._makeSessionGesture requires AG context")
-        }
-        let current = modifier._attribute.value
-        guard let node = current.proxy.node else {
+    var gesture: ContentGesture {
+        guard let node = proxy.node else {
             fatalError("ScrollViewGesture requires a live ScrollViewNode")
         }
-        let scrollGesture = current.proxy.config.gestureProvider.gesture(proxy: current.proxy)
-        typealias Chain = ModifierGesture<CallbacksGesture<ScrollViewGesture>, ScrollGesture>
-        let chain = Chain(
-            modifier: CallbacksGesture(callbacks: current),
+        let scrollGesture = proxy.config.gestureProvider.gesture(proxy: proxy)
+        let chain = CallbackGesture(
+            modifier: CallbacksGesture(callbacks: self),
             body: scrollGesture
         )
-        typealias CoordinateChain = ModifierGesture<
-            CoordinateSpaceGesture<ScrollGesture.Value>,
-            Chain
-        >
-        let coordinateChain = CoordinateChain(
+        return ContentGesture(
             modifier: CoordinateSpaceGesture(
                 coordinateSpace: .named(AnyHashable(ObjectIdentifier(node)))
             ),
             body: chain
         )
-        let chainAttribute = graph.makeInput(value: coordinateChain)
-        let outputs = CoordinateChain._makeGesture(
-            gesture: _GraphValue(_attribute: chainAttribute),
-            inputs: inputs
-        )
-        let mapped: Attribute<GesturePhase<()>> = graph.makeRule {
-            outputs.phase.value.map { _ in () }
-        }
-        return outputs.withPhase(mapped)
     }
 
     func dispatch(
@@ -200,24 +165,24 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
             return outputs
         }
         guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
-              viewGraph.rendererHost?.gestureGraph != nil else {
+              (viewGraph.rendererHost as? WindowController)?.gestureGraph != nil else {
             return outputs
         }
 
         let responderNodes = outputs.preferences.preferences
             .filter { $0.key == ViewRespondersKey.self }
             .map(\.value)
-        let responders: Attribute<[any ViewResponder]>
+        let responders: Attribute<[ViewResponder]>
         if responderNodes.isEmpty {
             responders = graph.makeInput(value: [])
         } else if responderNodes.count == 1 {
-            responders = Attribute<[any ViewResponder]>(responderNodes[0])
+            responders = Attribute<[ViewResponder]>(responderNodes[0])
         } else {
             responders = graph.makeRule {
                 var result = ViewRespondersKey.defaultValue
                 for identifier in responderNodes {
                     ViewRespondersKey.reduce(value: &result) {
-                        Attribute<[any ViewResponder]>(identifier).value
+                        Attribute<[ViewResponder]>(identifier).value
                     }
                 }
                 return result
@@ -225,10 +190,9 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
         }
 
         let filter = GestureFilter<Self>(
+            viewRespondersAttr: responders,
             modifierAttr: modifier._attribute,
-            innerRespondersAttr: responders,
-            viewInputs: inputs,
-            exclusionPolicy: Combiner.exclusionPolicy,
+            inputs: inputs,
             subgraph: AGSubgraph()
         )
         let responder = graph.makeStatefulRule(filter)
@@ -239,16 +203,21 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
 }
 
 // Connects the public logical scroll host to the shared gesture pipeline without
-// routing it through the legacy _ScrollView node.
+// routing it through the owning scroll node.
 struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
     typealias Combiner = DefaultGestureCombiner
     typealias Value = ScrollGesture.Value
     typealias StateType = Void
     typealias Body = Never
+    typealias ContentGesture = ModifierGesture<
+        CallbacksGesture<Self>,
+        SystemScrollGesture
+    >
 
     var scrollView: HostingScrollView
 
     static var initialState: Void { () }
+    var name: String? { nil }
 
     var gestureMask: GestureMask {
         scrollView.properties.isEnabled && (scrollView.configuration.isScrollEnabled ?? true)
@@ -256,23 +225,8 @@ struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
             : .gesture
     }
 
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == ScrollEvent.self || eventType == SystemWheelEvent.self
-    }
-
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        Self.acceptsEventType(eventType)
-    }
-
-    static func _makeSessionGesture(
-        modifier: _GraphValue<Self>,
-        inputs: _GestureInputs
-    ) -> _GestureOutputs<()> {
-        guard let graph = _AGGraph.current else {
-            fatalError("SystemScrollViewGesture._makeSessionGesture requires AG context")
-        }
-        let current = modifier._attribute.value
-        let axes = current.scrollView.configuration.axes
+    var gesture: ContentGesture {
+        let axes = scrollView.configuration.axes
         var directions: _EventDirections = []
         if axes.contains(.horizontal) {
             directions.formUnion(.horizontal)
@@ -280,24 +234,13 @@ struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
         if axes.contains(.vertical) {
             directions.formUnion(.vertical)
         }
-        let scrollGesture = SystemScrollGesture(
-            minimumDistance: 10,
-            allowedDirections: directions
+        return ContentGesture(
+            modifier: CallbacksGesture(callbacks: self),
+            body: SystemScrollGesture(
+                minimumDistance: 10,
+                allowedDirections: directions
+            )
         )
-        typealias Chain = ModifierGesture<CallbacksGesture<SystemScrollViewGesture>, SystemScrollGesture>
-        let chain = Chain(
-            modifier: CallbacksGesture(callbacks: current),
-            body: scrollGesture
-        )
-        let chainAttribute = graph.makeInput(value: chain)
-        let outputs = Chain._makeGesture(
-            gesture: _GraphValue(_attribute: chainAttribute),
-            inputs: inputs
-        )
-        let mapped: Attribute<GesturePhase<()>> = graph.makeRule {
-            outputs.phase.value.map { _ in () }
-        }
-        return outputs.withPhase(mapped)
     }
 
     func dispatch(
@@ -324,24 +267,24 @@ struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
         var outputs = body(_Graph(), inputs)
         guard inputs.preferences.keys.contains(ViewRespondersKey.self),
               let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
-              viewGraph.rendererHost?.gestureGraph != nil else {
+              (viewGraph.rendererHost as? WindowController)?.gestureGraph != nil else {
             return outputs
         }
 
         let responderNodes = outputs.preferences.preferences
             .filter { $0.key == ViewRespondersKey.self }
             .map(\.value)
-        let responders: Attribute<[any ViewResponder]>
+        let responders: Attribute<[ViewResponder]>
         if responderNodes.isEmpty {
             responders = graph.makeInput(value: [])
         } else if responderNodes.count == 1 {
-            responders = Attribute<[any ViewResponder]>(responderNodes[0])
+            responders = Attribute<[ViewResponder]>(responderNodes[0])
         } else {
             responders = graph.makeRule {
                 var result = ViewRespondersKey.defaultValue
                 for identifier in responderNodes {
                     ViewRespondersKey.reduce(value: &result) {
-                        Attribute<[any ViewResponder]>(identifier).value
+                        Attribute<[ViewResponder]>(identifier).value
                     }
                 }
                 return result
@@ -349,10 +292,9 @@ struct SystemScrollViewGesture: GestureViewModifier, GestureCallbacks {
         }
 
         let filter = GestureFilter<Self>(
+            viewRespondersAttr: responders,
             modifierAttr: modifier._attribute,
-            innerRespondersAttr: responders,
-            viewInputs: inputs,
-            exclusionPolicy: Combiner.exclusionPolicy,
+            inputs: inputs,
             subgraph: AGSubgraph()
         )
         let responder = graph.makeStatefulRule(filter)

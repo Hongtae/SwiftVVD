@@ -54,7 +54,7 @@ enum SceneList {
     // Item is one window entry reported by a Scene through SceneList.Key.
     struct Item {
         // Classifies which controller registry the window belongs to.
-        // Mirrors the dictionary split in AppWindowsController.
+        // Keep controller and presentation buckets separate during scene updates.
         enum Kind {
             case main       // WindowGroup has one or more instances per key.
             case single     // Window has exactly one instance per key.

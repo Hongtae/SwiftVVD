@@ -75,6 +75,9 @@ extension CoordinateSpace {
 extension CoordinateSpace: Equatable, Hashable {
 }
 
+@available(*, unavailable)
+extension CoordinateSpace: Sendable {}
+
 public protocol CoordinateSpaceProtocol {
     var coordinateSpace: CoordinateSpace { get }
 }
@@ -86,7 +89,10 @@ public struct NamedCoordinateSpace: CoordinateSpaceProtocol, Equatable {
     let name: AnyHashable
 }
 
-public struct _CoordinateSpaceModifier<Name>: ViewModifier, Equatable where Name: Hashable {
+@available(*, unavailable)
+extension NamedCoordinateSpace: Sendable {}
+
+public struct _CoordinateSpaceModifier<Name>: Equatable where Name: Hashable {
     public var name: Name
 
     public init(name: Name) {
@@ -120,7 +126,7 @@ public struct _CoordinateSpaceModifier<Name>: ViewModifier, Equatable where Name
     }
 }
 
-extension _CoordinateSpaceModifier: _ViewInputsModifier {
+extension _CoordinateSpaceModifier: ViewInputsModifier {
 }
 
 private struct CoordinateSpaceTransform<Name: Hashable>: Rule {
@@ -131,7 +137,7 @@ private struct CoordinateSpaceTransform<Name: Hashable>: Rule {
     var _position: Attribute<CGPoint>
     var _size: Attribute<CGSize>
 
-    func updateValue() -> ViewTransform {
+    var value: ViewTransform {
         var value = _transform.value
         value.appendPosition(_position.value)
         value.appendSizedSpace(
@@ -148,7 +154,7 @@ extension CoordinateSpaceProtocol where Self == NamedCoordinateSpace {
     }
 }
 
-public struct LocalCoordinateSpace: CoordinateSpaceProtocol {
+public struct LocalCoordinateSpace: CoordinateSpaceProtocol, Sendable {
     public init() {}
     public var coordinateSpace: CoordinateSpace {
         .local
@@ -161,7 +167,7 @@ extension CoordinateSpaceProtocol where Self == LocalCoordinateSpace {
     }
 }
 
-public struct GlobalCoordinateSpace: CoordinateSpaceProtocol {
+public struct GlobalCoordinateSpace: CoordinateSpaceProtocol, Sendable {
     public init() {}
     public var coordinateSpace: CoordinateSpace {
         .global

@@ -17,7 +17,7 @@ import Foundation
 ///   enabler = EventListener<TappableEvent>().duration(minimum:).endedBy(maximumDistance)
 ///             -> GesturePhase<Double>
 ///   result  -> GesturePhase<V=Bool>
-struct SingleLongPressGesture<V, B: Gesture>: Gesture, PubliclyPrimitiveGesture where B.Value == V {
+struct SingleLongPressGesture<V, B: Gesture>: Gesture where B.Value == V {
     var minimumDuration: Double
     var maximumDistance: CGFloat
     var storedBody: B   // created by LongPressGesture._makeGesture via longPressPhase()
@@ -25,26 +25,20 @@ struct SingleLongPressGesture<V, B: Gesture>: Gesture, PubliclyPrimitiveGesture 
     typealias Value = V
 
     // Enabler chain: EventListener<TappableEvent>.duration(min:).endedBy(maxDist) -> GesturePhase<Double>
-    typealias EnablerBase = ModifierGesture<DurationGesture<TappableEvent>, EventListener<TappableEvent>>
+    typealias EnablerBase = ModifierGesture<DurationGesture<MouseEvent>, EventListener<MouseEvent>>
     typealias Enabler     = EndedByWrapper<EnablerBase>
     typealias Body        = ModifierGesture<CombineGesture<V, Double, V>, B>
 
     var body: Body {
         let maxDist = maximumDistance
-        let enabler = EventListener<TappableEvent>()
+        let enabler = EventListener<MouseEvent>()
             .duration(minimum: minimumDuration)
             .endedBy { event, startLoc in
-                guard let loc = event.location, let start = startLoc else { return false }
+                guard let start = startLoc else { return false }
+                let loc = event.location
                 return hypot(loc.x - start.x, loc.y - start.y) > maxDist
             }
         return storedBody.gated(by: enabler)
-    }
-}
-
-extension SingleLongPressGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(B.self, eventType: eventType) ||
-            eventType == TappableEvent.self
     }
 }
 
@@ -52,7 +46,7 @@ extension SingleLongPressGesture: GestureEventTypeAccepting {
 
 // LongPressGesture builds SingleLongPressGesture and wraps it with CategoryGesture(.longPress).
 
-public struct LongPressGesture: Gesture {
+public struct LongPressGesture: Gesture, PubliclyPrimitiveGesture {
     public var minimumDuration: Double
     public var maximumDistance: CGFloat {
         get { _maximumDistance }
@@ -69,32 +63,27 @@ public struct LongPressGesture: Gesture {
     public typealias Value = Bool
     public typealias Body = Never
 
+    typealias Gate = ModifierGesture<MapGesture<TappableEvent, Bool>, EventListener<TappableEvent>>
+    typealias InternalBody = ModifierGesture<
+        CategoryGesture<Bool>,
+        SingleLongPressGesture<Bool, Gate>
+    >
+
+    var internalBody: InternalBody {
+        let gate: Gate = EventListener<TappableEvent>().longPressPhase()
+        return SingleLongPressGesture(
+            minimumDuration: minimumDuration,
+            maximumDistance: _maximumDistance,
+            storedBody: gate
+        )
+        .category(.longPress, includeChildren: false)
+    }
+
     public static func _makeGesture(
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Bool> {
-        guard let graph = _AGGraph.current else {
-            fatalError("LongPressGesture._makeGesture requires AG context")
-        }
-        // storedBody is EventListener<TappableEvent>().longPressPhase().
-        let self_ = gesture._attribute.value
-        typealias GateType = ModifierGesture<MapGesture<TappableEvent, Bool>, EventListener<TappableEvent>>
-        let storedBody: GateType = EventListener<TappableEvent>().longPressPhase()
-        let inner = SingleLongPressGesture<Bool, GateType>(
-            minimumDuration: self_.minimumDuration,
-            maximumDistance: self_._maximumDistance,
-            storedBody: storedBody
-        )
-        let categorized = inner.category(.longPress, includeChildren: false)
-        typealias Chain = ModifierGesture<CategoryGesture<Bool>, SingleLongPressGesture<Bool, GateType>>
-        let attr: Attribute<Chain> = graph.makeInput(value: categorized)
-        return Chain._makeGesture(gesture: _GraphValue(_attribute: attr), inputs: inputs)
-    }
-}
-
-extension LongPressGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == TappableEvent.self
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 

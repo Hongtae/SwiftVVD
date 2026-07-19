@@ -178,7 +178,7 @@ extension PhaseAnimator {
         private static func transactionSeedAttribute(in graph: _AGGraph) -> Attribute<UInt32> {
             if let ref = _AGGraphContext.current,
                let host = ref.context as? GraphHost {
-                return host.data.transactionSeedAttribute
+                return host.data._transactionSeed
             }
             return graph.makeInput(value: UInt32.zero)
         }
@@ -189,7 +189,7 @@ extension PhaseAnimator {
                 host.asyncTransaction(
                     Transaction.current,
                     id: Transaction.id,
-                    mutation: AssignmentGraphMutation(attribute: isVisible, value: value),
+                    mutation: AssignmentGraphMutation(isVisible, newValue: value),
                     style: .deferred,
                     mayDeferUpdate: false
                 )

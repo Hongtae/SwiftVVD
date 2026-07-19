@@ -169,11 +169,15 @@ struct SystemScrollView<Content>: View where Content: View {
         let layoutState: Attribute<SystemScrollLayoutState> = graph.makeInput(
             value: SystemScrollLayoutState()
         )
+        let resolvedContainerSize = graph.makeInput(
+            value: CGSize(width: -.infinity, height: -.infinity)
+        )
         let graphRef = _AGGraphContext.current ?? _AGGraphContext(graph: graph)
         let hostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
             MakeHostingScrollView(
                 _layoutState: layoutState,
                 _phaseState: phaseState,
+                _containerSize: resolvedContainerSize,
                 graphRef: graphRef
             )
         )
@@ -189,6 +193,52 @@ struct SystemScrollView<Content>: View where Content: View {
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.layoutDirection
         }
+        let pixelLength: Attribute<CGFloat> = graph.makeRule {
+            inputs.base.cachedEnvironment.value.environment.value.animationPixelLength
+        }
+
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        _ = cachedEnvironment.animatedPosition(for: inputs)
+        let animatedSize = cachedEnvironment.animatedSize(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
+
+        let contentFrameSize: Attribute<ViewSize> = graph.makeRule(
+            ScrollViewContentFrameSize(
+                _size: animatedSize,
+                _configuration: configuration
+            )
+        )
+        let systemContentInsets: Attribute<EdgeInsets> = graph.subscriptNode(
+            parent: layoutState,
+            keyPath: \SystemScrollLayoutState.systemContentInsets
+        )
+        let modelContentFrame: Attribute<ViewFrame> = graph.makeRule(
+            ScrollViewContentFrame(
+                _size: contentFrameSize,
+                _configuration: configuration,
+                _systemContentInsets: systemContentInsets,
+                _pixelLength: pixelLength,
+                _contentComputer: OptionalAttribute()
+            )
+        )
+        let frame = modelContentFrame.animated(inputs: inputs.base)
+        let childContainerSize: Attribute<ViewSize> = graph.makeStatefulRule(
+            ScrollViewChildContainerSize(
+                _configuration: configuration,
+                _parentContainerSize: inputs.containerSize,
+                _resolvedSize: resolvedContainerSize,
+                oldParentSize: ViewSize(
+                    CGSize(width: -.infinity, height: -.infinity),
+                    proposal: _ProposedSize(
+                        width: -.infinity,
+                        height: -.infinity
+                    )
+                ),
+                oldSize: CGSize(width: -.infinity, height: -.infinity)
+            )
+        )
+
         contentInputs.scrollable = OptionalAttribute(scrollableAttr)
         let childSafeArea = graph.makeRule(
             ScrollViewChildSafeArea(
@@ -203,6 +253,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 layoutDirection: layoutDirection
             )
         )
+        let animatedChildSafeArea = childSafeArea.animated(inputs: inputs.base)
         contentInputs.transform = graph.makeRule(
             ScrollViewContentTransformProvider(
                 transform: inputs.transform,
@@ -214,30 +265,42 @@ struct SystemScrollView<Content>: View where Content: View {
         )
         contentInputs.safeAreaInsets = OptionalAttribute(graph.makeRule(
             ScrollViewChildSafeAreaInsets(
-                safeAreaInsets: childSafeArea,
+                safeAreaInsets: animatedChildSafeArea,
                 layoutDirection: layoutDirection
             )
         ))
-        contentInputs.preferences.keys.insert(ScrollablePreferenceKey.self)
-        contentInputs.preferences.keys.insert(UpdateScrollStateRequestKey.self)
+        contentInputs.size = graph.subscriptNode(
+            parent: frame,
+            keyPath: \ViewFrame.size
+        )
+        contentInputs.position = safeAreaPosition
+        contentInputs.containerPosition = graph.makeInput(value: CGPoint.zero)
+        contentInputs.containerSize = OptionalAttribute(childContainerSize)
+        contentInputs.requestsLayoutComputer = true
+        contentInputs.preferences.keys.add(ScrollablePreferenceKey.self)
+        contentInputs.preferences.keys.add(UpdateScrollStateRequestKey.self)
 
         let contentOutputs = Content._makeView(view: view[\.content], inputs: contentInputs)
-        let layoutComputer: Attribute<LayoutComputer> = graph.makeRule(
-            ScrollViewLayoutComputerProvider(
-                contentLayout: contentOutputs._layoutComputer.attribute?.asWeak() ?? WeakAttribute()
-            )
-        )
-        let scrollLayoutComputer = OptionalAttribute(layoutComputer)
+        if let contentComputer = contentOutputs._layoutComputer.attribute {
+            graph.mutateRule(
+                modelContentFrame.identifier,
+                as: ScrollViewContentFrame.self,
+                invalidating: true
+            ) {
+                $0._contentComputer = OptionalAttribute(contentComputer)
+            }
+        }
         var outputs = contentOutputs
-        outputs._layoutComputer = scrollLayoutComputer
-
-        let frame: Attribute<ViewFrame> = graph.makeRule(
-            ViewFrameProvider(
-                position: inputs.position,
-                containerSize: inputs.size,
-                layoutComputer: scrollLayoutComputer
+        if inputs.requestsLayoutComputer {
+            let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                ScrollViewLayoutComputer(
+                    _configuration: configuration,
+                    _systemContentInsets: systemContentInsets,
+                    _contentComputer: contentOutputs._layoutComputer
+                )
             )
-        )
+            outputs._layoutComputer = OptionalAttribute(layoutComputer)
+        }
         let anchorStorage = graph.makeInput(value: ScrollAnchorStorage())
         let defaultAnchors: Attribute<ScrollAnchorStorage> = graph.makeStatefulRule(
             ScrollViewDefaultAnchors(
@@ -245,9 +308,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 _anchors: anchorStorage
             )
         )
-        let pixelLength: Attribute<CGFloat> = graph.makeRule {
-            inputs.base.cachedEnvironment.value.environment.value.animationPixelLength
-        }
         let positionBinding = inputs.base.scrollPositionBinding(kind: .scrollView).attribute?.value
         let adjustedState: Attribute<SystemScrollLayoutState> = graph.makeStatefulRule(
             ScrollViewAdjustedState(
@@ -420,7 +480,7 @@ private struct ScrollViewChildSafeArea: Rule {
     var safeAreaInsets: OptionalAttribute<SafeAreaInsets>
     var configuration: Attribute<ScrollViewConfiguration>
 
-    func updateValue() -> EdgeInsets {
+    var value: EdgeInsets {
         guard let insets = safeAreaInsets.attribute?.value.value else {
             return EdgeInsets()
         }
@@ -438,7 +498,7 @@ private struct ScrollViewChildPosition: Rule {
     var axes: Attribute<Axis.Set>
     var layoutDirection: Attribute<LayoutDirection>
 
-    func updateValue() -> CGPoint {
+    var value: CGPoint {
         guard _SemanticFeature<Semantics_v6>.isEnabled else {
             return .zero
         }
@@ -463,7 +523,7 @@ private struct ScrollViewChildSafeAreaInsets: Rule {
     var safeAreaInsets: Attribute<EdgeInsets>
     var layoutDirection: Attribute<LayoutDirection>
 
-    func updateValue() -> SafeAreaInsets {
+    var value: SafeAreaInsets {
         let elements: [SafeAreaInsets.Element] = _SemanticFeature<Semantics_v6>.isEnabled
             ? [
                 SafeAreaInsets.Element(
@@ -605,7 +665,7 @@ private struct ScrollableProvider: Rule {
 
     var scrollable: ScrollViewScrollable
 
-    func updateValue() -> any Scrollable {
+    var value: any Scrollable {
         scrollable
     }
 }
@@ -616,61 +676,152 @@ private struct ScrollablePreferenceProvider: Rule {
 
     var scrollable: Attribute<any Scrollable>
 
-    func updateValue() -> [any Scrollable] {
+    var value: [any Scrollable] {
         [scrollable.value]
     }
 }
 
-/// Host-owned layout relay for the scroll container's child content.
-private struct ScrollViewLayoutComputerProvider: Rule {
-    typealias Value = LayoutComputer
+private struct ScrollViewContentFrameSize: Rule {
+    typealias Value = ViewSize
 
-    var contentLayout: WeakAttribute<LayoutComputer>
+    var _size: Attribute<ViewSize>
+    var _configuration: Attribute<ScrollViewConfiguration>
 
-    func updateValue() -> LayoutComputer {
-        guard let graph = _AGGraph.current else {
-            fatalError("ScrollViewLayoutComputerProvider.updateValue called outside AG context.")
-        }
-        guard contentLayout.isValid(in: graph) else {
-            return LayoutComputer.defaultValue
-        }
-
-        let inner = contentLayout.toStrong().value
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                inner.sizeThatFits(proposal)
-            },
-            spacing: inner.spacing,
-            place: { position, anchor, proposal in
-                inner.place(at: position, anchor: anchor, proposal: proposal)
-            },
-            childGeometries: { size, origin in
-                inner.childGeometries(at: size, origin: origin)
-            },
-            priority: inner.priority,
-            explicitAlignment: { key, size in
-                inner.explicitAlignment(key, at: size)
-            }
-        )
+    var value: ViewSize {
+        var size = _size.value
+        let insets = _configuration.value.contentInsets
+        size.value.width -= insets.leading + insets.trailing
+        size.value.height -= insets.top + insets.bottom
+        return size
     }
 }
 
-/// Combines position and size inputs into a single content frame.
-private struct ViewFrameProvider: Rule {
+private struct ScrollViewContentFrame: Rule {
     typealias Value = ViewFrame
 
-    var position: Attribute<CGPoint>
-    var containerSize: Attribute<ViewSize>
-    var layoutComputer: OptionalAttribute<LayoutComputer>
+    var _size: Attribute<ViewSize>
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _systemContentInsets: Attribute<EdgeInsets>
+    var _pixelLength: Attribute<CGFloat>
+    var _contentComputer: OptionalAttribute<LayoutComputer>
 
-    func updateValue() -> ViewFrame {
-        let containerSize = containerSize.value
-        let contentSize = layoutComputer.attribute?.value.sizeThatFits(
-            ProposedViewSize(containerSize.value)
-        ) ?? containerSize.value
-        return ViewFrame(
-            origin: position.value,
-            size: ViewSize(contentSize, proposal: ProposedViewSize(containerSize.value))
+    var value: ViewFrame {
+        let containingSize = _size.value.value.inset(
+            by: _systemContentInsets.value
+        )
+        var frame = ScrollViewUtilities.contentFrame(
+            in: containingSize,
+            contentComputer: _contentComputer.attribute?.value,
+            axes: _configuration.value.axes
+        )
+        frame.round(toMultipleOf: _pixelLength.value)
+        return frame
+    }
+}
+
+private struct ScrollViewChildContainerSize: StatefulRule {
+    typealias Value = ViewSize
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _parentContainerSize: OptionalAttribute<ViewSize>
+    var _resolvedSize: Attribute<CGSize>
+    var oldParentSize: ViewSize
+    var oldSize: CGSize
+
+    mutating func updateValue() {
+        var inheritedSize = _parentContainerSize.attribute?.value ?? .zero
+        inheritedSize.value = inheritedSize.value.inset(
+            by: _configuration.value.contentInsets
+        )
+
+        let resolvedSize = _resolvedSize.value
+        let invalidSize = CGSize(width: -.infinity, height: -.infinity)
+        var output = inheritedSize
+        if resolvedSize != invalidSize && resolvedSize != .zero {
+            output.value = resolvedSize
+        }
+
+        if _AGGraph.currentStatefulOutput(ViewSize.self) == nil
+            || oldParentSize != inheritedSize
+            || oldSize != resolvedSize {
+            _AGGraph.setStatefulOutput(output)
+        }
+        oldParentSize = inheritedSize
+        oldSize = resolvedSize
+    }
+}
+
+/// Host-owned layout computer for the scroll container's child content.
+private struct ScrollViewLayoutComputer: StatefulRule {
+    typealias Value = LayoutComputer
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _systemContentInsets: Attribute<EdgeInsets>
+    var _contentComputer: OptionalAttribute<LayoutComputer>
+
+    mutating func updateValue() {
+        let configuration = _configuration.value
+        let contentInsets = configuration.contentInsets.adding(
+            _systemContentInsets.value
+        )
+        let contentComputer = _contentComputer.attribute?.value
+        updateIfNotEqual(
+            to: Engine(
+                axes: configuration.axes,
+                contentInsets: contentInsets,
+                contentComputer: contentComputer,
+                cache: ViewSizeCache()
+            )
+        )
+    }
+
+    struct Engine: LayoutEngine, Equatable {
+        var axes: Axis.Set
+        var contentInsets: EdgeInsets
+        var contentComputer: LayoutComputer?
+        var cache: ViewSizeCache
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.axes == rhs.axes
+                && lhs.contentInsets == rhs.contentInsets
+                && lhs.contentComputer == rhs.contentComputer
+        }
+
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            cache.get(proposal) {
+                let insetProposal = _ProposedSize(
+                    width: proposal.width.map {
+                        max($0 - contentInsets.leading - contentInsets.trailing, 0)
+                    },
+                    height: proposal.height.map {
+                        max($0 - contentInsets.top - contentInsets.bottom, 0)
+                    }
+                )
+                let contentSize = ScrollViewUtilities.sizeThatFits(
+                    in: ProposedViewSize(insetProposal),
+                    contentComputer: contentComputer,
+                    axes: axes
+                ) ?? insetProposal.fixingUnspecifiedDimensions()
+                return CGSize(
+                    width: contentSize.width
+                        + contentInsets.leading
+                        + contentInsets.trailing,
+                    height: contentSize.height
+                        + contentInsets.top
+                        + contentInsets.bottom
+                )
+            }
+        }
+    }
+}
+
+private extension EdgeInsets {
+    func adding(_ other: EdgeInsets) -> EdgeInsets {
+        EdgeInsets(
+            top: top + other.top,
+            leading: leading + other.leading,
+            bottom: bottom + other.bottom,
+            trailing: trailing + other.trailing
         )
     }
 }
@@ -684,7 +835,7 @@ private struct ScrollGeometryProvider: Rule {
     var size: Attribute<ViewSize>
     var layoutDirection: Attribute<LayoutDirection>
 
-    func updateValue() -> ScrollGeometry {
+    var value: ScrollGeometry {
         let state = layoutState.value
         let containerSize = size.value.value
         let contentSize = frame.value.size.value
@@ -708,7 +859,7 @@ private struct ScrollGeometryTransformProvider: Rule {
     var position: Attribute<CGPoint>
     var transform: Attribute<ViewTransform>
 
-    func updateValue() -> ViewTransform {
+    var value: ViewTransform {
         var value = transform.value
         value.appendPosition(position.value)
         return value
@@ -776,7 +927,7 @@ public struct ContentMarginPlacement {
     }
 }
 
-struct OptionalEdgeInsets: Equatable {
+struct OptionalEdgeInsets: Hashable {
     var top: CGFloat?
     var leading: CGFloat?
     var bottom: CGFloat?
@@ -1022,18 +1173,9 @@ extension EnvironmentValues {
 }
 
 private extension CachedEnvironment.ID {
-    static let nearestScrollableAxes = CachedEnvironment.ID(
-        value: ObjectIdentifier(NearestScrollableAxesEnvironmentKey.self).hashValue
-    )
-    static let allScrollableAxes = CachedEnvironment.ID(
-        value: ObjectIdentifier(AllScrollableAxesEnvironmentKey.self).hashValue
-    )
-    static let contentMarginProxy = CachedEnvironment.ID(
-        value: ObjectIdentifier(AutomaticContentMarginKey.self).hashValue
-            ^ ObjectIdentifier(ScrollContentContentMarginKey.self).hashValue
-            ^ ObjectIdentifier(ScrollIndicatorContentMarginKey.self).hashValue
-            ^ ObjectIdentifier(ToolbarContentMarginKey.self).hashValue
-    )
+    static let nearestScrollableAxes = CachedEnvironment.ID(base: UniqueID())
+    static let allScrollableAxes = CachedEnvironment.ID(base: UniqueID())
+    static let contentMarginProxy = CachedEnvironment.ID(base: UniqueID())
 }
 
 extension _GraphInputs {
@@ -1209,17 +1351,17 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
 
         var _behavior: Attribute<ResolvedScrollBehavior?>
 
-        func updateValue() -> BehaviorTransform {
+        var value: BehaviorTransform {
             BehaviorTransform(behavior: _behavior.value)
         }
     }
 
-    private struct UpdateEnvironment: Rule {
+    private struct UpdateEnvironment: Rule, AsyncAttribute {
         typealias Value = EnvironmentValues
 
         var _environment: Attribute<EnvironmentValues>
 
-        func updateValue() -> EnvironmentValues {
+        var value: EnvironmentValues {
             let environment = _environment.value
             var values = environment.trackingCopy()
             values.scrollEnvironmentStorage = environment.scrollEnvironmentStorage
@@ -1251,7 +1393,7 @@ private struct ScrollPhaseProvider: Rule {
 
     var phaseState: Attribute<ScrollPhaseState>
 
-    func updateValue() -> [ScrollPhaseState] {
+    var value: [ScrollPhaseState] {
         [phaseState.value]
     }
 }

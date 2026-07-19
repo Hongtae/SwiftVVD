@@ -147,11 +147,7 @@ extension EnvironmentValues {
     }
 }
 
-struct HasKeyboardShortcut: ViewInputFlag {
-    typealias Value = Bool
-    static var defaultValue: Bool { false }
-    var description: String { "HasKeyboardShortcut" }
-}
+struct HasKeyboardShortcut: ViewInputBoolFlag {}
 
 // Stores the shortcut trait consumed by platform item collection.
 struct KeyboardShortcutPickerOptionTraitKey: _ViewTraitKey {
@@ -171,7 +167,7 @@ extension View {
 
     public func keyboardShortcut(_ shortcut: KeyboardShortcut?) -> some View {
         environment(\.keyboardShortcut, shortcut)
-            .modifier(ViewInputFlagModifier<HasKeyboardShortcut>(value: true))
+            .modifier(ViewInputFlagModifier(flag: HasKeyboardShortcut()))
             ._trait(KeyboardShortcutPickerOptionTraitKey.self, shortcut)
     }
 

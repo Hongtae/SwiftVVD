@@ -86,6 +86,59 @@ private final class StateAnimatableTransactionProbe {
     var toggle: (() -> Void)?
 }
 
+private struct ShapeLeafFrameCacheIDs: Equatable {
+    var inputPosition: AGAttribute
+    var inputSize: AGAttribute
+    var sourcePosition: AGAttribute?
+    var sourceSize: AGAttribute?
+    var presentationPosition: AGAttribute?
+    var presentationSize: AGAttribute?
+
+    init(inputs: _ViewInputs) {
+        let frame = inputs.base.cachedEnvironment.value.animatedFrame
+        inputPosition = inputs.position.identifier
+        inputSize = inputs.size.identifier
+        sourcePosition = frame?.position.identifier
+        sourceSize = frame?.size.identifier
+        presentationPosition = frame?._animatedPosition?.identifier
+        presentationSize = frame?._animatedSize?.identifier
+    }
+}
+
+private final class ShapeLeafFrameCacheProbe {
+    var beforeBody: ShapeLeafFrameCacheIDs?
+    var afterBody: ShapeLeafFrameCacheIDs?
+}
+
+private struct ShapeLeafFrameCacheProbeModifier: ViewModifier {
+    let probe: ShapeLeafFrameCacheProbe
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        let probe = modifier._attribute.value.probe
+        probe.beforeBody = ShapeLeafFrameCacheIDs(inputs: inputs)
+        let outputs = body(_Graph(), inputs)
+        probe.afterBody = ShapeLeafFrameCacheIDs(inputs: inputs)
+        return outputs
+    }
+}
+
+private struct ShapeLeafFrameCacheProbeRoot: View {
+    let probe: ShapeLeafFrameCacheProbe
+
+    var body: some View {
+        Rectangle()
+            .modifier(ShapeLeafFrameCacheProbeModifier(probe: probe))
+            .frame(width: 180, height: 96)
+            .animation(.default, value: false)
+    }
+}
+
 private struct StateAnimatableTransactionRoot: View {
     let probe: StateAnimatableTransactionProbe
     @State private var expanded = false
@@ -346,6 +399,28 @@ private final class ObservationAsyncWaiter {
 }
 
 final class ViewObservationTransactionTests: XCTestCase {
+    // ASSERTIONS shapeLeafRekeysAnimatedFrameToModelGeometryObserved
+    func testShapeLeafRekeysAnimatedFrameCacheToModelGeometry() throws {
+        let rendererHost = TestViewRendererHost()
+        let probe = ShapeLeafFrameCacheProbe()
+        let host = ViewGraph(
+            rootViewType: ShapeLeafFrameCacheProbeRoot.self,
+            content: ShapeLeafFrameCacheProbeRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        let before = try XCTUnwrap(probe.beforeBody)
+        let after = try XCTUnwrap(probe.afterBody)
+
+        XCTAssertNotEqual(before.sourcePosition, before.inputPosition)
+        XCTAssertNotEqual(before.sourceSize, before.inputSize)
+        XCTAssertEqual(after.sourcePosition, after.inputPosition)
+        XCTAssertEqual(after.sourceSize, after.inputSize)
+        XCTAssertNotEqual(after.presentationPosition, after.inputPosition)
+        XCTAssertNotEqual(after.presentationSize, after.inputSize)
+    }
+
     func testDefaultBodyObservationInvalidationPropagatesCurrentTransaction() throws {
         let host = GraphHost()
         let model = ViewObservationTransactionModel()
@@ -1127,8 +1202,17 @@ final class ViewObservationTransactionTests: XCTestCase {
                 host.data.rootSubgraph.update()
                 _ = layoutAttr.value.sizeThatFits(.unspecified)
 
+                // Generic AnimatorState preserves its first two display-lane
+                // samples before entering the running phase. Drive those
+                // frames explicitly before taking tenth-second samples.
+                for warmupTime in [1.0 / 60.0, 2.0 / 60.0] {
+                    time.setValue(Time(seconds: warmupTime))
+                    host.data.rootSubgraph.update()
+                    _ = layoutAttr.value.sizeThatFits(.unspecified)
+                }
+
                 var samples: [(time: Double, width: CGFloat)] = []
-                for step in 0...10 {
+                for step in 1...10 {
                     let sampleTime = Double(step) / 10.0
                     time.setValue(Time(seconds: sampleTime))
                     host.data.rootSubgraph.update()
@@ -1144,10 +1228,10 @@ final class ViewObservationTransactionTests: XCTestCase {
 
                 XCTAssertEqual(initialWidth, 12)
                 XCTAssertEqual(finalWidth, 48)
-                XCTAssertGreaterThan(samples[1].width, initialWidth)
-                XCTAssertLessThan(samples[1].width, finalWidth)
-                XCTAssertGreaterThan(samples[5].width, samples[1].width)
-                XCTAssertLessThan(samples[5].width, finalWidth)
+                XCTAssertGreaterThan(samples[0].width, initialWidth)
+                XCTAssertLessThan(samples[0].width, finalWidth)
+                XCTAssertGreaterThan(samples[4].width, samples[0].width)
+                XCTAssertLessThan(samples[4].width, finalWidth)
             }
         }
     }
@@ -1522,14 +1606,10 @@ final class ViewObservationTransactionTests: XCTestCase {
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: time ?? graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return _ViewInputs(
             base: base,

@@ -75,7 +75,7 @@ extension ContextMenuModifier {
             responder?.updatePresentation(isPresentedAttr.value)
         }
 
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
         return outputs
     }
@@ -102,8 +102,6 @@ private let _contextMenuResponderNextKey = Mutex<UInt32>(0x90000000)
 
 final class ContextMenuResponder: ViewResponder {
     let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
 
     let itemList: Attribute<PlatformItemList>
     private var isPresented: Binding<Bool>?
@@ -129,25 +127,26 @@ final class ContextMenuResponder: ViewResponder {
         self.environment = environment
         self.transform = transform
         self.size = size
+        super.init()
     }
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func containsGlobalPoints(_ points: [CGPoint],
-                              cacheKey: UInt32?,
-                              options: ContainsPointsOptions) -> ContainsPointsResult {
+    override func containsGlobalPoints(_ points: [CGPoint],
+                                       cacheKey: UInt32?,
+                                       options: ViewResponder.ContainsPointsOptions) -> ViewResponder.ContainsPointsResult {
         let sz = snapshotSize.value
         var localPts = Array(points.prefix(64))
         snapshotTransform.convertGlobal(to: .local, points: &localPts)
         let bounds = CGRect(origin: .zero, size: sz)
-        var mask: UInt64 = 0
+        var mask = BitVector64()
         for (i, point) in localPts.enumerated() {
-            if bounds.contains(point) { mask |= (1 << i) }
+            mask[i] = bounds.contains(point)
         }
-        guard mask != 0 else { return .stop }
-        return ContainsPointsResult(mask: mask, priority: 16.0, children: [])
+        guard !mask.isEmpty else { return .stop }
+        return ViewResponder.ContainsPointsResult(mask: mask, priority: 16.0, children: [])
     }
 
     func updatePresentation(_ isPresented: Binding<Bool>?) {
@@ -442,7 +441,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
 
     private func replaceMenuContent(with items: [PlatformItemList.Item]) {
         guard let contentAttr else { return }
-        let graph = viewGraph.data.graph
+        let graph = viewGraph.graph
         let content = UnsafeBox(AnyView(contextMenuPopupContent(items: items,
                                                                 actions: popupActions)))
         // Replace child root content through the child graph inbox. The source

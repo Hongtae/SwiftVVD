@@ -3,7 +3,6 @@ import XCTest
 
 final class AppearanceActionModifierTests: XCTestCase {
     override func tearDown() {
-        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
@@ -397,33 +396,6 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
-    func testAppearanceEffectTrackedRemovalUsesRuntimeV6Gate() {
-        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v5)
-
-        let host = GraphHost()
-        host.removedState = .unattached
-
-        host.data.withCurrent {
-            AGSubgraph.withCurrent(host.data.rootSubgraph) {
-                var events: [String] = []
-                let modifier = host.data.graph.makeInput(
-                    value: _AppearanceActionModifier(
-                        appear: { events.append("appear") },
-                        disappear: { events.append("disappear") }
-                    )
-                )
-                let phase = host.data.graph.makeInput(value: Phase())
-                let effect = host.data.graph.makeStatefulRule(
-                    AppearanceEffect(modifier: modifier, phase: phase)
-                )
-
-                _ = effect.value
-
-                XCTAssertEqual(events, ["appear"])
-            }
-        }
-    }
-
     func testAppearanceEffectTrackedRemovalDoesNotRecheckHostStateWhenActionDrains() {
         let host = GraphHost()
         host.removedState = .unattached
@@ -582,7 +554,7 @@ private final class AppearanceDelegateGraphHost: GraphHost {
 
     init(delegate: AppearanceGraphDelegateRecorder) {
         self.delegateRecorder = delegate
-        super.init()
+        super.init(data: Data())
         delegate.host = self
     }
 

@@ -97,26 +97,12 @@ struct GloballySimultaneousGestureCombiner: GestureCombiner {
 /// `AddGestureModifier` conforms to this. The protocol provides a default
 /// `ViewModifier._makeView` implementation that delegates to `makeView`.
 /// Refining MultiViewModifier keeps view and view-list attachment checks unified.
-protocol GestureViewModifier: MultiViewModifier where Body == Never {
+protocol GestureViewModifier: MultiViewModifier, PrimitiveViewModifier where Body == Never {
+    associatedtype ContentGesture: Gesture
     associatedtype Combiner: GestureCombiner
+    var gesture: ContentGesture { get }
+    var name: String? { get }
     var gestureMask: GestureMask { get }
-    static func makeView(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewInputs,
-        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
-    ) -> _ViewOutputs
-
-    /// Produces `_GestureOutputs<()>` for one gesture session.
-    /// Called by `GestureResponder<Self>.makeGesture(inputs:)` at touch time.
-    /// The modifier is passed as a `_GraphValue` so the gesture type's `_makeGesture`
-    /// can subscript into it to get the inner gesture attribute.
-    static func _makeSessionGesture(
-        modifier: _GraphValue<Self>,
-        inputs: _GestureInputs
-    ) -> _GestureOutputs<()>
-
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool
-    func acceptsEventType(_ eventType: Any.Type) -> Bool
 }
 
 extension GestureViewModifier {
@@ -128,10 +114,6 @@ extension GestureViewModifier {
         makeView(modifier: modifier, inputs: inputs, body: body)
     }
 
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool { true }
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        Self.acceptsEventType(eventType)
-    }
     // _makeViewList: inherited from MultiViewModifier (creates ModifiedElements).
     // ModifiedElements materialization calls _makeView per child.
 }
@@ -145,6 +127,7 @@ extension GestureViewModifier {
 ///   - `SimultaneousGestureCombiner`: `.simultaneousGesture(_:including:)`
 ///   - `GloballySimultaneousGestureCombiner`: internal
 struct AddGestureModifier<T: Gesture, Combiner: GestureCombiner>: GestureViewModifier {
+    typealias ContentGesture = T
     var gesture: T
     var name: String?
     var gestureMask: GestureMask
@@ -174,36 +157,6 @@ extension View {
     }
 }
 
-// AddGestureModifier _makeSessionGesture + GestureFilter
-
-extension AddGestureModifier {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(T.self, eventType: eventType)
-    }
-
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(gesture, eventType: eventType)
-    }
-
-    /// Creates the gesture graph for one active session.
-    /// Maps the raw `_GestureOutputs<T.Value>` to `_GestureOutputs<()>` so the session
-    /// only needs to track terminal state, not the concrete value type.
-    static func _makeSessionGesture(
-        modifier: _GraphValue<Self>,
-        inputs: _GestureInputs
-    ) -> _GestureOutputs<()> {
-        guard let graph = _AGGraph.current else {
-            fatalError("AddGestureModifier._makeSessionGesture requires AG context")
-        }
-        let gestureGV = modifier[\.gesture]
-        let rawOutputs = T._makeGesture(gesture: gestureGV, inputs: inputs)
-        let mappedPhase: Attribute<GesturePhase<()>> = graph.makeRule {
-            rawOutputs.phase.value.map { _ in () }
-        }
-        return rawOutputs.withPhase(mappedPhase)
-    }
-}
-
 /// StatefulRule that lazily creates a GestureResponder<M> inside a dedicated AGSubgraph
 /// and keeps it updated whenever the modifier or inner view responders change.
 ///
@@ -211,65 +164,39 @@ extension AddGestureModifier {
 /// On first updateValue() the responder is created inside self.subgraph context.
 /// On subsequent evaluations, mask and inner responders update in place.
 struct GestureFilter<M: GestureViewModifier>: StatefulRule {
-    typealias Value = [any ViewResponder]
+    typealias Value = [ViewResponder]
 
+    var viewRespondersAttr: Attribute<[ViewResponder]>
     var modifierAttr: Attribute<M>
-    var innerRespondersAttr: Attribute<[any ViewResponder]>
-    var viewInputs: _ViewInputs
-    var exclusionPolicy: GestureResponderExclusionPolicy
+    var inputs: _ViewInputs
     var subgraph: AGSubgraph
     var _responder: GestureResponder<M>? = nil
 
     mutating func updateValue() {
-        let currentModifier = modifierAttr.value
-        let isInitialEvaluation = _responder == nil
-        if isInitialEvaluation {
-            // First evaluation: create the GestureResponder inside the dedicated subgraph.
-            // The responder is born in ViewGraph's AG context (GestureFilter runs in ViewGraph's AG).
+        if _responder == nil {
             AGSubgraph.withCurrent(subgraph) {
                 _responder = GestureResponder<M>(
-                    modifierAttr: modifierAttr,
-                    currentModifier: currentModifier,
-                    exclusionPolicy: exclusionPolicy,
-                    mask: currentModifier.gestureMask,
-                    inputs: viewInputs
+                    modifier: modifierAttr,
+                    inputs: inputs
                 )
             }
         }
         guard let responder = _responder else {
             fatalError("GestureFilter failed to create its gesture responder")
         }
-        if isInitialEvaluation {
+        responder.mask = modifierAttr.value.gestureMask
+        let isInitialValue = !context.hasValue
+        let childrenChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(viewRespondersAttr.identifier)
+        responder.updateChildren((value: viewRespondersAttr.value, changed: childrenChanged))
+        if isInitialValue {
             _AGGraph.setStatefulOutput([responder])
-        } else {
-            // Subsequent evaluation: modifier may have changed.
-            // Update the snapshot and flag the gesture chain for rebuild.
-            responder.currentModifier = currentModifier
-            responder.needsRebuild = true
-        }
-        // Refresh geometry snapshots (used for synchronous hit-testing in GestureGraph context).
-        // Also store the raw ViewGraph AG attributes so createSession can wire cross-graph refs
-        // and gesture coordinate-transform nodes read the latest ViewGraph geometry.
-        responder.snapshotTransform = viewInputs.transform.value
-        responder.snapshotSize = viewInputs.size.value
-        responder.snapshotPosition = viewInputs.position.value
-        responder.snapshotPreferenceKeys = viewInputs.preferences.hostKeys.value
-        responder.transformAttr = viewInputs.transform
-        responder.sizeAttr = viewInputs.size
-        responder.positionAttr = viewInputs.position
-        responder.mask = currentModifier.gestureMask
-        let innerResponders = innerRespondersAttr.value
-        responder.responders = innerResponders
-        // Wire nextResponder so that isDescendant() can traverse the chain upward.
-        for r in innerResponders where r.nextResponder == nil {
-            r.nextResponder = responder
         }
     }
 }
 
 // AddGestureModifier makeView (via GestureViewModifier)
 
-extension AddGestureModifier {
+extension GestureViewModifier {
     static func makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
@@ -293,18 +220,18 @@ extension AddGestureModifier {
             .filter { $0.key == ViewRespondersKey.self }
             .map { $0.value }
 
-        // Build a single Attribute<[any ViewResponder]> for inner responders.
+        // Build a single Attribute<[ViewResponder]> for inner responders.
         // If there are multiple inner nodes, reduce them via ViewRespondersKey.reduce.
-        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        let innerRespondersAttr: Attribute<[ViewResponder]>
         if innerResponderNodes.isEmpty {
             innerRespondersAttr = graph.makeInput(value: [])
         } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
         } else {
             innerRespondersAttr = graph.makeRule {
                 var combined = ViewRespondersKey.defaultValue
                 for nodeID in innerResponderNodes {
-                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    let val = Attribute<[ViewResponder]>(nodeID).value
                     ViewRespondersKey.reduce(value: &combined) { val }
                 }
                 return combined
@@ -313,12 +240,13 @@ extension AddGestureModifier {
 
         // GestureFilter StatefulRule: lazily creates GestureResponder<Self> on first evaluation
         // inside its own dedicated AGSubgraph, then updates mask/responders in place.
-        let responderSubgraph = AGSubgraph()
+        guard let responderSubgraph = AGSubgraph.current else {
+            return outputs
+        }
         let gestureFilter = GestureFilter<Self>(
+            viewRespondersAttr: innerRespondersAttr,
             modifierAttr: modifier._attribute,
-            innerRespondersAttr: innerRespondersAttr,
-            viewInputs: capturedViewInputs,
-            exclusionPolicy: Combiner.exclusionPolicy,
+            inputs: capturedViewInputs,
             subgraph: responderSubgraph
         )
         let respondersAttr = graph.makeStatefulRule(gestureFilter)

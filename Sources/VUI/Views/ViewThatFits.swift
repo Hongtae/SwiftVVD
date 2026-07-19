@@ -190,7 +190,7 @@ private final class SizeFittingState {
         let phaseAttr: Attribute<Phase> = graph.makeRule(
             SizeFittingChildPhase(parentPhase: inputs.base.phase, selected: selectedInput)
         )
-        let release = (sublist.elements as? _ViewList_SubgraphElements)?.retain()
+        let release = sublist.elements.retain()
         var baseInputs = inputs
         baseInputs.copyCaches()
         baseInputs.base[ViewPhaseOverride.self] = OptionalAttribute(phaseAttr)
@@ -214,9 +214,9 @@ private final class SizeFittingState {
                 let innerLC = lcAttr.value
                 return LayoutComputer(
                     sizeThatFits: { innerLC.sizeThatFits($0) },
-                    spacing: innerLC.spacing,
+                    spacing: innerLC.spacing(),
                     place: { position, anchor, proposal in
-                        let resolvedSize = innerLC.sizeThatFits(proposal)
+                        let resolvedSize = innerLC.sizeThatFits(_ProposedSize(proposal))
                         let origin = CGPoint(
                             x: position.x - resolvedSize.width * anchor.x,
                             y: position.y - resolvedSize.height * anchor.y
@@ -252,7 +252,7 @@ private struct SizeFittingChildPhase: Rule {
     var parentPhase: Attribute<Phase>
     var selected: Attribute<Bool>
 
-    func updateValue() -> Phase {
+    var value: Phase {
         var phase = parentPhase.value
         phase.isBeingRemoved = !selected.value
         return phase
@@ -272,20 +272,32 @@ private struct SizeFittingLayoutComputer: StatefulRule {
         }
         let computer = LayoutComputer(
             sizeThatFits: { proposal in
-                guard let child = SizeFittingLayoutComputer.selectChild(state: capturedState, axes: axes, proposal: proposal),
+                guard let child = SizeFittingLayoutComputer.selectChild(
+                    state: capturedState,
+                    axes: axes,
+                    proposal: proposal
+                ),
                       let lc = child.layoutComputer?.value else { return .zero }
                 return lc.sizeThatFits(proposal)
             },
             spacing: {
-                initialChildren.first?.layoutComputer?.value.spacing ?? ViewSpacing()
+                initialChildren.first?.layoutComputer?.value.spacing() ?? Spacing()
             }(),
             place: { position, anchor, proposal in
-                guard let child = SizeFittingLayoutComputer.selectChild(state: capturedState, axes: axes, proposal: proposal),
+                guard let child = SizeFittingLayoutComputer.selectChild(
+                    state: capturedState,
+                    axes: axes,
+                    proposal: _ProposedSize(proposal)
+                ),
                       let lc = child.layoutComputer?.value else { return }
                 lc.place(at: position, anchor: anchor, proposal: proposal)
             },
             explicitAlignment: { key, size in
-                guard let child = SizeFittingLayoutComputer.selectChild(state: capturedState, axes: axes, proposal: size.proposal),
+                guard let child = SizeFittingLayoutComputer.selectChild(
+                    state: capturedState,
+                    axes: axes,
+                    proposal: size.proposal
+                ),
                       let lc = child.layoutComputer?.value else { return nil }
                 return lc.explicitAlignment(key, at: size)
             }
@@ -296,7 +308,7 @@ private struct SizeFittingLayoutComputer: StatefulRule {
     private static func selectChild(
         state: SizeFittingState,
         axes: Axis.Set,
-        proposal: ProposedViewSize
+        proposal: _ProposedSize
     ) -> SizeFittingState.Child? {
         let children = state.materializedChildren()
         guard !children.isEmpty else { return nil }

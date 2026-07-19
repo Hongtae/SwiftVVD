@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _EnvironmentBackgroundStyleModifier<S>: ViewModifier where S: ShapeStyle {
+public struct _EnvironmentBackgroundStyleModifier<S> where S: ShapeStyle {
     @usableFromInline
     var style: S
     @inlinable init(style: S) {
@@ -17,7 +17,7 @@ public struct _EnvironmentBackgroundStyleModifier<S>: ViewModifier where S: Shap
     public typealias Body = Never
 }
 
-extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
+extension _EnvironmentBackgroundStyleModifier: ViewInputsModifier, PrimitiveViewModifier {
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeViewInputs called outside an active _AGGraph context.")
@@ -32,10 +32,6 @@ extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
         inputs.base.cachedEnvironment = MutableBox(
             inputs.base.cachedEnvironment.value.replacingEnvironment(newEnvAttr)
         )
-    }
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
     }
 }
 

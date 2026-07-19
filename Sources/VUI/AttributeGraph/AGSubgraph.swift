@@ -38,21 +38,31 @@ import Synchronization
 /// itemSubgraphs[id]?.removeFromParent()
 /// itemSubgraphs[id] = nil
 /// ```
-final class AGSubgraph: @unchecked Sendable {
+final class AGSubgraphRef: @unchecked Sendable {
+    private final class WeakAncestor {
+        weak var value: AGSubgraphRef?
+
+        init(_ value: AGSubgraphRef) {
+            self.value = value
+        }
+    }
+
     private(set) var nodes: [AGAttribute] = []
-    private(set) var children: [AGSubgraph] = []
-    private(set) weak var parent: AGSubgraph? = nil
+    private(set) var children: [AGSubgraphRef] = []
+    private(set) weak var parent: AGSubgraphRef? = nil
+    private var secondaryAncestors: [WeakAncestor] = []
     private(set) var isValid: Bool = true
-    weak let graph: _AGGraph?
+    private(set) var isInserted: Bool = true
+    weak let graph: AGGraphRef?
 
-    private static let currentStorage = _AGThreadLocal<AGSubgraph?>(nil)
+    private static let currentStorage = _AGThreadLocal<AGSubgraphRef?>(nil)
 
-    static var current: AGSubgraph? {
+    static var current: AGSubgraphRef? {
         currentStorage.value
     }
 
     @discardableResult
-    static func withCurrent<R>(_ subgraph: AGSubgraph?, _ body: () throws -> R) rethrows -> R {
+    static func withCurrent<R>(_ subgraph: AGSubgraphRef?, _ body: () throws -> R) rethrows -> R {
         try currentStorage.withValue(subgraph) {
             try body()
         }
@@ -63,7 +73,7 @@ final class AGSubgraph: @unchecked Sendable {
             fatalError("AGSubgraph must be created within an active _AGGraph context.")
         }
         self.graph = graph
-        if let parent = AGSubgraph.current {
+        if let parent = AGSubgraphRef.current {
             parent.children.append(self)
             self.parent = parent
         }
@@ -71,6 +81,7 @@ final class AGSubgraph: @unchecked Sendable {
 
     func register(_ id: AGAttribute) {
         nodes.append(id)
+        graph?.setSubgraph(self, for: id)
     }
 
     func invalidate() {
@@ -84,7 +95,10 @@ final class AGSubgraph: @unchecked Sendable {
 
         children.forEach {
             $0.invalidate()
-            $0.parent = nil
+            if $0.parent === self {
+                $0.parent = nil
+            }
+            $0.removeSecondaryAncestor(self)
         }
         children.removeAll()
 
@@ -98,6 +112,32 @@ final class AGSubgraph: @unchecked Sendable {
     func removeFromParent() {
         parent?.children.removeAll { $0 === self }
         parent = nil
+        for ancestor in secondaryAncestors {
+            ancestor.value?.children.removeAll { $0 === self }
+        }
+        secondaryAncestors.removeAll()
+    }
+
+    func addSecondaryChild(_ child: AGSubgraphRef) {
+        guard isValid, child.isValid else { return }
+        guard graph === child.graph else {
+            fatalError("AGSubgraph.addSecondaryChild(_:) cannot attach a subgraph owned by a different graph.")
+        }
+        guard child !== self else {
+            fatalError("AGSubgraph.addSecondaryChild(_:) cannot attach a subgraph to itself.")
+        }
+        if child.parent === self ||
+            child.secondaryAncestors.contains(where: { $0.value === self }) {
+            return
+        }
+        children.append(child)
+        child.secondaryAncestors.append(WeakAncestor(self))
+    }
+
+    private func removeSecondaryAncestor(_ ancestor: AGSubgraphRef) {
+        secondaryAncestors.removeAll { edge in
+            edge.value == nil || edge.value === ancestor
+        }
     }
 
     func update(flags: UInt32 = 1) {
@@ -117,7 +157,9 @@ final class AGSubgraph: @unchecked Sendable {
         guard graph === self.graph else {
             fatalError("AGSubgraph.willRemove() called from a different _AGGraph than the one that owns this subgraph.")
         }
+        guard isValid, isInserted else { return }
         graph.willRemoveSubgraph(self)
+        isInserted = false
     }
 
     func didReinsert() {
@@ -127,10 +169,18 @@ final class AGSubgraph: @unchecked Sendable {
         guard graph === self.graph else {
             fatalError("AGSubgraph.didReinsert() called from a different _AGGraph than the one that owns this subgraph.")
         }
+        guard isValid, !isInserted else { return }
         graph.didReinsertSubgraph(self)
+        isInserted = true
     }
 }
 
-func AGSubgraphIsValid(_ subgraph: AGSubgraph) -> Bool {
+typealias AGSubgraph = AGSubgraphRef
+
+func _AGSubgraphIsValid(_ subgraph: AGSubgraphRef) -> Bool {
     subgraph.isValid
+}
+
+func AGSubgraphIsValid(_ subgraph: AGSubgraphRef) -> Bool {
+    _AGSubgraphIsValid(subgraph)
 }

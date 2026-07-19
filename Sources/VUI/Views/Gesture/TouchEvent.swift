@@ -11,14 +11,14 @@ protocol TouchTypeProviding {
     var touchType: TouchType { get }
 }
 
-protocol HitTestableEventType: SpatialEventType {
+protocol HitTestableEventType: EventType {
     var hitTestLocation: CGPoint { get }
     var hitTestRadius: CGFloat { get }
 }
 
-extension HitTestableEventType {
+extension HitTestableEventType where Self: SpatialEventType {
     var hitTestLocation: CGPoint {
-        location ?? globalLocation
+        location
     }
 
     var hitTestRadius: CGFloat {
@@ -26,14 +26,18 @@ extension HitTestableEventType {
     }
 }
 
-protocol PanEventType: SpatialEventType {
-    var translation: CGSize { get set }
-    var globalTranslation: CGSize { get set }
+protocol PanEventType: EventType, TouchTypeProviding {
+    var translation: CGSize { get }
+    var globalTranslation: CGSize { get }
 }
 
-enum TouchType: UInt8, Sendable, Hashable {
-    case direct = 0
-    case indirect = 1
+protocol NonGestureEventType: EventType {}
+
+enum TouchType: Sendable, Hashable {
+    case direct
+    case indirect
+    case pencil
+    case indirectPointer
 }
 
 struct TouchEvent: EventType,
@@ -43,42 +47,26 @@ struct TouchEvent: EventType,
                    HitTestableEventType,
                    PanEventType,
                    Equatable {
-    var location: CGPoint?
+    var timestamp: Time
+    var phase: EventPhase
+    var binding: EventBinding?
+    var location: CGPoint
     var globalLocation: CGPoint
     var radius: CGFloat
-    var eventPhase: EventPhase
+    var force: Double
+    var maximumPossibleForce: Double
     var modifiers: EventModifiers
+    var altitude: Angle
+    var azimuth: Angle
     var touchType: TouchType
-    var translation: CGSize
-    var globalTranslation: CGSize
-    var force: CGFloat
-    var maximumPossibleForce: CGFloat
-    var timestamp: Double
+
     var kind: SpatialEvent.Kind? { .touch }
 
-    init(
-        location: CGPoint?,
-        globalLocation: CGPoint? = nil,
-        phase: EventPhase,
-        timestamp: Double = 0.0,
-        touchType: TouchType = .direct,
-        modifiers: EventModifiers = [],
-        radius: CGFloat = 0.0,
-        translation: CGSize = .zero,
-        globalTranslation: CGSize = .zero,
-        force: CGFloat = 0.0,
-        maximumPossibleForce: CGFloat = 1.0
-    ) {
-        self.location = location
-        self.globalLocation = globalLocation ?? location ?? .zero
-        self.eventPhase = phase
-        self.timestamp = timestamp
-        self.touchType = touchType
-        self.modifiers = modifiers
-        self.radius = radius
-        self.translation = translation
-        self.globalTranslation = globalTranslation
-        self.force = force
-        self.maximumPossibleForce = maximumPossibleForce
+    var translation: CGSize {
+        CGSize(width: location.x, height: location.y)
+    }
+
+    var globalTranslation: CGSize {
+        CGSize(width: globalLocation.x, height: globalLocation.y)
     }
 }

@@ -96,7 +96,7 @@ final class GesturePhaseSurfaceTests: XCTestCase {
                 dependency: .pausedWhileActive
             ))
             let childPhase = graph.makeInput(value: GesturePhase<Int>.active(4))
-            let outputs = DependentGesture<Int>.makeGesture(
+            let outputs = DependentGesture<Int>._makeGesture(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: makeGestureInputs(graph: graph)
             ) { _ in
@@ -117,7 +117,7 @@ final class GesturePhaseSurfaceTests: XCTestCase {
     func testResponderArbitrationMatchesPriorityDependencyAndTapCountRules() {
         let defaultParent = ArbitrationTestResponder(exclusionPolicy: .default)
         let defaultChild = ArbitrationTestResponder(exclusionPolicy: .default)
-        defaultChild.nextResponder = defaultParent
+        defaultChild.parent = defaultParent
 
         XCTAssertTrue(defaultChild.isPrioritized(
             over: defaultParent,
@@ -130,7 +130,7 @@ final class GesturePhaseSurfaceTests: XCTestCase {
 
         let highParent = ArbitrationTestResponder(exclusionPolicy: .highPriority)
         let highChild = ArbitrationTestResponder(exclusionPolicy: .highPriority)
-        highChild.nextResponder = highParent
+        highChild.parent = highParent
         XCTAssertTrue(highParent.isPrioritized(
             over: highChild,
             otherExclusionPolicy: highChild.exclusionPolicy
@@ -186,7 +186,7 @@ final class GesturePhaseSurfaceTests: XCTestCase {
             exclusionPolicy: .simultaneous(.descendants)
         )
         let simultaneousChild = ArbitrationTestResponder(exclusionPolicy: .default)
-        simultaneousChild.nextResponder = simultaneousParent
+        simultaneousChild.parent = simultaneousParent
         XCTAssertTrue(simultaneousParent.isSimultaneous(with: simultaneousChild))
         XCTAssertTrue(simultaneousChild.isSimultaneous(with: simultaneousParent))
 
@@ -197,17 +197,102 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         XCTAssertTrue(high.isSimultaneous(with: global))
     }
 
+    func testGestureResponderPreferenceGettersInstantiateInsideUpdateScope() {
+        func makeResponder() -> (ArbitrationTestResponder, UpdateScopeGestureGraph) {
+            let graph = UpdateScopeGestureGraph()
+            return (
+                ArbitrationTestResponder(
+                    exclusionPolicy: .default,
+                    gestureGraph: graph
+                ),
+                graph
+            )
+        }
+
+        let (cancellableResponder, cancellableGraph) = makeResponder()
+        XCTAssertFalse(cancellableResponder.isCancellable)
+        XCTAssertTrue(cancellableGraph.observedUpdateActive)
+
+        let (tapResponder, tapGraph) = makeResponder()
+        XCTAssertNil(tapResponder.requiredTapCount)
+        XCTAssertTrue(tapGraph.observedUpdateActive)
+
+        let (dependencyResponder, dependencyGraph) = makeResponder()
+        XCTAssertEqual(dependencyResponder.dependency, .none)
+        XCTAssertTrue(dependencyGraph.observedUpdateActive)
+    }
+
+    func testViewResponderPreferenceReductionAppendsInTraversalOrder() {
+        let first = MultiViewResponder()
+        let second = MultiViewResponder()
+        let third = MultiViewResponder()
+        var responders: [ViewResponder] = [first]
+
+        ViewRespondersKey.reduce(value: &responders) {
+            [second as ViewResponder, third as ViewResponder]
+        }
+
+        XCTAssertTrue(responders[0] === first)
+        XCTAssertTrue(responders[1] === second)
+        XCTAssertTrue(responders[2] === third)
+    }
+
+    func testViewResponderHitTestConstantsAndCounterMatchObservedSurface() {
+        XCTAssertEqual(ViewResponder.minOpacityForHitTest, 0.001)
+        XCTAssertEqual(ViewResponder.gestureContainmentPriority, 16.0)
+
+        let previous = ViewResponder.hitTestKey
+        XCTAssertEqual(ViewResponder.nextHitTestKey(), previous &+ 1)
+        XCTAssertEqual(ViewResponder.hitTestKey, previous &+ 1)
+    }
+
+    func testResponderVisitorSkipsChildrenAndCancelsTraversal() {
+        let root = MultiViewResponder()
+        let skipped = MultiViewResponder()
+        let skippedChild = MultiViewResponder()
+        let sibling = MultiViewResponder()
+        skipped.children = [skippedChild]
+        root.children = [skipped, sibling]
+
+        var visited: [ObjectIdentifier] = []
+        let completed = root.visit { responder in
+            visited.append(ObjectIdentifier(responder))
+            return responder === skipped ? .skipToNextSibling : .next
+        }
+        XCTAssertEqual(completed, .next)
+        XCTAssertEqual(
+            visited,
+            [root, skipped, sibling].map(ObjectIdentifier.init)
+        )
+
+        visited.removeAll()
+        let cancelled = root.visit { responder in
+            visited.append(ObjectIdentifier(responder))
+            return responder === skippedChild ? .cancel : .next
+        }
+        XCTAssertEqual(cancelled, .cancel)
+        XCTAssertEqual(
+            visited,
+            [root, skipped, skippedChild].map(ObjectIdentifier.init)
+        )
+    }
+
     func testCoordinateSpaceEventsConvertsInputsBeforeRecognition() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
-            let eventID = EventID(type: TappableEvent.self, serial: 1)
+            let eventID = EventID(type: VUI.MouseEvent.self, serial: 1)
             let modifier = graph.makeInput(value: CoordinateSpaceGesture<Int>(
                 coordinateSpace: .local
             ))
             let events = graph.makeInput(value: [
-                eventID: TappableEvent(
+                eventID: VUI.MouseEvent(
+                    timestamp: .zero,
+                    binding: nil,
+                    button: .primary,
+                    phase: .began,
                     location: CGPoint(x: 30, y: 50),
-                    phase: .began
+                    globalLocation: CGPoint(x: 30, y: 50),
+                    modifiers: []
                 )
             ] as [EventID: any EventType])
             var transform = ViewTransform()
@@ -219,13 +304,13 @@ final class GesturePhaseSurfaceTests: XCTestCase {
                 _transform: graph.makeInput(value: transform)
             ))
 
-            let local = try XCTUnwrap(output.value[eventID] as? TappableEvent)
+            let local = try XCTUnwrap(output.value[eventID] as? VUI.MouseEvent)
             XCTAssertEqual(local.location, CGPoint(x: 20, y: 30))
 
             modifier.setValue(CoordinateSpaceGesture(
                 coordinateSpace: .named(AnyHashable("named"))
             ))
-            let named = try XCTUnwrap(output.value[eventID] as? TappableEvent)
+            let named = try XCTUnwrap(output.value[eventID] as? VUI.MouseEvent)
             XCTAssertEqual(named.location, CGPoint(x: 30, y: 50))
 
             var namedTransform = ViewTransform()
@@ -238,16 +323,21 @@ final class GesturePhaseSurfaceTests: XCTestCase {
             let namedOutput = graph.makeRule(CoordinateSpaceEvents(
                 _modifier: modifier,
                 _events: graph.makeInput(value: [
-                    eventID: TappableEvent(
+                    eventID: VUI.MouseEvent(
+                        timestamp: .zero,
+                        binding: nil,
+                        button: .primary,
+                        phase: .began,
                         location: CGPoint(x: 115, y: 227),
-                        phase: .began
+                        globalLocation: CGPoint(x: 115, y: 227),
+                        modifiers: []
                     )
                 ] as [EventID: any EventType]),
                 _position: graph.makeInput(value: CGPoint(x: 100, y: 200)),
                 _transform: graph.makeInput(value: namedTransform)
             ))
             let convertedNamed = try XCTUnwrap(
-                namedOutput.value[eventID] as? TappableEvent
+                namedOutput.value[eventID] as? VUI.MouseEvent
             )
             XCTAssertEqual(convertedNamed.location, CGPoint(x: 15, y: 27))
         }
@@ -306,16 +396,10 @@ final class GesturePhaseSurfaceTests: XCTestCase {
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time()),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: graph.makeInput(value: EnvironmentValues()))
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(
@@ -333,76 +417,57 @@ final class GesturePhaseSurfaceTests: XCTestCase {
     }
 }
 
-private final class ArbitrationTestResponder: ResponderNode, ViewResponder, AnyGestureResponder {
-    let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
-
-    var relatedAttribute: AGAttribute {
-        cachedGestureOutputs?.phase.identifier ?? .invalid
-    }
+private final class ArbitrationTestResponder: ViewResponder, AnyGestureResponder {
+    var relatedAttribute: AGAttribute { .invalid }
     var inputs: _ViewInputs { fatalError("unused test responder input") }
     var childSubgraph: AGSubgraph?
     var childViewSubgraph: AGSubgraph?
-    var eventsAttr: Attribute<[EventID: any EventType]>?
-    var resetSeedAttr: Attribute<UInt32>?
-    var cachedGestureOutputs: _GestureOutputs<()>?
     let exclusionPolicy: GestureResponderExclusionPolicy
     var label: String? { nil }
     var mask: GestureMask = .all
     let gestureGraph: GestureGraph
-    var transformAttr: Attribute<ViewTransform>?
-    var sizeAttr: Attribute<ViewSize>?
-    var positionAttr: Attribute<CGPoint>?
-    var needsRebuild = false
-    var snapshotTransform: ViewTransform = .identity
-    var snapshotSize = ViewSize(.zero)
-    var snapshotPosition: CGPoint = .zero
-    var snapshotPreferenceKeys = PreferenceKeys()
+    let viewSubgraph: AGSubgraph
+    var eventSources: [any EventBindingSource] { [] }
+    var gestureType: Any.Type { Self.self }
+    var isValid: Bool { true }
 
     init(
         exclusionPolicy: GestureResponderExclusionPolicy,
         dependency: GestureDependency = .none,
         requiredTapCount: Int? = nil,
-        hitTestKey: UInt32 = 1
+        hitTestKey: UInt32 = 1,
+        gestureGraph suppliedGestureGraph: GestureGraph? = nil
     ) {
-        self.hitTestKey = hitTestKey
+        _ = hitTestKey
         self.exclusionPolicy = exclusionPolicy
-        self.gestureGraph = GestureGraph()
+        let gestureGraph = suppliedGestureGraph ?? GestureGraph()
+        self.gestureGraph = gestureGraph
+        self.viewSubgraph = gestureGraph.data.withCurrent {
+            AGSubgraph()
+        }
         super.init()
 
         gestureGraph.data.withCurrent {
             let graph = gestureGraph.data.graph
-            let phase = graph.makeInput(value: GesturePhase<Void>.possible(nil))
-            var outputs = _GestureOutputs(phase: phase)
-            let dependency = graph.makeInput(value: dependency)
-            outputs.appendPreference(key: GestureDependency.Key.self, value: dependency)
+            gestureGraph._gestureDependencyAttr = OptionalAttribute(
+                graph.makeInput(value: dependency)
+            )
             if let requiredTapCount {
-                let count = graph.makeInput(value: Optional(requiredTapCount))
-                outputs.appendPreference(key: RequiredTapCountKey.self, value: count)
+                gestureGraph._requiredTapCountAttr = OptionalAttribute(
+                    graph.makeInput(value: Optional(requiredTapCount))
+                )
             }
-            cachedGestureOutputs = outputs
         }
     }
 
-    func makeSubviewsGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
-        guard let cachedGestureOutputs else {
-            fatalError("missing test gesture outputs")
-        }
-        return cachedGestureOutputs
-    }
+    func detachContainer() {}
+}
 
-    func accepts(eventType: Any.Type) -> Bool { true }
-    func resetGesture() {}
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy { .include }
-    func containsGlobalPoints(
-        _ points: [CGPoint],
-        cacheKey: UInt32?,
-        options: ContainsPointsOptions
-    ) -> ContainsPointsResult {
-        ContainsPointsResult(mask: UInt64.max, priority: 0, children: [])
-    }
-    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
-        makeSubviewsGesture(inputs: inputs)
+private final class UpdateScopeGestureGraph: GestureGraph, @unchecked Sendable {
+    private(set) var observedUpdateActive = false
+
+    override func instantiateOutputs() {
+        observedUpdateActive = Update.isActive
+        super.instantiateOutputs()
     }
 }

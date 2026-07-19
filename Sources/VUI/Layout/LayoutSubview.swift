@@ -11,12 +11,20 @@ import Foundation
 
 /// Attributes for LayoutProxy: layoutComputer + traitsList.
 /// Both fields use a sentinel value for nil encoding (OptionalAttribute pattern).
-struct LayoutProxyAttributes {
+struct LayoutProxyAttributes: Equatable {
     /// Optional AG attribute for the child's layout computation.
     var layoutComputer: OptionalAttribute<LayoutComputer>
     /// Optional AG attribute for this child's ViewList (used for trait access).
     /// Reading `.value.traits` inside a layout rule registers a re-layout dependency.
     var traitsList: OptionalAttribute<any ViewList>
+
+    init(
+        layoutComputer: OptionalAttribute<LayoutComputer>,
+        traitsList: OptionalAttribute<any ViewList>
+    ) {
+        self.layoutComputer = layoutComputer
+        self.traitsList = traitsList
+    }
 
     init(layoutComputer: Attribute<LayoutComputer>,
          traitsList: OptionalAttribute<any ViewList> = OptionalAttribute()) {
@@ -43,13 +51,29 @@ struct LayoutProxyAttributes {
 
 /// Proxy for a child view in a Layout.
 /// Dependency tracking uses AG thread-local reads.
-struct LayoutProxy {
+struct LayoutProxy: Equatable {
     var context: AnyRuleContext?
     var attributes: LayoutProxyAttributes
 
     init(attributes: LayoutProxyAttributes) {
         self.context = _AGGraph.currentRuleContextAttribute.map(AnyRuleContext.init(attribute:))
         self.attributes = attributes
+    }
+
+    init(context: AnyRuleContext, attributes: LayoutProxyAttributes) {
+        self.context = context
+        self.attributes = attributes
+    }
+
+    init(
+        context: AnyRuleContext,
+        layoutComputer: Attribute<LayoutComputer>?
+    ) {
+        self.context = context
+        self.attributes = LayoutProxyAttributes(
+            layoutComputer: OptionalAttribute(layoutComputer),
+            traitsList: OptionalAttribute()
+        )
     }
 
     /// The child's LayoutComputer value (reads AG attribute; registers dependency).
@@ -60,7 +84,7 @@ struct LayoutProxy {
         return attr.value
     }
 
-    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+    func dimensions(in proposal: _ProposedSize) -> ViewDimensions {
         layoutComputer.dimensions(in: proposal)
     }
 
@@ -82,7 +106,7 @@ struct LayoutProxy {
         in size: CGSize,
         layoutDirection: LayoutDirection
     ) -> ViewGeometry {
-        let proposal = ProposedViewSize(placement.proposedSize)
+        let proposal = _ProposedSize(placement.proposedSize)
         let resolvedDimensions = self.dimensions(in: proposal)
         var origin = CGPoint(
             x: placement.anchorPosition.x - resolvedDimensions.width * placement.anchor.x,
@@ -92,6 +116,21 @@ struct LayoutProxy {
             origin.x = size.width - origin.x
         }
         return ViewGeometry(origin: origin, dimensions: resolvedDimensions)
+    }
+}
+
+struct LayoutProxyCollection: RandomAccessCollection {
+    typealias Index = Int
+    typealias Element = LayoutProxy
+
+    var context: AnyRuleContext
+    var attributes: [LayoutProxyAttributes]
+
+    var startIndex: Int { attributes.startIndex }
+    var endIndex: Int { attributes.endIndex }
+
+    subscript(position: Int) -> LayoutProxy {
+        LayoutProxy(context: context, attributes: attributes[position])
     }
 }
 
@@ -141,7 +180,7 @@ struct PlacementData {
         guard placedCount != geometries.count else { return geometries }
         for index in geometries.indices where geometries[index].isInvalid {
             let computer = children[index].layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
-            let dimensions = computer.dimensions(in: proposal)
+            let dimensions = computer.dimensions(in: _ProposedSize(proposal))
             let origin = CGPoint(
                 x: bounds.midX - dimensions.width * 0.5,
                 y: bounds.midY - dimensions.height * 0.5
@@ -169,23 +208,20 @@ private extension ViewGeometry {
 }
 
 enum ThreadLayoutData {
-    nonisolated(unsafe) private static var current: UnsafeMutablePointer<PlacementData>?
+    private static let placementData = _AGThreadLocal<UnsafeMutablePointer<PlacementData>?>(nil)
 
     static func withPlacementData<R>(
         _ pointer: UnsafeMutablePointer<PlacementData>,
         _ body: () -> R
     ) -> R {
-        let previous = current
-        current = pointer
-        defer { current = previous }
-        return body()
+        placementData.withValue(pointer, operation: body)
     }
 
     static func setGeometry(_ geometry: ViewGeometry,
                             at index: Int,
                             layoutDirection: LayoutDirection) -> Bool {
-        guard let current else { return false }
-        current.pointee.setGeometry(geometry, at: index, layoutDirection: layoutDirection)
+        guard let pointer = placementData.value else { return false }
+        pointer.pointee.setGeometry(geometry, at: index, layoutDirection: layoutDirection)
         return true
     }
 }
@@ -228,19 +264,19 @@ public struct LayoutSubview: Equatable {
     // MARK: - Layout API
 
     public var priority: Double {
-        proxy.layoutComputer.priority
+        proxy.layoutComputer.layoutPriority()
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proxy.layoutComputer.sizeThatFits(proposal)
+        proxy.layoutComputer.sizeThatFits(_ProposedSize(proposal))
     }
 
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        proxy.layoutComputer.dimensions(in: proposal)
+        proxy.layoutComputer.dimensions(in: _ProposedSize(proposal))
     }
 
     public var spacing: ViewSpacing {
-        proxy.layoutComputer.spacing
+        ViewSpacing(proxy.layoutComputer.spacing(), layoutDirection: layoutDirection)
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
@@ -265,7 +301,7 @@ public struct LayoutSubview: Equatable {
                                          layoutDirection: layoutDirection) {
             proxy.layoutComputer.place(at: geometry.origin,
                                        anchor: .topLeading,
-                                       proposal: geometry.dimensions.size.proposal)
+                                       proposal: ProposedViewSize(geometry.dimensions.size.proposal))
         }
     }
 
@@ -274,9 +310,13 @@ public struct LayoutSubview: Equatable {
     }
 }
 
+@available(*, unavailable)
+extension LayoutSubview: Sendable {
+}
+
 // MARK: - LayoutSubviews
 
-public struct LayoutSubviews: Equatable, RandomAccessCollection {
+public struct LayoutSubviews: Equatable, RandomAccessCollection, @unchecked Sendable {
     public typealias SubSequence = LayoutSubviews
     public typealias Element = LayoutSubview
     public typealias Index = Int

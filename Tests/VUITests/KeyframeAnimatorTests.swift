@@ -251,16 +251,10 @@ final class KeyframeAnimatorTests: XCTestCase {
         let time = graph.makeInput(value: Time(seconds: 0))
         let phase = graph.makeInput(value: Phase())
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: time,
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(environment: environment)
-            ),
             phase: phase,
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return (
             _ViewInputs(

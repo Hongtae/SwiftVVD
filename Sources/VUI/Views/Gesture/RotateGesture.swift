@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct RotateGesture: Gesture {
+public struct RotateGesture: Gesture, PrimitiveGesture {
     public struct Value: Equatable, Sendable {
         public var time: Date
         public var rotation: Angle
@@ -47,13 +47,7 @@ public struct RotateGesture: Gesture {
     }
 }
 
-extension RotateGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == RotateEvent.self
-    }
-}
-
-public struct RotationGesture: Gesture {
+public struct RotationGesture: Gesture, PubliclyPrimitiveGesture {
     public var minimumAngleDelta: Angle
 
     public init(minimumAngleDelta: Angle = .degrees(1)) {
@@ -63,29 +57,20 @@ public struct RotationGesture: Gesture {
     public typealias Value = Angle
     public typealias Body = Never
 
+    typealias InternalBody = _MapGesture<RotateGesture, Angle>
+
+    var internalBody: InternalBody {
+        _MapGesture(
+            content: RotateGesture(minimumAngleDelta: minimumAngleDelta),
+            transform: { $0.rotation }
+        )
+    }
+
     public static func _makeGesture(
         gesture: _GraphValue<RotationGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Angle> {
-        guard let graph = _AGGraph.current else {
-            fatalError("RotationGesture._makeGesture requires AG context")
-        }
-        let rotate = RotateGesture(minimumAngleDelta: gesture._attribute.value.minimumAngleDelta)
-        let rotateAttr: Attribute<RotateGesture> = graph.makeInput(value: rotate)
-        let outputs = RotateGesture._makeGesture(
-            gesture: _GraphValue(_attribute: rotateAttr),
-            inputs: inputs
-        )
-        let mappedPhase: Attribute<GesturePhase<Angle>> = graph.makeRule {
-            outputs.phase.value.map { $0.rotation }
-        }
-        return outputs.withPhase(mappedPhase)
-    }
-}
-
-extension RotationGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == RotateEvent.self
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 
@@ -103,7 +88,8 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
     var hasRecognized = false
     var startLocation: CGPoint = .zero
     var startAnchor: UnitPoint = .center
-    var lastTimestamp: Double?
+    var baselineAngle: Angle = .zero
+    var velocitySampler = AnimatableVelocitySampler<Angle>()
 
     var resetSeed: UInt32 { resetSeedAttr.value }
 
@@ -112,7 +98,8 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
         hasRecognized = false
         startLocation = .zero
         startAnchor = .center
-        lastTimestamp = nil
+        baselineAngle = .zero
+        velocitySampler = AnimatableVelocitySampler()
         _AGGraph.setStatefulOutput(GesturePhase<RotateGesture.Value>.possible(nil))
     }
 
@@ -135,29 +122,36 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
     }
 
     private mutating func update(event: RotateEvent, terminal: Bool) -> GesturePhase<RotateGesture.Value> {
-        let location = event.location ?? .zero
+        let location = event.location
         if !isTracking {
             isTracking = true
             startLocation = location
             startAnchor = Self.anchor(for: location, size: sizeAttr.value.value)
+            baselineAngle = event.initialAngle
+            velocitySampler = AnimatableVelocitySampler()
+
+            if terminal {
+                return .failed
+            }
+            return .possible(nil)
         }
 
-        if abs(event.rotation.radians) >= abs(minimumAngleDelta.radians) {
+        let accumulatedAngle = event.initialAngle + event.angleDelta
+        velocitySampler.addSample(
+            accumulatedAngle,
+            time: event.timestamp.seconds
+        )
+        if abs(accumulatedAngle.radians - baselineAngle.radians)
+            > abs(minimumAngleDelta.radians) {
             hasRecognized = true
         }
 
-        let velocity = Self.velocity(
-            current: event.rotation,
-            previous: event.previousRotation,
-            timestamp: event.timestamp,
-            previousTimestamp: lastTimestamp
-        )
-        lastTimestamp = event.timestamp
+        let rotation = accumulatedAngle - baselineAngle
 
         let value = RotateGesture.Value(
-            time: Date(),
-            rotation: event.rotation,
-            velocity: velocity,
+            time: Date(timeIntervalSinceReferenceDate: event.timestamp.seconds),
+            rotation: rotation,
+            velocity: velocitySampler.velocity(accumulatedAngle),
             startAnchor: startAnchor,
             startLocation: startLocation
         )
@@ -173,15 +167,4 @@ private struct RotateGesturePhase: StatefulRule, ResettableGestureRule {
         return UnitPoint(x: location.x / size.width, y: location.y / size.height)
     }
 
-    private static func velocity(
-        current: Angle,
-        previous: Angle,
-        timestamp: Double,
-        previousTimestamp: Double?
-    ) -> Angle {
-        guard let previousTimestamp else { return .zero }
-        let dt = timestamp - previousTimestamp
-        guard dt > 0 else { return .zero }
-        return Angle(radians: (current.radians - previous.radians) / dt)
-    }
 }

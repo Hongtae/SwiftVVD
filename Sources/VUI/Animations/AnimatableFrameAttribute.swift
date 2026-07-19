@@ -13,6 +13,10 @@ struct AnimatedFrameAttributes {
     var frame: Attribute<ViewFrame>
 }
 
+private extension CachedEnvironment.ID {
+    static let animationPixelLength = CachedEnvironment.ID(base: UniqueID())
+}
+
 private struct FrameVelocityFilter {
     var currentVelocity: Double?
     var previous: (time: Time, data: ViewFrame.AnimatableData)?
@@ -67,7 +71,7 @@ private struct FrameVelocityFilter {
     }
 }
 
-private struct AnimatableFrameAttribute: StatefulRule {
+private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncAttribute {
     typealias Value = ViewFrame
 
     var _position: Attribute<CGPoint>
@@ -100,10 +104,6 @@ private struct AnimatableFrameAttribute: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = _AGGraph.current else {
-            fatalError("AnimatableFrameAttribute.updateValue called outside an active _AGGraph context.")
-        }
-
         let target = roundedFrame(
             position: _position.value,
             size: _size.value,
@@ -118,10 +118,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
         let update = helper.beginStandaloneUpdate(
             value: &value,
             defaultAnimation: nil,
-            transactionForChangedTarget: {
-                graph.transaction(for: _position.identifier) ??
-                    graph.transaction(for: _size.identifier)
-            }
+            transactionForChangedTarget: { nil }
         )
 
         let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
@@ -184,7 +181,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
     }
 }
 
-private struct AnimatableFrameAttributeVFD: StatefulRule {
+private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, AsyncAttribute {
     typealias Value = ViewFrame
 
     var _position: Attribute<CGPoint>
@@ -218,10 +215,6 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
     }
 
     mutating func updateValue() {
-        guard let graph = _AGGraph.current else {
-            fatalError("AnimatableFrameAttributeVFD.updateValue called outside an active _AGGraph context.")
-        }
-
         let target = roundedFrame(
             position: _position.value,
             size: _size.value,
@@ -236,10 +229,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
         let update = helper.beginStandaloneUpdate(
             value: &value,
             defaultAnimation: nil,
-            transactionForChangedTarget: {
-                graph.transaction(for: _position.identifier) ??
-                    graph.transaction(for: _size.identifier)
-            }
+            transactionForChangedTarget: { nil }
         )
 
         let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
@@ -331,9 +321,12 @@ func makeAnimatableFrameAttributes(
         fatalError("makeAnimatableFrameAttributes called outside an active _AGGraph context.")
     }
 
-    let environment = inputs.cachedEnvironment.value.environment
-    let pixelLength: Attribute<CGFloat> = graph.makeRule {
-        environment.value.animationPixelLength
+    var cachedEnvironment = inputs.cachedEnvironment.value
+    let environment = cachedEnvironment.environment
+    let pixelLength: Attribute<CGFloat> = cachedEnvironment.attribute(
+        id: .animationPixelLength
+    ) {
+        $0.animationPixelLength
     }
     let disabled = animationsDisabled ?? inputs.options.contains(.animationsDisabled)
     let usesVFD = supportsVFD ?? inputs.options.contains(.supportsVariableFrameDuration)
@@ -374,7 +367,6 @@ func makeAnimatableFrameAttributes(
         keyPath: \ViewFrame.size
     )
 
-    var cachedEnvironment = inputs.cachedEnvironment.value
     cachedEnvironment.animatedFrame = CachedEnvironment.AnimatedFrame(
         position: position,
         size: size,
@@ -394,6 +386,102 @@ func makeAnimatableFrameAttributes(
         size: animatedSize,
         frame: frame
     )
+}
+
+extension CachedEnvironment {
+    mutating func animatedPosition(
+        for inputs: _ViewInputs
+    ) -> Attribute<CGPoint> {
+        guard inputs.needsGeometry else { return inputs.position }
+        return animatedFrame(for: inputs)._animatedPosition!
+    }
+
+    mutating func animatedSize(
+        for inputs: _ViewInputs
+    ) -> Attribute<ViewSize> {
+        guard inputs.needsGeometry else { return inputs.size }
+        return animatedFrame(for: inputs)._animatedSize!
+    }
+
+    private mutating func animatedFrame(
+        for inputs: _ViewInputs
+    ) -> AnimatedFrame {
+        guard let graph = _AGGraph.current else {
+            fatalError("CachedEnvironment.animatedFrame(for:) called outside an active _AGGraph context.")
+        }
+
+        let pixelLength: Attribute<CGFloat> = attribute(
+            id: .animationPixelLength
+        ) {
+            $0.animationPixelLength
+        }
+        let transaction = inputs.geometryTransaction()
+        if let cached = animatedFrame,
+           cached.position.identifier == inputs.position.identifier,
+           cached.size.identifier == inputs.size.identifier,
+           cached.pixelLength.identifier == pixelLength.identifier,
+           cached.time.identifier == inputs.base.time.identifier,
+           cached.transaction.identifier == transaction.identifier,
+           cached.viewPhase.identifier == inputs.base.phase.identifier,
+           cached._animatedPosition != nil,
+           cached._animatedSize != nil {
+            return cached
+        }
+
+        let environment = environment
+        let disabled = inputs.base.options.contains(.animationsDisabled) ||
+            inputs[LayoutPlacementAnimationsDisabledInput.self]
+        let frame: Attribute<ViewFrame>
+        if inputs.supportsVFD {
+            frame = graph.makeStatefulRule(
+                AnimatableFrameAttributeVFD(
+                    position: inputs.position,
+                    size: inputs.size,
+                    pixelLength: pixelLength,
+                    environment: environment,
+                    phase: inputs.base.phase,
+                    time: inputs.base.time,
+                    transaction: transaction,
+                    animationsDisabled: disabled
+                )
+            )
+        } else {
+            frame = graph.makeStatefulRule(
+                AnimatableFrameAttribute(
+                    position: inputs.position,
+                    size: inputs.size,
+                    pixelLength: pixelLength,
+                    environment: environment,
+                    phase: inputs.base.phase,
+                    time: inputs.base.time,
+                    transaction: transaction,
+                    animationsDisabled: disabled
+                )
+            )
+        }
+        let position = graph.subscriptNode(
+            parent: frame,
+            keyPath: \ViewFrame.origin
+        )
+        let size = graph.subscriptNode(
+            parent: frame,
+            keyPath: \ViewFrame.size
+        )
+        let result = AnimatedFrame(
+            position: inputs.position,
+            size: inputs.size,
+            pixelLength: pixelLength,
+            time: inputs.base.time,
+            transaction: transaction,
+            viewPhase: inputs.base.phase,
+            animatedFrame: frame,
+            _animatedPosition: position,
+            _animatedSize: size,
+            _animatedCGSize: nil
+        )
+        animatedFrame = result
+        return result
+    }
 }
 
 // Thin owner for live animation state. Callers keep policy-heavy completion

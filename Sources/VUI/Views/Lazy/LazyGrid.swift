@@ -31,7 +31,7 @@ public struct GridItem: Sendable, Equatable {
     }
 }
 
-struct _LazyGridLayout: Layout {
+struct _LazyGridLayout: Layout, @unchecked Sendable {
     var axis: Axis
     var items: [GridItem]
     var horizontalAlignment: HorizontalAlignment
@@ -468,7 +468,7 @@ extension HVGrid {
             emit(
                 subviews[index],
                 point,
-                proposedSize(minor: geometry.size, length: length),
+                _ProposedSize(proposedSize(minor: geometry.size, length: length)),
                 geometry.anchor
             )
         }

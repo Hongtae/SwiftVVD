@@ -5,12 +5,42 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// ViewAlias: marker protocol for source-alias view types whose backing content
-// is provided at render time via SourceInput<Self>.
+// ViewAlias: source-alias view types whose backing content is provided at
+// render time via SourceInput<Self>.
 // Conforming types: PrimitiveButtonStyleConfiguration.Label,
 //   ButtonStyleConfiguration.Label, LabelStyleConfiguration.Title/Icon,
 //   MenuStyleConfiguration.Label/Content, etc.
 protocol ViewAlias: View {}
+
+extension ViewAlias {
+    public static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        var inputs = inputs
+        guard let source = inputs.popLast(SourceInput<Self>.self) else {
+            return _ViewOutputs()
+        }
+        inputs.base.resetCurrentStyleableView()
+        return source.makeView(view: view, inputs: inputs)
+    }
+
+    public static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        var inputs = inputs
+        guard let source = inputs.base.popLast(SourceInput<Self>.self) else {
+            return _ViewListOutputs(
+                views: .staticList(.merged([])),
+                nextImplicitID: inputs.implicitID,
+                staticCount: 0
+            )
+        }
+        inputs.base.resetCurrentStyleableView()
+        return source.makeViewList(view: view, inputs: inputs)
+    }
+}
 
 // AnySourceFormula: protocol for type-erased view dispatch.
 // SourceFormula<T> conforms via its metatype stored in AnySource.formula.
@@ -63,7 +93,7 @@ struct AnySource {
 
     init<T: View>(value: _GraphValue<T>, valueIsNil: Optional<Attribute<Bool>> = nil) {
         self.formula = SourceFormula<T>.self
-        self.value = value._attribute.asWeak().raw
+        self.value = value._attribute.asWeak().base
         self.valueIsNil = valueIsNil
     }
 
@@ -116,11 +146,43 @@ struct AnySource {
 
 // SourceInput<Source>: PropertyKey whose value is Stack<AnySource>.
 // Written by StaticSourceWriter. Read by Source._makeView implementations.
-struct SourceInput<Source>: GraphInput {
+struct SourceInput<Source>: ViewInput {
     typealias Value = Stack<AnySource>
     static var defaultValue: Stack<AnySource> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
     var description: String { "SourceInput<\(Source.self)>" }
+}
+
+struct StyleableViewContextInput: GraphInput {
+    static var defaultValue: Any.Type? { nil }
+
+    static func valuesEqual(_ a: Any.Type?, _ b: Any.Type?) -> Bool {
+        switch (a, b) {
+        case (nil, nil):
+            true
+        case let (a?, b?):
+            ObjectIdentifier(a) == ObjectIdentifier(b)
+        default:
+            false
+        }
+    }
+}
+
+extension _GraphInputs {
+    mutating func setCurrentStyleableView<V: StyleableView>(_ type: V.Type) {
+        self[StyleableViewContextInput.self] = type
+    }
+
+    func isCurrentStyleableView<V: StyleableView>(_ type: V.Type) -> Bool {
+        guard let current = self[StyleableViewContextInput.self] else {
+            return false
+        }
+        return ObjectIdentifier(current) == ObjectIdentifier(type)
+    }
+
+    mutating func resetCurrentStyleableView() {
+        self[StyleableViewContextInput.self] = nil
+    }
 }
 
 // StaticSourceWriter<Source, Type>: ViewModifier that writes a SourceInput entry

@@ -44,6 +44,7 @@ extension GraphicsContext {
         public static var plusLighter: BlendMode        { .init(rawValue: 27) }
     }
 
+    // Blend modes define how source and destination color components are combined.
     // references:
     //  https://developer.apple.com/documentation/coregraphics/cgblendmode/
     //  https://www.w3.org/TR/compositing/#blending

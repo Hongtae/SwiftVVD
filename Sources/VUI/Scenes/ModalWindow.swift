@@ -681,7 +681,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
         }
     }
 
-    override func handleMouseEvent(event: MouseEvent) -> Bool {
+    override func handleMouseEvent(event: PlatformMouseEvent) -> Bool {
         presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
         return super.handleMouseEvent(event: event)

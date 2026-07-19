@@ -78,14 +78,19 @@ private extension TupleView {
 
 extension TupleView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        // Delegates to VStackLayout as the default layout for a bare TupleView.
-        // This mirrors the behaviour when a view's body returns a TupleView directly,
-        // which the framework wraps in a VStack-equivalent root.
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let body: (_Graph, _ViewInputs) -> _ViewListOutputs = { _, viewInputs in
             Self._makeViewList(view: view, inputs: _ViewListInputs(from: viewInputs))
+        }
+        if inputs[ImplicitRootLayoutInput.self] == .zStack {
+            let rootAttr = graph.makeInput(value: ZStackLayout(alignment: .center))
+            return ZStackLayout._makeLayoutView(
+                root: _GraphValue(_attribute: rootAttr),
+                inputs: inputs,
+                body: body
+            )
         }
         let rootAttr: Attribute<VStackLayout> = graph.makeInput(value: VStackLayout())
         let rootGraph = _GraphValue<VStackLayout>(_attribute: rootAttr)
@@ -167,6 +172,10 @@ extension TupleView {
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
         _subviewTypes.count
     }
+}
+
+@available(*, unavailable)
+extension TupleView: Sendable {
 }
 
 extension TupleView: PrimitiveView {

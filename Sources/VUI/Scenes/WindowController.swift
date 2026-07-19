@@ -9,6 +9,9 @@ import Foundation
 import Synchronization
 import VVD
 
+typealias PlatformMouseEvent = VVD.MouseEvent
+typealias PlatformKeyboardEvent = VVD.KeyboardEvent
+
 // WindowController owns ViewGraph and drives rendering plus event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
 // Optionally owns a WindowContext, created lazily on the first makeWindow() call.
@@ -21,6 +24,7 @@ class WindowController: WindowDelegate,
                         ViewGraphDelegate,
                         GraphDelegate,
                         EventBindingSource, EventBindingManagerDelegate,
+                        DirectEventBindingManagerDelegate,
                         @unchecked Sendable {
 
     // MARK: - Types
@@ -105,8 +109,12 @@ class WindowController: WindowDelegate,
         gestureGraph.eventBindingManager.host = gestureGraph
         gestureGraph.eventBindingManager.delegate = self
         eventBridge.manager = gestureGraph.eventBindingManager
-        eventBridge.addEventSource(self)
+        attach(to: eventBridge)
         gestureGraph.delegate = eventBridge
+    }
+
+    func attach(to bridge: EventBindingBridge) {
+        bridge.addEventSource(self)
     }
 
     private func sendRecognizerOwnedEvents(
@@ -143,20 +151,20 @@ class WindowController: WindowDelegate,
         var consumed: Set<EventID> = []
         for (eventID, event) in events {
             let forwardsTrackedUpdates = event is KeyEvent
-            switch event.eventPhase {
+            switch event.phase {
             case .began:
                 _hostTrackedEventIDs.insert(eventID)
                 _hostForwardedEventIDs.insert(eventID)
                 outbound[eventID] = event
                 consumed.insert(eventID)
-            case .moved:
+            case .active:
                 if forwardsTrackedUpdates || !_hostForwardedEventIDs.contains(eventID) {
                     _hostTrackedEventIDs.insert(eventID)
                     _hostForwardedEventIDs.insert(eventID)
                     outbound[eventID] = event
                     consumed.insert(eventID)
                 }
-            case .ended, .cancelled:
+            case .ended, .failed:
                 if forwardsTrackedUpdates || !_hostForwardedEventIDs.contains(eventID) {
                     outbound[eventID] = event
                     consumed.insert(eventID)
@@ -174,9 +182,43 @@ class WindowController: WindowDelegate,
     private func eventPhase(from gesturePhase: GestureEventPhase) -> EventPhase {
         switch gesturePhase {
         case .began: return .began
-        case .changed: return .moved
+        case .changed: return .active
         case .ended: return .ended
-        case .cancelled: return .cancelled
+        case .cancelled: return .failed
+        }
+    }
+
+    private func pointerEvent(
+        from event: PlatformMouseEvent,
+        phase: EventPhase,
+        at time: Time
+    ) -> any EventType {
+        switch event.device {
+        case .touch, .stylus:
+            return TouchEvent(
+                timestamp: time,
+                phase: phase,
+                binding: nil,
+                location: event.location,
+                globalLocation: event.location,
+                radius: 0,
+                force: event.pressure,
+                maximumPossibleForce: 1,
+                modifiers: [],
+                altitude: .zero,
+                azimuth: .zero,
+                touchType: event.device == .stylus ? .pencil : .direct
+            )
+        default:
+            return MouseEvent(
+                timestamp: time,
+                binding: nil,
+                button: MouseEvent.Button(rawValue: event.buttonID + 1),
+                phase: phase,
+                location: event.location,
+                globalLocation: event.location,
+                modifiers: []
+            )
         }
     }
 
@@ -289,7 +331,7 @@ class WindowController: WindowDelegate,
     private func keyEventPhase(for event: KeyboardEvent) -> EventPhase? {
         switch event.type {
         case .keyDown:
-            return event.isRepeat ? .moved : .began
+            return event.isRepeat ? .active : .began
         case .keyUp:
             return .ended
         case .textInput, .textComposition:
@@ -317,18 +359,22 @@ class WindowController: WindowDelegate,
 
     private func keyEvent(from event: KeyboardEvent) -> KeyEvent? {
         guard let phase = keyEventPhase(for: event) else { return nil }
+        let stringValue = keyCharacters(for: event)
+        let key = keyEquivalent(for: event)
         return KeyEvent(
-            key: keyEquivalent(for: event),
-            virtualKey: event.key,
-            characters: keyCharacters(for: event),
             phase: phase,
-            modifiers: eventModifiers(from: event.modifiers)
+            timestamp: currentTimestamp,
+            binding: nil,
+            modifiers: eventModifiers(from: event.modifiers),
+            keys: key.map { String($0.character) } ?? stringValue,
+            stringValue: stringValue,
+            keyID: AnyHashable(key ?? KeyEquivalent("\0"))
         )
     }
 
     func requestHoverUpdate(in manager: EventBindingManager) {
         manager.clearHoverUpdatePending()
-        eventBridge.requestHoverUpdate()
+        eventBridge.requestHoverUpdate(in: manager)
         if let hover = _lastHoverRefresh {
             _ = sendHoverEvent(at: hover.location,
                                deviceID: hover.deviceID,
@@ -337,11 +383,23 @@ class WindowController: WindowDelegate,
         }
     }
 
+    func didBind(to binding: EventBinding, id: EventID) {
+        eventBridge.didBind(to: binding, id: id)
+    }
+
+    func didUpdate(phase: GesturePhase<Void>, in manager: EventBindingManager) {
+        eventBridge.didUpdate(phase: phase, in: manager)
+    }
+
+    func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager) {
+        eventBridge.didUpdate(gestureCategory: gestureCategory, in: manager)
+    }
+
     func receiveDirectEvents(
         _ events: [EventID: any EventType],
         in manager: EventBindingManager
     ) -> Set<EventID> {
-        let rootResponder = gestureGraph?.rootResponder
+        let rootResponder = gestureGraph?.eventBindingManager.rootResponder as? MultiViewResponder
         let enqueueAction = { [weak self] action in
             if let gestureGraph = self?.gestureGraph {
                 gestureGraph.enqueueAction(action)
@@ -431,7 +489,7 @@ class WindowController: WindowDelegate,
 
     enum InputEvent: @unchecked Sendable {
         case keyboard(KeyboardEvent, Time)
-        case mouse(MouseEvent, Time)
+        case mouse(PlatformMouseEvent, Time)
         case gesture(GestureEvent, Time)
         case action(@Sendable () -> Void)
     }
@@ -449,7 +507,7 @@ class WindowController: WindowDelegate,
         Time(seconds: Date.now.timeIntervalSince(Self.eventTimestampOrigin))
     }
 
-    private func inputTimestamp(for event: MouseEvent) -> Time {
+    private func inputTimestamp(for event: PlatformMouseEvent) -> Time {
         let receiptTime = inputTimestamp
         guard event.timestamp.isFinite, event.timestamp > 0 else {
             return receiptTime
@@ -496,7 +554,7 @@ class WindowController: WindowDelegate,
     var externalUpdateCount: Int = 0
 
     // ViewRendererHost
-    var responderNode: ResponderNode? { gestureGraph?.rootResponder }
+    var responderNode: ResponderNode? { gestureGraph?.responderNode }
 
     // MARK: - Initialization
 
@@ -525,8 +583,8 @@ class WindowController: WindowDelegate,
         // Create GestureGraph first. It owns an independent AG from ViewGraph.
         self.gestureGraph = GestureGraph()
         // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
-        // reads viewGraph.rendererHost?.gestureGraph during _makeView.
-        self.gestureGraph!.rendererHost = self
+        // The graph must be connected before root view construction.
+        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureGestureEventBridge()
 
         // Create ViewGraph with full AG wiring, including _makeView responder construction.
@@ -564,7 +622,7 @@ class WindowController: WindowDelegate,
         self.date = .now
 
         self.gestureGraph = GestureGraph()
-        self.gestureGraph!.rendererHost = self
+        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
@@ -584,7 +642,7 @@ class WindowController: WindowDelegate,
     }
 
     // Sheet-specific init: content comes from a reactive attribute in a parent AG.
-    // The ViewGraph creates a crossGraphRef to mirror the parent's attribute, so that
+    // The ViewGraph creates a cross-graph reference to observe the parent's attribute, so that
     // when parent state changes, parent contentAttr re-evaluates and the child graph updates.
     // contentAttr must already have a non-nil cached value in sourceGraph before this is called.
     init(crossGraphContent contentAttr: Attribute<AnyView>,
@@ -600,7 +658,7 @@ class WindowController: WindowDelegate,
         self.date = .now
 
         self.gestureGraph = GestureGraph()
-        self.gestureGraph!.rendererHost = self
+        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
@@ -656,7 +714,7 @@ class WindowController: WindowDelegate,
                     events.append(.keyboard(event, time))
                 }
             }
-            window.addEventObserver(self) { [weak self] (event: MouseEvent) in
+            window.addEventObserver(self) { [weak self] (event: PlatformMouseEvent) in
                 guard let self else { return }
                 let time = self.inputTimestamp(for: event)
                 self.inputEvents.withLock { events in
@@ -774,7 +832,7 @@ class WindowController: WindowDelegate,
         let hadRootValueUpdates = !viewGraph.valuesNeedingUpdate.isEmpty
         let hadScheduledViewUpdate = viewGraph.hasScheduledViewUpdate
         let hadGraphWork = viewGraph.hasPendingTransactions ||
-            viewGraph.hasPendingGraphMutations ||
+            viewGraph.needsTransaction ||
             viewGraph.data.graph.inbox.hasPendingWork ||
             !viewGraph.data.graph.actionOutbox.isEmpty
         let hadViewChangedWhileDrawing = self.viewChangedWhileDrawing
@@ -953,8 +1011,8 @@ class WindowController: WindowDelegate,
 
         let updateChangedIDs = updateChangeSet.ids(for: viewGraph.data.graph)
         var clockIDs: Set<AGAttribute> = [
-            viewGraph.data.updateSeedAttribute.identifier,
-            viewGraph.data.transactionSeedAttribute.identifier
+            viewGraph.data._updateSeed.identifier,
+            viewGraph.data._transactionSeed.identifier
         ]
         if let timeID = viewGraph.timeAttr?.identifier {
             clockIDs.insert(timeID)
@@ -1186,7 +1244,7 @@ class WindowController: WindowDelegate,
         }
     }
 
-    func onMouseEvent(event: MouseEvent, at time: Time? = nil) {
+    func onMouseEvent(event: PlatformMouseEvent, at time: Time? = nil) {
         let topModal = self.modalChildren.withLock { $0.first }
         if let topModal, topModal.isOverlay, topModal.initiated {
             let modalController = topModal.controller
@@ -1267,16 +1325,17 @@ class WindowController: WindowDelegate,
     }
 
     @discardableResult
-    func handleMouseEvent(event: MouseEvent) -> Bool {
+    func handleMouseEvent(event: PlatformMouseEvent) -> Bool {
         handleMouseEvent(event: event, at: currentTimestamp)
     }
 
     @discardableResult
-    func handleMouseEvent(event: MouseEvent, at time: Time) -> Bool {
-        let handleEvent = { (event: MouseEvent) -> Bool in
+    func handleMouseEvent(event: PlatformMouseEvent, at time: Time) -> Bool {
+        let handleEvent = { (event: PlatformMouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
-            guard let rootResponder = self.gestureGraph?.rootResponder else {
+            guard let rootResponder = self.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder else {
                 return false
             }
             let contextMenuConsumed = self.contextMenuRecognizer.handleMouseEvent(
@@ -1319,20 +1378,18 @@ class WindowController: WindowDelegate,
             switch event.type {
             case .buttonDown:
                 let serial = self.nextEventSerial()
-                let tapEventID     = EventID(type: TappableEvent.self, serial: serial)
-                let spatialEventID = EventID(type: SpatialEvent.self,  serial: serial)
+                let eventType: Any.Type = isTouch ? TouchEvent.self : MouseEvent.self
+                let pointerEventID = EventID(type: eventType, serial: serial)
                 if isTouch {
-                    self._touchEventIDs[event.deviceID] = tapEventID
-                    self._spatialEventIDs[event.deviceID] = spatialEventID
+                    self._touchEventIDs[event.deviceID] = pointerEventID
                 } else {
-                    self._mouseEventID = tapEventID
-                    self._mouseSpatialEventID = spatialEventID
+                    self._mouseEventID = pointerEventID
                 }
-                self._activeEvents[tapEventID]     = TappableEvent(
-                    location: event.location, phase: .began, buttonID: event.buttonID)
-                self._activeEvents[spatialEventID] = SpatialEvent(
-                    location: event.location, globalLocation: event.location,
-                    phase: .began, timestamp: time.seconds)
+                self._activeEvents[pointerEventID] = self.pointerEvent(
+                    from: event,
+                    phase: .began,
+                    at: time
+                )
                 if event.buttonID == 0 {
                     // Keep the scroll stream in the same batch as the tap/spatial
                     // streams so recognizers see one coherent pointer update.
@@ -1343,26 +1400,26 @@ class WindowController: WindowDelegate,
                         previousLocation: event.location
                     )
                     self._activeEvents[scrollEventID] = ScrollEvent(
-                        delta: .zero,
+                        timestamp: time,
+                        phase: .began,
+                        binding: nil,
                         translation: .zero,
-                        previousTranslation: .zero,
-                        location: event.location,
-                        phase: .began
+                        modifiers: [],
+                        hitTestLocation: event.location
                     )
                 }
                 phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
 
             case .move:
-                let tapEventID     = isTouch ? self._touchEventIDs[event.deviceID]   : self._mouseEventID
-                let spatialEventID = isTouch ? self._spatialEventIDs[event.deviceID] : self._mouseSpatialEventID
-                guard let tapEventID else { return false }
-                self._activeEvents[tapEventID] = TappableEvent(
-                    location: event.location, phase: .moved, buttonID: event.buttonID)
-                if let spatialEventID {
-                    self._activeEvents[spatialEventID] = SpatialEvent(
-                        location: event.location, globalLocation: event.location,
-                        phase: .moved, timestamp: time.seconds)
-                }
+                let pointerEventID = isTouch
+                    ? self._touchEventIDs[event.deviceID]
+                    : self._mouseEventID
+                guard let pointerEventID else { return false }
+                self._activeEvents[pointerEventID] = self.pointerEvent(
+                    from: event,
+                    phase: .active,
+                    at: time
+                )
                 if var scrollState = self._pointerScrollStates[pointerScrollKey] {
                     // Accumulate from raw locations instead of backend deltas;
                     // some backends omit or coalesce the latter during a drag.
@@ -1370,63 +1427,56 @@ class WindowController: WindowDelegate,
                         width: event.location.x - scrollState.previousLocation.x,
                         height: event.location.y - scrollState.previousLocation.y
                     )
-                    let previousTranslation = scrollState.translation
                     scrollState.translation.width += delta.width
                     scrollState.translation.height += delta.height
                     scrollState.previousLocation = event.location
                     self._pointerScrollStates[pointerScrollKey] = scrollState
                     self._activeEvents[scrollState.eventID] = ScrollEvent(
-                        delta: delta,
+                        timestamp: time,
+                        phase: .active,
+                        binding: nil,
                         translation: scrollState.translation,
-                        previousTranslation: previousTranslation,
-                        location: event.location,
-                        phase: .moved
+                        modifiers: [],
+                        hitTestLocation: event.location
                     )
                 }
                 phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
 
             case .buttonUp:
-                let tapEventID: EventID?
-                let spatialEventID: EventID?
+                let pointerEventID: EventID?
                 if isTouch {
-                    tapEventID     = self._touchEventIDs.removeValue(forKey: event.deviceID)
-                    spatialEventID = self._spatialEventIDs.removeValue(forKey: event.deviceID)
+                    pointerEventID = self._touchEventIDs.removeValue(forKey: event.deviceID)
                 } else {
-                    tapEventID = self._mouseEventID
+                    pointerEventID = self._mouseEventID
                     self._mouseEventID = nil
-                    spatialEventID = self._mouseSpatialEventID
-                    self._mouseSpatialEventID = nil
                 }
-                guard let tapEventID else { return false }
-                self._activeEvents[tapEventID] = TappableEvent(
-                    location: event.location, phase: .ended, buttonID: event.buttonID)
-                if let spatialEventID {
-                    self._activeEvents[spatialEventID] = SpatialEvent(
-                        location: event.location, globalLocation: event.location,
-                        phase: .ended, timestamp: time.seconds)
-                }
+                guard let pointerEventID else { return false }
+                self._activeEvents[pointerEventID] = self.pointerEvent(
+                    from: event,
+                    phase: .ended,
+                    at: time
+                )
                 let scrollState = self._pointerScrollStates.removeValue(forKey: pointerScrollKey)
                 if let scrollState {
                     let delta = CGSize(
                         width: event.location.x - scrollState.previousLocation.x,
                         height: event.location.y - scrollState.previousLocation.y
                     )
-                    let previousTranslation = scrollState.translation
                     let translation = CGSize(
-                        width: previousTranslation.width + delta.width,
-                        height: previousTranslation.height + delta.height
+                        width: scrollState.translation.width + delta.width,
+                        height: scrollState.translation.height + delta.height
                     )
                     self._activeEvents[scrollState.eventID] = ScrollEvent(
-                        delta: delta,
+                        timestamp: time,
+                        phase: .ended,
+                        binding: nil,
                         translation: translation,
-                        previousTranslation: previousTranslation,
-                        location: event.location,
-                        phase: .ended
+                        modifiers: [],
+                        hitTestLocation: event.location
                     )
                 }
                 phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
-                self._activeEvents.removeValue(forKey: tapEventID)
-                if let spatialEventID { self._activeEvents.removeValue(forKey: spatialEventID) }
+                self._activeEvents.removeValue(forKey: pointerEventID)
                 if let scrollState { self._activeEvents.removeValue(forKey: scrollState.eventID) }
 
             default:
@@ -1442,7 +1492,7 @@ class WindowController: WindowDelegate,
 
         // Build handler list: presentation children (reversed = top-first) then self.
         var handlers = self.presentationChildren.withLock {
-            $0.reversed().compactMap { entry -> (target: AnyObject, action: (MouseEvent) -> Bool)? in
+            $0.reversed().compactMap { entry -> (target: AnyObject, action: (PlatformMouseEvent) -> Bool)? in
                 guard entry.isOverlay, entry.initiated else { return nil }
                 guard entry.frame != nil else { return nil }
                 let child = entry.controller
@@ -1503,7 +1553,8 @@ class WindowController: WindowDelegate,
             self?.enqueueInputAction { [weak self] in
                 guard let self,
                       let gg = self.gestureGraph,
-                      let rootResponder = gg.rootResponder else {
+                      let rootResponder = gg.eventBindingManager.rootResponder
+                        as? MultiViewResponder else {
                     return
                 }
                 _ = self.contextMenuRecognizer.fireLongPress(
@@ -1540,7 +1591,7 @@ class WindowController: WindowDelegate,
     }
 
     @discardableResult
-    private func handleMouseWheel(event: MouseEvent, time: Time) -> Bool {
+    private func handleMouseWheel(event: PlatformMouseEvent, time: Time) -> Bool {
         for entry in self.presentationChildren.withLock({ $0.reversed() }) {
             guard entry.isOverlay, entry.initiated else { continue }
             guard entry.frame != nil else { continue }
@@ -1597,7 +1648,7 @@ class WindowController: WindowDelegate,
             at: location,
             accepting: SystemWheelEvent.self
         ) else {
-            // Preserve the scalar wheel carrier for the legacy scroll route.
+            // Preserve the scalar wheel carrier for the single-axis scroll route.
             guard delta.x == 0,
                   let legacyBinding = gestureGraph.eventBinding(
                     at: location,
@@ -1673,7 +1724,7 @@ class WindowController: WindowDelegate,
             _wheelScrollEventID = eventID
             _wheelScrollTranslation = .zero
         case .stationary, .changed:
-            eventPhase = .moved
+            eventPhase = .active
             if let activeID = _wheelScrollEventID {
                 eventID = activeID
             } else {
@@ -1681,11 +1732,12 @@ class WindowController: WindowDelegate,
                 _wheelScrollEventID = eventID
                 _wheelScrollTranslation = .zero
                 let began = ScrollEvent(
-                    delta: .zero,
+                    timestamp: time,
+                    phase: .began,
+                    binding: nil,
                     translation: .zero,
-                    previousTranslation: .zero,
-                    location: location,
-                    phase: .began
+                    modifiers: [],
+                    hitTestLocation: location
                 )
                 _ = sendRecognizerOwnedEvents([eventID: began], at: time)
             }
@@ -1694,25 +1746,25 @@ class WindowController: WindowDelegate,
             guard let activeID = _wheelScrollEventID else { return false }
             eventID = activeID
         case .cancelled:
-            eventPhase = .cancelled
+            eventPhase = .failed
             guard let activeID = _wheelScrollEventID else { return false }
             eventID = activeID
         case .mayBegin:
             return false
         }
 
-        let previousTranslation = _wheelScrollTranslation
         _wheelScrollTranslation.width += gestureDelta.width
         _wheelScrollTranslation.height += gestureDelta.height
         let scrollEvent = ScrollEvent(
-            delta: gestureDelta,
+            timestamp: time,
+            phase: eventPhase,
+            binding: nil,
             translation: _wheelScrollTranslation,
-            previousTranslation: previousTranslation,
-            location: location,
-            phase: eventPhase
+            modifiers: [],
+            hitTestLocation: location
         )
         let result = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
-        if eventPhase == .ended || eventPhase == .cancelled {
+        if eventPhase.isTerminal {
             _wheelScrollEventID = nil
             _wheelScrollTranslation = .zero
         }
@@ -1749,21 +1801,21 @@ class WindowController: WindowDelegate,
                 guard let currentID = _scrollEventID else { return false }
                 eventID = currentID
             }
-            let previousTranslation = _scrollTranslation
             _scrollTranslation.width += delta.width
             _scrollTranslation.height += delta.height
             let scrollEvent = ScrollEvent(
-                delta: delta,
+                timestamp: time,
+                phase: eventPhase,
+                binding: nil,
                 translation: _scrollTranslation,
-                previousTranslation: previousTranslation,
-                location: event.location,
-                phase: eventPhase
+                modifiers: [],
+                hitTestLocation: event.location
             )
             // Platform pan input is already classified, but it still needs a
             // recognizer-owned session; direct-host tracking may suppress later
             // values after forwarding ownership to another host path.
             let phase = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
-            if eventPhase == .ended || eventPhase == .cancelled {
+            if eventPhase.isTerminal {
                 _scrollEventID = nil
                 _scrollTranslation = .zero
             }
@@ -1786,17 +1838,18 @@ class WindowController: WindowDelegate,
                 guard let currentID = _magnifyEventID else { return false }
                 eventID = currentID
             }
-            let previousMagnification = _magnification
-            _magnification += event.magnification
+            let initialScale = _magnification
             let magnifyEvent = MagnifyEvent(
-                magnification: _magnification,
-                previousMagnification: previousMagnification,
-                location: event.location,
+                timestamp: time,
                 phase: eventPhase,
-                timestamp: time.seconds
+                binding: nil,
+                globalLocation: event.location,
+                scaleDelta: event.magnification,
+                initialScale: initialScale
             )
             let phase = sendRecognizerOwnedEvents([eventID: magnifyEvent], at: time)
-            if eventPhase == .ended || eventPhase == .cancelled {
+            _magnification = initialScale + event.magnification
+            if eventPhase.isTerminal {
                 _magnifyEventID = nil
                 _magnification = 1.0
             }
@@ -1817,17 +1870,19 @@ class WindowController: WindowDelegate,
                 guard let currentID = _rotateEventID else { return false }
                 eventID = currentID
             }
-            let previousRotation = _rotation
-            _rotation += Angle(degrees: event.rotation)
+            let initialAngle = _rotation
+            let angleDelta = Angle(degrees: event.rotation)
             let rotateEvent = RotateEvent(
-                rotation: _rotation,
-                previousRotation: previousRotation,
-                location: event.location,
+                timestamp: time,
                 phase: eventPhase,
-                timestamp: time.seconds
+                binding: nil,
+                globalLocation: event.location,
+                angleDelta: angleDelta,
+                initialAngle: initialAngle
             )
             let phase = sendRecognizerOwnedEvents([eventID: rotateEvent], at: time)
-            if eventPhase == .ended || eventPhase == .cancelled {
+            _rotation = initialAngle + angleDelta
+            if eventPhase.isTerminal {
                 _rotateEventID = nil
                 _rotation = .zero
             }
@@ -1867,16 +1922,19 @@ class WindowController: WindowDelegate,
     private func sendHoverEvent(at location: CGPoint,
                                 deviceID: Int,
                                 isTopMost: Bool) -> Bool {
+        let responderRoot = gestureGraph?.eventBindingManager.rootResponder as? MultiViewResponder
         let hasHit = isTopMost &&
-            !(gestureGraph?.rootResponder?.hoverResponders(containing: location).isEmpty ?? true)
-        let wasActive = hoverEventDispatcher.hasActiveResponders(deviceID: deviceID)
+            !(responderRoot?.hoverResponders(containing: location).isEmpty ?? true)
+        let wasActive = _hoverEventIDs[deviceID].map {
+            hoverEventDispatcher.hasActiveResponders(deviceID: $0.serial)
+        } ?? false
 
         let eventID: EventID
         let phase: EventPhase
         if hasHit {
             if let currentID = _hoverEventIDs[deviceID] {
                 eventID = currentID
-                phase = .moved
+                phase = .active
             } else {
                 eventID = EventID(type: HoverEvent.self, serial: nextEventSerial())
                 _hoverEventIDs[deviceID] = eventID
@@ -1892,9 +1950,14 @@ class WindowController: WindowDelegate,
             return false
         }
 
-        let hoverEvent = HoverEvent(location: location, phase: phase, deviceID: deviceID)
+        let hoverEvent = HoverEvent(
+            timestamp: currentTimestamp,
+            phase: phase,
+            binding: nil,
+            globalLocation: location
+        )
         let consumed = sendHostEvents([eventID: hoverEvent], track: false, at: currentTimestamp)
-        if phase == .ended || phase == .cancelled {
+        if phase.isTerminal {
             _hoverEventIDs.removeValue(forKey: deviceID)
         }
         return consumed.contains(eventID)
@@ -1998,18 +2061,6 @@ class WindowController: WindowDelegate,
         setNeedsUpdate()
     }
 
-    func updateGraph<T>(body: (GraphHost) -> T) -> T {
-        body(viewGraph)
-    }
-
-    func graphDidChange() {
-        setNeedsUpdate()
-    }
-
-    func preferencesDidChange() {
-        setNeedsUpdate()
-    }
-
     // MARK: - ViewGraphRootValueUpdater
 
     func updateRootView() {
@@ -2019,7 +2070,7 @@ class WindowController: WindowDelegate,
     func updateEnvironment() {
         if let parentGraph = parentWindow?.viewGraph {
             let parentPhase = parentGraph.data.withCurrent {
-                parentGraph.data.phaseAttribute.value
+                parentGraph.data._phase.value
             }
             viewGraph.updateGraphPhase(
                 oldParentPhase: viewGraph.parentPhase,

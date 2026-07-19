@@ -48,20 +48,23 @@ protocol ViewGraphOwner: AnyObject {
     var externalUpdateCount: Int { get set }
 }
 
-// ViewRendererHost - extends ViewGraphOwner with a responder tree root and shared gesture graph.
-// WindowController owns both graph objects and exposes the event state needed
-// by generated responders through this protocol.
-protocol ViewRendererHost: ViewGraphOwner {
+// ViewRendererHost - extends root-value updating and graph ownership with a responder tree root.
+protocol ViewRendererHost: ViewGraphOwner, ViewGraphRootValueUpdater {
     var responderNode: ResponderNode? { get }
-    var gestureGraph: GestureGraph? { get }
 }
 
 // ViewGraphDelegate - update scheduling callbacks for the view graph.
 // ViewGraph.delegate: Optional<ViewGraphDelegate>
-protocol ViewGraphDelegate: AnyObject {
+protocol ViewGraphDelegate: GraphDelegate {
     func setNeedsUpdate()
     func requestUpdate(after: Double)
     func `as`<T>(_ type: T.Type) -> T?
+}
+
+extension ViewGraphDelegate {
+    func setNeedsUpdate() {
+        requestUpdate(after: 0)
+    }
 }
 
 // ViewGraphHostDelegate - environment/input update hook for ViewGraphHost.
@@ -88,7 +91,7 @@ protocol ViewGraphRenderDelegate: AnyObject {
 // accessibility paths until those root inputs are wired.
 // ViewGraphHost.updateDelegate: Optional<ViewGraphRootValueUpdater>
 // WindowController conforms as the host object that updates root input attributes.
-protocol ViewGraphRootValueUpdater: AnyObject {
+protocol ViewGraphRootValueUpdater: ViewGraphDelegate {
     func updateRootView()
     func updateEnvironment()
     func updateSize()
@@ -103,6 +106,19 @@ protocol ViewGraphRootValueUpdater: AnyObject {
 }
 
 extension ViewGraphRootValueUpdater {
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        guard let owner = self as? any ViewGraphOwner else {
+            fatalError("ViewGraphRootValueUpdater requires a ViewGraphOwner")
+        }
+        return body(owner.viewGraph)
+    }
+
+    func graphDidChange() {
+        setNeedsUpdate()
+    }
+
+    func preferencesDidChange() {}
+
     func updateTransform() {}
     func updateFocusStore() {}
     func updateFocusedItem() {}
@@ -207,7 +223,7 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     weak var updateDelegate: (any ViewGraphRootValueUpdater)?
 
     var accessibilityEnabled: Bool = false
-    var parentPhase: Phase?
+    var parentPhase: _GraphInputs.Phase?
 
     // ViewGraphOwner
     var currentTimestamp: Time = Time(seconds: 0)
@@ -324,8 +340,17 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
 
         data.withCurrent {
             // Flush async invalidations before applying root-value changes.
-            data.graph.inbox.drain()
+            let inboxTransaction = data.graph.inbox.drain()
             data.graph.drainActions()
+            if let viewGraph = self as? ViewGraph,
+               inboxTransaction != nil {
+                // WindowController samples transaction-bearing inbox entries one
+                // at a time. Other ViewGraph hosts still need the last drained
+                // transaction installed before lazily evaluated geometry rules
+                // consume the frame transaction attribute.
+                viewGraph.setCurrentUpdateTransaction(inboxTransaction)
+                viewGraph.beginNextUpdate(at: time)
+            }
 
             // Apply dirty root values through the host updater.
             if dirty.contains(.rootView)      { updateDelegate?.updateRootView() }
@@ -343,9 +368,6 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         }
     }
 
-    override init() { super.init() }
-
-    override init(graph: _AGGraph) { super.init(graph: graph) }
 }
 
 private final class ViewGraphDisplayLink {
@@ -408,6 +430,10 @@ private final class ViewGraphDisplayLink {
 // GestureGraph ownership is shared with the renderer host for event dispatch.
 class ViewGraph: ViewGraphHost {
 
+    override func hostKind() -> CustomEventTrace.InstantiationEventType.Kind {
+        .view
+    }
+
     // Update scheduling callback.
     weak var viewDelegate: (any ViewGraphDelegate)?
 
@@ -442,7 +468,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
     private(set) var transactionAttr: Attribute<Transaction>?
-    private(set) var phaseAttr: Attribute<Phase>?
+    private(set) var phaseAttr: Attribute<_GraphInputs.Phase>?
     private var currentUpdateTransaction = Transaction()
     private var hasCurrentUpdateTransaction = false
     private var transactionAttrNeedsClear = false
@@ -454,7 +480,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var rootDisplayList: Attribute<DisplayList>?
     private(set) var rootResourceList: Attribute<ResourceList>?
 
-    var isValid: Bool { rootLayoutComputer != nil }
+    override var isValid: Bool { rootLayoutComputer != nil }
 
     // Requested output bitmask.
     // defaults = displayList | viewResponders | layout | focus.
@@ -595,7 +621,7 @@ class ViewGraph: ViewGraphHost {
                 continue
             }
             preferenceValueOutlets.append((key: key, value: value))
-            if !isHiddenForReuse {
+            if !data.isHiddenForReuse {
                 bridge.addValue(value, for: key)
             }
         }
@@ -607,10 +633,10 @@ class ViewGraph: ViewGraphHost {
         }
 
         let outletKeys = resolvedHostPreferenceKeys(for: bridge, in: graph)
-        let hostWeak = WeakAttribute<PreferenceValues>(weakHostValues)
+        let hostWeak = WeakAttribute<PreferenceValues>(base: weakHostValues)
         hostPreferenceOutletKeys = outletKeys
         hostPreferenceValues = hostWeak
-        if let outletKeys, !isHiddenForReuse {
+        if let outletKeys, !data.isHiddenForReuse {
             bridge.addHostValues(hostWeak, for: outletKeys)
         }
     }
@@ -618,7 +644,7 @@ class ViewGraph: ViewGraphHost {
     func removePreferenceOutlets(isInvalidating: Bool) {
         guard let bridge = preferenceBridge else {
             preferenceValueOutlets.removeAll()
-            hostPreferenceValues = nil
+            hostPreferenceValues = WeakAttribute()
             hostPreferenceOutletKeys = nil
             return
         }
@@ -638,7 +664,7 @@ class ViewGraph: ViewGraphHost {
                 isInvalidating: isInvalidating
             )
         }
-        hostPreferenceValues = nil
+        hostPreferenceValues = WeakAttribute()
         hostPreferenceOutletKeys = nil
         bridge.removeChild(self)
     }
@@ -649,7 +675,7 @@ class ViewGraph: ViewGraphHost {
         }
 
         data.withCurrent {
-            if isHiddenForReuse {
+            if data.isHiddenForReuse {
                 for outlet in preferenceValueOutlets {
                     bridge.removeValue(
                         outlet.value,
@@ -668,7 +694,6 @@ class ViewGraph: ViewGraphHost {
                     bridge.addValue(outlet.value, for: outlet.key)
                 }
                 if let hostPreferenceOutletKeys,
-                   let hostPreferenceValues,
                    hostPreferenceValues.isValid(in: data.graph) {
                     bridge.addHostValues(hostPreferenceValues, for: hostPreferenceOutletKeys)
                 }
@@ -703,7 +728,10 @@ class ViewGraph: ViewGraphHost {
         isUpdating
     }
 
-    func updateGraphPhase(oldParentPhase: Phase?, newParentPhase: Phase) {
+    func updateGraphPhase(
+        oldParentPhase: _GraphInputs.Phase?,
+        newParentPhase: _GraphInputs.Phase
+    ) {
         defer { parentPhase = newParentPhase }
 
         guard let oldParentPhase else {
@@ -716,9 +744,9 @@ class ViewGraph: ViewGraphHost {
             incrementPhase()
         } else if (delta & 0x1) != 0 {
             data.withCurrent {
-                var phase = data.phaseAttribute.value
+                var phase = data._phase.value
                 phase.isBeingRemoved = newParentPhase.isBeingRemoved
-                data.phaseAttribute.setValue(phase)
+                data._phase.setValue(phase)
             }
         }
     }
@@ -756,7 +784,7 @@ class ViewGraph: ViewGraphHost {
         self.rootAnyViewContentInput = contentAttr
     }
 
-    // Cross-graph variant: content lives in a parent AG and is mirrored via crossGraphRef.
+    // Cross-graph variant: content lives in a parent graph and is observed through a proxy node.
     // When parent state changes, parent contentAttr re-evaluates, the child inbox
     // is notified, and the child updates on its next updateOutputs. Caller must evaluate contentAttr in sourceGraph
     // first (call `_ = contentAttr.value`) so the crossGraphRef finds a non-nil cached value.
@@ -780,8 +808,8 @@ class ViewGraph: ViewGraphHost {
                           features: [any ViewGraphFeature],
                           makeContent: (_AGGraph) -> _GraphValue<V>) {
         self.requestedOutputs = requestedOutputs
-        super.init()
-        // Wire rendererHost before _makeView so GestureResponder.init can read rendererHost?.gestureGraph.
+        super.init(data: GraphHost.Data())
+        // Wire rendererHost before building the root view.
         self.rendererHost = rendererHost
         for feature in features {
             featureBuffer.append(feature)
@@ -792,37 +820,33 @@ class ViewGraph: ViewGraphHost {
         var envAttrResult:   Attribute<EnvironmentValues>? = nil
         var timeAttrResult:  Attribute<Time>?              = nil
         var transactionAttrResult: Attribute<Transaction>? = nil
-        var phaseAttrResult: Attribute<Phase>?             = nil
+        var phaseAttrResult: Attribute<_GraphInputs.Phase>? = nil
         var rootLCResult:    Attribute<LayoutComputer>?    = nil
         var rootSizeResult:  Attribute<CGSize>?            = nil
         var rootDLResult:    Attribute<DisplayList>?       = nil
         var rootRLResult:    Attribute<ResourceList>?      = nil
 
         self.data.withCurrent {
-            let g = self.data.graph
+            let g = self.graph
             let contentGV = makeContent(g)
 
             let timeAttr        = g.makeInput(value: time)
-            let phaseAttr       = self.data.phaseAttribute
+            let phaseAttr       = self.data._phase
             let transactionAttr = g.makeInput(value: Transaction())
             let envAttr         = g.makeInput(value: initialEnvironment)
             let graphInputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: timeAttr,
-                cachedEnvironment: MutableBox(CachedEnvironment(environment: envAttr)),
                 phase: phaseAttr,
-                transaction: transactionAttr,
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: envAttr,
+                transaction: transactionAttr
             )
             var prefKeys = PreferenceKeys()
-            prefKeys.insert(DisplayList.Key.self)
-            prefKeys.insert(ResourceList.Key.self)
-            prefKeys.insert(ViewRespondersKey.self)
-            prefKeys.insert(SheetPreference.Key.self)
-            prefKeys.insert(AlertStorage.PreferenceKey.self)
-            prefKeys.insert(ConfirmationDialog.PreferenceKey.self)
+            prefKeys.add(DisplayList.Key.self)
+            prefKeys.add(ResourceList.Key.self)
+            prefKeys.add(ViewRespondersKey.self)
+            prefKeys.add(SheetPreference.Key.self)
+            prefKeys.add(AlertStorage.PreferenceKey.self)
+            prefKeys.add(ConfirmationDialog.PreferenceKey.self)
 
             let hostKeysAttr = g.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -845,6 +869,7 @@ class ViewGraph: ViewGraphHost {
                 stackOrientation: nil
             )
             viewInputs.requestsLayoutComputer = true
+            viewInputs.needsGeometry = true
             featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
             viewInputs.makeRootMatchedGeometryScope()
 
@@ -878,16 +903,18 @@ class ViewGraph: ViewGraphHost {
 
             let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
             if !responderNodes.isEmpty {
-                let rootRespondersAttr: Attribute<[any ViewResponder]> = g.makeRule {
-                    var combined: [any ViewResponder] = ViewRespondersKey.defaultValue
+                let rootRespondersAttr: Attribute<[ViewResponder]> = g.makeRule {
+                    var combined: [ViewResponder] = ViewRespondersKey.defaultValue
                     for nodeID in responderNodes {
-                        let list = Attribute<[any ViewResponder]>(nodeID).value
+                        let list = Attribute<[ViewResponder]>(nodeID).value
                         ViewRespondersKey.reduce(value: &combined) { list }
                     }
                     return combined
                 }
                 g.makeSideEffectRule { [weak self] in
-                    self?.rendererHost?.gestureGraph?.updateResponders(rootRespondersAttr.value)
+                    (self?.rendererHost as? WindowController)?
+                        .gestureGraph?
+                        .updateResponders(rootRespondersAttr.value)
                 }
             }
 
@@ -975,9 +1002,9 @@ class ViewGraph: ViewGraphHost {
     override func updateOutputs(at time: Time) {
         beginNextUpdate(at: time)
         flushTransactions()
-        runTransaction {
+        runTransaction(nil, do: {
             super.updateOutputs(at: time)
-        }
+        }, id: nil)
         flushTransactions()
         updatePreferences()
     }
@@ -1011,7 +1038,7 @@ class ViewGraph: ViewGraphHost {
                     transactionAttrNeedsClear = false
                 }
             }
-            data.incrementUpdateSeed()
+            data.updateSeed &+= 1
         }
     }
 

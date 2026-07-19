@@ -17,8 +17,11 @@ protocol Scrollable {
 }
 
 protocol ScrollableContainer: Scrollable {
-    var containerParentScrollable: (any Scrollable)? { get }
-    var containerChildScrollables: [any Scrollable] { get }
+    var parent: (any Scrollable)? { get }
+    var children: [any Scrollable]? { get }
+    func makeTarget<ID: Hashable>(
+        for id: ID
+    ) -> ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
 }
 
 extension Scrollable {
@@ -51,12 +54,17 @@ extension Scrollable {
 }
 
 extension ScrollableContainer {
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        guard let target = makeTarget(for: id) else { return false }
+        return setContentTarget(target)
+    }
+
     func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        if let parent = containerParentScrollable,
+        if let parent,
            parent.setContentTarget(target) {
             return true
         }
-        for child in containerChildScrollables {
+        for child in children ?? [] {
             if child.setContentTarget(target) {
                 return true
             }
@@ -65,20 +73,20 @@ extension ScrollableContainer {
     }
 
     var allowsContentOffsetAdjustments: Bool {
-        containerParentScrollable?.allowsContentOffsetAdjustments ?? false
+        parent?.allowsContentOffsetAdjustments ?? false
     }
 
     func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
-        guard let parent = containerParentScrollable else { return false }
+        guard let parent else { return false }
         return parent.adjustContentOffset(by: offset, reason: reason)
     }
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        if let parent = containerParentScrollable,
+        if let parent,
            let mapped = parent.mapFirstChild(ofType: type, body: body) {
             return mapped
         }
-        for child in containerChildScrollables {
+        for child in children ?? [] {
             if let typedChild = child as? A {
                 return body(typedChild)
             }
@@ -162,7 +170,7 @@ public struct ScrollTarget: Hashable {
 }
 
 /// Reason code passed to scrollable hosts when content offset is adjusted.
-enum ContentOffsetAdjustmentReason: Equatable {
+enum ContentOffsetAdjustmentReason: Hashable, RawRepresentable, CustomStringConvertible {
     case translation
     case positionTranslation
     case alignment
@@ -180,10 +188,42 @@ enum ContentOffsetAdjustmentReason: Equatable {
     }
 
     static var maxValue: UInt32 { 5 }
+
+    init?(rawValue: UInt32) {
+        switch rawValue {
+        case 1: self = .translation
+        case 2: self = .positionTranslation
+        case 3: self = .alignment
+        case 4: self = .reset
+        case 5: self = .resetPosition
+        default: return nil
+        }
+    }
+
+    func shouldAdjust(isScrolling: Bool, isTransitioning: Bool) -> Bool {
+        switch self {
+        case .translation, .positionTranslation:
+            !isTransitioning
+        case .alignment:
+            true
+        case .reset, .resetPosition:
+            !isScrolling
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .translation: "translation"
+        case .positionTranslation: "positionTranslation"
+        case .alignment: "alignment"
+        case .reset: "reset"
+        case .resetPosition: "resetPosition"
+        }
+    }
 }
 
 /// Stable classification used to coalesce compatible scroll state requests.
-enum ScrollStateRequestKind: CustomStringConvertible, Equatable {
+enum ScrollStateRequestKind: CustomStringConvertible {
     struct UpdateValueConfig: Equatable {
         var targetDistance: CGFloat
     }
@@ -202,7 +242,7 @@ enum ScrollStateRequestKind: CustomStringConvertible, Equatable {
 }
 
 /// Deferred mutation that synchronizes scroll state bindings or scroll position targets.
-protocol ScrollStateRequest: CustomStringConvertible {
+protocol ScrollStateRequest {
     var id: ObjectIdentifier { get }
     var kind: ScrollStateRequestKind { get }
     var transaction: Transaction { get }
@@ -217,12 +257,19 @@ extension ScrollStateRequest {
 
     func overrides(_ other: (any ScrollStateRequest)?) -> Bool {
         guard let other else { return true }
-        return id == other.id && kind == other.kind
+        switch (kind, other.kind) {
+        case (.scrollTo, .updateValue):
+            return true
+        case (.scrollTo, .scrollTo), (.updateValue, .scrollTo):
+            return false
+        case let (.updateValue(current), .updateValue(previous)):
+            return current.targetDistance < previous.targetDistance
+        }
     }
 }
 
 /// Writes a newly observed visible scroll position back into its binding.
-struct UpdateScrollStateRequest: ScrollStateRequest {
+struct UpdateScrollStateRequest: ScrollStateRequest, CustomStringConvertible {
     var binding: Binding<ScrollPosition>
     var newPosition: ScrollPosition
     var isVisible: Bool
@@ -306,7 +353,7 @@ struct PositionedByUserScrollStateRequest: ScrollStateRequest {
 }
 
 /// Applies a bound scroll position change to the current scrollable host.
-struct ScrollToScrollStateRequest: ScrollStateRequest {
+struct ScrollToScrollStateRequest: ScrollStateRequest, CustomStringConvertible {
     var binding: Binding<ScrollPosition>
     var anchor: UnitPoint?
     var id: ObjectIdentifier
@@ -691,7 +738,7 @@ struct ValueToScrollPosition<Value>: Projection where Value: Hashable {
 }
 
 /// Installs a fixed scroll position value into graph inputs for a scroll view.
-public struct ScrollValueModifier: ViewModifier, _GraphInputsModifier {
+public struct ScrollValueModifier: PrimitiveViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 
     public var value: ScrollPosition
@@ -713,7 +760,7 @@ public struct ScrollValueModifier: ViewModifier, _GraphInputsModifier {
 }
 
 /// Installs a binding-backed scroll position and emits scroll state requests when it changes.
-public struct ScrollPositionBindingModifier: ViewModifier, _GraphInputsModifier {
+public struct ScrollPositionBindingModifier: PrimitiveViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 
     public var binding: Binding<ScrollPosition>
@@ -753,7 +800,7 @@ public struct ScrollPositionBindingModifier: ViewModifier, _GraphInputsModifier 
 
         var anchor: Attribute<UnitPoint?>
 
-        func updateValue() -> UnitPoint? {
+        var value: UnitPoint? {
             let value = anchor.value
             guard !_SemanticFeature<Semantics_v6>.isEnabled else {
                 return value

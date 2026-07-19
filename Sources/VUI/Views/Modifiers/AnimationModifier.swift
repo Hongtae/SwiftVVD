@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier where Value: Equatable {
+public struct _AnimationModifier<Value>: PrimitiveViewModifier where Value: Equatable {
     public var animation: Animation?
     public var value: Value
 
@@ -18,7 +18,15 @@ public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier whe
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var modifiedInputs = inputs
+        modifiedInputs.copyCaches()
         _makeInputs(modifier: modifier, inputs: &modifiedInputs.base)
+        if modifiedInputs.needsGeometry {
+            let cachedEnvironmentAttribute = modifiedInputs.base.cachedEnvironment
+            var cachedEnvironment = cachedEnvironmentAttribute.value
+            _ = cachedEnvironment.animatedPosition(for: modifiedInputs)
+            _ = cachedEnvironment.animatedSize(for: modifiedInputs)
+            cachedEnvironmentAttribute.value = cachedEnvironment
+        }
         return body(_Graph(), modifiedInputs)
     }
 
@@ -56,7 +64,7 @@ public struct _AnimationModifier<Value>: ViewModifier, PrimitiveViewModifier whe
     private static func transactionSeedAttribute(in graph: _AGGraph) -> Attribute<UInt32> {
         if let ref = _AGGraphContext.current,
            let host = ref.context as? GraphHost {
-            return host.data.transactionSeedAttribute
+            return host.data._transactionSeed
         }
         return graph.makeInput(value: UInt32.zero)
     }
@@ -71,7 +79,7 @@ extension _AnimationModifier: Equatable {
 extension _AnimationModifier: Sendable {
 }
 
-private struct ValueTransactionSeed<Observed: Equatable>: StatefulRule {
+private struct ValueTransactionSeed<Observed: Equatable>: StatefulRule, AsyncAttribute {
     typealias Value = UInt32
 
     var value: Attribute<Observed>
@@ -93,7 +101,7 @@ private struct ValueTransactionSeed<Observed: Equatable>: StatefulRule {
     }
 }
 
-private struct ChildTransaction: Rule {
+private struct ChildTransaction: Rule, AsyncAttribute {
     typealias Value = Transaction
 
     var valueTransactionSeed: Attribute<UInt32>
@@ -101,7 +109,7 @@ private struct ChildTransaction: Rule {
     var parent: Attribute<Transaction>
     var transactionSeed: Attribute<UInt32>
 
-    func updateValue() -> Transaction {
+    var value: Transaction {
         var transaction = parent.value
         guard !transaction.disablesAnimations else {
             return transaction

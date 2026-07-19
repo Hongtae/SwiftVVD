@@ -75,7 +75,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         host.setPhase(phase)
 
         host.data.withCurrent {
-            XCTAssertEqual(host.data.phaseAttribute.value.rawValue, phase.rawValue)
+            XCTAssertEqual(host.data._phase.value.rawValue, phase.rawValue)
         }
         XCTAssertTrue(recorder.events.isEmpty)
     }
@@ -91,7 +91,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         host.incrementPhase()
 
         host.data.withCurrent {
-            let next = host.data.phaseAttribute.value
+            let next = host.data._phase.value
             XCTAssertEqual(next.resetSeed, 4)
             XCTAssertTrue(next.isBeingRemoved)
         }
@@ -106,7 +106,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         phase.resetSeed = 9
         phase.isBeingRemoved = true
 
-        XCTAssertEqual(viewGraph.phaseAttr?.identifier, viewGraph.data.phaseAttribute.identifier)
+        XCTAssertEqual(viewGraph.phaseAttr?.identifier, viewGraph.data._phase.identifier)
 
         viewGraph.setPhase(phase)
 
@@ -127,7 +127,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
         viewGraph.data.withCurrent {
-            XCTAssertEqual(viewGraph.data.phaseAttribute.value.rawValue, newParentPhase.rawValue)
+            XCTAssertEqual(viewGraph.data._phase.value.rawValue, newParentPhase.rawValue)
         }
     }
 
@@ -151,7 +151,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
         viewGraph.data.withCurrent {
-            let next = viewGraph.data.phaseAttribute.value
+            let next = viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 11)
             XCTAssertTrue(next.isBeingRemoved)
         }
@@ -178,7 +178,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
         viewGraph.data.withCurrent {
-            let next = viewGraph.data.phaseAttribute.value
+            let next = viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 10)
             XCTAssertTrue(next.isBeingRemoved)
         }
@@ -217,7 +217,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         XCTAssertEqual(child.viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
         child.viewGraph.data.withCurrent {
-            let next = child.viewGraph.data.phaseAttribute.value
+            let next = child.viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 8)
             XCTAssertTrue(next.isBeingRemoved)
         }
@@ -229,7 +229,7 @@ private final class DelegateGraphHost: GraphHost {
 
     init(recorder: GraphDelegateEventRecorder) {
         self.delegateRecorder = recorder
-        super.init()
+        super.init(data: Data())
         recorder.host = self
     }
 

@@ -12,12 +12,11 @@ final class GraphHostDataSubgraphTests: XCTestCase {
         XCTAssertTrue(host.data.globalSubgraph.children.contains { $0 === host.data.rootSubgraph })
     }
 
-    func testSharedGraphHostsKeepDistinctSubgraphOwnership() {
-        let graph = _AGGraph()
-        let first = GraphHost(graph: graph)
-        let second = GraphHost(graph: graph)
+    func testIndependentGraphHostsKeepDistinctSubgraphOwnership() {
+        let first = GraphHost()
+        let second = GraphHost()
 
-        XCTAssertTrue(first.data.graph === second.data.graph)
+        XCTAssertFalse(first.data.graph === second.data.graph)
         XCTAssertTrue(first.data.globalSubgraph !== second.data.globalSubgraph)
         XCTAssertTrue(first.data.rootSubgraph !== second.data.rootSubgraph)
         XCTAssertTrue(first.data.rootSubgraph.parent === first.data.globalSubgraph)

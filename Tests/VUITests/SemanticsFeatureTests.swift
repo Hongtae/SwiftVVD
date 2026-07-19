@@ -2,14 +2,7 @@ import XCTest
 @testable import VUI
 
 final class SemanticsFeatureTests: XCTestCase {
-    override func tearDown() {
-        Semantics.overrides = Semantics.Overrides()
-        super.tearDown()
-    }
-
     func testCurrentBaselineEnablesKnownSemanticMarkers() {
-        Semantics.overrides = Semantics.Overrides()
-
         XCTAssertTrue(_SemanticFeature<Semantics_v4>.isEnabled)
         XCTAssertTrue(_SemanticFeature<Semantics_v5>.isEnabled)
         XCTAssertTrue(_SemanticFeature<Semantics_v6>.isEnabled)
@@ -23,6 +16,7 @@ final class SemanticsFeatureTests: XCTestCase {
         XCTAssertEqual(Semantics_v4.semantic.rawValue, 400)
         XCTAssertEqual(Semantics_v5.semantic.rawValue, 500)
         XCTAssertEqual(Semantics_v6.semantic.rawValue, 600)
+        XCTAssertEqual(Semantics.v6_4.rawValue, 640)
         XCTAssertEqual(Semantics_v7.semantic.rawValue, 700)
         XCTAssertEqual(Semantics_v8.semantic.rawValue, 800)
         XCTAssertLessThan(Semantics_v4.semantic, Semantics_v5.semantic)
@@ -31,73 +25,14 @@ final class SemanticsFeatureTests: XCTestCase {
         XCTAssertLessThan(Semantics_v7.semantic, Semantics_v8.semantic)
     }
 
-    func testBuildOverrideControlsDefaultSemanticFeatureRequirement() {
-        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: nil)
-
-        XCTAssertTrue(_SemanticFeature<Semantics_v4>.isEnabled)
-        XCTAssertFalse(_SemanticFeature<Semantics_v5>.isEnabled)
-        XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
-        XCTAssertFalse(_SemanticFeature<Semantics_v7>.isEnabled)
-        XCTAssertFalse(_SemanticFeature<Semantics_v8>.isEnabled)
+    func testBothRequirementKindsUseLatestBaseline() {
         XCTAssertTrue(RuntimeV6SemanticFeature.isEnabled)
-    }
-
-    func testRuntimeOverrideControlsRuntimeRequirementOnly() {
-        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
-
-        XCTAssertTrue(_SemanticFeature<Semantics_v6>.isEnabled)
-        XCTAssertTrue(_SemanticFeature<Semantics_v7>.isEnabled)
-        XCTAssertTrue(_SemanticFeature<Semantics_v8>.isEnabled)
-        XCTAssertFalse(RuntimeV6SemanticFeature.isEnabled)
-        XCTAssertFalse(RuntimeV7SemanticFeature.isEnabled)
-    }
-
-    func testSemanticsTestTemporarilyOverridesSelectedLaneAndRestores() {
-        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: nil)
-
-        Semantics.test(as: \.build) {
-            XCTAssertTrue(_SemanticFeature<Semantics_v6>.isEnabled)
-            XCTAssertTrue(_SemanticFeature<Semantics_v7>.isEnabled)
-            XCTAssertTrue(_SemanticFeature<Semantics_v8>.isEnabled)
-            XCTAssertEqual(Semantics.overrides.build, .v8)
-        }
-
-        XCTAssertEqual(Semantics.overrides.build, .v4)
-        XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
-    }
-
-    func testSemanticsTestOnlyOverridesSelectedLane() {
-        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: .v4)
-
-        Semantics.test(as: \.runtime) {
-            XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
-            XCTAssertTrue(RuntimeV6SemanticFeature.isEnabled)
-            XCTAssertTrue(RuntimeV7SemanticFeature.isEnabled)
-            XCTAssertTrue(RuntimeV8SemanticFeature.isEnabled)
-            XCTAssertEqual(Semantics.overrides.build, .v4)
-            XCTAssertEqual(Semantics.overrides.runtime, .v8)
-        }
-
-        XCTAssertEqual(Semantics.overrides.build, .v4)
-        XCTAssertEqual(Semantics.overrides.runtime, .v4)
-    }
-
-    func testSemanticsTestRestoresSelectedLaneAfterThrow() {
-        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: .v5)
-
-        do {
-            try Semantics.test(as: \.runtime) {
-                XCTAssertEqual(Semantics.overrides.build, .v4)
-                XCTAssertEqual(Semantics.overrides.runtime, .v8)
-                throw SemanticsFeatureProbeError.expected
-            }
-            XCTFail("Semantics.test returned normally")
-        } catch SemanticsFeatureProbeError.expected {
-            XCTAssertEqual(Semantics.overrides.build, .v4)
-            XCTAssertEqual(Semantics.overrides.runtime, .v5)
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
+        XCTAssertTrue(RuntimeV7SemanticFeature.isEnabled)
+        XCTAssertTrue(RuntimeV8SemanticFeature.isEnabled)
+        XCTAssertTrue(isLinkedOnOrAfter(.v8))
+        XCTAssertTrue(isDeployedOnOrAfter(.v8))
+        XCTAssertFalse(isLinkedOnOrAfter(Semantics(rawValue: 801)))
+        XCTAssertFalse(isDeployedOnOrAfter(Semantics(rawValue: 801)))
     }
 }
 
@@ -114,8 +49,4 @@ private struct RuntimeV7SemanticFeature: SemanticFeature {
 private struct RuntimeV8SemanticFeature: SemanticFeature {
     static var introduced: Semantics { .v8 }
     static var requirement: SemanticRequirement { .runtime }
-}
-
-private enum SemanticsFeatureProbeError: Error {
-    case expected
 }

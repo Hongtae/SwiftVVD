@@ -82,7 +82,7 @@ struct PrimitiveButtonGestureCore: Gesture {
         let capturedOutset = outset
         return SizeGesture { size in
             let transform: (SpatialEvent) -> Value = { event in
-                let loc = event.location ?? .zero
+                let loc = event.location
                 let rect = CGRect(origin: .zero, size: size)
                 let insetRect = rect.insetBy(dx: -capturedOutset, dy: -capturedOutset)
                 let locationInBounds: LocationInBounds =
@@ -91,24 +91,18 @@ struct PrimitiveButtonGestureCore: Gesture {
                                               .outOfBounds
                 return Value(
                     location: loc,
-                    timestamp: event.timestamp,
+                    timestamp: event.timestamp.seconds,
                     locationInBounds: locationInBounds
                 )
             }
             return ModifierGesture(
-                modifier: MapGesture(transform: transform),
+                modifier: MapGesture(body: { $0.map(transform) }),
                 body: ModifierGesture(
                     modifier: DelayedGesture<SpatialEvent>(),  // duration=0
                     body: EventListener<SpatialEvent>()
                 )
             )
         }
-    }
-}
-
-extension PrimitiveButtonGestureCore: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == SpatialEvent.self
     }
 }
 
@@ -284,12 +278,6 @@ struct PrimitiveButtonGesture: Gesture {
     }
 }
 
-extension PrimitiveButtonGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == SpatialEvent.self
-    }
-}
-
 // MARK: - _ButtonGesture
 
 // Public button gesture entry point.
@@ -309,6 +297,43 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
     public typealias Body = Never
     public typealias Value = Void
 
+    struct LegacyBody: Gesture {
+        typealias Body = Never
+        typealias Value = Void
+
+        static func _makeGesture(
+            gesture: _GraphValue<Self>,
+            inputs: _GestureInputs
+        ) -> _GestureOutputs<Void> {
+            fatalError("Legacy button gesture is unavailable")
+        }
+    }
+
+    typealias InternalBody = StaticIf<
+        ImprovedButtonGestureFeature,
+        _MapGesture<PrimitiveButtonGesture, Void>,
+        LegacyBody
+    >
+
+    var internalBody: InternalBody {
+        let pressingAction: ButtonPressingAction? = pressingAction.map { action in
+            { phase in action(phase == .pressing) }
+        }
+        let action = action
+        return StaticIf(
+            trueBody: _MapGesture(
+                content: PrimitiveButtonGesture(
+                    hoverCallback: { _ in action() },
+                    buttonPressingAction: pressingAction,
+                    outset: 0,
+                    alwaysActive: false
+                ),
+                transform: { _ in () }
+            ),
+            falseBody: LegacyBody()
+        )
+    }
+
     public var body: Never { fatalError("_ButtonGesture.body must not be called") }
 
     // Converts stored closures to primitive callback wrappers, then delegates to the primitive.
@@ -316,33 +341,7 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Void> {
-        guard let graph = _AGGraph.current else {
-            fatalError("_ButtonGesture._makeGesture requires AG context")
-        }
-        // Rebuild the primitive when the public gesture fields change.
-        let pbgAttr: Attribute<PrimitiveButtonGesture> = graph.makeRule {
-            let s = gesture._attribute.value
-            let bpa2: ButtonPressingAction? = s.pressingAction.map { pc in
-                { phase in pc(phase.rawValue == 2) }
-            }
-            let act = s.action
-            return PrimitiveButtonGesture(
-                hoverCallback: { _ in act() },
-                buttonPressingAction: bpa2,
-                outset: 0.0,
-                alwaysActive: false
-            )
-        }
-        return PrimitiveButtonGesture._makeGesture(
-            gesture: _GraphValue(_attribute: pbgAttr),
-            inputs: inputs
-        )
-    }
-}
-
-extension _ButtonGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == SpatialEvent.self
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 

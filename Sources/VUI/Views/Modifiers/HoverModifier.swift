@@ -21,8 +21,6 @@ private let _hoverResponderNextKey = Mutex<UInt32>(0xA0000000)
 
 final class HoverResponder: MultiViewResponder, AnyHoverResponder {
     let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
 
     var callback: ((Bool) -> Void)?
     var continuousCallback: ((HoverPhase) -> Void)?
@@ -30,7 +28,7 @@ final class HoverResponder: MultiViewResponder, AnyHoverResponder {
     var snapshotTransform: ViewTransform
     var snapshotSize: ViewSize
     var snapshotIsEnabled: Bool
-    var innerResponders: [any ViewResponder]
+    var innerResponders: [ViewResponder]
     weak var eventBindingManager: EventBindingManager?
     private var isActive = false
     private var phase: HoverPhase = .ended
@@ -41,7 +39,7 @@ final class HoverResponder: MultiViewResponder, AnyHoverResponder {
          transform: ViewTransform,
          size: ViewSize,
          isEnabled: Bool,
-         innerResponders: [any ViewResponder],
+         innerResponders: [ViewResponder],
          eventBindingManager: EventBindingManager?) {
         self.hitTestKey = _hoverResponderNextKey.withLock { key in
             defer { key &+= 1 }
@@ -59,33 +57,31 @@ final class HoverResponder: MultiViewResponder, AnyHoverResponder {
         updateInnerResponders(innerResponders)
     }
 
-    func updateInnerResponders(_ responders: [any ViewResponder]) {
+    func updateInnerResponders(_ responders: [ViewResponder]) {
         innerResponders = responders
-        for responder in responders where responder.nextResponder == nil {
-            responder.nextResponder = self
-        }
+        children = responders
     }
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func containsGlobalPoints(_ points: [CGPoint],
-                              cacheKey: UInt32?,
-                              options: ContainsPointsOptions) -> ContainsPointsResult {
+    override func containsGlobalPoints(_ points: [CGPoint],
+                                       cacheKey: UInt32?,
+                                       options: ViewResponder.ContainsPointsOptions) -> ViewResponder.ContainsPointsResult {
         guard snapshotIsEnabled else { return .stop }
 
         var localPts = Array(points.prefix(64))
         snapshotTransform.convertGlobal(to: .local, points: &localPts)
         let bounds = CGRect(origin: .zero, size: snapshotSize.value)
 
-        var mask: UInt64 = 0
+        var mask = BitVector64()
         for (i, point) in localPts.enumerated() {
-            if bounds.contains(point) { mask |= (1 << i) }
+            mask[i] = bounds.contains(point)
         }
 
-        guard mask != 0 else { return .stop }
-        return ContainsPointsResult(mask: mask, priority: 16.0, children: innerResponders)
+        guard !mask.isEmpty else { return .stop }
+        return ViewResponder.ContainsPointsResult(mask: mask, priority: 16.0, children: innerResponders)
     }
 
     private func hoverPhase(isActive active: Bool, point: CGPoint?) -> HoverPhase {
@@ -145,13 +141,26 @@ final class HoverEventDispatcher {
         var consumed: Set<EventID> = []
         for (eventID, event) in events {
             guard let hoverEvent = event as? HoverEvent,
-                  let location = hoverEvent.location else { continue }
-            let wasActive = hasActiveResponders(deviceID: hoverEvent.deviceID)
-            let allowHit = hoverEvent.eventPhase != .ended && hoverEvent.eventPhase != .cancelled
+                  !hoverEvent.phase.isTerminal else {
+                if event is HoverEvent {
+                    _ = updateResponders(
+                        at: (event as? HoverEvent)?.globalLocation ?? .zero,
+                        deviceID: eventID.serial,
+                        allowHit: false,
+                        rootResponder: rootResponder,
+                        enqueueAction: enqueueAction
+                    )
+                    consumed.insert(eventID)
+                }
+                continue
+            }
+            let location = hoverEvent.globalLocation
+            let deviceID = eventID.serial
+            let wasActive = hasActiveResponders(deviceID: deviceID)
             let isActive = updateResponders(
                 at: location,
-                deviceID: hoverEvent.deviceID,
-                allowHit: allowHit,
+                deviceID: deviceID,
+                allowHit: true,
                 rootResponder: rootResponder,
                 enqueueAction: enqueueAction
             )
@@ -216,7 +225,7 @@ final class HoverEventDispatcher {
     }
 }
 
-public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
+public struct _HoverRegionModifier: ViewModifier, MultiViewModifier, PrimitiveViewModifier {
     public let callback: (Bool) -> Void
 
     @inlinable public init(_ callback: @escaping (Bool) -> Void) {
@@ -238,16 +247,16 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
             .filter { $0.key == ViewRespondersKey.self }
             .map { $0.value }
 
-        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        let innerRespondersAttr: Attribute<[ViewResponder]>
         if innerResponderNodes.isEmpty {
             innerRespondersAttr = graph.makeInput(value: [])
         } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
         } else {
             innerRespondersAttr = graph.makeRule {
                 var combined = ViewRespondersKey.defaultValue
                 for nodeID in innerResponderNodes {
-                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    let val = Attribute<[ViewResponder]>(nodeID).value
                     ViewRespondersKey.reduce(value: &combined) { val }
                 }
                 return combined
@@ -256,8 +265,10 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
 
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let eventBindingManager =
-            (_AGGraphContext.current?.context as? ViewGraph)?
-                .rendererHost?.gestureGraph?.eventBindingManager
+            ((_AGGraphContext.current?.context as? ViewGraph)?
+                .rendererHost as? WindowController)?
+                .gestureGraph?
+                .eventBindingManager
         let responder = HoverResponder(
             callback: modifier._attribute.value.callback,
             continuousCallback: nil,
@@ -281,7 +292,7 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
         // Install the responder preference surface and ask the event manager
         // for a hover refresh when geometry changes.
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
         return outputs
     }
@@ -318,16 +329,16 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
             .filter { $0.key == ViewRespondersKey.self }
             .map { $0.value }
 
-        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        let innerRespondersAttr: Attribute<[ViewResponder]>
         if innerResponderNodes.isEmpty {
             innerRespondersAttr = graph.makeInput(value: [])
         } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
         } else {
             innerRespondersAttr = graph.makeRule {
                 var combined = ViewRespondersKey.defaultValue
                 for nodeID in innerResponderNodes {
-                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    let val = Attribute<[ViewResponder]>(nodeID).value
                     ViewRespondersKey.reduce(value: &combined) { val }
                 }
                 return combined
@@ -336,8 +347,10 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
 
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let eventBindingManager =
-            (_AGGraphContext.current?.context as? ViewGraph)?
-                .rendererHost?.gestureGraph?.eventBindingManager
+            ((_AGGraphContext.current?.context as? ViewGraph)?
+                .rendererHost as? WindowController)?
+                .gestureGraph?
+                .eventBindingManager
         let responder = HoverResponder(
             callback: nil,
             continuousCallback: modifier._attribute.value.callback,
@@ -360,7 +373,7 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
         }
 
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
         return outputs
     }

@@ -83,7 +83,7 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
         }
         var itemInputs = inputs
         var keys = itemInputs.preferences.keys
-        keys.insert(PlatformItemList.Key.self)
+        keys.add(PlatformItemList.Key.self)
         itemInputs.preferences = PreferencesInputs(keys: keys,
                                                    hostKeys: itemInputs.preferences.hostKeys)
         itemInputs[PlatformItemListCollectionOptions.self] =

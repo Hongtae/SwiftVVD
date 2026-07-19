@@ -26,11 +26,11 @@ public struct _VariadicView_Children: View {
     public typealias Body = Never
 
     /// Child AG rule that materializes `ForEach<_VariadicView_Children, AnyHashable, Element>`.
-    private struct Child: Rule {
+    private struct Child: Rule, AsyncAttribute {
         typealias Value = ForEach<_VariadicView_Children, AnyHashable, Element>
         var attribute: Attribute<_VariadicView_Children>
 
-        func updateValue() -> Value {
+        var value: Value {
             let children = attribute.value
             return ForEach(children, id: \.id) { $0 }
         }
@@ -97,12 +97,14 @@ public struct _VariadicView_Children: View {
     }
 }
 
+extension _VariadicView_Children: MultiView {}
+
 extension _VariadicView_Children: RandomAccessCollection {
     public struct Element: View, Identifiable {
-        public var id: AnyHashable { AnyHashable(view.index) }
+        public var id: AnyHashable { view.viewID }
 
         public func id<ID>(as _: ID.Type = ID.self) -> ID? where ID: Hashable {
-            return nil
+            view.id.primaryExplicitID?.base as? ID
         }
 
         public subscript<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
@@ -175,7 +177,7 @@ extension _VariadicView_Children: RandomAccessCollection {
     private var elements: [Element] {
         var built: [Element] = []
         _ = _forEachSublist(in: list, sublistTransform: transform) { sublist in
-            let sharedElements = _ViewList_SubgraphElements(base: sublist.elements)
+            let sharedElements = sublist.elements
             let traitsCollection = sublist.traits
             for offset in 0..<sublist.count {
                 let view = _ViewList_View(
@@ -196,6 +198,10 @@ extension _VariadicView_Children: RandomAccessCollection {
     public typealias Iterator = IndexingIterator<_VariadicView_Children>
     public typealias SubSequence = Slice<_VariadicView_Children>
     public typealias Indices = Range<Int>
+}
+
+@available(*, unavailable)
+extension _VariadicView_Children: Sendable {
 }
 
 extension _VariadicView_Children: PrimitiveView {
@@ -434,6 +440,10 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
             return Content._makeViewList(view: view[\.content], inputs: listInputs)
         }
     }
+}
+
+@available(*, unavailable)
+extension _VariadicView.Tree: Sendable {
 }
 
 extension _VariadicView.Tree: PrimitiveView, UnaryView where Self: View {

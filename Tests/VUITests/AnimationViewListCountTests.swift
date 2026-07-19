@@ -92,18 +92,10 @@ final class AnimationViewListCountTests: XCTestCase {
 
         ref.withCurrent {
             let inputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(
-                        environment: graph.makeInput(value: EnvironmentValues())
-                    )
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: Transaction())
             )
 
             XCTAssertEqual(
@@ -434,7 +426,7 @@ final class AnimationViewListCountTests: XCTestCase {
             )
             assertLayout(layout, width: 10, height: 725)
 
-            host.data.incrementTransactionSeed()
+            host.data.transactionSeed &+= 1
             content.setValue(
                 TransactionReportingAnimationContent(equalityKey: 1, width: 20)
             )
@@ -664,7 +656,7 @@ final class AnimationViewListCountTests: XCTestCase {
             )
             XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 735)
 
-            host.data.incrementTransactionSeed()
+            host.data.transactionSeed &+= 1
             contentWidth.setValue(20)
             XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 820)
         }
@@ -941,18 +933,10 @@ final class AnimationViewListCountTests: XCTestCase {
     ) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(
-                        environment: graph.makeInput(value: EnvironmentValues())
-                    )
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: transaction),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: transaction)
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(
@@ -975,18 +959,10 @@ final class AnimationViewListCountTests: XCTestCase {
     ) -> _ViewListInputs {
         _ViewListInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(
-                        environment: graph.makeInput(value: EnvironmentValues())
-                    )
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: transaction),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: transaction)
             ),
             implicitID: 0,
             options: 0,

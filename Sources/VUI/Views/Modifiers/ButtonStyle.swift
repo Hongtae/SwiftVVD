@@ -13,6 +13,11 @@ public protocol PrimitiveButtonStyle {
     typealias Configuration = PrimitiveButtonStyleConfiguration
 }
 
+protocol ButtonStyleConvertible {
+    associatedtype ButtonStyleRepresentation: ButtonStyle
+    var buttonStyleRepresentation: ButtonStyleRepresentation { get }
+}
+
 public struct ButtonRole: Equatable, Sendable {
     public static let destructive = ButtonRole(_role: .destructive)
     public static let cancel = ButtonRole(_role: .cancel)
@@ -29,7 +34,7 @@ public struct ButtonRole: Equatable, Sendable {
 }
 
 // LinkDestination stores URL/navigation button destinations.
-struct LinkDestination {
+struct LinkDestination: DynamicProperty {
     let url: URL
 }
 
@@ -70,51 +75,17 @@ public struct PrimitiveButtonStyleConfiguration {
 
 extension PrimitiveButtonStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
-            return _ViewOutputs()
-        }
-        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
-        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
-        var innerInputs = inputs
-        let animatedFrame = makeAnimatableFrameAttributes(
-            in: &innerInputs.base,
-            position: innerPosAttr,
-            size: innerSizeAttr,
-            supportsVFD: innerInputs.supportsVFD
+        ButtonStyleConfiguration.Label._makeView(
+            view: view.unsafeCast(to: ButtonStyleConfiguration.Label.self),
+            inputs: inputs
         )
-        innerInputs.position = animatedFrame.position
-        innerInputs.size = animatedFrame.size
-        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
-        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
-            return innerOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let innerLC = innerLCAttr.value
-            return LayoutComputer(
-                sizeThatFits: { innerLC.sizeThatFits($0) },
-                spacing: innerLC.spacing,
-                place: { position, anchor, proposal in
-                    let size = innerLC.sizeThatFits(proposal)
-                    let origin = CGPoint(x: position.x - size.width * anchor.x,
-                                         y: position.y - size.height * anchor.y)
-                    let placementTransaction = Transaction.current
-                    innerPosAttr.setValue(origin, transaction: placementTransaction)
-                    innerSizeAttr.setValue(ViewSize(size), transaction: placementTransaction)
-                    Transaction.withScopedThreadTransaction(placementTransaction) {
-                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                    }
-                },
-                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
-            )
-        }
-        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+        ButtonStyleConfiguration.Label._makeViewList(
+            view: view.unsafeCast(to: ButtonStyleConfiguration.Label.self),
+            inputs: inputs
+        )
     }
 }
 
@@ -189,11 +160,15 @@ private struct _LinkButtonStyleBody: View {
     }
 }
 
-public struct PlainButtonStyle: PrimitiveButtonStyle {
+public struct PlainButtonStyle: PrimitiveButtonStyle, ButtonStyleConvertible {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
         Button(configuration).buttonStyle(PlainButtonStyleBase())
+    }
+
+    var buttonStyleRepresentation: some ButtonStyle {
+        PlainButtonStyleBase()
     }
 }
 
@@ -321,55 +296,6 @@ public struct ButtonStyleConfiguration {
     public let role: ButtonRole?
     public let label: ButtonStyleConfiguration.Label
     public let isPressed: Bool
-}
-
-extension ButtonStyleConfiguration.Label {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        guard let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top else {
-            return _ViewOutputs()
-        }
-        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
-        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
-        var innerInputs = inputs
-        let animatedFrame = makeAnimatableFrameAttributes(
-            in: &innerInputs.base,
-            position: innerPosAttr,
-            size: innerSizeAttr,
-            supportsVFD: innerInputs.supportsVFD
-        )
-        innerInputs.position = animatedFrame.position
-        innerInputs.size = animatedFrame.size
-        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
-        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
-            return innerOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let innerLC = innerLCAttr.value
-            return LayoutComputer(
-                sizeThatFits: { innerLC.sizeThatFits($0) },
-                spacing: innerLC.spacing,
-                place: { position, anchor, proposal in
-                    let size = innerLC.sizeThatFits(proposal)
-                    let origin = CGPoint(x: position.x - size.width * anchor.x,
-                                         y: position.y - size.height * anchor.y)
-                    let placementTransaction = Transaction.current
-                    innerPosAttr.setValue(origin, transaction: placementTransaction)
-                    innerSizeAttr.setValue(ViewSize(size), transaction: placementTransaction)
-                    Transaction.withScopedThreadTransaction(placementTransaction) {
-                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                    }
-                },
-                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
-            )
-        }
-        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
-    }
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
 }
 
 extension ButtonStyleConfiguration.Label: PrimitiveView {}

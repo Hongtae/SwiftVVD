@@ -1071,86 +1071,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testConditionalDefaultTransitionInsertionKeepsFinalPlacement() throws {
-        let counter = LayoutSchedulingCounter()
-        let probe = LayoutSchedulingAnimationProbe()
-        let controller = WindowController(
-            content: LayoutSchedulingConditionalDefaultTransitionRoot(
-                counter: counter,
-                probe: probe
-            ),
-            scene: WindowKey(
-                namespace: .app,
-                sceneID: SceneID(LayoutSchedulingConditionalDefaultTransitionRoot.self)
-            )
-        )
-        let withGC: WindowContext.WithGraphicsContext = { _, _ in
-            XCTFail("Static conditional insertion test should not request graphics resources.")
-        }
-
-        var redraw = false
-        controller.updateView(
-            tick: 0,
-            delta: 0,
-            date: controller.date,
-            contentSize: CGSize(width: 420, height: 240),
-            redraw: &redraw,
-            withGC
-        )
-
-        try XCTUnwrap(probe.toggle)()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-
-        var samples: [(time: Double, frame: CGRect)] = []
-        for (index, sampleTime) in [0.0, 1.0 / 60.0, 0.5, 2.5, 10.0].enumerated() {
-            redraw = false
-            controller.updateView(
-                tick: UInt64(index + 1),
-                delta: sampleTime - controller.animationTimestamp.seconds,
-                date: controller.date.addingTimeInterval(sampleTime),
-                contentSize: CGSize(width: 420, height: 240),
-                redraw: &redraw,
-                withGC
-            )
-            if let position = probe.insertionPosition,
-               let size = probe.insertionSize {
-                samples.append((sampleTime, controller.viewGraph.data.withCurrent {
-                    CGRect(origin: position.value, size: size.value.value)
-                }))
-            }
-        }
-
-        XCTAssertGreaterThanOrEqual(samples.count, 2)
-        let finalFrame = try XCTUnwrap(samples.last?.frame)
-        for sample in samples.dropLast() {
-            XCTAssertEqual(
-                sample.frame.origin.x,
-                finalFrame.origin.x,
-                accuracy: 0.5,
-                "inserted text moved horizontally: \(samples)"
-            )
-            XCTAssertEqual(
-                sample.frame.origin.y,
-                finalFrame.origin.y,
-                accuracy: 0.5,
-                "inserted text moved vertically: \(samples)"
-            )
-            XCTAssertEqual(
-                sample.frame.size.width,
-                finalFrame.size.width,
-                accuracy: 0.5,
-                "inserted text width animated: \(samples)"
-            )
-            XCTAssertEqual(
-                sample.frame.size.height,
-                finalFrame.size.height,
-                accuracy: 0.5,
-                "inserted text height animated: \(samples)"
-            )
-        }
-    }
-
-    @MainActor
     func testSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -1352,7 +1272,133 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testRawTextLikeSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
+    func testAnimationLabConditionalButtonSamplesIntermediateWidthDuringRemoval() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingAnimationLabButtonRowRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingAnimationLabButtonRowRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Animation Lab button scheduling test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 120),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+            let buttons = shapeStrokeBounds(in: try displayList(in: controller))
+                .filter { $0.width > 40 && $0.height > 15 && $0.height < 50 }
+                .sorted { $0.minX < $1.minX }
+            XCTAssertEqual(buttons.count, 4, "unexpected button strokes at \(time): \(buttons)")
+            return try XCTUnwrap(buttons.dropFirst().first)
+        }
+
+        let initialBounds = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var samples: [(time: Double, bounds: CGRect)] = []
+        for time in [0.001, 1.0 / 60.0, 0.1, 1.0, 2.5, 4.0, 5.1] {
+            samples.append((time, try update(time: time)))
+        }
+
+        let finalBounds = try XCTUnwrap(samples.last?.bounds)
+        XCTAssertNotEqual(initialBounds.width, finalBounds.width, accuracy: 0.01)
+        let lower = min(initialBounds.width, finalBounds.width)
+        let upper = max(initialBounds.width, finalBounds.width)
+        XCTAssertNotNil(
+            samples.dropLast().first { sample in
+                sample.bounds.width > lower + 0.01 && sample.bounds.width < upper - 0.01
+            },
+            "expected intermediate button width: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
+        )
+    }
+
+    @MainActor
+    func testAnimationLabRemovalTitleSamplesIntermediateVerticalPosition() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingReinsertedAnimationLabChildRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingReinsertedAnimationLabChildRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Animation Lab title scheduling test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+            return try XCTUnwrap(
+                textBounds(in: try displayList(in: controller)).first {
+                    abs($0.width - 160) <= 0.5 && abs($0.height - 20) <= 0.5
+                }
+            )
+        }
+
+        let initialBounds = try update(time: 0)
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var samples: [(time: Double, bounds: CGRect)] = []
+        for time in [0.001, 1.0 / 60.0, 0.1, 1.0, 2.5, 4.0, 5.1] {
+            samples.append((time, try update(time: time)))
+        }
+
+        let finalBounds = try XCTUnwrap(samples.last?.bounds)
+        XCTAssertGreaterThan(finalBounds.minY, initialBounds.minY)
+        XCTAssertNotNil(
+            samples.dropLast().first { sample in
+                sample.bounds.minY > initialBounds.minY + 0.01 &&
+                    sample.bounds.minY < finalBounds.minY - 0.01
+            },
+            "expected intermediate title position: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
+        )
+        for pair in zip(samples, samples.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(
+                pair.1.bounds.minY + 0.01,
+                pair.0.bounds.minY,
+                "title reversed vertically: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
+            )
+        }
+    }
+
+    @MainActor
+    func testRawPrimitiveReceivesEndpointModelPositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
         let controller = WindowController(
@@ -1399,22 +1445,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let finalBounds = try XCTUnwrap(samples.last?.bounds)
-        let sampledBounds = try XCTUnwrap(
-            samples.dropFirst().dropLast().first { sample in
-                sample.bounds.minX > initialBounds.minX &&
-                    sample.bounds.minX < finalBounds.minX
-            }?.bounds,
-            """
-            expected raw text-like placement to animate through frame attributes:
-            initial=\(initialBounds)
-            final=\(finalBounds)
-            samples=\(samples)
-            """
-        )
-
         XCTAssertGreaterThan(finalBounds.minX, initialBounds.minX)
-        XCTAssertGreaterThan(sampledBounds.minX, initialBounds.minX)
-        XCTAssertLessThan(sampledBounds.minX, finalBounds.minX)
+        for sample in samples {
+            XCTAssertEqual(sample.bounds.minX, finalBounds.minX, accuracy: 0.001)
+        }
     }
 
     @MainActor
@@ -2295,6 +2329,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 label = "interpolatorAnimation"
             case .shader:
                 label = "shader"
+            case .geometryGroup:
+                label = "geometryGroup"
             }
             lines.append("\(prefix)effect \(label)")
             lines.append(displayListTreeDescription(effect.contents, depth: depth + 1))
@@ -2399,7 +2435,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 }
 
-private final class LayoutSchedulingCounter {
+private final class LayoutSchedulingCounter: @unchecked Sendable {
     var placements = 0
 }
 
@@ -2926,38 +2962,6 @@ private struct LayoutSchedulingTextSiblingPlacementRoot: View {
     }
 }
 
-private struct LayoutSchedulingConditionalDefaultTransitionRoot: View {
-    let counter: LayoutSchedulingCounter
-    let probe: LayoutSchedulingAnimationProbe
-    @State private var showChild = true
-
-    var body: some View {
-        probe.toggle = {
-            withAnimation(.linear(duration: 5)) {
-                showChild.toggle()
-            }
-        }
-        return LayoutSchedulingPassThroughLayout(counter: counter) {
-            VStack {
-                if showChild {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.green)
-                        .frame(width: 120, height: 48)
-                } else {
-                    LayoutSchedulingTransitionTextMarker(
-                        content: LayoutSchedulingTextContent(value: "inserted"),
-                        size: CGSize(width: 80, height: 20),
-                        probe: probe
-                    )
-                    .padding(18)
-                }
-            }
-            .frame(width: 190, height: 150)
-        }
-        .frame(width: 420, height: 240)
-    }
-}
-
 private struct LayoutSchedulingButtonLabelPlacementRoot: View {
     let counter: LayoutSchedulingCounter
     let probe: LayoutSchedulingAnimationProbe
@@ -2992,6 +2996,51 @@ private struct LayoutSchedulingButtonLabelPlacementRoot: View {
             }
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct LayoutSchedulingAnimationLabButtonRowRoot: View {
+    let counter: LayoutSchedulingCounter
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var showChild = true
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 5)) {
+                showChild.toggle()
+            }
+        }
+        return LayoutSchedulingPassThroughLayout(counter: counter) {
+            HStack(spacing: 10) {
+                Button(action: {}) {
+                    LayoutSchedulingTextMarker(
+                        content: LayoutSchedulingTextContent(value: "Spring Move"),
+                        size: CGSize(width: 84, height: 20)
+                    )
+                }
+                Button(action: {}) {
+                    LayoutSchedulingTextMarker(
+                        content: LayoutSchedulingTextContent(
+                            value: showChild ? "Remove Child" : "Insert Child"
+                        ),
+                        size: CGSize(width: showChild ? 96 : 84, height: 20)
+                    )
+                }
+                Button(action: {}) {
+                    LayoutSchedulingTextMarker(
+                        content: LayoutSchedulingTextContent(value: "Sequence"),
+                        size: CGSize(width: 68, height: 20)
+                    )
+                }
+                Button(action: {}) {
+                    LayoutSchedulingTextMarker(
+                        content: LayoutSchedulingTextContent(value: "Close"),
+                        size: CGSize(width: 40, height: 20)
+                    )
+                }
+            }
+        }
+        .frame(width: 560, height: 120)
     }
 }
 
@@ -3209,19 +3258,18 @@ private struct LayoutSchedulingTransitionTextMarker: View {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
-        let animatedFrame = inputs.base.cachedEnvironment.value.animatedFrame
-        let position = animatedFrame?._animatedPosition ?? inputs.position
-        let inputSize = animatedFrame?._animatedSize ?? inputs.size
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let inputSize = cachedEnvironment.animatedSize(for: inputs)
+        let position = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         view[\.probe]._attribute.value.insertionPosition = position
         view[\.probe]._attribute.value.insertionSize = inputSize
         let resolvedSize = graph.makeInput(value: CGSize.zero)
         let boxedSize = UnsafeBox(view._attribute.value.size)
-        let publicationTransaction = _TextResourceResolutionState.publicationTransaction(
-            candidate: inputs.base.transaction.value,
-            hasResolvedContent: false
-        )
-        let boxedTransaction = UnsafeBox(publicationTransaction)
-        graph.inbox.enqueue(transaction: publicationTransaction) {
+        let transaction = inputs.base.transaction.value
+        let boxedTransaction = UnsafeBox(transaction)
+        graph.inbox.enqueue(transaction: transaction) {
             resolvedSize.setValue(boxedSize.value, transaction: boxedTransaction.value)
         }
         let layoutComputer: Attribute<LayoutComputer> = graph.makeRule {
@@ -3288,8 +3336,11 @@ private struct LayoutSchedulingTextMarker: View {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
-        let positionAttr = inputs.position
-        let sizeAttr = inputs.size
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer.fixed(view._attribute.value.size)
         }
@@ -3369,9 +3420,10 @@ private struct LayoutSchedulingEnvironmentTextMarker: View {
         }
 
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
-        let animatedFrame = cachedEnvironmentAttr.value.animatedFrame
-        let positionAttr = animatedFrame?._animatedPosition ?? inputs.position
-        let sizeAttr = animatedFrame?._animatedSize ?? inputs.size
+        var cachedEnvironment = cachedEnvironmentAttr.value
+        let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttr.value = cachedEnvironment
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             _ = cachedEnvironmentAttr.value.environment.value.font
             return LayoutComputer.fixed(view._attribute.value.size)

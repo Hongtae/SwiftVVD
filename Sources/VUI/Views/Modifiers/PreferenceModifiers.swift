@@ -9,7 +9,7 @@
 /// Conforms to MultiViewModifier; _makeViewList uses the MultiViewModifier
 /// default unless the PreferredColorSchemeKey static-list specialization applies.
 /// _makeView: called per child during ModifiedElements materialization.
-public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier {
+public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier, PrimitiveViewModifier, _SceneModifier {
     public typealias Body = Never
     public var value: Key.Value
 
@@ -25,11 +25,28 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
         guard _AGGraph.current != nil else {
             fatalError("\(Self.self)._makeView called outside _AGGraph context.")
         }
-        var outputs = body(_Graph(), inputs)
+        var childInputs = inputs
+        childInputs.preferences.keys.remove(Key.self)
+        var outputs = body(_Graph(), childInputs)
 
         // Create reactive AG node for the preference value.
         let valueAttr: Attribute<Key.Value> = modifier[\.value]._attribute
         outputs.preferences.append(Key.self, node: valueAttr.identifier)
+        return outputs
+    }
+
+    public static func _makeScene(
+        modifier: _GraphValue<Self>,
+        inputs: _SceneInputs,
+        body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs
+    ) -> _SceneOutputs {
+        guard _AGGraph.current != nil else {
+            fatalError("\(Self.self)._makeScene called outside _AGGraph context.")
+        }
+        var childInputs = inputs
+        childInputs.preferences.keys.remove(Key.self)
+        var outputs = body(_Graph(), childInputs)
+        outputs.preferences.append(Key.self, node: modifier[\.value]._attribute.identifier)
         return outputs
     }
 
@@ -84,7 +101,7 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
 /// Applies a transform closure to an existing PreferenceKey value flowing up the tree.
 /// Conforms to MultiViewModifier; _makeViewList uses the MultiViewModifier default.
 /// _makeView: called per child during ModifiedElements materialization.
-public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifier {
+public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifier, PrimitiveViewModifier, _SceneModifier {
     public typealias Body = Never
     public var transform: (inout Key.Value) -> Void
 
@@ -110,6 +127,23 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         outputs.preferences.makePreferenceTransformer(
             key: Key.self,
             transformAttr: transformAttr,
+            graph: graph
+        )
+        return outputs
+    }
+
+    public static func _makeScene(
+        modifier: _GraphValue<Self>,
+        inputs: _SceneInputs,
+        body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs
+    ) -> _SceneOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeScene called outside _AGGraph context.")
+        }
+        var outputs = body(_Graph(), inputs)
+        outputs.preferences.makePreferenceTransformer(
+            key: Key.self,
+            transformAttr: modifier[\.transform]._attribute,
             graph: graph
         )
         return outputs
@@ -175,7 +209,7 @@ extension _PreferenceWritingModifier where Key == PreferredColorSchemeKey {
         var parentEnvAttr: Attribute<EnvironmentValues>
         var modifierValueAttr: Attribute<ColorScheme?>
 
-        func updateValue() -> EnvironmentValues {
+        var value: EnvironmentValues {
             var env = parentEnvAttr.value.trackingCopy()
             if let cs = modifierValueAttr.value {
                 env.colorScheme = cs
@@ -192,7 +226,7 @@ extension _PreferenceWritingModifier where Key == PreferredColorSchemeKey {
         var traitListAttr: OptionalAttribute<ViewTraitCollection>
         var modifierValueAttr: Attribute<ColorScheme?>
 
-        func updateValue() -> ViewTraitCollection {
+        var value: ViewTraitCollection {
             var traits = traitListAttr.attribute?.value ?? ViewTraitCollection()
             traits[PreviewColorSchemeTraitKey.self] = modifierValueAttr.value
             return traits

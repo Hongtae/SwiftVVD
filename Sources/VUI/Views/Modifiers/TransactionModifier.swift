@@ -7,7 +7,18 @@
 
 import Foundation
 
-public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
+private struct ChildTransaction: Rule, AsyncAttribute {
+    var modifier: Attribute<_TransactionModifier>
+    var parent: Attribute<Transaction>
+
+    var value: Transaction {
+        var transaction = parent.value
+        modifier.value.transform(&transaction)
+        return transaction
+    }
+}
+
+public struct _TransactionModifier: PrimitiveViewModifier, _GraphInputsModifier {
     public var transform: (inout Transaction) -> Void
 
     @inlinable public init(transform: @escaping (inout Transaction) -> Void) {
@@ -18,14 +29,12 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
         }
-        let parentTransAttr = inputs.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let m = modifier._attribute.value
-            var t = parentTransAttr.value
-            m.transform(&t)
-            return t
-        }
-        inputs.transaction = newTransAttr
+        inputs.transaction = graph.makeRule(
+            ChildTransaction(
+                modifier: modifier._attribute,
+                parent: inputs.transaction
+            )
+        )
     }
 
     public typealias Body = Never
@@ -35,7 +44,7 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
 extension _TransactionModifier: Sendable {
 }
 
-public struct _ValueTransactionModifier<Value>: ViewModifier, _GraphInputsModifier where Value: Equatable {
+public struct _ValueTransactionModifier<Value>: PrimitiveViewModifier, _GraphInputsModifier where Value: Equatable {
     public var value: Value
     public var transform: (inout Transaction) -> Void
 
@@ -84,7 +93,7 @@ private struct ValueTransactionModifierTransactionRule<Observed: Equatable>: Sta
     }
 }
 
-public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: ViewModifier {
+public struct _PushPopTransactionModifier<Content>: MultiViewModifier, PrimitiveViewModifier where Content: ViewModifier {
     public var content: Content
     public var base: _TransactionModifier
 
@@ -98,15 +107,26 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let m = modifier._attribute.value
-            var t = parentTransAttr.value
-            m.base.transform(&t)
-            return t
-        }
+        let newTransAttr = graph.makeRule(
+            ChildTransaction(
+                modifier: modifier[\.base]._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
+        modifiedInputs.savedTransactions.append(parentTransAttr)
         modifiedInputs.base.transaction = newTransAttr
-        return Content._makeView(modifier: modifier[\.content], inputs: modifiedInputs, body: body)
+        return Content._makeView(
+            modifier: modifier[\.content],
+            inputs: modifiedInputs
+        ) { graph, bodyInputs in
+            var bodyInputs = bodyInputs
+            guard let savedTransaction = bodyInputs.savedTransactions.popLast() else {
+                fatalError("_PushPopTransactionModifier body lost its saved transaction.")
+            }
+            bodyInputs.base.transaction = savedTransaction
+            return body(graph, bodyInputs)
+        }
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
@@ -114,15 +134,26 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let m = modifier._attribute.value
-            var t = parentTransAttr.value
-            m.base.transform(&t)
-            return t
-        }
+        let newTransAttr = graph.makeRule(
+            ChildTransaction(
+                modifier: modifier[\.base]._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
+        modifiedInputs.savedTransactions.append(parentTransAttr)
         modifiedInputs.base.transaction = newTransAttr
-        return Content._makeViewList(modifier: modifier[\.content], inputs: modifiedInputs, body: body)
+        return Content._makeViewList(
+            modifier: modifier[\.content],
+            inputs: modifiedInputs
+        ) { graph, bodyInputs in
+            var bodyInputs = bodyInputs
+            guard let savedTransaction = bodyInputs.savedTransactions.popLast() else {
+                fatalError("_PushPopTransactionModifier body lost its saved transaction.")
+            }
+            bodyInputs.base.transaction = savedTransaction
+            return body(graph, bodyInputs)
+        }
     }
 
     public typealias Body = Never

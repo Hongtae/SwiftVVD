@@ -187,33 +187,19 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
             )
             contentInputs.scrollable = OptionalAttribute(scrollableAttr)
             contentInputs.requestsLayoutComputer = true
-            contentInputs.preferences.keys.insert(ScrollablePreferenceKey.self)
+            contentInputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
-            let coordinateSpaceModifier = graph.makeInput(value: _CoordinateSpaceModifier(
-                name: ObjectIdentifier(node)
-            ))
-            _CoordinateSpaceModifier<ObjectIdentifier>._makeViewInputs(
-                modifier: _GraphValue(_attribute: coordinateSpaceModifier),
-                inputs: &contentInputs
+            let childModifier: Attribute<ScrollViewChildModifier.Value> = graph.makeRule(
+                ScrollViewChildModifier(_proxy: scrollView, node: node)
             )
-
-            let gestureModifier: Attribute<ScrollViewGesture> = graph.makeRule {
-                ScrollViewGesture(proxy: scrollView.value)
-            }
-            let contentOutputs = ScrollViewGesture._makeView(
-                modifier: _GraphValue(_attribute: gestureModifier),
+            let contentOutputs = ScrollViewChildModifier.Value._makeView(
+                modifier: _GraphValue(_attribute: childModifier),
                 inputs: contentInputs
             ) { _, inputs in
-                let childModifier = graph.makeInput(value: ScrollViewChildModifier())
-                return ScrollViewChildModifier._makeView(
-                    modifier: _GraphValue(_attribute: childModifier),
+                Provider.ScrollableContent._makeView(
+                    view: _GraphValue(_attribute: contentAttr),
                     inputs: inputs
-                ) { _, inputs in
-                    Provider.ScrollableContent._makeView(
-                        view: _GraphValue(_attribute: contentAttr),
-                        inputs: inputs
-                    )
-                }
+                )
             }
 
             let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
@@ -239,16 +225,16 @@ public struct _ScrollView<Provider>: View where Provider: _ScrollableContentProv
             var outputs = contentOutputs
             outputs.preferences.setValue(nil, for: ScrollablePreferenceKey.self)
             if inputs.preferences.keys.contains(ViewRespondersKey.self) {
-                let childResponders: Attribute<[any ViewResponder]>
+                let childResponders: Attribute<[ViewResponder]>
                 if let childRespondersID = contentOutputs.preferences.value(for: ViewRespondersKey.self) {
-                    childResponders = Attribute<[any ViewResponder]>(childRespondersID)
+                    childResponders = Attribute<[ViewResponder]>(childRespondersID)
                 } else {
                     childResponders = graph.makeInput(value: ViewRespondersKey.defaultValue)
                 }
-                let responder: Attribute<[any ViewResponder]> = graph.makeStatefulRule(
+                let responder: Attribute<[ViewResponder]> = graph.makeStatefulRule(
                     DefaultLayoutResponderFilter(
                         children: childResponders,
-                        responder: DefaultLayoutViewResponder()
+                        responder: DefaultLayoutViewResponder(inputs: inputs)
                     )
                 )
                 outputs.preferences.setValue(responder.identifier, for: ViewRespondersKey.self)
@@ -290,20 +276,42 @@ struct ContainingScrollViewInput: ViewInput {
     }
 }
 
-struct ScrollViewChildModifier: ViewModifier, _ViewInputsModifier {
-    typealias Body = Never
+struct ScrollViewChildModifier: Rule {
+    typealias Value = ModifiedContent<
+        ModifiedContent<
+            ModifiedContent<
+                ModifiedContent<_GeometryGroupEffect, ScrollViewGeometry>,
+                _CoordinateSpaceModifier<ObjectIdentifier>
+            >,
+            _ContentShapeModifier<Rectangle>
+        >,
+        ScrollViewGesture
+    >
 
-    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        _ = modifier
-        inputs = ScrollViewGeometry.rewrite(inputs: inputs)
+    var _proxy: Attribute<_ScrollViewProxy>
+    var node: ScrollViewNode
+
+    var value: Value {
+        _GeometryGroupEffect()
+            .concat(ScrollViewGeometry())
+            .concat(_CoordinateSpaceModifier(name: ObjectIdentifier(node)))
+            .concat(_ContentShapeModifier(shape: Rectangle(), eoFill: false))
+            .concat(ScrollViewGesture(proxy: _proxy.value))
     }
 }
 
-private enum ScrollViewGeometry {
-    static func rewrite(inputs: _ViewInputs) -> _ViewInputs {
+struct ScrollViewGeometry: MultiViewModifier {
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _ = modifier
         guard let graph = _AGGraph.current,
               let scrollView = inputs[ContainingScrollViewInput.self] else {
-            return inputs
+            return body(_Graph(), inputs)
         }
 
         var rewritten = inputs
@@ -316,9 +324,9 @@ private enum ScrollViewGeometry {
         rewritten.size = graph.makeRule {
             let proxy = scrollView.proxy.value
             let visibleSize = proxy.pageSize.inset(by: proxy.config.contentInsets)
-            return ViewSize(visibleSize, proposal: ProposedViewSize(visibleSize))
+            return ViewSize(visibleSize, proposal: _ProposedSize(visibleSize))
         }
-        return rewritten
+        return body(_Graph(), rewritten)
     }
 }
 
@@ -328,7 +336,7 @@ private struct _ScrollViewMainContentOffset: Rule {
     var basePosition: Attribute<CGPoint>
     var scrollView: Attribute<_ScrollViewProxy>
 
-    func updateValue() -> CGPoint {
+    var value: CGPoint {
         let base = basePosition.value
         let proxy = scrollView.value
         let insets = proxy.config.contentInsets
@@ -1760,7 +1768,7 @@ private struct _ScrollViewMainScrollableProvider: Rule {
 
     var scrollable: _ScrollViewMainScrollable
 
-    func updateValue() -> any Scrollable {
+    var value: any Scrollable {
         scrollable
     }
 }
@@ -1859,12 +1867,12 @@ private struct _ScrollViewMainGeometryProvider: Rule {
     var layoutComputer: OptionalAttribute<LayoutComputer>
     var layoutDirection: Attribute<LayoutDirection>
 
-    func updateValue() -> ScrollGeometry {
+    var value: ScrollGeometry {
         let proxyValue = proxy.value
         let containerSize = proxyValue.pageSize
         let proposedSize = containerSize.inset(by: proxyValue.config.contentInsets)
         let contentSize = layoutComputer.attribute?.value.sizeThatFits(
-            ProposedViewSize(proposedSize)
+            _ProposedSize(proposedSize)
         ) ?? proxyValue.contentSize
         let contentOffset = node.updateContentSize(
             contentSize,
@@ -2606,7 +2614,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
         }
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         var closest: (subview: ScrollableCollectionSubview, distance: CGFloat)?
         forEachVisibleSubview { subview, stop in
             let distance = subview.frame.midpointDistance(to: rect)
@@ -2627,7 +2635,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
         nil
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         false
     }
 
@@ -2667,12 +2675,31 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
         }
     }
 
-    var containerParentScrollable: (any Scrollable)? {
+    var parent: (any Scrollable)? {
         resolvedParentScrollable
     }
 
-    var containerChildScrollables: [any Scrollable] {
-        childScrollables?.value ?? []
+    var children: [any Scrollable]? {
+        childScrollables?.value
+    }
+
+    func makeTarget<ID: Hashable>(
+        for id: ID
+    ) -> ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)? {
+        let canonical = _ViewList_ID(explicitID: AnyHashable(id)).canonicalID
+        guard let index = layoutState.value.identifiers.first(
+            where: { canonicalID(for: $0) == canonical }
+        ), let placement = layoutState.value.placements[index] else {
+            return nil
+        }
+        let anchor = Transaction.current.scrollTargetAnchor
+        return { _, _ in
+            let rect = frame(for: placement).converted(
+                to: .content,
+                using: transform.value
+            )
+            return ScrollTarget(rect: rect, anchor: anchor)
+        }
     }
 
     private func canonicalID(for index: Data.Index) -> _ViewList_ID.Canonical {
@@ -2745,7 +2772,9 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
         let dataValue = data.value
         let layoutValue = layout.value
         let proxyValue = scrollView.attribute?.value
-        let containerSize = proxyValue?.pageSize ?? inputs.size.value.value
+        let containerSize = proxyValue?.pageSize
+            ?? inputs.containerSize.attribute?.value.value
+            ?? inputs.size.value.value
         let contentInsets = proxyValue?.config.contentInsets ?? EdgeInsets()
         let visibleSize = containerSize.inset(by: contentInsets)
         let contentOffset = proxyValue?.contentOffset ?? .zero
@@ -2888,7 +2917,7 @@ private final class ScrollableLayoutMeasurementTemplate<Data>
         delta.setValue(seed)
         content.setValue(newContent)
         let layoutComputer = outputs._layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
-        return layoutComputer.sizeThatFits(ProposedViewSize(proposal))
+        return layoutComputer.sizeThatFits(_ProposedSize(proposal))
     }
 }
 
@@ -3092,7 +3121,7 @@ private struct ScrollableLayoutComputerRule<Data, Layout>: Rule
     var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
     var containerInfo: Attribute<DynamicContainer.Info>
 
-    func updateValue() -> LayoutComputer {
+    var value: LayoutComputer {
         let state = layoutState.value
         let info = containerInfo.value
         let activeItems = Array(info.activeItems)
@@ -3105,7 +3134,7 @@ private struct ScrollableLayoutComputerRule<Data, Layout>: Rule
 
         return LayoutComputer(
             sizeThatFits: { proposal in
-                contentSize == .zero ? proposal.replacingUnspecifiedDimensions() : contentSize
+                contentSize == .zero ? proposal.fixingUnspecifiedDimensions() : contentSize
             },
             place: { position, anchor, proposal in
                 let origin = CGPoint(
@@ -3145,7 +3174,7 @@ private struct ScrollableLayoutComputerRule<Data, Layout>: Rule
                         origin: childOrigin,
                         dimensions: ViewDimensions(
                             guideComputer: childComputer,
-                            size: ViewSize(proposedSize, proposal: ProposedViewSize(proposedSize))
+                            size: ViewSize(proposedSize, proposal: _ProposedSize(proposedSize))
                         )
                     )
                 }

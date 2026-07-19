@@ -10,16 +10,16 @@ final class GraphHostRemovedStateTests: XCTestCase {
 
         host.removedState = .unattached
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
-        XCTAssertTrue(host.isRemoved)
-        XCTAssertFalse(host.isHiddenForReuse)
+        XCTAssertTrue(host.data.isRemoved)
+        XCTAssertFalse(host.data.isHiddenForReuse)
 
         host.removedState = .unattached
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
 
         host.removedState = []
         XCTAssertEqual(recorder.events, ["update", "willRemove", "didReinsert"])
-        XCTAssertFalse(host.isRemoved)
-        XCTAssertFalse(host.isHiddenForReuse)
+        XCTAssertFalse(host.data.isRemoved)
+        XCTAssertFalse(host.data.isHiddenForReuse)
     }
 
     func testHiddenForReuseSetsHiddenFlagAndDispatchesRemoval() {
@@ -31,15 +31,15 @@ final class GraphHostRemovedStateTests: XCTestCase {
         host.removedState = .hiddenForReuse
 
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
-        XCTAssertTrue(host.isRemoved)
-        XCTAssertTrue(host.isHiddenForReuse)
+        XCTAssertTrue(host.data.isRemoved)
+        XCTAssertTrue(host.data.isHiddenForReuse)
         XCTAssertEqual(host.isHiddenForReuseDidChangeCount, 1)
 
         host.removedState = .unattached
 
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
-        XCTAssertTrue(host.isRemoved)
-        XCTAssertFalse(host.isHiddenForReuse)
+        XCTAssertTrue(host.data.isRemoved)
+        XCTAssertFalse(host.data.isHiddenForReuse)
         XCTAssertEqual(host.isHiddenForReuseDidChangeCount, 2)
     }
 
@@ -54,15 +54,15 @@ final class GraphHostRemovedStateTests: XCTestCase {
         child.updateRemovedState()
 
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
-        XCTAssertTrue(child.isRemoved)
-        XCTAssertTrue(child.isHiddenForReuse)
+        XCTAssertTrue(child.data.isRemoved)
+        XCTAssertTrue(child.data.isHiddenForReuse)
 
         parent.removedState = []
         child.updateRemovedState()
 
         XCTAssertEqual(recorder.events, ["update", "willRemove", "didReinsert"])
-        XCTAssertFalse(child.isRemoved)
-        XCTAssertFalse(child.isHiddenForReuse)
+        XCTAssertFalse(child.data.isRemoved)
+        XCTAssertFalse(child.data.isHiddenForReuse)
     }
 
     func testViewGraphHostUpdateRemovedStatePacksUnattachedAndHiddenForReuse() {
@@ -70,18 +70,18 @@ final class GraphHostRemovedStateTests: XCTestCase {
 
         host.updateRemovedState(isUnattached: true, isHiddenForReuse: false)
         XCTAssertEqual(host.removedState, .unattached)
-        XCTAssertTrue(host.isRemoved)
-        XCTAssertFalse(host.isHiddenForReuse)
+        XCTAssertTrue(host.data.isRemoved)
+        XCTAssertFalse(host.data.isHiddenForReuse)
 
         host.updateRemovedState(isUnattached: true, isHiddenForReuse: true)
         XCTAssertEqual(host.removedState, [.unattached, .hiddenForReuse])
-        XCTAssertTrue(host.isRemoved)
-        XCTAssertTrue(host.isHiddenForReuse)
+        XCTAssertTrue(host.data.isRemoved)
+        XCTAssertTrue(host.data.isHiddenForReuse)
 
         host.updateRemovedState(isUnattached: false, isHiddenForReuse: false)
         XCTAssertEqual(host.removedState, [])
-        XCTAssertFalse(host.isRemoved)
-        XCTAssertFalse(host.isHiddenForReuse)
+        XCTAssertFalse(host.data.isRemoved)
+        XCTAssertFalse(host.data.isHiddenForReuse)
     }
 
     func testViewGraphHiddenForReuseDispatchesFeatureBufferHook() {
@@ -195,18 +195,10 @@ final class GraphHostRemovedStateTests: XCTestCase {
 
     private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time()),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(
-                    environment: graph.makeInput(value: EnvironmentValues.tracking())
-                )
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: graph.makeInput(value: EnvironmentValues.tracking()),
+            transaction: graph.makeInput(value: Transaction())
         )
     }
 
@@ -269,7 +261,7 @@ private final class ChildRemovedStateGraphHost: GraphHost {
 
     init(parent: GraphHost) {
         self.parent = parent
-        super.init(graph: parent.data.graph)
+        super.init(data: Data())
     }
 
     override var parentHost: GraphHost? {

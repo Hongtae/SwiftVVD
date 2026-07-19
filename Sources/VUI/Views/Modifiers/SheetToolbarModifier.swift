@@ -121,10 +121,96 @@ struct ToolbarKey: PreferenceKey {
 
 // MARK: - ToolbarContent protocol
 
-// ToolbarContent protocol surface. Current items are collected via
-// View._makeView + ToolbarKey preference path.
+public struct _ToolbarInputs {
+    var viewInputs: _ViewInputs
+
+    init(_ viewInputs: _ViewInputs) {
+        self.viewInputs = viewInputs
+    }
+}
+
+public struct _ToolbarOutputs {
+    var storage: OptionalAttribute<ToolbarStorage>
+
+    init(storage: OptionalAttribute<ToolbarStorage> = OptionalAttribute()) {
+        self.storage = storage
+    }
+}
+
+public struct _ToolbarItemList {
+    var storage: ToolbarStorage
+
+    init(storage: ToolbarStorage = ToolbarStorage()) {
+        self.storage = storage
+    }
+}
+
+private func mergeToolbarOutputs(
+    _ outputs: [_ToolbarOutputs],
+    in graph: _AGGraph
+) -> _ToolbarOutputs {
+    let storageAttributes = outputs.compactMap { $0.storage.attribute }
+    guard !storageAttributes.isEmpty else {
+        return _ToolbarOutputs()
+    }
+    if storageAttributes.count == 1 {
+        return _ToolbarOutputs(storage: OptionalAttribute(storageAttributes[0]))
+    }
+    let storage: Attribute<ToolbarStorage> = graph.makeRule {
+        var merged = ToolbarStorage()
+        for attribute in storageAttributes {
+            merged.merge(attribute.value)
+        }
+        return merged
+    }
+    return _ToolbarOutputs(storage: OptionalAttribute(storage))
+}
+
+private func toolbarIdentifier<ID>(_ value: ID) -> AnyHashable {
+    if let value = value as? AnyHashable {
+        return value
+    }
+    if let value = value as? any Hashable {
+        return AnyHashable(value)
+    }
+    return AnyHashable(ObjectIdentifier(ID.self))
+}
+
+// Toolbar content is constructed either as graph-backed outputs or into a
+// resolved item list.
 public protocol ToolbarContent {
-    // _makeToolbar(_:inputs:) belongs to the dedicated toolbar content pipeline.
+    associatedtype Body: ToolbarContent
+    @ToolbarContentBuilder var body: Self.Body { get }
+
+    static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs
+    static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    )
+}
+
+extension ToolbarContent {
+    public static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs {
+        fatalError("The dedicated toolbar construction pipeline is not implemented.")
+    }
+
+    public static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    ) {
+        fatalError("The resolved toolbar content pipeline is not implemented.")
+    }
+}
+
+extension Never: ToolbarContent {
 }
 
 // MARK: - ToolbarDefaultItemKind
@@ -139,14 +225,7 @@ public struct ToolbarDefaultItemKind: Equatable, Sendable {
 
 // ToolbarItem stores identifier, placement, content, default visibility,
 // emptiness, and optional default item kind.
-// It also conforms to View while toolbar content uses the normal view path.
-public struct _ToolbarItemDefaultID: Hashable, Sendable {
-    public init() {}
-}
-
-public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Identifiable {
-    public var id: ID { identifier }
-
+public struct ToolbarItem<ID, Content: View>: ToolbarContent {
     // Stable item identity.
     var identifier: ID
     var placement: ToolbarItemPlacement
@@ -158,41 +237,59 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
 
     public typealias Body = Never
 
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+    public var body: Never {
+        fatalError("ToolbarItem may not have Body == Never")
+    }
+
+    public static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("ToolbarItem._makeView called outside AG context")
+            fatalError("ToolbarItem._makeToolbar called outside AG context")
         }
-        let contentView = view[\.content]
-        let baseInputs = inputs.base
+        let contentView = content[\.content]
+        let baseInputs = inputs.viewInputs.base
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
-            let item = view._attribute.value
+            let item = content._attribute.value
             guard !item.isEmpty else { return ToolbarStorage() }
             var storage = ToolbarStorage()
             storage.items.append(ToolbarStorage.Item(
-                id: ToolbarStorage.ID(AnyHashable(item.identifier)),
+                id: ToolbarStorage.ID(toolbarIdentifier(item.identifier)),
                 placement: item.placement.role,
                 view: AnyView(item.content),
                 generator: TypedUnaryViewGenerator(contentView, baseInputs: baseInputs)
             ))
             return storage
         }
-        var outputs = _ViewOutputs()
-        outputs.preferences.append(ToolbarKey.self, node: storageAttr.identifier)
-        return outputs
+        return _ToolbarOutputs(storage: OptionalAttribute(storageAttr))
     }
 
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    public static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    ) {
+        let item = content._attribute.value
+        guard !item.isEmpty else { return }
+        resolved.storage.items.append(ToolbarStorage.Item(
+            id: ToolbarStorage.ID(toolbarIdentifier(item.identifier)),
+            placement: item.placement.role,
+            view: AnyView(item.content),
+            generator: TypedUnaryViewGenerator(content[\.content], baseInputs: inputs)
+        ))
     }
 }
 
-extension ToolbarItem: PrimitiveView {}
+extension ToolbarItem: Identifiable where ID: Hashable {
+    public var id: ID { identifier }
+}
 
-extension ToolbarItem where ID == _ToolbarItemDefaultID {
+extension ToolbarItem where ID == Void {
     public init(placement: ToolbarItemPlacement = .automatic,
                 showsByDefault: Bool = true,
                 @ViewBuilder content: () -> Content) {
-        self.identifier = _ToolbarItemDefaultID()
+        self.identifier = ()
         self.placement = placement
         self.content = content()
         self.showsByDefault = showsByDefault
@@ -219,77 +316,113 @@ extension ToolbarItem where ID == String {
 
 // @ToolbarContentBuilder produces TupleToolbarContent<C> (single) or
 // TupleToolbarContent<(C0, C1, ...)> (multiple items, C = tuple).
-// Mirrors TupleView pattern: _forEachField reflects over C to find View-typed fields.
-// Declared public because this project is source-compiled rather than a precompiled binary.
-// Applying @usableFromInline cascades to all View protocol conformance methods,
-// making public the practical equivalent for a source library.
-public struct TupleToolbarContent<C>: View, ToolbarContent {
+// Field iteration reflects over the content tuple and visits view-typed fields.
+// Public visibility keeps result-builder expansion usable across module boundaries.
+public struct TupleToolbarContent<C>: ToolbarContent {
     public var value: C
     public init(_ value: C) { self.value = value }
 
     public typealias Body = Never
 
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("TupleToolbarContent._makeView called outside AG context")
-        }
-        var allOutputs: [_ViewOutputs] = []
-        func makeChild<V: View>(_: V.Type, offset: Int) {
-            let childAttr: Attribute<V> = graph.makeRule {
-                withUnsafeBytes(of: view._attribute.value.value) { buf in
-                    buf.baseAddress!.advanced(by: offset)
-                        .assumingMemoryBound(to: V.self).pointee
-                }
-            }
-            allOutputs.append(V._makeView(view: _GraphValue(_attribute: childAttr), inputs: inputs))
-        }
-        _forEachField(of: C.self) { _, offset, fieldType in
-            if let vt = fieldType as? any View.Type {
-                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
-                _openExistential(vt, do: open)
-            }
-            return true
-        }
-        if allOutputs.isEmpty { return _ViewOutputs() }
-        var merged = allOutputs[0]
-        for i in 1..<allOutputs.count {
-            merged.preferences = PreferencesOutputs.merge(
-                [merged.preferences, allOutputs[i].preferences], in: graph)
-        }
-        return merged
+    public var body: Never {
+        fatalError("TupleToolbarContent may not have Body == Never")
     }
 
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+    public static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("TupleToolbarContent._makeViewList called outside AG context")
+            fatalError("TupleToolbarContent._makeToolbar called outside AG context")
         }
-        var children: [_ViewListOutputs] = []
-        func makeChild<V: View>(_: V.Type, offset: Int) {
-            let childAttr: Attribute<V> = graph.makeRule {
-                withUnsafeBytes(of: view._attribute.value.value) { buf in
+        var allOutputs: [_ToolbarOutputs] = []
+
+        func makeWholeValue<T: ToolbarContent>(_: T.Type) {
+            let value: Attribute<T> = graph.makeRule {
+                content._attribute.value.value as! T
+            }
+            allOutputs.append(T._makeToolbar(
+                content: _GraphValue(_attribute: value),
+                inputs: inputs
+            ))
+        }
+        if let contentType = C.self as? any ToolbarContent.Type {
+            _openExistential(contentType, do: makeWholeValue)
+            return mergeToolbarOutputs(allOutputs, in: graph)
+        }
+
+        func makeChild<T: ToolbarContent>(_: T.Type, offset: Int) {
+            let childAttr: Attribute<T> = graph.makeRule {
+                withUnsafeBytes(of: content._attribute.value.value) { buf in
                     buf.baseAddress!.advanced(by: offset)
-                        .assumingMemoryBound(to: V.self).pointee
+                        .assumingMemoryBound(to: T.self).pointee
                 }
             }
-            children.append(V._makeViewList(view: _GraphValue(_attribute: childAttr), inputs: inputs))
+            allOutputs.append(T._makeToolbar(
+                content: _GraphValue(_attribute: childAttr),
+                inputs: inputs
+            ))
         }
         _forEachField(of: C.self) { _, offset, fieldType in
-            if let vt = fieldType as? any View.Type {
-                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
-                _openExistential(vt, do: open)
+            if let toolbarType = fieldType as? any ToolbarContent.Type {
+                func open<T: ToolbarContent>(_: T.Type) {
+                    makeChild(T.self, offset: offset)
+                }
+                _openExistential(toolbarType, do: open)
             }
             return true
         }
-        let count = children.count
-        return _ViewListOutputs(
-            views: .staticList(.merged(children)),
-            nextImplicitID: count,
-            staticCount: count
-        )
+        return mergeToolbarOutputs(allOutputs, in: graph)
+    }
+
+    public static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("TupleToolbarContent._makeContent called outside AG context")
+        }
+
+        func makeWholeValue<T: ToolbarContent>(_: T.Type) {
+            let value: Attribute<T> = graph.makeRule {
+                content._attribute.value.value as! T
+            }
+            T._makeContent(
+                content: _GraphValue(_attribute: value),
+                inputs: inputs,
+                resolved: &resolved
+            )
+        }
+        if let contentType = C.self as? any ToolbarContent.Type {
+            _openExistential(contentType, do: makeWholeValue)
+            return
+        }
+
+        func makeChild<T: ToolbarContent>(_: T.Type, offset: Int) {
+            let childAttr: Attribute<T> = graph.makeRule {
+                withUnsafeBytes(of: content._attribute.value.value) { buf in
+                    buf.baseAddress!.advanced(by: offset)
+                        .assumingMemoryBound(to: T.self).pointee
+                }
+            }
+            T._makeContent(
+                content: _GraphValue(_attribute: childAttr),
+                inputs: inputs,
+                resolved: &resolved
+            )
+        }
+        _forEachField(of: C.self) { _, offset, fieldType in
+            if let toolbarType = fieldType as? any ToolbarContent.Type {
+                func open<T: ToolbarContent>(_: T.Type) {
+                    makeChild(T.self, offset: offset)
+                }
+                _openExistential(toolbarType, do: open)
+            }
+            return true
+        }
     }
 }
-
-extension TupleToolbarContent: PrimitiveView {}
 
 // MARK: - ToolbarContentBuilder
 
@@ -297,6 +430,10 @@ extension TupleToolbarContent: PrimitiveView {}
 // buildBlock methods are @inlinable so the public TupleToolbarContent type is usable at call sites.
 @resultBuilder
 public struct ToolbarContentBuilder {
+    public static func buildBlock(_ content: Never) -> Never {
+        content
+    }
+
     @inlinable
     public static func buildBlock<C: ToolbarContent>(_ c: C) -> TupleToolbarContent<C> {
         TupleToolbarContent(c)
@@ -351,14 +488,25 @@ public struct ToolbarContentBuilder {
 
 // MARK: - _ConditionalContent ToolbarContent conformance
 
-extension _ConditionalContent: ToolbarContent where TrueContent: ToolbarContent, FalseContent: ToolbarContent {}
+extension _ConditionalContent: ToolbarContent
+where TrueContent: ToolbarContent, FalseContent: ToolbarContent {
+    public typealias Body = Never
+
+    public var body: Never {
+        fatalError("_ConditionalContent may not have Body == Never")
+    }
+}
 
 // MARK: - ToolbarItemGroup
 
 // ToolbarItemGroup stores placement, content, and isEmpty. Unlike ToolbarItem,
 // it has no identifier, showsByDefault, or defaultItemKind fields.
-public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
+public struct ToolbarItemGroup<Content: View>: ToolbarContent {
     public typealias Body = Never
+
+    public var body: Never {
+        fatalError("ToolbarItemGroup may not have Body == Never")
+    }
 
     var placement: ToolbarItemPlacement
     var content: Content
@@ -371,14 +519,17 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
         self.isEmpty = false
     }
 
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+    public static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("ToolbarItemGroup._makeView called outside AG context")
+            fatalError("ToolbarItemGroup._makeToolbar called outside AG context")
         }
-        let contentView = view[\.content]
-        let baseInputs = inputs.base
+        let contentView = content[\.content]
+        let baseInputs = inputs.viewInputs.base
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
-            let group = view._attribute.value
+            let group = content._attribute.value
             guard !group.isEmpty else { return ToolbarStorage() }
             var storage = ToolbarStorage()
             // ToolbarItemGroup uses placement.role and has no identifier. Use a stable hash.
@@ -391,45 +542,59 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
             ))
             return storage
         }
-        var outputs = _ViewOutputs()
-        outputs.preferences.append(ToolbarKey.self, node: storageAttr.identifier)
-        return outputs
+        return _ToolbarOutputs(storage: OptionalAttribute(storageAttr))
     }
 
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    public static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    ) {
+        let group = content._attribute.value
+        guard !group.isEmpty else { return }
+        resolved.storage.items.append(ToolbarStorage.Item(
+            id: ToolbarStorage.ID(AnyHashable(ObjectIdentifier(Content.self))),
+            placement: group.placement.role,
+            view: AnyView(group.content),
+            generator: TypedUnaryViewGenerator(content[\.content], baseInputs: inputs)
+        ))
     }
 }
-
-extension ToolbarItemGroup: PrimitiveView {}
 
 // MARK: - EmptyToolbarContent
 
 // EmptyToolbarContent: ToolbarContent and CustomizableToolbarContent conformance.
 // Produces no toolbar items.
-public struct EmptyToolbarContent: View, ToolbarContent {
+public struct EmptyToolbarContent: ToolbarContent {
     public typealias Body = Never
 
     public init() {}
 
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs()
+    public var body: Never {
+        fatalError("EmptyToolbarContent may not have Body == Never")
     }
 
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(views: .staticList(.merged([])), nextImplicitID: 0, staticCount: 0)
+    public static func _makeToolbar(
+        content: _GraphValue<Self>,
+        inputs: _ToolbarInputs
+    ) -> _ToolbarOutputs {
+        _ToolbarOutputs()
+    }
+
+    public static func _makeContent(
+        content: _GraphValue<Self>,
+        inputs: _GraphInputs,
+        resolved: inout _ToolbarItemList
+    ) {
     }
 }
-
-extension EmptyToolbarContent: PrimitiveView {}
 
 // MARK: - ToolbarModifier
 
 // Toolbar modifier stores an optional customization ID, toolbar content, and
 // optional selection binding. The dedicated _makeToolbar path belongs to the
-// toolbar content pipeline. Current items are collected through
-// View._makeView + ToolbarKey preference.
-struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewModifier, MultiViewModifier {
+// toolbar content pipeline. Resolved storage is published through ToolbarKey.
+struct ToolbarModifier<CustomizationID, Content: ToolbarContent>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
     var id: String?
@@ -442,24 +607,23 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewMod
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("ToolbarModifier._makeView called outside AG context")
         }
         var outputs = body(_Graph(), inputs)
 
         var toolbarInputs = inputs
         var keys = toolbarInputs.preferences.keys
-        keys.insert(ToolbarKey.self)
+        keys.add(ToolbarKey.self)
         toolbarInputs.preferences = PreferencesInputs(keys: keys,
                                                        hostKeys: toolbarInputs.preferences.hostKeys)
-        let toolbarOutputs = Content._makeView(
-            view: modifier[\.content],
-            inputs: toolbarInputs
+        let toolbarOutputs = Content._makeToolbar(
+            content: modifier[\.content],
+            inputs: _ToolbarInputs(toolbarInputs)
         )
-        outputs.preferences = PreferencesOutputs.merge(
-            [outputs.preferences, toolbarOutputs.preferences],
-            in: graph
-        )
+        if let storage = toolbarOutputs.storage.attribute {
+            outputs.preferences.append(ToolbarKey.self, node: storage.identifier)
+        }
         return outputs
     }
 
@@ -477,9 +641,7 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewMod
 }
 
 extension View {
-    // Requires Content to also conform to View so the current preference bridge can
-    // collect toolbar content through the normal view path.
-    public func toolbar<Content: ToolbarContent & View>(
+    public func toolbar<Content: ToolbarContent>(
         @ToolbarContentBuilder content: () -> Content
     ) -> some View {
         modifier(ToolbarModifier<Void, Content>(id: nil, content: content(), selection: nil))
@@ -497,7 +659,6 @@ struct SearchContentKey: PreferenceKey {
 
 struct UsesUnbridgedToolbar: ViewInputBoolFlag {
     typealias Value = Bool
-    static var defaultValue: Bool { false }
     var description: String { "UsesUnbridgedToolbar" }
 }
 
@@ -544,7 +705,6 @@ struct ToolbarReader<Edges, Content: View>: View {
         guard let graph = _AGGraph.current else {
             fatalError("ToolbarReader._makeView called outside AG context")
         }
-
         // PrimitiveReader as AG input, not a rule, so it has a stable cached value
         // that is safe to read even when other rules are evaluating.
         let primitiveReaderAttr: Attribute<ToolbarPrimitiveReader> =
@@ -557,8 +717,8 @@ struct ToolbarReader<Edges, Content: View>: View {
 
         var contentInputs = inputs
         var keys = contentInputs.preferences.keys
-        keys.insert(ToolbarKey.self)
-        keys.insert(SearchContentKey.self)
+        keys.add(ToolbarKey.self)
+        keys.add(SearchContentKey.self)
         contentInputs.preferences = PreferencesInputs(keys: keys,
                                                       hostKeys: contentInputs.preferences.hostKeys)
         let outputs = Content._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: contentInputs)
@@ -845,7 +1005,7 @@ struct DialogBottomButtonsHLayout: Layout {
             subviews[index].place(at: CGPoint(x: leadingX, y: midY),
                                   anchor: .leading,
                                   proposal: ProposedViewSize(size))
-            leadingX += size.width + ViewSpacing.defaultSpacing
+            leadingX += size.width + Spacing.defaultValue.width
         }
 
         for index in subviews.indices.dropFirst(leadingEnd).reversed() {
@@ -854,7 +1014,7 @@ struct DialogBottomButtonsHLayout: Layout {
             subviews[index].place(at: CGPoint(x: trailingX, y: midY),
                                   anchor: .leading,
                                   proposal: ProposedViewSize(size))
-            trailingX -= ViewSpacing.defaultSpacing
+            trailingX -= Spacing.defaultValue.width
         }
     }
 }

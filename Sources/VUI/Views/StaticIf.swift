@@ -12,6 +12,13 @@ import Foundation
 // Internal type used for construction-time branch selection.
 protocol ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool
+    static func evaluate(listInputs: _ViewListInputs) -> Bool
+}
+
+extension ViewInputPredicate {
+    static func evaluate(listInputs: _ViewListInputs) -> Bool {
+        evaluate(inputs: listInputs.base)
+    }
 }
 
 // StaticIf<Predicate, TrueContent, FalseContent>: evaluates Predicate once against
@@ -93,39 +100,61 @@ struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredica
     }
 }
 
-struct BothFeatures<A: ViewInputPredicate, B: ViewInputPredicate>: ViewInputPredicate {
-    static func evaluate(inputs: _GraphInputs) -> Bool {
-        A.evaluate(inputs: inputs) && B.evaluate(inputs: inputs)
+struct BothFeatures<A: Feature, B: Feature>: Feature {
+    typealias Value = Bool
+
+    static var isEnabled: Bool {
+        A.isEnabled && B.isEnabled
     }
 }
 
-struct InferredToolbarUserDefaultFeature: ViewInputPredicate {
-    static func evaluate(inputs: _GraphInputs) -> Bool {
-        false
-    }
+struct InferredToolbarUserDefaultFeature: Feature {
+    typealias Value = Bool
+    static var isEnabled: Bool { false }
 }
 
 // ViewInputFlag: ViewInput with Bool value semantics.
-protocol ViewInputFlag: ViewInput where Value == Bool {}
+protocol ViewInputFlag: ViewInputPredicate, _GraphInputsModifier {
+    associatedtype Input: ViewInput = Self where Input.Value: Equatable
+    static var value: Input.Value { get }
+    init()
+}
 
-// ViewInputBoolFlag: ViewInputFlag that also acts as a ViewInputPredicate.
-// evaluate(inputs:) reads the Bool from customInputs.
-protocol ViewInputBoolFlag: ViewInputFlag, ViewInputPredicate {}
-
-extension ViewInputBoolFlag {
+extension ViewInputFlag {
     static func evaluate(inputs: _GraphInputs) -> Bool {
-        inputs.customInputs.value(forKey: Self.self)
+        inputs[Input.self] == value
+    }
+
+    static func _makeInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs
+    ) {
+        inputs[Input.self] = value
     }
 }
 
-// ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier + _GraphInputsModifier that writes
-// a Bool flag into customInputs.
-struct ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier, _GraphInputsModifier {
+// ViewInputBoolFlag: ViewInputFlag that also acts as a ViewInputPredicate.
+// evaluate(inputs:) reads the Bool from customInputs.
+protocol ViewInputBoolFlag: ViewInput, ViewInputFlag
+where Value == Bool, Input.Value == Bool {}
+
+extension ViewInputBoolFlag {
+    static var defaultValue: Bool { false }
+    static var value: Bool { true }
+}
+
+// ViewInputFlagModifier stores the flag value and delegates graph-input
+// installation through the flag protocol witness.
+struct ViewInputFlagModifier<T: ViewInputFlag>: PrimitiveViewModifier, _GraphInputsModifier {
     typealias Body = Never
-    let value: Bool
+    var flag: T
+
+    init(flag: T) {
+        self.flag = flag
+    }
 
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        inputs.customInputs.setValue(modifier._attribute.value.value, forKey: T.self)
+        T._makeInputs(modifier: modifier[\.flag], inputs: &inputs)
     }
 }
 
@@ -166,26 +195,20 @@ struct StyleContextAcceptsAnyPredicate<T>: ViewInputPredicate {
 // a default-style button in a toolbar context (set by ButtonStyleContainerModifier).
 struct IsDefaultButtonLabel: ViewInputBoolFlag {
     typealias Value = Bool
-    static var defaultValue: Bool { false }
     var description: String { "IsDefaultButtonLabel" }
 }
 
 // InvertedViewInputPredicate<P>: NOT predicate wrapping P.
 struct InvertedViewInputPredicate<P: ViewInputBoolFlag>: ViewInputBoolFlag, _GraphInputsModifier {
     typealias Value = Bool
-    typealias Body = Never
-    static var defaultValue: Bool { false }
+    typealias Input = P
+    static var value: Bool { false }
     var description: String { "InvertedViewInputPredicate<\(P.self)>" }
 
     static func evaluate(inputs: _GraphInputs) -> Bool {
         !P.evaluate(inputs: inputs)
     }
 
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        // Writes the inverted value of P into customInputs under Self's key.
-        let val = !P.evaluate(inputs: inputs)
-        inputs.customInputs.setValue(val, forKey: Self.self)
-    }
 }
 
 // _staticIf: free function helper for constructing StaticIf with type inference.
@@ -216,11 +239,8 @@ private struct MultiViewLabelKey: PropertyKey {
 }
 
 // _SemanticFeature<T>: ViewInputPredicate that gates behavior on semantic version.
-struct _SemanticFeature<T: SemanticProtocol>: SemanticFeature, ViewInputBoolFlag, _GraphInputsModifier {
+struct _SemanticFeature<T: SemanticProtocol>: SemanticFeature, Feature {
     typealias Value = Bool
-    typealias Body = Never
-
-    static var defaultValue: Bool { false }
 
     var description: String {
         "_SemanticFeature<\(T.self)>"
@@ -230,11 +250,4 @@ struct _SemanticFeature<T: SemanticProtocol>: SemanticFeature, ViewInputBoolFlag
         T.semantic
     }
 
-    static func evaluate(inputs: _GraphInputs) -> Bool {
-        isEnabled
-    }
-
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        inputs.customInputs.setValue(isEnabled, forKey: Self.self)
-    }
 }

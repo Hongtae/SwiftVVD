@@ -22,14 +22,26 @@ struct LayoutPriorityLayout: UnaryLayout {
         set { value = newValue }
     }
 
-    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        LayoutComputer(
-            sizeThatFits: { lc.sizeThatFits($0) },
-            spacing: lc.spacing,
-            place: { lc.place(at: $0, anchor: $1, proposal: $2) },
-            priority: value,
-            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        child.dimensions(in: proposal).size.value
+    }
+
+    func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+        let proposal = context.proposedSize
+        let childSize = child.dimensions(in: proposal).size.value
+        return _Placement(
+            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
+            anchoring: .topLeading,
+            at: .zero
         )
+    }
+
+    func layoutPriority(child: LayoutProxy) -> Double {
+        value
     }
 }
 

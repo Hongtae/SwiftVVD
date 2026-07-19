@@ -21,27 +21,28 @@ public struct _FixedSizeLayout: ViewModifier, Animatable, Sendable {
 }
 
 extension _FixedSizeLayout: UnaryLayout {
-    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        let h = self.horizontal
-        let v = self.vertical
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                // Propose ideal (nil) for fixed axes so the child returns its natural size
-                let fixedProposal = ProposedViewSize(
-                    width:  h ? nil : proposal.width,
-                    height: v ? nil : proposal.height
-                )
-                return lc.sizeThatFits(fixedProposal)
-            },
-            spacing: lc.spacing,
-            place: { position, anchor, proposal in
-                let fixedProposal = ProposedViewSize(
-                    width:  h ? nil : proposal.width,
-                    height: v ? nil : proposal.height
-                )
-                lc.place(at: position, anchor: anchor, proposal: fixedProposal)
-            },
-            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+    private func childProposal(for proposal: _ProposedSize) -> _ProposedSize {
+        _ProposedSize(
+            width: horizontal ? nil : proposal.width,
+            height: vertical ? nil : proposal.height
+        )
+    }
+
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        child.dimensions(in: childProposal(for: proposal)).size.value
+    }
+
+    func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+        let proposal = childProposal(for: context.proposedSize)
+        let childSize = child.dimensions(in: proposal).size.value
+        return _Placement(
+            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
+            anchoring: .topLeading,
+            at: .zero
         )
     }
 }
@@ -56,4 +57,3 @@ extension View {
         return fixedSize(horizontal: true, vertical: true)
     }
 }
-

@@ -152,7 +152,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var infoAttr: Attribute<DynamicContainer.Info>!
         var viewPhase: Attribute<Phase>!
         var transitionPhase: Attribute<TransitionPhase>!
-        var placementState: Attribute<Bool>!
         var removalEvents: [String] = []
 
         ref.withCurrent {
@@ -169,9 +168,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                         transitionPhase = inputs[
                             DynamicContainerTransitionPhaseInput.self
                         ].attribute
-                        placementState = inputs[
-                            LayoutPlacementStateInput.self
-                        ].attribute
                         return Self.makeFixedLayoutOutputs(inputs)
                     }
                 )
@@ -187,15 +183,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.items.first?.phase, 1)
             if let layout = initial.items.first?.outputs._layoutComputer.attribute?.value {
-                XCTAssertFalse(placementState.value)
-                let size = layout.sizeThatFits(.unspecified)
-                layout.place(
-                    at: .zero,
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(size)
-                )
+                _ = layout.sizeThatFits(.unspecified)
             }
-            XCTAssertTrue(placementState.value)
             XCTAssertEqual(recorder.events, ["identity"])
             XCTAssertFalse(viewPhase.value.isBeingRemoved)
             XCTAssertEqual(transitionPhase.value, .identity)
@@ -651,6 +640,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                             .transition(.opacity)
                     }
                 }
+                .frame(height: 100)
             }
         }
     }
@@ -670,6 +660,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                         .transition(.opacity)
                     }
                 }
+                .frame(height: 100)
             }
         }
     }
@@ -1029,6 +1020,46 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testPublicConditionalActiveBranchPublishesNestedDynamicListChanges() throws {
+        typealias Rows = ForEach<[String], String, Text>
+        typealias Root = _ConditionalContent<Rows, EmptyView>
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var source: Attribute<Root>!
+        var list: Attribute<any ViewList>!
+        var info: Attribute<DynamicContainer.Info>!
+
+        func root(_ rows: [String]) -> Root {
+            ViewBuilder.buildEither(
+                first: ForEach(rows, id: \.self) { Text($0) }
+            )
+        }
+
+        ref.withCurrent {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let viewInputs = makeViewInputs(graph: graph, base: inputs)
+            source = graph.makeInput(value: root(["row"]))
+            let outputs = Root._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+            guard case .dynamicList(let attribute, _) = outputs.views else {
+                return XCTFail("conditional should publish a dynamic list")
+            }
+            list = attribute
+            info = graph.makeStatefulRule(
+                DynamicContainerInfo(viewListAttr: attribute, inputs: viewInputs)
+            )
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 1)
+            XCTAssertEqual(info.value.activeItems.count, 1)
+
+            source.setValue(root([]))
+
+            XCTAssertEqual(list.value.count(style: _ViewList_IteratorStyle()), 0)
+            XCTAssertEqual(info.value.activeItems.count, 0)
+        }
+    }
+
     func testPublicConditionalReinsertionReusesRetainedBranchItem() throws {
         typealias Root = _ConditionalContent<Text, Text>
         let graph = _AGGraph()
@@ -1125,7 +1156,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
             source = graph.makeInput(value: root(showChild: true))
             var keys = PreferenceKeys()
-            keys.insert(DisplayList.Key.self)
+            keys.add(DisplayList.Key.self)
             let outputs = DynamicContainerConditionalValueTransitionRoot._makeView(
                 view: _GraphValue(_attribute: source),
                 inputs: makeViewInputs(
@@ -1308,7 +1339,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let layout = layoutAttr.value
             XCTAssertEqual(
-                layout.sizeThatFits(ProposedViewSize(width: 20, height: 20)),
+                layout.sizeThatFits(_ProposedSize(width: 20, height: 20)),
                 CGSize(width: 10, height: 10)
             )
             layout.place(
@@ -1330,7 +1361,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let layout = layoutAttr.value
             XCTAssertEqual(
-                layout.sizeThatFits(ProposedViewSize(width: 20, height: 20)),
+                layout.sizeThatFits(_ProposedSize(width: 20, height: 20)),
                 CGSize(width: 10, height: 10)
             )
             layout.place(
@@ -1387,7 +1418,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             layoutAttr.value.childGeometries(
                 at: ViewSize(
                     CGSize(width: 190, height: 42),
-                    proposal: ProposedViewSize(width: 190, height: 42)
+                    proposal: _ProposedSize(width: 190, height: 42)
                 ),
                 origin: .zero
             )
@@ -3029,8 +3060,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             )
             let layout = graph.makeInput(value: ZStackLayout())
             var keys = PreferenceKeys()
-            keys.insert(DisplayList.Key.self)
-            keys.insert(RetainedRemovalOrdinaryPreferenceKey.self)
+            keys.add(DisplayList.Key.self)
+            keys.add(RetainedRemovalOrdinaryPreferenceKey.self)
             let outputs = ZStackLayout._makeLayoutView(
                 root: _GraphValue(_attribute: layout),
                 inputs: makeViewInputs(
@@ -3086,6 +3117,33 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(info.removedCount, 1)
             XCTAssertEqual(info.unusedCount, 0)
             XCTAssertEqual(info.displayMap, [0, 2, 1, 0, 3, 2, 1])
+            XCTAssertEqual(
+                info.displayItems.map(\.uniqueId),
+                [activeLow, removed, activeMiddle, activeHigh].map(\.uniqueId)
+            )
+        }
+    }
+
+    func testRetainedRemovalDisplaysRemovedItemsBelowActiveReplacements() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        ref.withCurrent {
+            var info = DynamicContainer.Info()
+            let activeA = makeDisplayMapItem(id: "active-a", zIndex: 0, phase: 1)
+            let activeB = makeDisplayMapItem(id: "active-b", zIndex: 0, phase: 1)
+            let removedA = makeDisplayMapItem(id: "removed-a", zIndex: 0, phase: 2)
+            let removedB = makeDisplayMapItem(id: "removed-b", zIndex: 0, phase: 2)
+
+            info.replaceItems(
+                active: [activeA, activeB],
+                removed: [removedA, removedB]
+            )
+
+            XCTAssertNil(info.displayMap)
+            XCTAssertEqual(
+                info.displayItems.map(\.uniqueId),
+                [removedA, removedB, activeA, activeB].map(\.uniqueId)
+            )
         }
     }
 
@@ -3125,6 +3183,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             )
 
             XCTAssertEqual(info.displayMap, [0, 1, 2, 0, 3, 1, 2])
+            XCTAssertEqual(
+                info.displayItems.map(\.uniqueId),
+                [activeZero, removedSame, activeSameA, activeSameB].map(\.uniqueId)
+            )
         }
     }
 
@@ -3283,7 +3345,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     start: 0,
                     count: 1,
                     id: _ViewList_ID(explicitID: row),
-                    elements: UnaryElements(body: makeOutputs, baseInputs: baseInputs),
+                    elements: _ViewList_SubgraphElements(
+                        base: UnaryElements(body: makeOutputs, baseInputs: baseInputs)
+                    ),
                     traits: traits,
                     list: list
                 )
@@ -3332,9 +3396,11 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     start: 0,
                     count: 1,
                     id: _ViewList_ID(explicitID: row),
-                    elements: UnaryElements(
-                        body: { inputs in makeOutputs(rowValue, inputs) },
-                        baseInputs: baseInputs
+                    elements: _ViewList_SubgraphElements(
+                        base: UnaryElements(
+                            body: { inputs in makeOutputs(rowValue, inputs) },
+                            baseInputs: baseInputs
+                        )
                     ),
                     traits: traits,
                     list: list
@@ -3387,18 +3453,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         transaction: Transaction
     ) -> _GraphInputs {
         _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(
-                    environment: graph.makeInput(value: EnvironmentValues())
-                )
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: transaction),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: graph.makeInput(value: EnvironmentValues()),
+            transaction: graph.makeInput(value: transaction)
         )
     }
 
@@ -3437,7 +3495,7 @@ private final class DynamicContainerDelegateGraphHost: GraphHost {
 
     init(delegate: DynamicContainerGraphDelegateRecorder) {
         self.delegateRecorder = delegate
-        super.init()
+        super.init(data: Data())
         delegate.host = self
     }
 

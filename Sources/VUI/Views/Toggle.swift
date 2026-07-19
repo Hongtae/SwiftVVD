@@ -5,13 +5,30 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum ToggleState: Sendable, Equatable {
-    case off
+public enum ToggleState: UInt, Sendable, Codable, CaseIterable, Hashable,
+    StronglyHashable, CustomDebugStringConvertible {
     case on
+    case off
     case mixed
 
-    init(isOn: Bool) {
+    init(_ isOn: Bool) {
         self = isOn ? .on : .off
+    }
+
+    init(isOn: Bool) {
+        self.init(isOn)
+    }
+
+    mutating func toggle() {
+        self = self == .on ? .off : .on
+    }
+
+    public var debugDescription: String {
+        switch self {
+        case .on: "on"
+        case .off: "off"
+        case .mixed: "mixed"
+        }
     }
 
     var isOn: Bool {
@@ -137,47 +154,6 @@ public struct ToggleStyleConfiguration {
     }
 }
 
-extension ToggleStyleConfiguration.Label {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
-            return _ViewOutputs()
-        }
-        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
-        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
-        var innerInputs = inputs
-        innerInputs.position = innerPosAttr
-        innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
-        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
-            return innerOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let innerLC = innerLCAttr.value
-            return LayoutComputer(
-                sizeThatFits: { innerLC.sizeThatFits($0) },
-                spacing: innerLC.spacing,
-                place: { position, anchor, proposal in
-                    let size = innerLC.sizeThatFits(proposal)
-                    let origin = CGPoint(x: position.x - size.width * anchor.x,
-                                         y: position.y - size.height * anchor.y)
-                    innerPosAttr.setValue(origin)
-                    innerSizeAttr.setValue(ViewSize(size))
-                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                },
-                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
-            )
-        }
-        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
-    }
-
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
-}
-
 extension ToggleStyleConfiguration.Label: PrimitiveView {}
 
 public protocol ToggleStyle {
@@ -191,7 +167,7 @@ struct ResolvedToggleStyle: StyleableView {
     var configuration: ToggleStyleConfiguration
 
     var body: some View {
-        DefaultToggleStyle().makeBody(configuration: configuration)
+        Toggle(configuration)
     }
 
     typealias DefaultStyleModifier = ToggleStyleModifier<DefaultToggleStyle>

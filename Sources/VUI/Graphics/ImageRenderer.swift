@@ -194,7 +194,7 @@ public final class ImageRenderer<Content> where Content: View {
     private func resolvedRenderSize() -> CGSize {
         host.updateOutputsForRender()
         return host.viewGraph.data.withCurrent {
-            host.viewGraph.rootLayoutComputer?.value.sizeThatFits(proposedSize)
+            host.viewGraph.rootLayoutComputer?.value.sizeThatFits(_ProposedSize(proposedSize))
                 ?? proposedSize.replacingUnspecifiedDimensions()
         }
     }
@@ -245,6 +245,19 @@ private final class ImageRendererHost<Content: View>: ViewRendererHost, ViewGrap
 
     func updateOutputsForRender() {
         storage.updateOutputs(at: currentTimestamp)
+    }
+
+    func requestUpdate(after: Double) {
+        // Rendering is pull-driven by the ImageRenderer accessors.
+    }
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        let requestedType = ObjectIdentifier(type)
+        guard requestedType == ObjectIdentifier((any ViewGraphOwner).self)
+                || requestedType == ObjectIdentifier((any ViewGraphDelegate).self) else {
+            return nil
+        }
+        return self as? T
     }
 
     func updateRootView() {

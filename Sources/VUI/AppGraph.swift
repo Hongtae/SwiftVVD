@@ -39,20 +39,16 @@ class AppGraph<A: App>: @unchecked Sendable {
             let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
 
             let graphInputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: timeAttr,
-                cachedEnvironment: MutableBox(CachedEnvironment(environment: envAttr)),
                 phase: phaseAttr,
-                transaction: transactionAttr,
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: envAttr,
+                transaction: transactionAttr
             )
 
             // Register preference keys so that scenes output them in _SceneOutputs.
             var prefKeys = PreferenceKeys()
-            prefKeys.insert(SceneList.Key.self)
-            prefKeys.insert(WindowConfiguration.Override.Key.self)
+            prefKeys.add(SceneList.Key.self)
+            prefKeys.add(WindowConfiguration.Override.Key.self)
             let hostKeysAttr = graph.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
 

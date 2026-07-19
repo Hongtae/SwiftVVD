@@ -9,13 +9,13 @@ import Foundation
 import Synchronization
 
 protocol LeafViewLayout {
-    func spacing() -> ViewSpacing
+    func spacing() -> Spacing
     func sizeThatFits(in proposal: _ProposedSize) -> CGSize
 }
 
 extension LeafViewLayout {
-    func spacing() -> ViewSpacing {
-        ViewSpacing()
+    func spacing() -> Spacing {
+        Spacing()
     }
 
     static func makeLeafLayout(
@@ -35,7 +35,7 @@ extension LeafViewLayout {
     }
 }
 
-private struct LeafLayoutComputer<Leaf: LeafViewLayout>: StatefulRule {
+private struct LeafLayoutComputer<Leaf: LeafViewLayout>: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
     var view: Attribute<Leaf>
@@ -51,11 +51,11 @@ private struct LeafLayoutComputer<Leaf: LeafViewLayout>: StatefulRule {
 struct LeafLayoutEngine<Leaf: LeafViewLayout>: LayoutEngine {
     var view: Leaf
 
-    func spacing() -> ViewSpacing {
+    func spacing() -> Spacing {
         view.spacing()
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
         view.sizeThatFits(in: proposal)
     }
 }
@@ -64,12 +64,12 @@ struct LeafLayoutEngine<Leaf: LeafViewLayout>: LayoutEngine {
 
 /// AG Rule: computes child geometries for a layout container.
 /// Reads parentSize/parentPosition and calls LayoutComputer.childGeometries via the box vtable.
-struct LayoutChildGeometries: Rule {
+struct LayoutChildGeometries: Rule, AsyncAttribute {
     typealias Value = [ViewGeometry]
     var parentSize: Attribute<ViewSize>
     var parentPosition: Attribute<CGPoint>
     var layoutComputer: Attribute<LayoutComputer>
-    func updateValue() -> [ViewGeometry] {
+    var value: [ViewGeometry] {
         let lc = layoutComputer.value
         return lc.box.childGeometries_(at: parentSize.value, origin: parentPosition.value)
     }
@@ -77,17 +77,94 @@ struct LayoutChildGeometries: Rule {
 
 /// AG Rule: extracts one ViewGeometry from the LayoutChildGeometries output by index.
 /// Position and size projections are created with makeRule closures.
-private struct LayoutChildGeometry: Rule {
+private struct LayoutChildGeometry: Rule, AsyncAttribute {
     typealias Value = ViewGeometry
     var geometriesAttr: Attribute<[ViewGeometry]>
     var index: Int
-    func updateValue() -> ViewGeometry {
+    var value: ViewGeometry {
         let geoms = geometriesAttr.value
-        guard index < geoms.count else {
-            return ViewGeometry(origin: .zero,
-                                dimensions: ViewDimensions(guideComputer: .defaultValue, size: .zero))
-        }
+        precondition(index >= 0 && index < geoms.count)
         return geoms[index]
+    }
+}
+
+/// Resolves a stable dynamic-container identity to the current flattened child
+/// geometry. A removed or not-yet-published child uses the canonical zero
+/// geometry until the container publishes a matching view index.
+private struct DynamicLayoutViewChildGeometry: StatefulRule, AsyncAttribute {
+    typealias Value = ViewGeometry
+
+    var containerInfo: Attribute<DynamicContainer.Info>
+    var geometries: Attribute<[ViewGeometry]>
+    var id: _ViewList_ID.Canonical
+
+    mutating func updateValue() {
+        let info = containerInfo.value
+        let currentGeometries = geometries.value
+        let geometry = info.viewIndex(id: id).flatMap { index in
+            currentGeometries.indices.contains(index) ? currentGeometries[index] : nil
+        } ?? .zero
+        _AGGraph.setStatefulOutput(geometry)
+    }
+}
+
+/// Late-bound construction context used by the dynamic layout adaptor. The
+/// container-info attribute is installed when its stateful rule begins its
+/// first evaluation, after the layout computer and aggregate geometry rule
+/// already exist.
+private final class DynamicLayoutViewGeometryContext {
+    var containerInfo: Attribute<DynamicContainer.Info>?
+    let geometries: Attribute<[ViewGeometry]>
+
+    init(geometries: Attribute<[ViewGeometry]>) {
+        self.geometries = geometries
+    }
+}
+
+private struct DynamicLayoutViewGeometryContextInput: ViewInput {
+    static var defaultValue: DynamicLayoutViewGeometryContext? { nil }
+
+    static func valuesEqual(
+        _ lhs: DynamicLayoutViewGeometryContext?,
+        _ rhs: DynamicLayoutViewGeometryContext?
+    ) -> Bool {
+        lhs === rhs
+    }
+}
+
+/// Routes dynamic item layout creation and destruction back to the inline
+/// DynamicLayoutMap stored by DynamicLayoutComputer.
+private final class DynamicLayoutMapMutator {
+    private let body: (@escaping (inout DynamicLayoutMap) -> Void) -> Void
+
+    init(
+        _ body: @escaping (@escaping (inout DynamicLayoutMap) -> Void) -> Void
+    ) {
+        self.body = body
+    }
+
+    func callAsFunction(_ mutation: @escaping (inout DynamicLayoutMap) -> Void) {
+        body(mutation)
+    }
+}
+
+private struct DynamicLayoutMapMutatorInput: ViewInput {
+    static var defaultValue: DynamicLayoutMapMutator? { nil }
+
+    static func valuesEqual(
+        _ lhs: DynamicLayoutMapMutator?,
+        _ rhs: DynamicLayoutMapMutator?
+    ) -> Bool {
+        lhs === rhs
+    }
+}
+
+private struct LayoutGeometryPlacementState: Rule {
+    var geometry: Attribute<ViewGeometry>
+
+    var value: Bool {
+        _ = geometry.value
+        return true
     }
 }
 
@@ -132,7 +209,7 @@ private struct ScrollableItemIdentifier: Rule {
     var uniqueId: _ViewList_ID.Canonical
     var context: ScrollableLayoutItemGeometryContext
 
-    func updateValue() -> AnyHashable? {
+    var value: AnyHashable? {
         context.identifier(for: uniqueId)
     }
 }
@@ -147,7 +224,7 @@ private struct ScrollableItemGeometry: Rule {
     var size: Attribute<ViewSize>
     var layoutComputer: Attribute<LayoutComputer>
 
-    func updateValue() -> ViewGeometry {
+    var value: ViewGeometry {
         guard let identifier = identifier.value,
               let placement = context.placement(identifier) else {
             return ViewGeometry(
@@ -178,7 +255,7 @@ private struct ScrollableItemGeometryPosition: Rule {
 
     var geometry: Attribute<ViewGeometry>
 
-    func updateValue() -> CGPoint {
+    var value: CGPoint {
         geometry.value.origin
     }
 }
@@ -189,7 +266,7 @@ private struct ScrollableItemGeometrySize: Rule {
 
     var geometry: Attribute<ViewGeometry>
 
-    func updateValue() -> ViewSize {
+    var value: ViewSize {
         geometry.value.dimensions.size
     }
 }
@@ -197,33 +274,22 @@ private struct ScrollableItemGeometrySize: Rule {
 /// StatefulRule: produces LayoutComputer wrapping ViewLayoutEngine<L> for a static child list.
 /// Re-fires when layoutAttr changes (e.g. animating spacing). Child LC deps are tracked
 /// downstream by LayoutChildGeometries (which calls childGeometries via ViewLayoutEngine).
-private struct StaticLayoutComputer<L: Layout>: StatefulRule {
+private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, CustomStringConvertible {
     typealias Value = LayoutComputer
     var layoutAttr: Attribute<L>
+    var environment: Attribute<EnvironmentValues>
     var children: [LayoutProxyAttributes]
-    var layoutDirection: LayoutDirection
+
+    var description: String {
+        "\(L.self) → LayoutComputer"
+    }
+
     mutating func updateValue() {
-        let layout = layoutAttr.value
-        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
-           let box = current.box as? LayoutEngineBox<ViewLayoutEngine<L>> {
-            box.engine.update(
-                layout: layout,
-                layoutAttr: layoutAttr,
-                children: children,
-                layoutDirection: layoutDirection
-            )
-            current.changeCount &+= 1
-            _AGGraph.setStatefulOutput(current)
-            return
-        }
-        let engine = ViewLayoutEngine(
-            layout: layout,
-            layoutAttr: layoutAttr,
-            children: children,
-            layoutDirection: layoutDirection
+        updateLayoutComputer(
+            layout: layoutAttr.value,
+            environment: environment,
+            attributes: children
         )
-        let box = LayoutEngineBox(engine: engine)
-        _AGGraph.setStatefulOutput(LayoutComputer(box: box))
     }
 }
 
@@ -302,8 +368,9 @@ enum DynamicContainer {
     }
 
     /// Field roles: subgraph, uniqueId, viewCount, outputs,
-    /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
-    /// resetSeed, phase, item, completion seed, transition transactions.
+        /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
+        /// resetSeed, phase, item, placement transaction, completion seed,
+        /// transition transactions.
     /// The identity is stored in canonical form for lookup across updates.
     final class ItemInfo {
         var subgraph: AGSubgraph
@@ -325,6 +392,7 @@ enum DynamicContainer {
         var layoutAttributes: [LayoutProxyAttributes]
         var preferenceOutputs: [PreferencesOutputs]
         var viewPhase: Attribute<TransitionPhase>?
+        var placementTransaction: Attribute<Transaction>?
         var transitionPhaseSetters: [_TransitionPhaseSetter]
         var transitionCompletionSeed: Attribute<UInt32>?
         var transitionTransactions: _TransitionTransactionResolver?
@@ -340,6 +408,7 @@ enum DynamicContainer {
             layoutAttributes: [LayoutProxyAttributes],
             preferenceOutputs: [PreferencesOutputs],
             viewPhase: Attribute<TransitionPhase>? = nil,
+            placementTransaction: Attribute<Transaction>? = nil,
             transitionPhaseSetters: [_TransitionPhaseSetter] = [],
             needsTransitions: Bool = false,
             listener: TransitionRemovalListener? = nil,
@@ -370,6 +439,7 @@ enum DynamicContainer {
             self.layoutAttributes = layoutAttributes
             self.preferenceOutputs = preferenceOutputs
             self.viewPhase = viewPhase
+            self.placementTransaction = placementTransaction
             self.transitionPhaseSetters = transitionPhaseSetters
             self.transitionCompletionSeed = transitionCompletionSeed
             self.transitionTransactions = transitionTransactions
@@ -417,7 +487,10 @@ enum DynamicContainer {
         }
 
         func viewIndex(id: _ViewList_ID.Canonical) -> Int? {
-            indexMap[id]
+            guard let itemIndex = indexMap[id], items.indices.contains(itemIndex) else {
+                return nil
+            }
+            return items[itemIndex].precedingViewCount
         }
 
         func item(for id: _ViewList_ID.Canonical) -> ItemInfo? {
@@ -437,6 +510,25 @@ enum DynamicContainer {
         var activeAndRemovedItems: ArraySlice<ItemInfo> {
             let retainedEnd = max(0, items.count - unusedCount)
             return items.prefix(retainedEnd)
+        }
+
+        var displayItems: [ItemInfo] {
+            let retainedCount = max(0, items.count - unusedCount)
+            guard retainedCount > 0 else { return [] }
+            if let displayMap {
+                // The map begins with the active-only layout segment and ends
+                // with the retained-inclusive display segment.
+                return displayMap.suffix(retainedCount).compactMap { index in
+                    let index = Int(index)
+                    return items.indices.contains(index) ? items[index] : nil
+                }
+            }
+            let activeCount = max(0, retainedCount - removedCount)
+            // Removed items render below their active replacements. This lets
+            // insertion and removal opacity compose independently instead of
+            // the outgoing opaque surface masking the incoming one.
+            return Array(items[activeCount..<retainedCount]) +
+                Array(items[..<activeCount])
         }
 
         mutating func replaceItems(
@@ -556,76 +648,21 @@ struct LayoutPlacementStateInput: ViewInput {
     }
 }
 
-struct LayoutPlacementAnimationsDisabledInput: ViewInput {
-    static var defaultValue: Bool { false }
-}
-
-struct LayoutPlacementProjection {
-    var targetFrame: Attribute<ViewFrame>
-    var presentationFrame: Attribute<ViewFrame>
-}
-
-struct LayoutPlacementProjectionInput: ViewInput {
-    static var defaultValue: LayoutPlacementProjection? { nil }
+struct LayoutPlacementTransactionInput: ViewInput {
+    static var defaultValue: OptionalAttribute<Transaction> {
+        OptionalAttribute()
+    }
 
     static func valuesEqual(
-        _ lhs: LayoutPlacementProjection?,
-        _ rhs: LayoutPlacementProjection?
+        _ lhs: OptionalAttribute<Transaction>,
+        _ rhs: OptionalAttribute<Transaction>
     ) -> Bool {
-        lhs?.targetFrame.identifier == rhs?.targetFrame.identifier &&
-            lhs?.presentationFrame.identifier == rhs?.presentationFrame.identifier
+        lhs.base.identifier == rhs.base.identifier
     }
 }
 
-private struct ProjectedLayoutPosition: Rule {
-    var position: Attribute<CGPoint>
-    var size: Attribute<ViewSize>
-    var projection: LayoutPlacementProjection
-
-    func updateValue() -> CGPoint {
-        let rawOrigin = position.value
-        let childSize = size.value.value
-        let target = projection.targetFrame.value
-        let presentation = projection.presentationFrame.value
-        let targetPoint = CGPoint(
-            x: rawOrigin.x + childSize.width * 0.5,
-            y: rawOrigin.y + childSize.height * 0.5
-        )
-        let projectedPoint = CGPoint(
-            x: project(
-                targetPoint.x,
-                from: target.origin.x,
-                length: target.size.value.width,
-                to: presentation.origin.x,
-                length: presentation.size.value.width
-            ),
-            y: project(
-                targetPoint.y,
-                from: target.origin.y,
-                length: target.size.value.height,
-                to: presentation.origin.y,
-                length: presentation.size.value.height
-            )
-        )
-        return CGPoint(
-            x: projectedPoint.x - childSize.width * 0.5,
-            y: projectedPoint.y - childSize.height * 0.5
-        )
-    }
-
-    private func project(
-        _ value: CGFloat,
-        from sourceOrigin: CGFloat,
-        length sourceLength: CGFloat,
-        to destinationOrigin: CGFloat,
-        length destinationLength: CGFloat
-    ) -> CGFloat {
-        guard sourceLength != 0 else {
-            return destinationOrigin + value - sourceOrigin
-        }
-        let unitPosition = (value - sourceOrigin) / sourceLength
-        return destinationOrigin + destinationLength * unitPosition
-    }
+struct LayoutPlacementAnimationsDisabledInput: ViewInput {
+    static var defaultValue: Bool { false }
 }
 
 /// Keeps a phase-3 retained-unused item cached after its later animated removal
@@ -656,14 +693,6 @@ private struct DynamicLayoutMap {
         sortedSeeds = nil
     }
 
-    mutating func replace(with info: DynamicContainer.Info) {
-        map.removeAll(keepingCapacity: true)
-        sortedSeeds = nil
-        for item in info.activeItems {
-            set(item.layoutAttributes, uniqueId: item.uniqueId)
-        }
-    }
-
     mutating func attributes(info: DynamicContainer.Info) -> [LayoutProxyAttributes] {
         if sortedSeeds == info.seed { return sortedArray }
 
@@ -685,7 +714,7 @@ private struct DynamicLayoutMap {
         }
 
         sortedArray = orderedItems.flatMap { item in
-            let attributes = map[item.uniqueId] ?? item.layoutAttributes
+            let attributes = map[item.uniqueId] ?? []
             if attributes.isEmpty {
                 return Array(repeating: LayoutProxyAttributes(), count: item.viewCount)
             }
@@ -697,7 +726,7 @@ private struct DynamicLayoutMap {
 }
 
 /// StatefulRule: reconciles dynamic container items and publishes DynamicContainer.Info.
-struct DynamicContainerInfo: StatefulRule {
+struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
     typealias Value = DynamicContainer.Info
     var viewListAttr: Attribute<any ViewList>
     var inputs: _ViewInputs
@@ -708,6 +737,11 @@ struct DynamicContainerInfo: StatefulRule {
     mutating func updateValue() {
         guard let graph = _AGGraph.current else {
             fatalError("DynamicContainerInfo.updateValue called outside AG context.")
+        }
+        if let geometryContext = inputs[DynamicLayoutViewGeometryContextInput.self],
+           geometryContext.containerInfo == nil,
+           let currentAttribute = _AGGraph.currentRuleContextAttribute {
+            geometryContext.containerInfo = Attribute<DynamicContainer.Info>(currentAttribute)
         }
 
         let capturedInputs = inputs
@@ -730,13 +764,10 @@ struct DynamicContainerInfo: StatefulRule {
                 let needsTransitions = sublist.traits[CanTransitionTraitKey.self]
                 // allUnary becomes false when any active item reports viewCount != 1.
                 // The same viewCount is used for cumulative child offsets.
-                if let existing = info.item(for: id), existing.viewCount != viewCount {
-                    existing.invalidate()
-                    retainedElements.removeValue(forKey: id)
-                }
-                if let existing = info.item(for: id), existing.needsTransitions != needsTransitions {
-                    existing.invalidate()
-                    retainedElements.removeValue(forKey: id)
+                if let existing = info.item(for: id),
+                   existing.viewCount != viewCount ||
+                    existing.needsTransitions != needsTransitions {
+                    eraseItem(existing)
                 }
 
                 let reusableItem = info.item(for: id).flatMap { existing in
@@ -757,11 +788,13 @@ struct DynamicContainerInfo: StatefulRule {
                         offset: offset,
                         transition: transition,
                         initialTransitionPhase: insertionTransaction == nil ? .identity : .willAppear,
+                        placementTransaction: listTransaction,
                         capturedInputs: capturedInputs,
                         graph: graph
                     )
                 }
                 if let item {
+                    item.placementTransaction?.setValue(listTransaction)
                     // Item object depth is driven by view-level zIndex. displayMap
                     // stores UInt32 item indexes sorted by that depth.
                     item.zIndex = sublist.traits[ZIndexTraitKey.self]
@@ -837,8 +870,7 @@ struct DynamicContainerInfo: StatefulRule {
         for item in info.items where !liveIDs.contains(item.uniqueId) {
             if item.phase == 2 {
                 guard let listener = item.listener else {
-                    item.invalidate()
-                    retainedElements.removeValue(forKey: item.uniqueId)
+                    eraseItem(item)
                     continue
                 }
                 listener.readSeed()
@@ -849,8 +881,7 @@ struct DynamicContainerInfo: StatefulRule {
                         item.phase = 3
                         item.removalOrder = 0
                         guard unusedItems.count < maxUnusedItems else {
-                            item.invalidate()
-                            retainedElements.removeValue(forKey: item.uniqueId)
+                            eraseItem(item)
                             continue
                         }
                         unusedItems.append(item)
@@ -869,8 +900,7 @@ struct DynamicContainerInfo: StatefulRule {
                         removedItems.append(item)
                         continue
                     }
-                    item.invalidate()
-                    retainedElements.removeValue(forKey: item.uniqueId)
+                    eraseItem(item)
                     continue
                 }
                 item.removalOrder = removedItems.count
@@ -912,8 +942,7 @@ struct DynamicContainerInfo: StatefulRule {
                     item.ignoredRetainedUnusedRemovalObserver = observerID
                 }
                 guard unusedItems.count < maxUnusedItems else {
-                    item.invalidate()
-                    retainedElements.removeValue(forKey: item.uniqueId)
+                    eraseItem(item)
                     continue
                 }
                 unusedItems.append(item)
@@ -922,8 +951,7 @@ struct DynamicContainerInfo: StatefulRule {
 
             guard let transition = positiveRemovalTransition(for: item) else {
                 guard unusedItems.count < maxUnusedItems else {
-                    item.invalidate()
-                    retainedElements.removeValue(forKey: item.uniqueId)
+                    eraseItem(item)
                     continue
                 }
                 item.listener = nil
@@ -956,6 +984,14 @@ struct DynamicContainerInfo: StatefulRule {
         return (removedItems, unusedItems)
     }
 
+    private mutating func eraseItem(_ item: DynamicContainer.ItemInfo) {
+        inputs[DynamicLayoutMapMutatorInput.self]? {
+            $0.remove(uniqueId: item.uniqueId)
+        }
+        item.invalidate()
+        retainedElements.removeValue(forKey: item.uniqueId)
+    }
+
     private mutating func makeItem(
         uniqueId: _ViewList_ID.Canonical,
         viewCount: Int,
@@ -963,16 +999,18 @@ struct DynamicContainerInfo: StatefulRule {
         offset: Int,
         transition: AnyTransition?,
         initialTransitionPhase: TransitionPhase,
+        placementTransaction: Transaction,
         capturedInputs: _ViewInputs,
         graph: _AGGraph
     ) -> DynamicContainer.ItemInfo? {
         let subgraph = AGSubgraph()
-        let release = (sublist.elements as? _ViewList_SubgraphElements)?.retain()
+        let release = sublist.elements.retain()
         var baseInputs = capturedInputs
         baseInputs.copyCaches()
 
         let item: DynamicContainer.ItemInfo? = AGSubgraph.withCurrent(subgraph) {
             let viewPhase = graph.makeInput(value: initialTransitionPhase)
+            let placementTransactionAttribute = graph.makeInput(value: placementTransaction)
             let parentTransform = capturedInputs.transform
 
             var firstOutputs: _ViewOutputs?
@@ -983,56 +1021,52 @@ struct DynamicContainerInfo: StatefulRule {
             let traitsListAttr = sublist.list.map { OptionalAttribute($0) } ??
                 OptionalAttribute<any ViewList>()
             let scrollContext = baseInputs[ScrollableLayoutItemGeometryContextKey.self]
+            let layoutGeometryContext = baseInputs[DynamicLayoutViewGeometryContextInput.self]
             let dynamicItem = scrollContext != nil ? sublist.id.canonicalID.explicitID : nil
 
             // Non-unary items are a single DynamicContainer item whose viewCount spans
             // multiple child outputs, not multiple item records.
             for elementOffset in offset..<(offset + viewCount) {
-                let rawPosAttr = graph.makeInput(value: CGPoint.zero)
-                let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
-                let isPlacedAttr = graph.makeInput(value: false)
-                let scrollBasePosAttr = scrollContext.map { _ in
-                    graph.makeInput(value: CGPoint.zero)
-                }
+                let fallbackPosAttr = capturedInputs.position
+                let fallbackSizeAttr = capturedInputs.size
                 let scrollLayoutComputer = scrollContext.map { _ in
                     graph.makeIndirectAttribute(defaultValue: LayoutComputer.defaultValue)
                 }
-
                 let childOutputs = sublist.elements.makeOneElement(at: elementOffset, inputs: baseInputs) {
                     elementInputs,
                     makeView in
                     var childInputs = elementInputs
+                    childInputs.copyCaches()
                     childInputs[DynamicContainerTransitionPhaseInput.self] =
                         OptionalAttribute(viewPhase)
-                    childInputs[LayoutPlacementStateInput.self] =
-                        OptionalAttribute(isPlacedAttr)
-                    let projectedPosition = childInputs[
-                        LayoutPlacementProjectionInput.self
-                    ].map { projection in
-                        graph.makeRule(
-                            ProjectedLayoutPosition(
-                                position: rawPosAttr,
-                                size: rawSizeAttr,
-                                projection: projection
+                    childInputs[LayoutPlacementTransactionInput.self] =
+                        OptionalAttribute(placementTransactionAttribute)
+                    let geometryAttr: Attribute<ViewGeometry>?
+                    if let layoutGeometryContext,
+                       let containerInfo = layoutGeometryContext.containerInfo {
+                        geometryAttr = graph.makeStatefulRule(
+                            DynamicLayoutViewChildGeometry(
+                                containerInfo: containerInfo,
+                                geometries: layoutGeometryContext.geometries,
+                                id: uniqueId
                             )
                         )
-                    } ?? rawPosAttr
-                    let animatedFrame = makeAnimatableFrameAttributes(
-                        in: &childInputs.base,
-                        position: projectedPosition,
-                        size: rawSizeAttr,
-                        supportsVFD: childInputs.supportsVFD,
-                        animationsDisabled: childInputs[
-                            LayoutPlacementAnimationsDisabledInput.self
-                        ]
-                    )
-                    let posAttr = animatedFrame.position
-                    let sizeAttr = animatedFrame.size
+                    } else {
+                        geometryAttr = nil
+                    }
+                    let posAttr = geometryAttr.map {
+                        graph.subscriptNode(parent: $0, keyPath: \ViewGeometry.origin)
+                    } ?? fallbackPosAttr
+                    let sizeAttr = geometryAttr.map {
+                        graph.subscriptNode(parent: $0, keyPath: \ViewGeometry.dimensions.size)
+                    } ?? fallbackSizeAttr
+                    if let geometryAttr {
+                        childInputs[LayoutPlacementStateInput.self] = OptionalAttribute(
+                            graph.makeRule(LayoutGeometryPlacementState(geometry: geometryAttr))
+                        )
+                    }
                     let childTransform: Attribute<ViewTransform> = graph.makeRule {
                         var t = parentTransform.value
-                        // The backend placement bridge writes absolute root/window origins
-                        // into posAttr. Keep parent transform items, but do not translate the
-                        // already-absolute origin through the parent position again.
                         t.appendPosition(posAttr.value)
                         return t
                     }
@@ -1046,8 +1080,8 @@ struct DynamicContainerInfo: StatefulRule {
                             ScrollableItemGeometry(
                                 identifier: identifierAttr,
                                 context: scrollContext,
-                                position: scrollBasePosAttr ?? posAttr,
-                                size: sizeAttr,
+                                position: fallbackPosAttr,
+                                size: fallbackSizeAttr,
                                 layoutComputer: scrollLayoutComputer
                             )
                         )
@@ -1089,58 +1123,12 @@ struct DynamicContainerInfo: StatefulRule {
                     layoutAttributes.append(LayoutProxyAttributes())
                     continue
                 }
-
-                let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
-                    let inner = lcAttr.value
-                    var pendingPlacementTransaction = graph.transaction(for: lcAttr.identifier)
-                    return LayoutComputer(
-                        sizeThatFits: { inner.sizeThatFits($0) },
-                        spacing: inner.spacing,
-                        place: { pos, anchor, proposal in
-                            let sz = inner.sizeThatFits(proposal)
-                            let rawOrigin = CGPoint(
-                                x: pos.x - sz.width * anchor.x,
-                                y: pos.y - sz.height * anchor.y
-                            )
-                            // The transaction captured when the child layout computer
-                            // refreshed applies to its next placement only. Reading the
-                            // graph transaction again here would revive stale resource
-                            // publication keys during later parent animations.
-                            let placementTransaction =
-                                pendingPlacementTransaction ?? Transaction.current
-                            pendingPlacementTransaction = nil
-                            rawPosAttr.setValue(rawOrigin, transaction: placementTransaction)
-                            rawSizeAttr.setValue(
-                                ViewSize(sz, proposal: proposal),
-                                transaction: placementTransaction
-                            )
-                            isPlacedAttr.setValue(true, transaction: placementTransaction)
-                            if let scrollContext,
-                               let scrollBasePosAttr,
-                               let identifier = dynamicItem,
-                               let placement = scrollContext.placement(identifier) {
-                                scrollBasePosAttr.setValue(
-                                    CGPoint(
-                                        x: pos.x - placement.anchorPosition.x,
-                                        y: pos.y - placement.anchorPosition.y
-                                    )
-                                )
-                            } else {
-                                scrollBasePosAttr?.setValue(rawOrigin)
-                            }
-                            Transaction.withScopedThreadTransaction(placementTransaction) {
-                                inner.place(at: pos, anchor: anchor, proposal: proposal)
-                            }
-                        },
-                        explicitAlignment: { inner.explicitAlignment($0, at: $1) }
-                    )
-                }
                 if let scrollLayoutComputer {
-                    graph.setIndirectTarget(scrollLayoutComputer, to: wrapperLC)
+                    graph.setIndirectTarget(scrollLayoutComputer, to: lcAttr)
                 }
 
                 layoutAttributes.append(LayoutProxyAttributes(
-                    layoutComputer: wrapperLC,
+                    layoutComputer: lcAttr,
                     traitsList: traitsListAttr
                 ))
             }
@@ -1148,6 +1136,9 @@ struct DynamicContainerInfo: StatefulRule {
             guard var outputs = firstOutputs else { return nil }
             if let firstLayoutComputer = layoutAttributes.first?.layoutComputer.attribute {
                 outputs._layoutComputer = OptionalAttribute(firstLayoutComputer)
+            }
+            capturedInputs[DynamicLayoutMapMutatorInput.self]? {
+                $0.set(layoutAttributes, uniqueId: uniqueId)
             }
             return DynamicContainer.ItemInfo(
                 subgraph: subgraph,
@@ -1157,6 +1148,7 @@ struct DynamicContainerInfo: StatefulRule {
                 layoutAttributes: layoutAttributes,
                 preferenceOutputs: preferenceOutputs,
                 viewPhase: viewPhase,
+                placementTransaction: placementTransactionAttribute,
                 transitionPhaseSetters: transitionPhaseSetters,
                 needsTransitions: transition != nil,
                 phase: initialTransitionPhase == .willAppear ? 0 : 1,
@@ -1194,39 +1186,32 @@ private extension AnyTransition {
 
 /// StatefulRule: consumes DynamicContainer.Info through DynamicLayoutMap and produces
 /// LayoutComputer for a dynamic layout list.
-private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
+private struct DynamicLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, CustomStringConvertible {
     typealias Value = LayoutComputer
     var layoutAttr: Attribute<L>
-    var containerInfoAttr: Attribute<DynamicContainer.Info>
+    var environment: Attribute<EnvironmentValues>
+    var containerInfoAttr: OptionalAttribute<DynamicContainer.Info>
     var layoutMap = DynamicLayoutMap()
 
+    var description: String {
+        "\(L.self) → LayoutComputer"
+    }
+
     mutating func updateValue() {
+        guard let containerInfoAttr = containerInfoAttr.attribute else {
+            fatalError("DynamicLayoutComputer evaluated before its container info was installed.")
+        }
         let layout = layoutAttr.value
         let info = containerInfoAttr.value
-        layoutMap.replace(with: info)
         let children = layoutMap.attributes(info: info)
         for child in children {
             _ = child.layoutComputer.attribute?.value
         }  // register AG deps on each child LC
-        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
-           let box = current.box as? LayoutEngineBox<ViewLayoutEngine<L>> {
-            box.engine.update(
-                layout: layout,
-                layoutAttr: layoutAttr,
-                children: children,
-                layoutDirection: .leftToRight
-            )
-            current.changeCount &+= 1
-            _AGGraph.setStatefulOutput(current)
-            return
-        }
-        let engine = ViewLayoutEngine(
+        updateLayoutComputer(
             layout: layout,
-            layoutAttr: layoutAttr,
-            children: children,
-            layoutDirection: .leftToRight
+            environment: environment,
+            attributes: children
         )
-        _AGGraph.setStatefulOutput(LayoutComputer(box: LayoutEngineBox(engine: engine)))
     }
 }
 
@@ -1263,7 +1248,7 @@ private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContaine
         }
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         var closest: (subview: ScrollableCollectionSubview, distance: CGFloat)?
         forEachVisibleSubview { subview, stop in
             let distance = subview.frame.midpointDistance(to: rect)
@@ -1284,7 +1269,7 @@ private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContaine
         nil
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         false
     }
 
@@ -1319,12 +1304,27 @@ private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContaine
         }
     }
 
-    var containerParentScrollable: (any Scrollable)? {
+    var parent: (any Scrollable)? {
         resolvedParentScrollable
     }
 
-    var containerChildScrollables: [any Scrollable] {
-        childScrollables?.value ?? []
+    var children: [any Scrollable]? {
+        childScrollables?.value
+    }
+
+    func makeTarget<ID: Hashable>(
+        for id: ID
+    ) -> ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)? {
+        guard let offset = viewList.value.firstOffset(
+            forID: id,
+            style: _ViewList_IteratorStyle()
+        ) else {
+            return nil
+        }
+        let anchor = Transaction.current.scrollTargetAnchor
+        return { _, _ in
+            makeTarget(at: offset, anchor: anchor)
+        }
     }
 
     private func collectionViewIDs() -> [_ViewList_ID.Canonical] {
@@ -1399,7 +1399,7 @@ func _makeDynReduceAttr<K: PreferenceKey>(
     return attr.identifier
 }
 
-public protocol Layout: Animatable {
+public protocol Layout: Sendable, Animatable {
     static var layoutProperties: LayoutProperties { get }
 
     associatedtype Cache = Void
@@ -1451,6 +1451,7 @@ extension Layout {
         // via the parent. Replace this with the exact layout-container overlay
         // mechanism once modeled.
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
+        let environment = cachedEnvironmentAttr.value.environment
         let containerPosAttr  = inputs.position
         let containerSizeAttr = inputs.size
         let debugDLAttr: Attribute<DisplayList> = graph.makeRule {
@@ -1471,56 +1472,53 @@ extension Layout {
 
         switch childListOutputs.views {
         case .staticList(let elements):
-            // Step 1: makeElements traversal. Create per-child indirect posAttr/sizeAttr,
-            //   call makeView, collect child LCs + prefs. Indirect attrs resolve the chicken-and-egg:
-            //   makeView needs posAttr/sizeAttr handles, and those are wired to concrete attrs later.
             var childProxyAttrs: [LayoutProxyAttributes] = []
             var allPreferences: [PreferencesOutputs] = []
 
+            let staticLCAttr: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                StaticLayoutComputer(
+                    layoutAttr: root._attribute,
+                    environment: environment,
+                    children: [],
+                )
+            )
+            let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
+                LayoutChildGeometries(
+                    parentSize: inputs.size,
+                    parentPosition: inputs.position,
+                    layoutComputer: staticLCAttr
+                )
+            )
+
             var from = 0
+            var childIndex = 0
             elements.makeElements(from: &from, inputs: layoutInputs, indirectMap: nil) { elementInputs, makeView in
-                // Backend bridge: primitive display rules read the position/size
-                // attributes they received during makeView. StaticLayoutComputer's
-                // geometry projection is not enough unless the render backend pulls
-                // those projection attrs directly, so keep concrete placement attrs
-                // and update them from the LayoutComputer.place path.
-                // Replace this bridge once the renderer consumes
-                // LayoutChildGeometries projection directly.
-                let rawPosAttr = graph.makeInput(value: CGPoint.zero)
-                let rawSizeAttr = graph.makeInput(value: ViewSize.zero)
-                let isPlacedAttr = graph.makeInput(value: false)
+                let geometry = graph.makeRule(
+                    LayoutChildGeometry(
+                        geometriesAttr: childGeometries,
+                        index: childIndex
+                    )
+                )
+                childIndex += 1
 
                 var childInputs = elementInputs
-                childInputs[LayoutPlacementStateInput.self] =
-                    OptionalAttribute(isPlacedAttr)
-                let projectedPosition = childInputs[
-                    LayoutPlacementProjectionInput.self
-                ].map { projection in
-                    graph.makeRule(
-                        ProjectedLayoutPosition(
-                            position: rawPosAttr,
-                            size: rawSizeAttr,
-                            projection: projection
-                        )
-                    )
-                } ?? rawPosAttr
-                let animatedFrame = makeAnimatableFrameAttributes(
-                    in: &childInputs.base,
-                    position: projectedPosition,
-                    size: rawSizeAttr,
-                    supportsVFD: childInputs.supportsVFD,
-                    animationsDisabled: childInputs[
-                        LayoutPlacementAnimationsDisabledInput.self
-                    ]
+                childInputs.copyCaches()
+                childInputs.base.options.insert(.viewNeedsGeometry)
+                childInputs.requestsLayoutComputer = true
+                childInputs[LayoutPlacementStateInput.self] = OptionalAttribute(
+                    graph.makeRule(LayoutGeometryPlacementState(geometry: geometry))
                 )
-                let posAttr = animatedFrame.position
-                let sizeAttr = animatedFrame.size
+                let posAttr = graph.subscriptNode(
+                    parent: geometry,
+                    keyPath: \ViewGeometry.origin
+                )
+                let sizeAttr = graph.subscriptNode(
+                    parent: geometry,
+                    keyPath: \ViewGeometry.dimensions.size
+                )
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
-                    // The backend placement bridge writes absolute root/window origins
-                    // into posAttr. Keep parent transform items, but do not translate the
-                    // already-absolute origin through the parent position again.
                     t.appendPosition(posAttr.value)
                     return t
                 }
@@ -1534,83 +1532,77 @@ extension Layout {
                 childInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
 
                 let childOutputs = makeView(childInputs)
-                if let lcAttr = childOutputs._layoutComputer.attribute {
-                    let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
-                        let inner = lcAttr.value
-                        var pendingPlacementTransaction = graph.transaction(for: lcAttr.identifier)
-                        return LayoutComputer(
-                            sizeThatFits: { inner.sizeThatFits($0) },
-                            spacing: inner.spacing,
-                            place: { position, anchor, proposal in
-                                let resolvedSize = inner.sizeThatFits(proposal)
-                                let origin = CGPoint(
-                                    x: position.x - resolvedSize.width * anchor.x,
-                                    y: position.y - resolvedSize.height * anchor.y
-                                )
-                                // Consume the child refresh transaction once. Later
-                                // placements inherit the active layout transaction.
-                                let placementTransaction =
-                                    pendingPlacementTransaction ?? Transaction.current
-                                pendingPlacementTransaction = nil
-                                rawPosAttr.setValue(origin, transaction: placementTransaction)
-                                rawSizeAttr.setValue(
-                                    ViewSize(resolvedSize, proposal: proposal),
-                                    transaction: placementTransaction
-                                )
-                                isPlacedAttr.setValue(true, transaction: placementTransaction)
-                                Transaction.withScopedThreadTransaction(placementTransaction) {
-                                    inner.place(at: position, anchor: anchor, proposal: proposal)
-                                }
-                            },
-                            priority: inner.priority,
-                            explicitAlignment: { inner.explicitAlignment($0, at: $1) }
-                        )
-                    }
-                    // Trait-writing static bodies are promoted to dynamicList by
-                    // _TraitWritingModifier._makeViewList, so the plain static path has no
-                    // ViewList attribute for LayoutProxyAttributes.traitsList.
-                    childProxyAttrs.append(LayoutProxyAttributes(layoutComputer: wrapperLC))
-                    allPreferences.append(childOutputs.preferences)
+                if let layoutComputer = childOutputs._layoutComputer.attribute {
+                    childProxyAttrs.append(
+                        LayoutProxyAttributes(layoutComputer: layoutComputer)
+                    )
+                } else {
+                    childProxyAttrs.append(LayoutProxyAttributes())
                 }
+                allPreferences.append(childOutputs.preferences)
                 return (childOutputs, true)
             }
 
-            let staticLCAttr: Attribute<LayoutComputer> = graph.makeStatefulRule(
-                StaticLayoutComputer(
-                    layoutAttr: root._attribute,
-                    children: childProxyAttrs,
-                    layoutDirection: .leftToRight
-                )
-            )
-
+            graph.mutateStatefulRule(
+                staticLCAttr.identifier,
+                as: StaticLayoutComputer<Self>.self,
+                invalidating: true
+            ) {
+                $0.children = childProxyAttrs
+            }
             layoutComputerAttr = staticLCAttr
             mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)
 
         case .dynamicList(let viewListAttr, _):
-            // DynamicContainerInfo manages item lifecycle. DynamicLayoutComputer consumes its Info.
-            var dynamicInputs = layoutInputs
-            dynamicInputs.stackOrientation = layoutInputs.stackOrientation
-            dynamicInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
-            let containerInfoAttr: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
-                DynamicContainerInfo(
-                    viewListAttr: viewListAttr,
-                    inputs: dynamicInputs
-                )
-            )
-
-            layoutComputerAttr = graph.makeStatefulRule(
+            let dynamicLayoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
                 DynamicLayoutComputer(
                     layoutAttr: root._attribute,
-                    containerInfoAttr: containerInfoAttr
+                    environment: environment,
+                    containerInfoAttr: OptionalAttribute()
                 )
             )
             let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
                 LayoutChildGeometries(
                     parentSize: inputs.size,
                     parentPosition: inputs.position,
-                    layoutComputer: layoutComputerAttr
+                    layoutComputer: dynamicLayoutComputer
                 )
             )
+            let geometryContext = DynamicLayoutViewGeometryContext(
+                geometries: childGeometries
+            )
+            let mapMutator = DynamicLayoutMapMutator { mutation in
+                guard let graph = _AGGraph.current else {
+                    fatalError("DynamicLayoutMap mutation requires an active AG context.")
+                }
+                graph.mutateStatefulRule(
+                    dynamicLayoutComputer.identifier,
+                    as: DynamicLayoutComputer<Self>.self,
+                    invalidating: true
+                ) {
+                    mutation(&$0.layoutMap)
+                }
+            }
+            var dynamicInputs = layoutInputs
+            dynamicInputs.stackOrientation = layoutInputs.stackOrientation
+            dynamicInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
+            dynamicInputs[DynamicLayoutViewGeometryContextInput.self] = geometryContext
+            dynamicInputs[DynamicLayoutMapMutatorInput.self] = mapMutator
+            let containerInfoAttr: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: viewListAttr,
+                    inputs: dynamicInputs
+                )
+            )
+            geometryContext.containerInfo = containerInfoAttr
+            graph.mutateStatefulRule(
+                dynamicLayoutComputer.identifier,
+                as: DynamicLayoutComputer<Self>.self,
+                invalidating: true
+            ) {
+                $0.containerInfoAttr = OptionalAttribute(containerInfoAttr)
+            }
+            layoutComputerAttr = dynamicLayoutComputer
 
             // Two-level dynamic preference reduce.
             // nodeListAttr reads containerInfoAttr to ensure DynamicContainer.Info is current,
@@ -1623,14 +1615,15 @@ extension Layout {
                     // Retained removals still need to render through DisplayList.Key.
                     // Other preferences stay active-only until their lifecycle is modeled.
                     let items = ObjectIdentifier(keyType) == ObjectIdentifier(DisplayList.Key.self) ?
-                        info.activeAndRemovedItems : info.activeItems
-                    return items.flatMap { item in
+                        info.displayItems[...] : info.activeItems
+                    let nodes = items.flatMap { item in
                         item.preferenceOutputs.flatMap { preferences in
                             preferences.values(for: keyType).compactMap {
                                 graph.weakAttributeIfValid(for: $0)
                             }
                         }
                     }
+                    return nodes
                 }
                 let reducedID = _makeDynReduceAttr(keyType, nodeListAttr: nodeListAttr, in: graph)
                 dynMergedPreferences.append(keyType, node: reducedID)
@@ -1774,7 +1767,7 @@ extension EnvironmentValues {
     }
 }
 
-public struct LayoutProperties {
+public struct LayoutProperties: Sendable {
     public var stackOrientation: Axis?
     public init(stackOrientation: Axis? = nil) {
         self.stackOrientation = stackOrientation
@@ -1794,7 +1787,7 @@ struct DynamicStackOrientation: ViewInput {
 private struct DynamicStackOrientationRule<L: Layout>: Rule {
     var layout: Attribute<L>
 
-    func updateValue() -> Axis? {
+    var value: Axis? {
         layout.value._vuiDynamicLayoutProperties.stackOrientation
     }
 }
@@ -1980,6 +1973,10 @@ public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     }
 
     public typealias Body = Never
+}
+
+@available(*, unavailable)
+extension _LayoutRoot: Sendable {
 }
 
 struct DefaultLayoutProperty: PropertyKey {

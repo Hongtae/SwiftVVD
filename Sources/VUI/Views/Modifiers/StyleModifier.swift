@@ -25,7 +25,7 @@ protocol AnyStyleModifierType {
 // StyleModifier: protocol for modifier types wrapping a style.
 // Requirements: var style, init(style:), styleBody(configuration:).
 // ViewModifier conformance with Body == Never.
-protocol StyleModifier: ViewModifier where Body == Never {
+protocol StyleModifier: MultiViewModifier, PrimitiveViewModifier where Body == Never {
     associatedtype Style
     var style: Style { get set }
     init(style: Style)
@@ -223,7 +223,7 @@ struct AnyStyleModifier {
 // PropertyKey with Stack<AnyStyleModifier> value.
 // PrimitiveButtonStyle uses StyleInput<PrimitiveButtonStyleConfiguration>.
 // LabelStyle uses StyleInput<LabelStyleConfiguration>.
-struct StyleInput<Configuration>: GraphInput {
+struct StyleInput<Configuration>: ViewInput {
     typealias Value = Stack<AnyStyleModifier>
     static var defaultValue: Stack<AnyStyleModifier> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
@@ -244,38 +244,88 @@ protocol StyleableView: View {
     associatedtype DefaultStyleModifier: StyleModifier
         where DefaultStyleModifier.StyleConfiguration == Configuration
     static var defaultStyleModifier: DefaultStyleModifier { get }
+    var scrapeableContent: ScrapeableContent.Content? { get }
+}
+
+struct MakeResolvedRepresentation<V: StyleableView>: Rule {
+    var view: Attribute<V>
+
+    var value: V.Body {
+        view.value.body
+    }
+}
+
+struct MakeDefaultRepresentation<V: StyleableView>: Rule {
+    var view: Attribute<V>
+
+    var value: ModifiedContent<V, V.DefaultStyleModifier> {
+        view.value.modifier(V.defaultStyleModifier)
+    }
 }
 
 extension StyleableView {
     static var isScrapeable: Bool { false }
+    var scrapeableContent: ScrapeableContent.Content? { nil }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        var stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
-        if let head = stack.pop() {
-            var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<Configuration>.self)
-            return head._type.makeView(view: view, modifier: head, inputs: poppedInputs)
-        } else {
-            guard !(Body.self is Never.Type) else {
-                fatalError("\(Self.self) may not have Body == Never")
-            }
-            let bodyGV = view[\.body]
-            return Body._makeView(view: bodyGV, inputs: inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
+        var inputs = inputs
+        if inputs.base.isCurrentStyleableView(Self.self) {
+            if let modifier = inputs.popLast(StyleInput<Configuration>.self) {
+                return modifier._type.makeView(
+                    view: view,
+                    modifier: modifier,
+                    inputs: inputs
+                )
+            }
+            let representation = graph.makeRule(
+                MakeDefaultRepresentation(view: view._attribute)
+            )
+            return ModifiedContent<Self, DefaultStyleModifier>._makeView(
+                view: _GraphValue(_attribute: representation),
+                inputs: inputs
+            )
+        }
+        inputs.base.setCurrentStyleableView(Self.self)
+        let representation = graph.makeRule(
+            MakeResolvedRepresentation(view: view._attribute)
+        )
+        return Body._makeView(
+            view: _GraphValue(_attribute: representation),
+            inputs: inputs
+        )
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        var stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
-        if let head = stack.pop() {
-            var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<Configuration>.self)
-            return head._type.makeViewList(view: view, modifier: head, inputs: poppedInputs)
-        } else {
-            guard !(Body.self is Never.Type) else {
-                fatalError("\(Self.self) may not have Body == Never")
-            }
-            let bodyGV = view[\.body]
-            return Body._makeViewList(view: bodyGV, inputs: inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
+        var inputs = inputs
+        if inputs.base.isCurrentStyleableView(Self.self) {
+            if let modifier = inputs.base.popLast(StyleInput<Configuration>.self) {
+                return modifier._type.makeViewList(
+                    view: view,
+                    modifier: modifier,
+                    inputs: inputs
+                )
+            }
+            let representation = graph.makeRule(
+                MakeDefaultRepresentation(view: view._attribute)
+            )
+            return ModifiedContent<Self, DefaultStyleModifier>._makeViewList(
+                view: _GraphValue(_attribute: representation),
+                inputs: inputs
+            )
+        }
+        inputs.base.setCurrentStyleableView(Self.self)
+        let representation = graph.makeRule(
+            MakeResolvedRepresentation(view: view._attribute)
+        )
+        return Body._makeViewList(
+            view: _GraphValue(_attribute: representation),
+            inputs: inputs
+        )
     }
 }

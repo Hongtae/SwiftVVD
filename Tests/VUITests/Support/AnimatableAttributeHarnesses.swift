@@ -28,16 +28,10 @@ final class AnimatableAttributeHarness {
             let transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: time,
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: environment)
-                ),
                 phase: phase,
-                transaction: transaction,
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: transaction
             )
             let subgraph = AGSubgraph()
             animatableSubgraph = subgraph
@@ -193,16 +187,10 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
             let transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: time,
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: environment)
-                ),
                 phase: phase,
-                transaction: transaction,
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: transaction
             )
             let subgraph = AGSubgraph()
             animatableSubgraph = subgraph
@@ -289,16 +277,10 @@ final class DualAnimatableAttributeHarness {
                 let transaction = graph.makeInput(value: Transaction())
                 let environment = graph.makeInput(value: EnvironmentValues())
                 return _GraphInputs(
-                    customInputs: PropertyList(),
                     time: time,
-                    cachedEnvironment: MutableBox(
-                        CachedEnvironment(environment: environment)
-                    ),
                     phase: phase,
-                    transaction: transaction,
-                    changedDebugProperties: 0,
-                    options: [],
-                    mergedInputs: []
+                    environment: environment,
+                    transaction: transaction
                 )
             }
             var firstGraphValue = _GraphValue<_OpacityEffect>(_attribute: firstSource)
@@ -418,16 +400,10 @@ final class AnimatableFrameAttributeHarness {
             transaction = graph.makeInput(value: initialTransaction)
             let environment = graph.makeInput(value: EnvironmentValues())
             var inputs = _GraphInputs(
-                customInputs: PropertyList(),
                 time: time,
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: environment)
-                ),
                 phase: phase,
-                transaction: transaction,
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: transaction
             )
             if supportsVFD {
                 inputs.options.insert(.supportsVariableFrameDuration)
@@ -485,9 +461,11 @@ final class AnimatableFrameAttributeHarness {
     func setFrame(
         position: CGPoint,
         size: ViewSize,
-        transaction: Transaction
+        transaction: Transaction,
+        geometryTransaction: Transaction? = nil
     ) {
         viewGraph.data.withCurrent {
+            self.transaction.setValue(geometryTransaction ?? transaction)
             rawPosition.setValue(position, transaction: transaction)
             rawSize.setValue(size, transaction: transaction)
         }
@@ -545,4 +523,16 @@ final class TestViewRendererHost: ViewRendererHost {
     var viewGraph: ViewGraph { storage }
     var responderNode: ResponderNode? { nil }
     var gestureGraph: GestureGraph? { nil }
+
+    func requestUpdate(after: Double) {}
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        self as? T
+    }
+
+    func updateRootView() {}
+    func updateEnvironment() {}
+    func updateSize() {}
+    func updateSafeArea() {}
+    func updateContainerSize() {}
 }

@@ -10,14 +10,6 @@ import Foundation
 struct ResettableLazyLayoutRoot<Content>: View where Content: View {
     var content: Content
 
-    struct MakeAdaptor<LayoutType: LazyLayout>: Rule {
-        var root: Attribute<LayoutType>
-
-        func updateValue() -> LazyLayoutAdaptor_V1<LayoutType> {
-            LazyLayoutAdaptor_V1(layout: root.value)
-        }
-    }
-
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
@@ -49,13 +41,11 @@ extension View {
 protocol LazyLayoutNamespace {
 }
 
-typealias _ProposedSize = ProposedViewSize
-
 @dynamicMemberLookup
 struct SizeAndSpacingContext {
     var context: AnyRuleContext
     var owner: AGAttribute?
-    var environment: Attribute<EnvironmentValues>
+    var _environment: Attribute<EnvironmentValues>
 
     init(
         context: AnyRuleContext,
@@ -64,11 +54,11 @@ struct SizeAndSpacingContext {
     ) {
         self.context = context
         self.owner = owner
-        self.environment = environment
+        self._environment = environment
     }
 
     subscript<Value>(dynamicMember keyPath: KeyPath<EnvironmentValues, Value>) -> Value {
-        environment.value[keyPath: keyPath]
+        _environment.value[keyPath: keyPath]
     }
 
     mutating func update(_ context: AnyRuleContext) {
@@ -76,7 +66,7 @@ struct SizeAndSpacingContext {
     }
 }
 
-struct _LazyLayout_Properties: LazyLayoutNamespace {
+struct _LazyLayout_Properties: LazyLayoutNamespace, Equatable {
     var axes: Axis.Set
     var multipleViewAxes: Axis.Set
 
@@ -101,7 +91,7 @@ enum _LazyLayout_PrefetchResult: UInt8, Hashable {
     }
 }
 
-struct ScrollPrefetchState: Equatable, PropertyKey {
+struct ScrollPrefetchState: ViewInput {
     typealias Value = OptionalAttribute<ScrollPrefetchState>
 
     static var defaultValue: OptionalAttribute<ScrollPrefetchState> {
@@ -137,7 +127,7 @@ struct ScrollPrefetchState: Equatable, PropertyKey {
         host.asyncTransaction(
             transaction,
             id: Transaction.id,
-            mutation: AssignmentGraphMutation(attribute: attribute, value: self),
+            mutation: AssignmentGraphMutation(attribute, newValue: self),
             style: .deferred,
             mayDeferUpdate: false
         )
@@ -151,7 +141,7 @@ enum LazyPrefetchOperation {
     case layout
     case outputs
     case display(LazyLayoutCacheItem)
-    case layoutDisplay(LazyLayoutCacheItem, ProposedViewSize)
+    case layoutDisplay(LazyLayoutCacheItem, _ProposedSize)
     case removal
 }
 
@@ -202,16 +192,22 @@ struct LazySubviewMaterialization<LayoutType: LazyLayout>: StatefulRule {
     }
 }
 
-private struct LazyDynamicStackOrientationRule<L: Layout>: Rule {
+private struct LazyDynamicStackOrientationRule<L: LazyLayout>: Rule {
     var layout: Attribute<L>
 
-    func updateValue() -> Axis? {
+    var value: Axis? {
         _ = layout.value
-        return L.layoutProperties.stackOrientation
+        if L.layoutProperties.axes.contains(.horizontal) {
+            return .horizontal
+        }
+        if L.layoutProperties.axes.contains(.vertical) {
+            return .vertical
+        }
+        return nil
     }
 }
 
-struct UpdateViewCache: StatefulRule {
+struct UpdateViewCache: StatefulRule, ObservedAttribute {
     typealias Value = Void
 
     var phase: Attribute<Phase>
@@ -239,12 +235,13 @@ struct UpdateViewCache: StatefulRule {
     }
 }
 
-struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule {
+struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribute {
     typealias Value = [_LazyLayout_PlacedSubview]
 
     var layout: Attribute<LayoutType>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
+    var containerSize: OptionalAttribute<ViewSize>
     var environment: Attribute<EnvironmentValues>
     var layoutDirection: Attribute<LayoutDirection>
     var accessibilityEnabled: Attribute<Bool>
@@ -255,6 +252,7 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule {
         layout: Attribute<LayoutType>,
         size: Attribute<ViewSize>,
         position: Attribute<CGPoint>,
+        containerSize: OptionalAttribute<ViewSize>,
         environment: Attribute<EnvironmentValues>,
         layoutDirection: Attribute<LayoutDirection>,
         accessibilityEnabled: Attribute<Bool>,
@@ -263,6 +261,7 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule {
         self.layout = layout
         self.size = size
         self.position = position
+        self.containerSize = containerSize
         self.environment = environment
         self.layoutDirection = layoutDirection
         self.accessibilityEnabled = accessibilityEnabled
@@ -280,7 +279,7 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule {
         let placements = makePlacements(cache: cache)
         cache.commitPlacedSubviews(placements.subviews)
         cache.outerPlacedRect = placements.validRect
-        cache.containingSize = size.value.value
+        cache.containingSize = containerSize.attribute?.value.value ?? size.value.value
         _AGGraph.setStatefulOutput(placements.subviews)
         if shouldInvalidateSize(previous: previousSubviews, current: placements) {
             if let layoutComputer = reference.layoutComputer {
@@ -399,7 +398,7 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule {
     }
 }
 
-struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
+struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule, AsyncAttribute {
     typealias Value = Void
 
     var _layout: Attribute<LayoutType>
@@ -504,7 +503,7 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
                 next = advance.result
                 didNotify = advance.didNotify
             case .layoutDisplay(let item, let proposal):
-                item.beginPrefetching(at: proposal)
+                item.beginPrefetching(at: ProposedViewSize(proposal))
                 let advance = cache.advancePrefetchPhaseForDisplayWithNotifyFlag(item: item)
                 next = advance.result
                 didNotify = advance.didNotify
@@ -526,7 +525,7 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
         offset: Int,
         owner: AGAttribute
     ) -> _LazyLayout_PrefetchResult {
-        let axes = LayoutType._lazyLayoutProperties.axes
+        let axes = LayoutType.layoutProperties.axes
         if axes.contains(.horizontal),
            !info.edges.intersection(.horizontal).isEmpty {
             let result = makeLayoutPrefetchResult(
@@ -577,71 +576,74 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
             owner: owner,
             environment: _environment
         )
+        let placementContext = _LazyLayout_PlacementContext(
+            base: sizingContext,
+            size: _size.value
+        )
         let subviews = cache.subviews(context: ruleContext)
-        let proposedSize = ProposedViewSize(_size.value.value)
 
         if let layout = stackLayout(LazyHStackLayout.self),
            axis == .horizontal {
-            var stackCache = _LazyStack_Cache<LazyHStackLayout>(
+            let stackCache = _LazyStack_Cache<LazyHStackLayout>(
                 visibleLength: prefetchVisibleLength(axis: axis)
             )
-            return enqueueLayoutDisplayOperations(
-                from: layout.proposeSizes(
-                    at: offset,
-                    subviews: subviews,
-                    context: sizingContext,
-                    cache: &stackCache,
-                    in: proposedSize
-                )
+            var proposedSizes = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
+                at: offset,
+                subviews: subviews,
+                context: placementContext,
+                cache: stackCache,
+                in: &proposedSizes
             )
+            return enqueueLayoutDisplayOperations(from: proposedSizes)
         }
 
         if let layout = stackLayout(LazyVStackLayout.self),
            axis == .vertical {
-            var stackCache = _LazyStack_Cache<LazyVStackLayout>(
+            let stackCache = _LazyStack_Cache<LazyVStackLayout>(
                 visibleLength: prefetchVisibleLength(axis: axis)
             )
-            return enqueueLayoutDisplayOperations(
-                from: layout.proposeSizes(
-                    at: offset,
-                    subviews: subviews,
-                    context: sizingContext,
-                    cache: &stackCache,
-                    in: proposedSize
-                )
+            var proposedSizes = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
+                at: offset,
+                subviews: subviews,
+                context: placementContext,
+                cache: stackCache,
+                in: &proposedSizes
             )
+            return enqueueLayoutDisplayOperations(from: proposedSizes)
         }
 
         if let layout = stackLayout(LazyHGridLayout.self),
            axis == .horizontal {
-            var stackCache = _LazyStack_Cache<LazyHGridLayout>(
+            let stackCache = _LazyStack_Cache<LazyHGridLayout>(
                 visibleLength: prefetchVisibleLength(axis: axis)
             )
-            return enqueueLayoutDisplayOperations(
-                from: layout.proposeSizes(
-                    at: offset,
-                    subviews: subviews,
-                    context: sizingContext,
-                    cache: &stackCache,
-                    in: proposedSize
-                )
+            var proposedSizes = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
+                at: offset,
+                subviews: subviews,
+                context: placementContext,
+                cache: stackCache,
+                in: &proposedSizes
             )
+            return enqueueLayoutDisplayOperations(from: proposedSizes)
         }
 
         if let layout = stackLayout(LazyVGridLayout.self),
            axis == .vertical {
-            var stackCache = _LazyStack_Cache<LazyVGridLayout>(
+            let stackCache = _LazyStack_Cache<LazyVGridLayout>(
                 visibleLength: prefetchVisibleLength(axis: axis)
             )
-            return enqueueLayoutDisplayOperations(
-                from: layout.proposeSizes(
-                    at: offset,
-                    subviews: subviews,
-                    context: sizingContext,
-                    cache: &stackCache,
-                    in: proposedSize
-                )
+            var proposedSizes = _LazyLayout_ProposedSizes()
+            layout.proposeSizes(
+                at: offset,
+                subviews: subviews,
+                context: placementContext,
+                cache: stackCache,
+                in: &proposedSizes
             )
+            return enqueueLayoutDisplayOperations(from: proposedSizes)
         }
 
         return .none
@@ -653,9 +655,6 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
         let layout = _layout.value
         if let layout = layout as? StackLayoutType {
             return layout
-        }
-        if let adaptor = layout as? LazyLayoutAdaptor_V1<StackLayoutType> {
-            return adaptor.layout
         }
         return nil
     }
@@ -777,7 +776,7 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule {
     }
 }
 
-struct LazyLayoutCacheSection: Hashable {
+struct LazyLayoutCacheSection: Equatable {
     var id: UInt32?
     var isHeader: Bool
     var isFooter: Bool
@@ -1009,14 +1008,9 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
 
                 var index = traversalIndex
                 var shouldStop = false
-                let id = sublist.id.elementID(at: index)
+                let id = sublist.id.elementID(at: offset)
                 let data = _LazyLayout_Subview.Data(
-                    elements: _ViewList_SubgraphElements(
-                        base: _LazyLayout_SingleElement(
-                            base: sublist.elements,
-                            elementIndex: offset
-                        )
-                    ),
+                    elements: sublist.elements,
                     id: id,
                     traits: sublist.traits,
                     list: sublist.list,
@@ -1350,56 +1344,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
 
 }
 
-private struct _LazyLayout_SingleElement: _ViewList_Elements {
-    var base: any _ViewList_Elements
-    var elementIndex: Int
-
-    var count: Int {
-        1
-    }
-
-    @discardableResult
-    func makeElements(
-        from: inout Int,
-        inputs: _ViewInputs,
-        indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
-    ) -> (_ViewOutputs?, Bool) {
-        guard from == 0 else {
-            from -= 1
-            return (nil, true)
-        }
-
-        var shouldContinue = true
-        let output = base.makeOneElement(
-            at: elementIndex,
-            inputs: inputs,
-            indirectMap: indirectMap
-        ) { elementInputs, makeView in
-            let (resolved, keepGoing) = body(elementInputs, makeView)
-            shouldContinue = keepGoing
-            return resolved
-        }
-        return (output, shouldContinue)
-    }
-
-    func tryToReuseElement(
-        at index: Int,
-        by other: any _ViewList_Elements,
-        at otherIndex: Int,
-        indirectMap: IndirectAttributeMap,
-        testOnly: Bool
-    ) -> Bool {
-        base.tryToReuseElement(
-            at: elementIndex + index,
-            by: other,
-            at: otherIndex,
-            indirectMap: indirectMap,
-            testOnly: testOnly
-        )
-    }
-}
-
 struct _LazyLayout_Section: LazyLayoutNamespace {
     struct ID: Hashable {
         var id: UInt32
@@ -1566,10 +1510,18 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         }
     }
 
-    enum Kind: Hashable {
+    enum Kind: Hashable, CustomDebugStringConvertible {
         case normal
         case header
         case footer
+
+        var debugDescription: String {
+            switch self {
+            case .normal: "normal"
+            case .header: "header"
+            case .footer: "footer"
+            }
+        }
     }
 
     func proposeSize(_ proposal: ProposedViewSize) -> _LazyLayout_ProposedSubview {
@@ -1579,7 +1531,7 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         )
         return _LazyLayout_ProposedSubview(
             item: item,
-            proposal: proposal,
+            proposal: _ProposedSize(proposal),
             index: index
         )
     }
@@ -1596,7 +1548,7 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
     ) -> (length: CGFloat, spacing: CGFloat) {
         let item = cache.item(data: data)
         let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
-        let length = layoutComputer.lengthThatFits(size, in: axis)
+        let length = layoutComputer.lengthThatFits(_ProposedSize(size), in: axis)
         guard let predecessor else {
             return (length, 0)
         }
@@ -1608,7 +1560,10 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
             predecessorItem.outputs._layoutComputer.attribute?.value ?? .defaultValue
         return (
             length,
-            predecessorLayoutComputer.spacing.distance(to: layoutComputer.spacing, along: axis)
+            ViewSpacing(predecessorLayoutComputer.spacing()).distance(
+                to: ViewSpacing(layoutComputer.spacing()),
+                along: axis
+            )
         )
     }
 
@@ -1623,7 +1578,7 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
     }
 }
 
-final class LazyLayoutCacheItem {
+final class LazyLayoutCacheItem: LazyLayoutNamespace {
     struct State: Hashable {
         var resetDelta: UInt32
         var phase: TransitionPhase
@@ -1813,7 +1768,7 @@ struct LazyLayoutCacheChildren {
     }
 }
 
-class LazyLayoutViewCache: LazyLayoutNamespace {
+class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     struct LeastRecentlyUsedItems {
         private(set) var usedSeed: UInt32 = 0
         var maxIdle: Int = 16
@@ -1880,6 +1835,12 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
     var childCaches: [_ViewList_ID.Canonical: LazyLayoutCacheChildren]
     var childCacheSeeds: [_ViewList_ID.Canonical: Int]
     var nextChildCacheSeed: Int
+
+    var layoutType: Any.Type { Never.self }
+
+    var description: String {
+        "LazyLayoutViewCache<\(String(describing: layoutType))>"
+    }
 
     init(
         viewGraph: GraphHost?,
@@ -1964,7 +1925,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
         }
         invalidationTTL &-= 1
 
-        let target = layoutComputer.asWeak().raw
+        let target = layoutComputer.asWeak().base
         guard target.isValid(in: graph) else {
             return
         }
@@ -2456,11 +2417,11 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
     }
 
     func signalPrefetch() {
-        let signal = _weakPrefetchSignal.raw
+        let signal = _weakPrefetchSignal.base
         Update.enqueueAction { [weak viewGraph] in
             guard let viewGraph else { return }
             viewGraph.data.withCurrent {
-                let graph = viewGraph.data.graph
+                let graph = viewGraph.graph
                 guard signal.isValid(in: graph) else { return }
                 graph.invalidateAttribute(signal.toStrong())
             }
@@ -2521,7 +2482,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
             let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
             var transitionPhaseSetters: [_TransitionPhaseSetter] = []
             var lazyTransactionAttr: Attribute<Transaction>?
-            let outputs = data.elements.makeOneElement(at: 0, inputs: childInputs) {
+            let outputs = data.elements.makeOneElement(at: data.id.index, inputs: childInputs) {
                 elementInputs,
                 makeView in
                 var elementInputs = elementInputs
@@ -2567,7 +2528,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
             state: materialized.state,
             list: data.list.map(OptionalAttribute.init) ?? OptionalAttribute<any ViewList>(),
             elements: data.elements,
-            elementIndex: 0,
+            elementIndex: data.id.index,
             id: data.id,
             reuseIdentifier: data.id.reuseIdentifier,
             section: data.section,
@@ -2598,6 +2559,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
         transition: AnyTransition?
     ) {
         item.elements = data.elements
+        item.elementIndex = data.id.index
         item._list = data.list.map(OptionalAttribute.init) ?? OptionalAttribute<any ViewList>()
         item.id = data.id
         item.reuseIdentifier = data.id.reuseIdentifier
@@ -2617,6 +2579,8 @@ class LazyLayoutViewCache: LazyLayoutNamespace {
 final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     var _layout: Attribute<LayoutType>
     var cacheState: Attribute<LayoutType.Cache>
+
+    override var layoutType: Any.Type { LayoutType.self }
 
     init(
         layout: Attribute<LayoutType>,
@@ -2652,12 +2616,12 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
 
     override var supportsPrefetching: Bool {
         guard AGSubgraphIsValid(parentSubgraph) else { return false }
-        return !LayoutType._lazyLayoutProperties.axes.intersection(_nearestScrollableAxes.value).isEmpty
+        return !LayoutType.layoutProperties.axes.intersection(_nearestScrollableAxes.value).isEmpty
     }
 
     override func reset() {
         let subviews = LayoutSubviews(subviews: [], layoutDirection: _layoutDirection.value)
-        cacheState.setValue(_layout.value.makeCache(subviews: subviews))
+        cacheState.setValue(LayoutType.initialCache)
         super.reset()
     }
 }
@@ -2665,9 +2629,23 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
 struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableContainer {
     var position: WeakAttribute<CGPoint>
     var transform: WeakAttribute<ViewTransform>
-    var parent: WeakAttribute<any Scrollable>
-    var children: WeakAttribute<[any Scrollable]>
+    var _parent: WeakAttribute<any Scrollable>
+    var _children: WeakAttribute<[any Scrollable]>
     var cache: _LazyLayoutViewCache<LayoutType>?
+
+    init(
+        position: WeakAttribute<CGPoint>,
+        transform: WeakAttribute<ViewTransform>,
+        parent: WeakAttribute<any Scrollable>,
+        children: WeakAttribute<[any Scrollable]>,
+        cache: _LazyLayoutViewCache<LayoutType>?
+    ) {
+        self.position = position
+        self.transform = transform
+        self._parent = parent
+        self._children = children
+        self.cache = cache
+    }
 
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
         placedSubviews.map { $0.id.canonicalID }
@@ -2691,7 +2669,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
         }
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         var closest: (subview: ScrollableCollectionSubview, distance: CGFloat)?
         forEachVisibleSubview { subview, stop in
             let distance = subview.frame.midpointDistance(to: rect)
@@ -2737,12 +2715,12 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
         return collectionViewID(at: index)
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         switch axis {
         case .horizontal:
-            return LayoutType._lazyLayoutProperties.multipleViewAxes.contains(.horizontal)
+            return LayoutType.layoutProperties.multipleViewAxes.contains(.horizontal)
         case .vertical:
-            return LayoutType._lazyLayoutProperties.multipleViewAxes.contains(.vertical)
+            return LayoutType.layoutProperties.multipleViewAxes.contains(.vertical)
         }
     }
 
@@ -2778,12 +2756,32 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
         }
     }
 
-    var containerParentScrollable: (any Scrollable)? {
+    var parent: (any Scrollable)? {
         resolvedParent
     }
 
-    var containerChildScrollables: [any Scrollable] {
-        resolvedChildren
+    var children: [any Scrollable]? {
+        value(for: _children)
+    }
+
+    func makeTarget<ID: Hashable>(
+        for id: ID
+    ) -> ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)? {
+        guard let cache,
+              let offset = cache._list.value.firstOffset(
+                forID: id,
+                style: _ViewList_IteratorStyle()
+              ),
+              let canonicalID = collectionViewID(at: offset) else {
+            return nil
+        }
+        let anchor = Transaction.current.scrollTargetAnchor
+        let context = _AGGraph.currentRuleContextAttribute.map {
+            AnyRuleContext(attribute: $0)
+        }
+        return { _, _ in
+            makeTarget(for: canonicalID, anchor: anchor, context: context)
+        }
     }
 
     static var accessibilityRole: AccessibilityLayoutRole? {
@@ -2806,11 +2804,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
     }
 
     private var resolvedParent: (any Scrollable)? {
-        value(for: parent)
-    }
-
-    private var resolvedChildren: [any Scrollable] {
-        value(for: children) ?? []
+        value(for: _parent)
     }
 
     private func collectionViewID(at index: Int) -> _ViewList_ID.Canonical? {
@@ -2965,7 +2959,7 @@ extension _LazyLayoutViewCache: LazyScrollableTargetProducing where LayoutType: 
                 ) { subview, point, proposal, anchor in
                     guard lazyCollectionID(subview.data.id, matches: id) else { return }
                     target = subview.place(at: _Placement(
-                        proposedSize: proposal.replacingUnspecifiedDimensions(),
+                        proposedSize: proposal.fixingUnspecifiedDimensions(),
                         anchoring: anchor,
                         at: placementPoint(for: point, at: groupPosition)
                     ))
@@ -3042,7 +3036,7 @@ struct _LazyLayout_PlacedSubview {
 
     var size: CGSize {
         let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
-        return layoutComputer.sizeThatFits(ProposedViewSize(placement.proposedSize))
+        return layoutComputer.sizeThatFits(_ProposedSize(placement.proposedSize))
     }
 
     var origin: CGPoint {
@@ -3115,7 +3109,7 @@ private func lazyChildGeometries(
                 guideComputer: layoutComputer,
                 size: ViewSize(
                     frame.size,
-                    proposal: ProposedViewSize(placedSubview.placement.proposedSize)
+                    proposal: _ProposedSize(placedSubview.placement.proposedSize)
                 )
             )
         )
@@ -3921,12 +3915,10 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
             return
         }
 
-        if index < section.content.baseIndex {
-            var headerFrom = max(0, index - section.header.baseIndex)
-            _ = section.header.apply(from: &headerFrom, style: style) { _, subview, childStop in
-                placeBoundary(subview: subview)
-                childStop = shouldStop()
-            }
+        var headerFrom = 0
+        _ = section.header.apply(from: &headerFrom, style: style) { _, subview, childStop in
+            placeBoundary(subview: subview)
+            childStop = shouldStop()
         }
         guard !shouldStop() else {
             return
@@ -4071,7 +4063,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
             emit(
                 subview,
                 at: boundaryPoint(),
-                proposal: proposal,
+                proposal: _ProposedSize(proposal),
                 anchor: .topLeading
             )
         }
@@ -4169,11 +4161,11 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
     mutating func emit(
         _ subview: _LazyLayout_Subview,
         at point: CGPoint,
-        proposal: ProposedViewSize,
+        proposal: _ProposedSize,
         anchor: UnitPoint
     ) -> _LazyLayout_PlacedSubview {
         let placed = subview.place(at: _Placement(
-            proposedSize: proposal.replacingUnspecifiedDimensions(),
+            proposedSize: proposal.fixingUnspecifiedDimensions(),
             anchoring: anchor,
             at: point
         ))
@@ -4231,7 +4223,6 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
     var visibleLength: CGFloat
     var containerLength: CGFloat
     var estimations: EstimationCache
-    var prefetchStride: Int
 
     init(
         minor: MinorProperties<LayoutType>? = nil,
@@ -4241,8 +4232,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
         visibleExtent: Range<CGFloat> = CGFloat.zero..<CGFloat.zero,
         visibleLength: CGFloat = .infinity,
         containerLength: CGFloat = 0,
-        estimations: EstimationCache = EstimationCache(),
-        prefetchStride: Int = 1
+        estimations: EstimationCache = EstimationCache()
     ) {
         self.minor = minor
         self.endIndex = endIndex
@@ -4252,7 +4242,6 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
         self.visibleLength = visibleLength
         self.containerLength = containerLength
         self.estimations = estimations
-        self.prefetchStride = prefetchStride
     }
 
     mutating func reset() {
@@ -4324,7 +4313,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
                 containerLength: containerLength
             ),
             layoutDirection: .leftToRight,
-            axes: LayoutType._lazyLayoutProperties.axes,
+            axes: LayoutType.layoutProperties.axes,
             pinnedViews: pinnedViews
         )
 
@@ -4661,7 +4650,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
               visibleLength > 0 else {
             return true
         }
-        let scaledOffset = CGFloat(max(0, offset)) * CGFloat(max(1, prefetchStride))
+        let scaledOffset = CGFloat(max(0, offset)) * CGFloat(max(1, minor?.count ?? 1))
         return scaledOffset <= floor(visibleLength) * 0.75
     }
 }
@@ -4698,14 +4687,14 @@ struct _LazyLayout_EstimatedPlacements: LazyLayoutNamespace {
     }
 }
 
-struct LazyViewPhase: Rule {
+struct LazyViewPhase: Rule, AsyncAttribute {
     typealias Value = Phase
 
     var basePhase: Attribute<Phase>
     var secondaryPhase: OptionalAttribute<Phase>
     var state: Attribute<LazyLayoutCacheItem.State>
 
-    func updateValue() -> Phase {
+    var value: Phase {
         var phase = basePhase.value
         if let secondaryPhase = secondaryPhase.attribute {
             phase.merge(secondaryPhase.value)
@@ -4720,7 +4709,7 @@ struct LazyViewPhase: Rule {
     }
 }
 
-struct LazyTransaction: StatefulRule, RemovableAttribute {
+struct LazyTransaction: StatefulRule, RemovableAttribute, AsyncAttribute {
     typealias Value = Transaction
 
     var _transaction: Attribute<Transaction>
@@ -4776,9 +4765,71 @@ private final class LazyLayoutCacheItemAnimationListener: AnimationListener, @un
     }
 }
 
-protocol LazyLayout: Layout, _VariadicView_UnaryViewRoot {
+protocol LazyLayout: Animatable, _VariadicView_UnaryViewRoot {
+    associatedtype Cache
+
+    static var layoutProperties: _LazyLayout_Properties { get }
+    static var initialCache: Cache { get }
+    func sizeThatFits(
+        proposedSize: ProposedViewSize,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_SizeAndSpacingContext,
+        cache: Cache
+    ) -> CGSize
+    func spacing(
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_SizeAndSpacingContext,
+        cache: Cache
+    ) -> Spacing
+    func place(
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: inout Cache,
+        in placements: inout _LazyLayout_Placements
+    )
+    func estimatedPlacement(
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_EstimatedPlacementContext,
+        cache: Cache,
+        in placements: inout _LazyLayout_EstimatedPlacements
+    )
+    func proposeSizes(
+        at offset: Int,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: Cache,
+        in proposedSizes: inout _LazyLayout_ProposedSizes
+    )
+    func initialPlacement(
+        newIndex: Int,
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasInsertedToSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement
+    func finalPlacement(
+        oldIndex: Int,
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasRemovedFromSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement
+    func firstIndex<ID: Hashable>(
+        of id: ID,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext
+    ) -> Int?
+    func boundingRect(
+        at index: Int,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: Cache
+    ) -> CGRect?
     var pinnedViews: PinnedScrollableViews { get }
-    static var _lazyLayoutProperties: _LazyLayout_Properties { get }
 }
 
 private protocol LazyLayoutAccessibilityRoleProviding {
@@ -4793,130 +4844,53 @@ private enum LazyLayoutAccessibilityRole {
     }
 }
 
-struct LazyLayoutAdaptor_V1<LayoutType: LazyLayout>: LazyLayout {
-    var layout: LayoutType
-
-    typealias Body = Never
-    typealias Cache = LayoutType.Cache
-    typealias AnimatableData = LayoutType.AnimatableData
-
-    static var layoutProperties: LayoutProperties {
-        LayoutType.layoutProperties
-    }
-
-    static var _lazyLayoutProperties: _LazyLayout_Properties {
-        LayoutType._lazyLayoutProperties
-    }
-
-    var animatableData: AnimatableData {
-        get { layout.animatableData }
-        set { layout.animatableData = newValue }
-    }
-
-    var pinnedViews: PinnedScrollableViews {
-        layout.pinnedViews
-    }
-
-    func makeCache(subviews: Subviews) -> Cache {
-        layout.makeCache(subviews: subviews)
-    }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        layout.updateCache(&cache, subviews: subviews)
-    }
-
-    func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
-        layout.spacing(subviews: subviews, cache: &cache)
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func explicitAlignment(
-        of guide: HorizontalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        layout.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
-
-    func explicitAlignment(
-        of guide: VerticalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        layout.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
-}
-
-extension LazyLayoutAdaptor_V1: LazyLayoutAccessibilityRoleProviding {
-    static var lazyAccessibilityRole: AccessibilityLayoutRole? {
-        LazyLayoutAccessibilityRole.role(for: LayoutType.self)
-    }
-}
-
 extension LazyLayout {
     static var _viewListOptions: Int {
         Int(_ViewListInputs.sectionListOptions)
     }
 
-    static var _lazyLayoutProperties: _LazyLayout_Properties {
-        switch Self.layoutProperties.stackOrientation {
-        case .horizontal:
-            return _LazyLayout_Properties(axes: .horizontal)
-        case .vertical:
-            return _LazyLayout_Properties(axes: .vertical)
-        case nil:
-            return _LazyLayout_Properties()
-        }
+    static var layoutProperties: _LazyLayout_Properties {
+        _LazyLayout_Properties()
     }
 
-    static func _makeView(
-        root: _GraphValue<Self>,
-        inputs: _ViewInputs,
-        body: (_Graph, _ViewInputs) -> _ViewListOutputs
-    ) -> _ViewOutputs {
-        var lazyInputs = inputs
-        lazyInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
-        return Self._makeLayoutView(root: root, inputs: lazyInputs, body: body)
+    func spacing(
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_SizeAndSpacingContext,
+        cache: Cache
+    ) -> Spacing {
+        Spacing()
     }
+
+    func initialPlacement(
+        newIndex: Int,
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasInsertedToSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement {
+        newPlacedSubviews[newIndex].placement
+    }
+
+    func finalPlacement(
+        oldIndex: Int,
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasRemovedFromSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement {
+        oldPlacedSubviews[oldIndex].placement
+    }
+
 }
 
 protocol LazyStack: LazyLayout {
     associatedtype MinorGeometry: Equatable
 
     static var majorAxis: Axis { get }
-
     var spacing: CGFloat? { get }
     var headerAnchor: UnitPoint { get }
     var footerAnchor: UnitPoint { get }
@@ -4936,93 +4910,190 @@ protocol LazyStack: LazyLayout {
     )
 }
 
-extension LazyLayoutAdaptor_V1: LazyStack where LayoutType: LazyStack {
-    typealias MinorGeometry = LayoutType.MinorGeometry
-
-    static var majorAxis: Axis {
-        LayoutType.majorAxis
+extension LazyStack where Cache == _LazyStack_Cache<Self> {
+    static var initialCache: Cache {
+        _LazyStack_Cache()
     }
 
-    var spacing: CGFloat? {
-        layout.spacing
-    }
-
-    var headerAnchor: UnitPoint {
-        layout.headerAnchor
-    }
-
-    var footerAnchor: UnitPoint {
-        layout.footerAnchor
-    }
-
-    func flexibleMinorSize(subviews: _LazyLayout_Subviews) -> CGFloat {
-        layout.flexibleMinorSize(subviews: subviews)
-    }
-
-    func minorGeometry(updatingSize size: inout CGFloat) -> (count: Int, data: MinorGeometry) {
-        layout.minorGeometry(updatingSize: &size)
-    }
-
-    func lengthAndSpacing(
-        subviews: [_LazyLayout_Subview],
-        predecessors: [_LazyLayout_Subview]?,
-        minorGeometry: MinorGeometry
-    ) -> (length: CGFloat, spacing: CGFloat) {
-        layout.lengthAndSpacing(
+    func sizeThatFits(
+        proposedSize: ProposedViewSize,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_SizeAndSpacingContext,
+        cache: Cache
+    ) -> CGSize {
+        let fallback = context.containerSize
+        let resolvedSize = proposedSize.replacingUnspecifiedDimensions(by: fallback)
+        let minor = lazyMinorProperties(size: resolvedSize, subviews: subviews)
+        var cache = cache
+        let placements = cache.place(
+            stack: self,
             subviews: subviews,
-            predecessors: predecessors,
-            minorGeometry: minorGeometry
+            from: 0,
+            position: 0,
+            visible: 0..<CGFloat.greatestFiniteMagnitude,
+            visibleLength: .infinity,
+            containerLength: lazyMajorLength(resolvedSize),
+            minor: minor,
+            pinnedViews: pinnedViews
         )
+        let measuredMajor: CGFloat
+        if placements.validRect.isNull {
+            measuredMajor = 0
+        } else {
+            switch Self.majorAxis {
+            case .horizontal:
+                measuredMajor = max(0, placements.validRect.maxX)
+            case .vertical:
+                measuredMajor = max(0, placements.validRect.maxY)
+            }
+        }
+        switch Self.majorAxis {
+        case .horizontal:
+            return CGSize(
+                width: proposedSize.width ?? measuredMajor,
+                height: proposedSize.height ?? minor.size
+            )
+        case .vertical:
+            return CGSize(
+                width: proposedSize.width ?? minor.size,
+                height: proposedSize.height ?? measuredMajor
+            )
+        }
     }
 
     func place(
-        subviews: [_LazyLayout_Subview],
-        length: CGFloat?,
-        minorGeometry: MinorGeometry,
-        emit: (_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint) -> Void
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: inout Cache,
+        in placements: inout _LazyLayout_Placements
     ) {
-        layout.place(
+        let minor = lazyMinorProperties(size: context.size, subviews: subviews)
+        let visible = lazyVisibleRange(context.nearestVisibleRect)
+        let start = cache.resolveIndexAndPosition(
+            stack: self,
             subviews: subviews,
-            length: length,
-            minorGeometry: minorGeometry,
-            emit: emit
+            visible: visible,
+            minor: minor
         )
+        placements = cache.place(
+            stack: self,
+            subviews: subviews,
+            from: start.index,
+            position: start.position,
+            visible: visible,
+            visibleLength: max(0, visible.upperBound - visible.lowerBound),
+            containerLength: lazyMajorLength(context.size),
+            minor: minor,
+            pinnedViews: pinnedViews
+        )
+    }
+
+    func estimatedPlacement(
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_EstimatedPlacementContext,
+        cache: Cache,
+        in placements: inout _LazyLayout_EstimatedPlacements
+    ) {
+        var cache = cache
+        var resolved = _LazyLayout_Placements()
+        place(
+            subviews: subviews,
+            context: context.base,
+            cache: &cache,
+            in: &resolved
+        )
+        placements.index = resolved.subviews.first?.index
+        placements.subviews = resolved.subviews
+    }
+
+    func firstIndex<ID: Hashable>(
+        of id: ID,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext
+    ) -> Int? {
+        _ = context
+        return subviews.firstIndex(forID: id)
+    }
+
+    func boundingRect(
+        at index: Int,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: Cache
+    ) -> CGRect? {
+        var searchContext = context
+        searchContext.position = .zero
+        switch Self.majorAxis {
+        case .horizontal:
+            searchContext.size.width = .greatestFiniteMagnitude
+        case .vertical:
+            searchContext.size.height = .greatestFiniteMagnitude
+        }
+        var cache = cache
+        var placements = _LazyLayout_Placements()
+        place(
+            subviews: subviews,
+            context: searchContext,
+            cache: &cache,
+            in: &placements
+        )
+        return placements.subviews.first(where: { $0.index == index })?.frame
+    }
+
+    private func lazyMinorProperties(
+        size: CGSize,
+        subviews: _LazyLayout_Subviews
+    ) -> MinorProperties<Self> {
+        var minorSize = lazyMinorLength(size)
+        if !minorSize.isFinite || minorSize < 0 {
+            minorSize = flexibleMinorSize(subviews: subviews)
+        }
+        if !minorSize.isFinite || minorSize < 0 {
+            minorSize = 0
+        }
+        let minor = minorGeometry(updatingSize: &minorSize)
+        return MinorProperties(
+            count: max(1, minor.count),
+            size: minorSize,
+            geometry: minor.data
+        )
+    }
+
+    private func lazyMajorLength(_ size: CGSize) -> CGFloat {
+        switch Self.majorAxis {
+        case .horizontal: size.width
+        case .vertical: size.height
+        }
+    }
+
+    private func lazyMinorLength(_ size: CGSize) -> CGFloat {
+        switch Self.majorAxis {
+        case .horizontal: size.height
+        case .vertical: size.width
+        }
+    }
+
+    private func lazyVisibleRange(_ rect: CGRect) -> Range<CGFloat> {
+        let lower: CGFloat
+        let upper: CGFloat
+        switch Self.majorAxis {
+        case .horizontal:
+            lower = rect.minX
+            upper = rect.maxX
+        case .vertical:
+            lower = rect.minY
+            upper = rect.maxY
+        }
+        guard lower.isFinite,
+              upper.isFinite,
+              upper > lower else {
+            return 0..<CGFloat.greatestFiniteMagnitude
+        }
+        return lower..<upper
     }
 }
 
-extension ResettableLazyLayoutRoot {
-    static func _makeLazyLayoutView<Root, TreeContent>(
-        view: _GraphValue<Self>,
-        inputs: _ViewInputs
-    ) -> _ViewOutputs
-    where Content == _VariadicView.Tree<Root, TreeContent>,
-          Root: LazyStack,
-          TreeContent: View {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-
-        var lazyInputs = inputs
-        lazyInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
-        lazyInputs[DynamicContainerRetainCompletedUnusedRemovals.self] = true
-        lazyInputs[DynamicContainerMaxUnusedItems.self] = 1
-
-        let tree = view[\.content]
-        let adaptor: Attribute<LazyLayoutAdaptor_V1<Root>> = graph.makeRule(
-            MakeAdaptor(root: tree[\.root]._attribute)
-        )
-        return LazyLayoutAdaptor_V1<Root>._makeView(
-            root: _GraphValue(_attribute: adaptor),
-            inputs: lazyInputs
-        ) { _, inputs in
-            var listInputs = inputs.listInputs
-            listInputs.formUnion(viewListOptions: Root._viewListOptions)
-            return TreeContent._makeViewList(view: tree[\.content], inputs: listInputs)
-        }
-    }
-}
-
-extension LazyStack {
+extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
     static func _makeView(
         root: _GraphValue<Self>,
         inputs: _ViewInputs,
@@ -5032,9 +5103,7 @@ extension LazyStack {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
         guard let host = _AGGraphContext.current?.context as? GraphHost else {
-            var fallbackInputs = inputs
-            fallbackInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
-            return Self._makeLayoutView(root: root, inputs: fallbackInputs, body: body)
+            fatalError("\(self)._makeView called outside an active GraphHost context.")
         }
 
         let dynamicStackOrientationAttr: Attribute<Axis?> = graph.makeRule(
@@ -5065,7 +5134,7 @@ extension LazyStack {
             layoutDirection: layoutDirection.value
         )
         let cacheState = graph.makeInput(
-            value: root._attribute.value.makeCache(subviews: initialSubviews)
+            value: Self.initialCache
         )
         let reference = LazyLayoutCacheReference<Self>()
         let placedSubviews: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeStatefulRule(
@@ -5073,6 +5142,7 @@ extension LazyStack {
                 layout: root._attribute,
                 size: inputs.size,
                 position: inputs.position,
+                containerSize: inputs.containerSize,
                 environment: inputs.base.cachedEnvironment.value.environment,
                 layoutDirection: layoutDirection,
                 accessibilityEnabled: accessibilityEnabled,
@@ -5183,14 +5253,20 @@ extension LazyStack {
             )
         }
 
+        let fallbackSize = inputs.containerSize.attribute ?? inputs.size
         let layoutComputer: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
                     _ = materializedSubviews.value
-                    return proposal.replacingUnspecifiedDimensions(by: inputs.size.value.value)
+                    if let width = proposal.width, let height = proposal.height {
+                        return CGSize(width: width, height: height)
+                    }
+                    return proposal.fixingUnspecifiedDimensions(
+                        at: fallbackSize.value.value
+                    )
                 },
                 place: { position, anchor, proposal in
-                    let size = proposal.replacingUnspecifiedDimensions(by: inputs.size.value.value)
+                    let size = proposal.replacingUnspecifiedDimensions(by: fallbackSize.value.value)
                     let origin = CGPoint(
                         x: position.x - size.width * anchor.x,
                         y: position.y - size.height * anchor.y
@@ -5212,9 +5288,12 @@ extension LazyStack {
         cache.outputs = outputs
         return outputs
     }
+}
+
+extension LazyStack {
 
     static var majorAxis: Axis {
-        if _lazyLayoutProperties.axes.contains(.horizontal) {
+        if layoutProperties.axes.contains(.horizontal) {
             return .horizontal
         }
         return .vertical
@@ -5231,30 +5310,29 @@ extension LazyStack {
     func proposeSizes(
         at offset: Int,
         subviews: _LazyLayout_Subviews,
-        context: _LazyLayout_SizeAndSpacingContext,
-        cache: inout _LazyStack_Cache<Self>,
-        in proposedSize: ProposedViewSize
-    ) -> _LazyLayout_ProposedSizes {
-        _ = context
+        context: _LazyLayout_PlacementContext,
+        cache: _LazyStack_Cache<Self>,
+        in proposedSizes: inout _LazyLayout_ProposedSizes
+    ) {
         guard cache.allowsLayoutPrefetch(at: offset) else {
-            return _LazyLayout_ProposedSizes()
+            return
         }
-        var from = max(0, offset / max(1, cache.prefetchStride))
-        let proposal = Self.lazyStackPrefetchProposal(from: proposedSize)
-        var result = _LazyLayout_ProposedSizes()
+        var from = max(0, offset / max(1, cache.minor?.count ?? 1))
+        let proposal = Self.lazyStackPrefetchProposal(
+            from: ProposedViewSize(context.size)
+        )
 
         _ = subviews.apply(from: &from) { _, subview, stop in
-            result.subviews.append(subview.proposeSize(proposal))
+            proposedSizes.subviews.append(subview.proposeSize(proposal))
             stop = true
         }
-        return result
     }
 
     static func lazyStackPrefetchProposal(from proposedSize: ProposedViewSize) -> ProposedViewSize {
-        if _lazyLayoutProperties.axes.contains(.horizontal) {
+        if layoutProperties.axes.contains(.horizontal) {
             return ProposedViewSize(width: nil, height: proposedSize.height)
         }
-        if _lazyLayoutProperties.axes.contains(.vertical) {
+        if layoutProperties.axes.contains(.vertical) {
             return ProposedViewSize(width: proposedSize.width, height: nil)
         }
         return proposedSize
@@ -5270,6 +5348,13 @@ protocol LazyHVStack: LazyStack where MinorGeometry == CGFloat {
 extension LazyHVStack {
     static var majorAxis: Axis {
         Base.majorAxis
+    }
+
+    static var layoutProperties: _LazyLayout_Properties {
+        switch majorAxis {
+        case .horizontal: _LazyLayout_Properties(axes: .horizontal)
+        case .vertical: _LazyLayout_Properties(axes: .vertical)
+        }
     }
 
     var spacing: CGFloat? {
@@ -5326,7 +5411,7 @@ extension LazyHVStack {
             case .vertical:
                 point = CGPoint(x: 0, y: offset)
             }
-            emit(subview, point, proposedSize, .topLeading)
+            emit(subview, point, _ProposedSize(proposedSize), .topLeading)
             let measured = subview.lengthAndSpacing(
                 size: proposedSize,
                 axis: Self.majorAxis,
@@ -5345,77 +5430,13 @@ struct LazyHStackLayout: LazyHVStack {
 
     typealias Body = Never
     typealias AnimatableData = EmptyAnimatableData
-    typealias Cache = _HStackLayout.Cache
+    typealias Cache = _LazyStack_Cache<Self>
 
     init(base: _HStackLayout, pinnedViews: PinnedScrollableViews) {
         self.base = base
         self.pinnedViews = pinnedViews
     }
 
-    static var layoutProperties: LayoutProperties {
-        _HStackLayout.layoutProperties
-    }
-
-    func makeCache(subviews: Subviews) -> Cache {
-        base.makeCache(subviews: subviews)
-    }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        base.updateCache(&cache, subviews: subviews)
-    }
-
-    func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
-        base.spacing(subviews: subviews, cache: &cache)
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        base.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        base.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func explicitAlignment(
-        of guide: HorizontalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        base.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
-
-    func explicitAlignment(
-        of guide: VerticalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        base.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
 }
 
 struct HVGridGeometry: LazyLayoutNamespace, Equatable {
@@ -5430,75 +5451,11 @@ struct LazyVStackLayout: LazyHVStack {
 
     typealias Body = Never
     typealias AnimatableData = EmptyAnimatableData
-    typealias Cache = _VStackLayout.Cache
+    typealias Cache = _LazyStack_Cache<Self>
 
     init(base: _VStackLayout, pinnedViews: PinnedScrollableViews) {
         self.base = base
         self.pinnedViews = pinnedViews
     }
 
-    static var layoutProperties: LayoutProperties {
-        _VStackLayout.layoutProperties
-    }
-
-    func makeCache(subviews: Subviews) -> Cache {
-        base.makeCache(subviews: subviews)
-    }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        base.updateCache(&cache, subviews: subviews)
-    }
-
-    func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
-        base.spacing(subviews: subviews, cache: &cache)
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        base.sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        base.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
-    }
-
-    func explicitAlignment(
-        of guide: HorizontalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        base.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
-
-    func explicitAlignment(
-        of guide: VerticalAlignment,
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGFloat? {
-        base.explicitAlignment(
-            of: guide,
-            in: bounds,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
-        )
-    }
 }

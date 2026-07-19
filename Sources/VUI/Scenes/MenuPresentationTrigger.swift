@@ -20,7 +20,7 @@ struct MenuPresentationTrigger {
     }
 
     @discardableResult
-    mutating func handleMouseEvent(_ event: MouseEvent,
+    mutating func handleMouseEvent(_ event: PlatformMouseEvent,
                                    viewGraph: ViewGraph,
                                    rootResponder: MultiViewResponder,
                                    open: (MenuDropdownResponder) -> Void) -> Bool {

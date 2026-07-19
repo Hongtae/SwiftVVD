@@ -27,7 +27,7 @@ final class LocationStorageTests: XCTestCase {
         host.data.withCurrent {
             signalSubgraph = AGSubgraph()
             AGSubgraph.withCurrent(signalSubgraph) {
-                signal = host.data.graph.makeInput(value: ()).asWeak().raw
+                signal = host.data.graph.makeInput(value: ()).asWeak().base
             }
         }
 
@@ -346,7 +346,7 @@ final class LocationStorageTests: XCTestCase {
     private func makeSignal(in host: GraphHost) -> AGWeakAttribute {
         var signal: AGWeakAttribute!
         host.data.withCurrent {
-            signal = host.data.graph.makeInput(value: ()).asWeak().raw
+            signal = host.data.graph.makeInput(value: ()).asWeak().base
         }
         return signal
     }

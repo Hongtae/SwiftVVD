@@ -9,13 +9,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let hostKeys = graph.makeInput(value: requestedKeys)
-            let hostCombiner = graph.makeStatefulRule(
+            let hostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: hostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -103,7 +103,7 @@ final class PreferenceBridgeTests: XCTestCase {
         let reduced = values.value(for: AppendingPreferenceKey.self)
 
         XCTAssertEqual(reduced.value, "ab")
-        XCTAssertEqual(reduced.seed, VersionSeed(value: 2))
+        XCTAssertEqual(reduced.seed.value, 2)
     }
 
     func testPreferenceBridgeAddRemoveValueMutatesCombiner() {
@@ -113,13 +113,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let hostKeys = graph.makeInput(value: requestedKeys)
-            let hostCombiner = graph.makeStatefulRule(
+            let hostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: hostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -155,13 +155,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let hostKeys = graph.makeInput(value: requestedKeys)
-            let hostCombiner = graph.makeStatefulRule(
+            let hostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: hostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -211,7 +211,7 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
@@ -224,7 +224,7 @@ final class PreferenceBridgeTests: XCTestCase {
                 hostPreferencesCombiner: bridgeHostCombiner.asWeak()
             )
             var localKeys = PreferenceKeys()
-            localKeys.insert(SecondaryPreferenceKey.self)
+            localKeys.add(SecondaryPreferenceKey.self)
             let localHostKeys = graph.makeInput(value: localKeys)
             var inputs = makeViewInputs(
                 graph: graph,
@@ -248,7 +248,7 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
@@ -297,7 +297,7 @@ final class PreferenceBridgeTests: XCTestCase {
             var baseTransaction = Transaction()
             baseTransaction[PreferenceTransformBaseTransactionKey.self] = "base"
             var keys = PreferenceKeys()
-            keys.insert(AppendingPreferenceKey.self)
+            keys.add(AppendingPreferenceKey.self)
             let hostKeys = graph.makeInput(value: keys)
             let inputs = makeViewInputs(
                 graph: graph,
@@ -339,7 +339,7 @@ final class PreferenceBridgeTests: XCTestCase {
 
         try _AGGraph.withCurrent(graph) {
             var keys = PreferenceKeys()
-            keys.insert(OptionalRelayPreferenceKey.self)
+            keys.add(OptionalRelayPreferenceKey.self)
             let inputs = makeViewInputs(
                 graph: graph,
                 preferenceKeys: keys,
@@ -600,13 +600,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -631,13 +631,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = host.data.graph
             let requestedKeys = makeRequestedKeys()
             let hostKeys = graph.makeInput(value: requestedKeys)
-            let hostCombiner = graph.makeStatefulRule(
+            let hostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: hostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -675,13 +675,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -719,13 +719,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -764,13 +764,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -808,13 +808,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -828,11 +828,11 @@ final class PreferenceBridgeTests: XCTestCase {
             environment.preferenceBridge = bridge
 
             Update.begin()
-            viewGraph.runTransaction {
+            viewGraph.runTransaction (nil, do: {
                 viewGraph.updatePreferenceBridge(environment: environment) {
                     deferredUpdateCalled = true
                 }
-            }
+            }, id: nil)
             XCTAssertNil(viewGraph.preferenceBridge)
             XCTAssertEqual(Update.queuedActionReasons, [0x11])
             XCTAssertFalse(deferredUpdateCalled)
@@ -857,13 +857,13 @@ final class PreferenceBridgeTests: XCTestCase {
             let graph = viewGraph.data.graph
             let requestedKeys = makeRequestedKeys()
             let bridgeHostKeys = graph.makeInput(value: requestedKeys)
-            let bridgeHostCombiner = graph.makeStatefulRule(
+            let bridgeHostCombiner = graph.makeRule(
                 HostPreferencesCombiner(
                     _keys: bridgeHostKeys,
                     _values: OptionalAttribute()
                 )
             )
-            let valueCombiner = graph.makeStatefulRule(
+            let valueCombiner = graph.makeRule(
                 PreferenceCombiner<AppendingPreferenceKey>()
             )
             let bridge = makeBridge(
@@ -946,7 +946,7 @@ final class PreferenceBridgeTests: XCTestCase {
 
     private func makeRequestedKeys() -> PreferenceKeys {
         var keys = PreferenceKeys()
-        keys.insert(AppendingPreferenceKey.self)
+        keys.add(AppendingPreferenceKey.self)
         return keys
     }
 
@@ -968,14 +968,10 @@ final class PreferenceBridgeTests: XCTestCase {
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues.tracking())
         let graphInputs = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: transaction),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: transaction)
         )
         return _ViewInputs(
             base: graphInputs,

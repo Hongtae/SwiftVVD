@@ -153,7 +153,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
 
     private func queueTrackedRemovalIfNeeded(attribute: AGAttribute) {
         guard !attribute.isInvalid else { return }
-        guard isRuntimeBaselineOnOrAfter(.v6) else { return }
+        guard isDeployedOnOrAfter(.v6) else { return }
         guard let graphRef = _AGGraphContext.current,
               let host = graphRef.context as? GraphHost,
               host.removedState.contains(.unattached) else { return }

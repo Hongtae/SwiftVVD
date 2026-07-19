@@ -24,7 +24,7 @@ public struct Button<Label>: View where Label: View {
                 role: role,
                 label: PrimitiveButtonStyleConfiguration.Label(),
                 action: .handler(action)))
-        .modifier(StaticSourceWriter<PrimitiveButtonStyleConfiguration.Label, Label>(source: label))
+        .modifier(StaticSourceWriter<ButtonStyleConfiguration.Label, Label>(source: label))
     }
 }
 
@@ -96,8 +96,6 @@ extension Button where Label == VUI.Label<Text, Image> {
     }
 }
 
-// ResolvedButtonStyle reads the PrimitiveButtonStyle from StyleInput stack and evaluates it.
-// Non-generic. StyleableView._makeView pops the stack; falls back to body getter when stack is empty.
 struct ResolvedButtonStyle: StyleableView {
     typealias Configuration = PrimitiveButtonStyleConfiguration
     var configuration: PrimitiveButtonStyleConfiguration
@@ -107,7 +105,7 @@ struct ResolvedButtonStyle: StyleableView {
     }
     
     var body: some View {
-        DefaultButtonStyle().makeBody(configuration: configuration)
+        Button(configuration)
     }
 
     typealias DefaultStyleModifier = ButtonStyleModifier<DefaultButtonStyle>

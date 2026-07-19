@@ -10,23 +10,18 @@ import Foundation
 // GestureModifier
 
 /// Protocol for modifier gestures: gestures that wrap another gesture and transform
-/// its inputs or output. Inherits Gesture so conformers have associated Value/Body.
+/// its inputs or output.
 ///
-/// `ModifierGesture._makeGesture` dispatches to `Modifier.makeGesture(modifier:inputs:body:)`,
+/// `ModifierGesture._makeGesture` dispatches to `Modifier._makeGesture(modifier:inputs:body:)`,
 /// passing a closure that calls `Body._makeGesture` for the inner gesture.
-protocol GestureModifier: Gesture {
+protocol GestureModifier {
+    associatedtype Value
     associatedtype BodyValue
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<BodyValue>
     ) -> _GestureOutputs<Value>
-}
-
-extension GestureModifier {
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError("\(Self.self) is a GestureModifier - use it as Modifier inside ModifierGesture, not standalone")
-    }
 }
 
 // ModifierGesture
@@ -35,9 +30,10 @@ extension GestureModifier {
 /// is the modifier's output type.
 ///
 /// Stores the modifier and wrapped body.
-/// _makeGesture dispatches to Modifier.makeGesture(modifier:inputs:body:), passing a
+/// _makeGesture dispatches to Modifier._makeGesture(modifier:inputs:body:), passing a
 /// closure that calls Body._makeGesture for the inner gesture.
-struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture
+struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture,
+    PrimitiveGesture, PrimitiveDebuggableGesture
     where Modifier.BodyValue == Body.Value
 {
     var modifier: Modifier
@@ -49,24 +45,12 @@ struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<Modifier.Value> {
-        Modifier.makeGesture(
+        Modifier._makeGesture(
             modifier: gesture[\.modifier],
             inputs: inputs,
             body: { modifiedInputs in
                 Body._makeGesture(gesture: gesture[\.body], inputs: modifiedInputs)
             }
         )
-    }
-}
-
-extension ModifierGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(Body.self, eventType: eventType)
-    }
-}
-
-extension ModifierGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(body, eventType: eventType)
     }
 }

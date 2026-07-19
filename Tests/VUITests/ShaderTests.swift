@@ -512,14 +512,10 @@ final class ShaderTests: XCTestCase {
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: environment)
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
         )
         return _ViewInputs(
             base: base,

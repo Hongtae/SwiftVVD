@@ -24,7 +24,7 @@ extension EnvironmentValues {
     }
 }
 
-public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
+public struct _ForegroundStyleModifier<Style> where Style: ShapeStyle {
     public var style: Style
 
     @inlinable public init(style: Style) {
@@ -50,10 +50,11 @@ public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier: _ViewInputsModifier {
+extension _ForegroundStyleModifier: ViewInputsModifier, PrimitiveViewModifier {
+    static var graphInputsSemantics: Semantics? { .v4 }
 }
 
-public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeStyle, S2: ShapeStyle {
+public struct _ForegroundStyleModifier2<S1, S2> where S1: ShapeStyle, S2: ShapeStyle {
     public var primary: S1
     public var secondary: S2
 
@@ -83,10 +84,11 @@ public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeSty
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier2: _ViewInputsModifier {
+extension _ForegroundStyleModifier2: ViewInputsModifier, PrimitiveViewModifier {
+    static var graphInputsSemantics: Semantics? { .v4 }
 }
 
-public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: ShapeStyle, S2: ShapeStyle, S3: ShapeStyle {
+public struct _ForegroundStyleModifier3<S1, S2, S3> where S1: ShapeStyle, S2: ShapeStyle, S3: ShapeStyle {
     public var primary: S1
     public var secondary: S2
     public var tertiary: S3
@@ -119,7 +121,8 @@ public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: Shap
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier3: _ViewInputsModifier {
+extension _ForegroundStyleModifier3: ViewInputsModifier, PrimitiveViewModifier {
+    static var graphInputsSemantics: Semantics? { .v4 }
 }
 
 extension View {

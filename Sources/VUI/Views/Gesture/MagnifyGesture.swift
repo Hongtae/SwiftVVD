@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct MagnifyGesture: Gesture {
+public struct MagnifyGesture: Gesture, PrimitiveGesture {
     public struct Value: Equatable, Sendable {
         public var time: Date
         public var magnification: CGFloat
@@ -47,13 +47,7 @@ public struct MagnifyGesture: Gesture {
     }
 }
 
-extension MagnifyGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == MagnifyEvent.self
-    }
-}
-
-public struct MagnificationGesture: Gesture {
+public struct MagnificationGesture: Gesture, PubliclyPrimitiveGesture {
     public var minimumScaleDelta: CGFloat
 
     public init(minimumScaleDelta: CGFloat = 0.01) {
@@ -63,29 +57,20 @@ public struct MagnificationGesture: Gesture {
     public typealias Value = CGFloat
     public typealias Body = Never
 
+    typealias InternalBody = _MapGesture<MagnifyGesture, CGFloat>
+
+    var internalBody: InternalBody {
+        _MapGesture(
+            content: MagnifyGesture(minimumScaleDelta: minimumScaleDelta),
+            transform: { $0.magnification }
+        )
+    }
+
     public static func _makeGesture(
         gesture: _GraphValue<MagnificationGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<CGFloat> {
-        guard let graph = _AGGraph.current else {
-            fatalError("MagnificationGesture._makeGesture requires AG context")
-        }
-        let magnify = MagnifyGesture(minimumScaleDelta: gesture._attribute.value.minimumScaleDelta)
-        let magnifyAttr: Attribute<MagnifyGesture> = graph.makeInput(value: magnify)
-        let outputs = MagnifyGesture._makeGesture(
-            gesture: _GraphValue(_attribute: magnifyAttr),
-            inputs: inputs
-        )
-        let mappedPhase: Attribute<GesturePhase<CGFloat>> = graph.makeRule {
-            outputs.phase.value.map { $0.magnification }
-        }
-        return outputs.withPhase(mappedPhase)
-    }
-}
-
-extension MagnificationGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == MagnifyEvent.self
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 
@@ -103,7 +88,8 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
     var hasRecognized = false
     var startLocation: CGPoint = .zero
     var startAnchor: UnitPoint = .center
-    var lastTimestamp: Double?
+    var baselineScale: CGFloat = 1.0
+    var velocitySampler = VelocitySampler<CGFloat>()
 
     var resetSeed: UInt32 { resetSeedAttr.value }
 
@@ -112,7 +98,8 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
         hasRecognized = false
         startLocation = .zero
         startAnchor = .center
-        lastTimestamp = nil
+        baselineScale = 1.0
+        velocitySampler.reset()
         _AGGraph.setStatefulOutput(GesturePhase<MagnifyGesture.Value>.possible(nil))
     }
 
@@ -135,30 +122,38 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
     }
 
     private mutating func update(event: MagnifyEvent, terminal: Bool) -> GesturePhase<MagnifyGesture.Value> {
-        let location = event.location ?? .zero
+        let location = event.location
         if !isTracking {
             isTracking = true
             startLocation = location
             startAnchor = Self.anchor(for: location, size: sizeAttr.value.value)
+            baselineScale = event.initialScale
+            velocitySampler.reset()
+
+            if terminal {
+                return .failed
+            }
+            return .possible(nil)
         }
 
-        let magnitude = abs(event.magnification - 1.0)
-        if magnitude >= minimumScaleDelta {
+        let accumulatedScale = event.initialScale + event.scaleDelta
+        velocitySampler.addSample(
+            accumulatedScale,
+            time: event.timestamp.seconds
+        )
+        if abs(accumulatedScale - baselineScale) > minimumScaleDelta {
             hasRecognized = true
         }
 
-        let velocity = Self.velocity(
-            current: event.magnification,
-            previous: event.previousMagnification,
-            timestamp: event.timestamp,
-            previousTimestamp: lastTimestamp
+        let magnification = max(
+            accumulatedScale + 1.0 - baselineScale,
+            0.0
         )
-        lastTimestamp = event.timestamp
 
         let value = MagnifyGesture.Value(
-            time: Date(),
-            magnification: event.magnification,
-            velocity: velocity,
+            time: Date(timeIntervalSinceReferenceDate: event.timestamp.seconds),
+            magnification: magnification,
+            velocity: velocitySampler.velocity.valuePerSecond,
             startAnchor: startAnchor,
             startLocation: startLocation
         )
@@ -174,15 +169,4 @@ private struct MagnifyGesturePhase: StatefulRule, ResettableGestureRule {
         return UnitPoint(x: location.x / size.width, y: location.y / size.height)
     }
 
-    private static func velocity(
-        current: CGFloat,
-        previous: CGFloat,
-        timestamp: Double,
-        previousTimestamp: Double?
-    ) -> CGFloat {
-        guard let previousTimestamp else { return 0 }
-        let dt = timestamp - previousTimestamp
-        guard dt > 0 else { return 0 }
-        return (current - previous) / dt
-    }
 }

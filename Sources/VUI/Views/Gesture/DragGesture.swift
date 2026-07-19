@@ -32,7 +32,7 @@ public struct _EventDirections: OptionSet, Sendable {
 //
 // _makeGesture copies fields into SpatialDragGesture, then wraps it with Gesture.category(.drag).
 
-public struct DragGesture: Gesture {
+public struct DragGesture: Gesture, PubliclyPrimitiveGesture {
     public struct Value: Equatable {
         public var time: Date
         public var location: CGPoint
@@ -78,54 +78,39 @@ public struct DragGesture: Gesture {
 
     public typealias Body = Never
 
+    typealias InternalBody = ModifierGesture<CategoryGesture<Value>, SpatialDragGesture>
+
+    var internalBody: InternalBody {
+        SpatialDragGesture(
+            minimumDistance: minimumDistance,
+            coordinateSpace: coordinateSpace,
+            allowedDirections: allowedDirections
+        )
+        .category(.drag, includeChildren: false)
+    }
+
     public static func _makeGesture(
         gesture: _GraphValue<DragGesture>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<DragGesture.Value> {
-        guard let graph = _AGGraph.current else {
-            fatalError("DragGesture._makeGesture requires AG context")
-        }
-        // Copies minimumDistance/coordinateSpace/allowedDirections into SpatialDragGesture,
-        // then wraps result with Gesture.category(.drag, includeChildren: false).
-        let self_ = gesture._attribute.value
-        let spatial = SpatialDragGesture(
-            minimumDistance: self_.minimumDistance,
-            coordinateSpace: self_.coordinateSpace,
-            allowedDirections: self_.allowedDirections
-        )
-        // CategoryGesture is pass-through until GestureCategory.Key preference
-        // injection is implemented. Keep the wrapper so category injection can be
-        // added without refactoring.
-        let categorized = spatial.category(.drag, includeChildren: false)
-        typealias Chain = ModifierGesture<CategoryGesture<DragGesture.Value>, SpatialDragGesture>
-        let attr: Attribute<Chain> = graph.makeInput(value: categorized)
-        return Chain._makeGesture(gesture: _GraphValue(_attribute: attr), inputs: inputs)
+        makeGesture(gesture: gesture, inputs: inputs)
     }
 }
 
 extension DragGesture.Value: Sendable {}
-
-extension DragGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == TappableEvent.self
-    }
-}
 
 // MARK: - SpatialDragGesture
 
 /// Internal gesture type used by DragGesture.
 /// Implements drag recognition via an AG modifier chain.
 ///
-/// GestureGraph currently converts platform mouse input into TappableEvent,
-/// so this local chain uses EventListener<TappableEvent>.
-///
 /// body chain (inner -> outer):
-///   EventListener<TappableEvent>
-///   -> EventFilter<TappableEvent>       (event.button == .primary)
-///   -> CoordinateSpaceGesture<TappableEvent>
-///   -> StateContainerGesture<InternalState, TappableEvent, DragGesture.Value>
+///   EventListener<MouseEvent>
+///   -> EventFilter<MouseEvent>       (event.button == .primary)
+///   -> CoordinateSpaceGesture<MouseEvent>
+///   -> StateContainerGesture<InternalState, MouseEvent, DragGesture.Value>
 ///   -> DependentGesture<DragGesture.Value> (.pausedUntilFailed)
-struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
+struct SpatialDragGesture: Gesture {
     var minimumDistance: CGFloat
     var coordinateSpace: CoordinateSpace
     var allowedDirections: _EventDirections
@@ -133,21 +118,23 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
     typealias Value = DragGesture.Value
 
     /// Intermediate state for drag recognition.
-    struct InternalState {
+    struct InternalState: GestureStateProtocol {
         var startLocation: CGPoint = .zero
         var currentLocation: CGPoint = .zero
         var startTime: Date = Date()
         var velocity: _Velocity<CGSize> = _Velocity(valuePerSecond: .zero)
         var isDragging: Bool = false
+
+        init() {}
     }
 
     typealias RecognitionBody = ModifierGesture<
-        StateContainerGesture<InternalState, TappableEvent, DragGesture.Value>,
+        StateContainerGesture<InternalState, MouseEvent, DragGesture.Value>,
         ModifierGesture<
-            CoordinateSpaceGesture<TappableEvent>,
+            CoordinateSpaceGesture<MouseEvent>,
             ModifierGesture<
-                EventFilter<TappableEvent>,
-                EventListener<TappableEvent>
+                EventFilter<MouseEvent>,
+                EventListener<MouseEvent>
             >
         >
     >
@@ -157,19 +144,16 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
         let minDist = minimumDistance
         let cs = coordinateSpace
         let allowed = allowedDirections
-        let transform: (inout InternalState, GesturePhase<TappableEvent>) -> GesturePhase<DragGesture.Value> = {
+        let transform: (inout InternalState, GesturePhase<MouseEvent>) -> GesturePhase<DragGesture.Value> = {
             SpatialDragGesture.applyPhase(minimumDistance: minDist, allowedDirections: allowed, state: &$0, phase: $1)
         }
         let recognitionBody = RecognitionBody(
-            modifier: StateContainerGesture(
-                initialState: InternalState(),
-                transform: transform
-            ),
+            modifier: StateContainerGesture(body: transform),
             body: ModifierGesture(
                 modifier: CoordinateSpaceGesture(coordinateSpace: cs),
                 body: ModifierGesture(
                     modifier: EventFilter(),
-                    body: EventListener<TappableEvent>()
+                    body: EventListener<MouseEvent>()
                 )
             )
         )
@@ -182,14 +166,14 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
         minimumDistance: CGFloat,
         allowedDirections: _EventDirections,
         state: inout InternalState,
-        phase: GesturePhase<TappableEvent>
+        phase: GesturePhase<MouseEvent>
     ) -> GesturePhase<DragGesture.Value> {
         switch phase {
         case .possible:
             state.isDragging = false
             return .possible(nil)
         case .active(let event):
-            guard let location = event.location else { return .possible(nil) }
+            let location = event.location
             if !state.isDragging && state.startLocation == .zero {
                 state.startLocation = location
                 state.startTime = Date()
@@ -229,12 +213,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
                 state.currentLocation = .zero
                 return .failed
             }
-            guard let location = event.location else {
-                state.isDragging = false
-                state.startLocation = .zero
-                state.currentLocation = .zero
-                return .failed
-            }
+            let location = event.location
             let value = DragGesture.Value(
                 time: state.startTime,
                 location: location,
@@ -251,11 +230,5 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
             state.currentLocation = .zero
             return .failed
         }
-    }
-}
-
-extension SpatialDragGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == TappableEvent.self
     }
 }

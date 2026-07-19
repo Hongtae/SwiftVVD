@@ -60,6 +60,20 @@ extension GraphInput where Value: GraphReusable {
 /// No additional requirements.
 protocol ViewInput: GraphInput {}
 
+protocol Feature: ViewInputBoolFlag {
+    static var isEnabled: Bool { get }
+}
+
+extension Feature {
+    static var defaultValue: Bool { isEnabled }
+}
+
+struct ImprovedButtonGestureFeature: Feature {
+    typealias Value = Bool
+
+    static var isEnabled: Bool { true }
+}
+
 struct UsingGraphicsRenderer: ViewInput {
     typealias Value = Bool
     static var defaultValue: Bool { false }
@@ -149,7 +163,7 @@ final class MutableBox<Value>: @unchecked Sendable {
 
 /// Animation time value passed through the AG graph.
 /// Only stored property: `seconds: Double` (8 bytes).
-struct Time {
+struct Time: Comparable, Hashable {
     var seconds: Double
 
     static var zero: Time { Time(seconds: 0) }
@@ -164,43 +178,6 @@ struct Time {
     static func == (lhs: Time, rhs: Time) -> Bool { lhs.seconds == rhs.seconds }
 }
 
-/// Render phase passed through the AG graph.
-/// Stored as one UInt32: bit 0 is the removal flag, bits 1...31 are resetSeed.
-struct Phase {
-    var rawValue: UInt32 = 0
-
-    var isBeingRemoved: Bool {
-        get { (rawValue & 0x1) != 0 }
-        set {
-            if newValue {
-                rawValue |= 0x1
-            } else {
-                rawValue &= ~UInt32(0x1)
-            }
-        }
-    }
-
-    var resetSeed: UInt32 {
-        get { rawValue >> 1 }
-        set { rawValue = (rawValue & 0x1) | (newValue &<< 1) }
-    }
-
-    var isInserted: Bool { !isBeingRemoved }
-
-    static var invalid: Phase { Phase(value: UInt32(bitPattern: Int32(-16))) }
-
-    init() {}
-    init(value: UInt32) {
-        self.rawValue = value
-    }
-
-    mutating func merge(_ other: Phase) {
-        let preservedRemoval = rawValue & 0x1
-        let seedBits = rawValue & ~UInt32(0x1)
-        rawValue = (seedBits &+ other.rawValue) | preservedRemoval
-    }
-}
-
 struct ViewPhaseOverride: GraphInput {
     static var defaultValue: OptionalAttribute<Phase> { OptionalAttribute() }
 
@@ -209,6 +186,19 @@ struct ViewPhaseOverride: GraphInput {
         _ rhs: OptionalAttribute<Phase>
     ) -> Bool {
         lhs.base.identifier == rhs.base.identifier
+    }
+}
+
+private struct SavedTransactionKey: GraphInput {
+    static var defaultValue: [Attribute<Transaction>] { [] }
+
+    static func valuesEqual(
+        _ lhs: [Attribute<Transaction>],
+        _ rhs: [Attribute<Transaction>]
+    ) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy {
+            $0.identifier == $1.identifier
+        }
     }
 }
 
@@ -241,9 +231,8 @@ struct ViewFrame: Equatable {
 /// (via `MutableBox`) so all descendants share a single environment Attribute.
 struct CachedEnvironment {
 
-    // Direct Int identity used for cache lookup.
-    struct ID: Hashable {
-        var value: Int
+    struct ID: Equatable {
+        var base: UniqueID
     }
 
     struct MapItem {
@@ -319,7 +308,47 @@ struct CachedEnvironment {
 /// The bundle of AG context Attributes passed from parent to child during
 /// `_makeView` traversal.  All fields are Attribute references (IDs), so
 /// copying this struct is cheap.
-public struct _GraphInputs {
+public struct _GraphInputs: GraphReusable {
+    /// Render phase passed through the graph.
+    /// Stored as one UInt32: bit 0 is the removal flag, bits 1...31 are resetSeed.
+    struct Phase: Equatable {
+        var rawValue: UInt32 = 0
+
+        var isBeingRemoved: Bool {
+            get { (rawValue & 0x1) != 0 }
+            set {
+                if newValue {
+                    rawValue |= 0x1
+                } else {
+                    rawValue &= ~UInt32(0x1)
+                }
+            }
+        }
+
+        var resetSeed: UInt32 {
+            get { rawValue >> 1 }
+            set { rawValue = (rawValue & 0x1) | (newValue &<< 1) }
+        }
+
+        var isInserted: Bool { !isBeingRemoved }
+
+        static var invalid: Phase {
+            Phase(value: UInt32(bitPattern: Int32(-16)))
+        }
+
+        init() {}
+
+        init(value: UInt32) {
+            rawValue = value
+        }
+
+        mutating func merge(_ other: Phase) {
+            let preservedRemoval = rawValue & 0x1
+            let seedBits = rawValue & ~UInt32(0x1)
+            rawValue = (seedBits &+ other.rawValue) | preservedRemoval
+        }
+    }
+
     struct Options: OptionSet, Sendable {
         var rawValue: UInt32
 
@@ -365,6 +394,24 @@ public struct _GraphInputs {
 
     /// Set of AG node IDs whose inputs have been merged into this context.
     var mergedInputs: Set<AGAttribute>
+
+    init(
+        time: Attribute<Time>,
+        phase: Attribute<Phase>,
+        environment: Attribute<EnvironmentValues>,
+        transaction: Attribute<Transaction>
+    ) {
+        customInputs = PropertyList()
+        self.time = time
+        cachedEnvironment = MutableBox(
+            CachedEnvironment(environment: environment)
+        )
+        self.phase = phase
+        self.transaction = transaction
+        changedDebugProperties = .max
+        options = []
+        mergedInputs = []
+    }
 
     // Base-channel subscript stores in customInputs (PropertyList).
     subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
@@ -433,7 +480,7 @@ public struct _GraphInputs {
         let selfEnvID  = cachedEnvironment.value.environment.identifier
         let otherEnvID = other.cachedEnvironment.value.environment.identifier
         if selfEnvID != otherEnvID, mergedInputs.insert(otherEnvID).inserted {
-            let selfWeak = cachedEnvironment.value.environment.asWeak().raw
+            let selfWeak = cachedEnvironment.value.environment.asWeak().base
             let newEnvAttr = graph.makeRule(MergedEnvironment(selfWeak: selfWeak,
                                                                otherRaw: otherEnvID.rawValue))
             var newCE = cachedEnvironment.value
@@ -442,21 +489,11 @@ public struct _GraphInputs {
             changedDebugProperties |= 0x20
         }
 
-        // A modifier's captured inputs provide the higher-priority semantic
-        // environment, but its frame cache predates child materialization.
-        // Prefer the concrete child's frame when layout has installed one so
-        // modifier content reads its own geometry rather than an ancestor's.
-        if let childFrame = other.cachedEnvironment.value.animatedFrame {
-            var newCE = cachedEnvironment.value
-            newCE.animatedFrame = childFrame
-            cachedEnvironment = MutableBox(newCE)
-        }
-
         // Step 3: Transaction
         let selfTxID  = transaction.identifier
         let otherTxID = other.transaction.identifier
         if selfTxID != otherTxID, mergedInputs.insert(otherTxID).inserted {
-            let selfWeak = transaction.asWeak().raw
+            let selfWeak = transaction.asWeak().base
             transaction = graph.makeRule(MergedTransaction(selfWeak: selfWeak,
                                                             otherRaw: otherTxID.rawValue))
         }
@@ -466,7 +503,7 @@ public struct _GraphInputs {
             let selfPhaseID  = phase.identifier
             let otherPhaseID = other.phase.identifier
             if selfPhaseID != otherPhaseID, mergedInputs.insert(otherPhaseID).inserted {
-                let selfWeak = phase.asWeak().raw
+                let selfWeak = phase.asWeak().base
                 phase = graph.makeRule(MergedPhase(selfWeak: selfWeak,
                                                     otherRaw: otherPhaseID.rawValue))
                 changedDebugProperties |= 0x40
@@ -487,18 +524,41 @@ public struct _GraphInputs {
     }
 }
 
+// Source compatibility for implementation files that have not yet moved to
+// the nested spelling. This is an alias, so the nominal runtime type remains
+// `_GraphInputs.Phase`.
+typealias Phase = _GraphInputs.Phase
+
+extension _ViewInputs {
+    var savedTransactions: [Attribute<Transaction>] {
+        get { base[SavedTransactionKey.self] }
+        set { base[SavedTransactionKey.self] = newValue }
+    }
+
+    func geometryTransaction() -> Attribute<Transaction> {
+        savedTransactions.last ?? base.transaction
+    }
+}
+
+extension _ViewListInputs {
+    var savedTransactions: [Attribute<Transaction>] {
+        get { base[SavedTransactionKey.self] }
+        set { base[SavedTransactionKey.self] = newValue }
+    }
+}
+
 // MARK: - Merged* AG Rules
 // All three follow the same pattern: weak ref to self attr + strong raw of other attr.
 // updateValue() reads both (registering AG dependencies), merges, returns result.
 // When the weak ref is invalid (subgraph was deallocated), returns other's value unchanged.
 
 // Merges two EnvironmentValues by chaining their PropertyLists (self = higher priority).
-struct MergedEnvironment: Rule {
+struct MergedEnvironment: Rule, AsyncAttribute {
     typealias Value = EnvironmentValues
     let selfWeak: AGWeakAttribute
     let otherRaw: UInt32
 
-    func updateValue() -> EnvironmentValues {
+    var value: EnvironmentValues {
         let graph = _AGGraph.current!
         let otherAttr = Attribute<EnvironmentValues>(AGAttribute(rawValue: otherRaw))
         let otherEnv = otherAttr.value
@@ -511,12 +571,12 @@ struct MergedEnvironment: Rule {
 }
 
 // Merges two Transactions by chaining their PropertyLists (self = higher priority).
-struct MergedTransaction: Rule {
+struct MergedTransaction: Rule, AsyncAttribute {
     typealias Value = Transaction
     let selfWeak: AGWeakAttribute
     let otherRaw: UInt32
 
-    func updateValue() -> Transaction {
+    var value: Transaction {
         let graph = _AGGraph.current!
         let otherAttr = Attribute<Transaction>(AGAttribute(rawValue: otherRaw))
         let otherTx = otherAttr.value
@@ -528,12 +588,12 @@ struct MergedTransaction: Rule {
 }
 
 // Merges two Phases while preserving the receiver removal bit.
-struct MergedPhase: Rule {
+struct MergedPhase: Rule, AsyncAttribute {
     typealias Value = Phase
     let selfWeak: AGWeakAttribute
     let otherRaw: UInt32
 
-    func updateValue() -> Phase {
+    var value: Phase {
         let graph = _AGGraph.current!
         let otherAttr = Attribute<Phase>(AGAttribute(rawValue: otherRaw))
         let otherPhase = otherAttr.value

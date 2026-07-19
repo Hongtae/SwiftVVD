@@ -56,21 +56,31 @@ extension ForEach: View where Content: View {
         }
 
         let state = ForEachState<Data, ID, Content>(inputs: inputs)
+        let infoAttr: Attribute<ForEachState<Data, ID, Content>.Info> = graph.makeRule(
+            ForEachState<Data, ID, Content>.Info.Init(
+                _view: view._attribute,
+                state: state
+            )
+        )
+        state.info = infoAttr
 
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
             guard let graph = _AGGraph.current else {
                 fatalError("ForEach viewList rule evaluated outside an active _AGGraph context.")
             }
-            let forEach = view._attribute.value   // dep: data / content changes
+            let info = infoAttr.value
+            guard let forEach = info.state.view else {
+                return EmptyViewList() as any ViewList
+            }
 
             // Collect current IDs in data order.
-            var newOrder: [AnyHashable] = []
-            var newIDs: Set<AnyHashable> = []
+            var newOrder: [(id: ID, index: Data.Index)] = []
+            var newIDs: Set<ID> = []
             var dataIdx = forEach.data.startIndex
             while dataIdx != forEach.data.endIndex {
                 let element = forEach.data[dataIdx]
-                let id = AnyHashable(element[keyPath: forEach.id])
-                newOrder.append(id)
+                let id = element[keyPath: forEach.id]
+                newOrder.append((id, dataIdx))
                 newIDs.insert(id)
                 dataIdx = forEach.data.index(after: dataIdx)
             }
@@ -85,26 +95,31 @@ extension ForEach: View where Content: View {
             // Create content Attributes for newly seen IDs.
             // Each item's nodes are registered to a dedicated AGSubgraph so they can
             // be cleanly removed when the item disappears from the data source.
-            dataIdx = forEach.data.startIndex
-            for id in newOrder {
-                let element = forEach.data[dataIdx]
-                dataIdx = forEach.data.index(after: dataIdx)
-
+            for (id, index) in newOrder {
                 if state.items[id] == nil {
                     let subgraph = AGSubgraph()
+                    let managedSubgraph = _ViewList_Subgraph(subgraph: subgraph)
+                    let item = ForEachState<Data, ID, Content>.Item(
+                        id: id,
+                        index: index,
+                        seed: info.seed,
+                        elements: _ViewList_SubgraphElements(
+                            base: EmptyViewListElements()
+                        ),
+                        subgraph: managedSubgraph,
+                        traitListAttr: inputs._traits
+                    )
+                    // The child source rule may be evaluated while its view-list
+                    // output is being built, so identity/index/generation must be
+                    // visible before constructing that output.
+                    state.items[id] = item
                     let contentAttr: Attribute<Content> = AGSubgraph.withCurrent(subgraph) {
-                        graph.makeRule {
-                            let fe = view._attribute.value
-                            var si = fe.data.startIndex
-                            while si != fe.data.endIndex {
-                                let e = fe.data[si]
-                                if AnyHashable(e[keyPath: fe.id]) == id {
-                                    return fe.content(e)
-                                }
-                                si = fe.data.index(after: si)
-                            }
-                            return forEach.content(element)  // stale fallback if ID removed
-                        }
+                        graph.makeStatefulRule(
+                            ForEachChild<Data, ID, Content>(
+                                _info: infoAttr,
+                                id: id
+                            )
+                        )
                     }
                     let contentView = _GraphValue(_attribute: contentAttr)
                     let traitListAttr = AGSubgraph.withCurrent(subgraph) {
@@ -119,19 +134,14 @@ extension ForEach: View where Content: View {
                         inputs: inputs
                     )
                     var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
-                    let managedSubgraph = _ViewList_Subgraph(subgraph: subgraph)
                     elements.wrap(subgraph: managedSubgraph)
-                    state.items[id] = ForEachState<Data, ID, Content>.Item(
-                        elements: elements,
-                        subgraph: managedSubgraph,
-                        traitListAttr: traitListAttr
-                    )
+                    item.elements = elements
+                    item.traitListAttr = traitListAttr
                 }
             }
 
-            state.order = newOrder
-            state.seed &+= 1
-            return ForEachList(state: state, seed: state.seed)
+            state.order = newOrder.map(\.id)
+            return ForEachList(state: state, seed: info.seed)
         }
 
         return _ViewListOutputs(
@@ -165,6 +175,9 @@ extension ForEach: View where Content: View {
     }
 }
 
+extension ForEach: PrimitiveView where ForEach: View {
+}
+
 // MARK: - ForEachState
 
 /// Per-ForEach state class. Holds per-item subgraph elements.
@@ -172,10 +185,44 @@ extension ForEach: View where Content: View {
 final class ForEachState<Data, ID, Content>
     where Data: RandomAccessCollection, ID: Hashable, Content: View {
 
-    struct Item {
+    struct Info {
+        var state: ForEachState
+        var seed: UInt32
+
+        struct Init: Rule {
+            var _view: Attribute<ForEach<Data, ID, Content>>
+            var state: ForEachState
+
+            var value: Info {
+                state.update(view: _view.value)
+                return Info(state: state, seed: state.seed)
+            }
+        }
+    }
+
+    final class Item {
+        let id: ID
+        var index: Data.Index
+        var seed: UInt32
         var elements: _ViewList_SubgraphElements
         var subgraph: _ViewList_Subgraph
         var traitListAttr: OptionalAttribute<ViewTraitCollection>
+
+        init(
+            id: ID,
+            index: Data.Index,
+            seed: UInt32,
+            elements: _ViewList_SubgraphElements,
+            subgraph: _ViewList_Subgraph,
+            traitListAttr: OptionalAttribute<ViewTraitCollection>
+        ) {
+            self.id = id
+            self.index = index
+            self.seed = seed
+            self.elements = elements
+            self.subgraph = subgraph
+            self.traitListAttr = traitListAttr
+        }
 
         var traits: ViewTraitCollection {
             traitListAttr.attribute?.value ?? ViewTraitCollection()
@@ -187,12 +234,49 @@ final class ForEachState<Data, ID, Content>
     }
 
     var inputs: _ViewListInputs
-    var items: [AnyHashable: Item] = [:]
-    var order: [AnyHashable] = []
+    var info: Attribute<Info>?
+    var view: ForEach<Data, ID, Content>?
+    var items: [ID: Item] = [:]
+    var order: [ID] = []
     var seed: UInt32 = 0
 
     init(inputs: _ViewListInputs) {
         self.inputs = inputs
+    }
+
+    func update(view: ForEach<Data, ID, Content>) {
+        self.view = view
+        seed &+= 1
+
+        var index = view.data.startIndex
+        while index != view.data.endIndex {
+            let element = view.data[index]
+            let id = element[keyPath: view.id]
+            if let item = items[id] {
+                item.index = index
+                item.seed = seed
+            }
+            index = view.data.index(after: index)
+        }
+    }
+}
+
+private struct ForEachChild<Data, ID, Content>: StatefulRule
+    where Data: RandomAccessCollection, ID: Hashable, Content: View {
+
+    typealias Value = Content
+
+    var _info: Attribute<ForEachState<Data, ID, Content>.Info>
+    var id: ID
+
+    mutating func updateValue() {
+        let info = _info.value
+        guard let item = info.state.items[id],
+              item.seed == info.seed,
+              let forEach = info.state.view else {
+            return
+        }
+        _AGGraph.setStatefulOutput(forEach.content(forEach.data[item.index]))
     }
 }
 
@@ -226,7 +310,7 @@ struct ForEachList<Data, ID, Content>: ViewList
             let sublist = _ViewList_Sublist(
                 start: 0,
                 count: 1,
-                id: _ViewList_ID(explicitID: id),
+                id: _ViewList_ID(explicitID: AnyHashable(id)),
                 elements: item.elements,
                 traits: item.traits,
                 list: list
@@ -239,7 +323,8 @@ struct ForEachList<Data, ID, Content>: ViewList
     }
 }
 
-extension ForEach: PrimitiveView where ForEach: View {
+@available(*, unavailable)
+extension ForEach: Sendable {
 }
 
 extension ForEach where ID == Data.Element.ID, Content: View, Data.Element: Identifiable {
@@ -299,7 +384,7 @@ extension ForEach where Data == Range<Int>, ID == Int, Content: View {
 extension ForEach: DynamicViewContent where Content: View {
 }
 
-public protocol DynamicViewContent: View {
+public protocol DynamicViewContent<Data>: View {
     associatedtype Data: Collection
     var data: Self.Data { get }
 }

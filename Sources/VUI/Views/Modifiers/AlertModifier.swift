@@ -14,7 +14,7 @@ struct BoundInputsView {}
 
 // MARK: - ViewIdentity
 // Per-presentation identity key used by alert and confirmation-dialog dictionaries.
-struct ViewIdentity: Hashable {
+struct ViewIdentity: Hashable, CustomStringConvertible {
     private static let counter = Atomic<UInt32>(0)
     let rawValue: UInt32
 
@@ -24,6 +24,10 @@ struct ViewIdentity: Hashable {
 
     private init(rawValue: UInt32) {
         self.rawValue = rawValue
+    }
+
+    var description: String {
+        "ViewIdentity(\(rawValue))"
     }
 
     // Zero-initialized tracker that refreshes identity when the phase reset seed changes.
@@ -459,6 +463,21 @@ private func platformItemButtonLabelSurface(
     return (source?.snapshot() ?? AnyView(fallback), nil)
 }
 
+private func platformItemButtonLabelSource(
+    _ inputs: _ViewInputs
+) -> AnySource? {
+    var sources = inputs.base[
+        SourceInput<ButtonStyleConfiguration.Label>.self
+    ]
+    guard let relay = sources.pop() else {
+        return nil
+    }
+    if relay.isSource(PrimitiveButtonStyleConfiguration.Label.self) {
+        return sources.pop()
+    }
+    return relay
+}
+
 private struct PlatformItemListButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
     @Environment(\.isEnabled) private var isEnabled: Bool
@@ -470,7 +489,7 @@ private struct PlatformItemListButtonBody: View {
 
         let configurationAttr = view[\.configuration]._attribute
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top
+        let source = platformItemButtonLabelSource(inputs)
         let itemID = PlatformItemList.stableID(configurationAttr.identifier)
         let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
             let configuration = configurationAttr.value

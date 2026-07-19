@@ -381,7 +381,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -396,7 +396,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             let selectedTransaction = graph.makeStatefulRule(
                 Container.TransactionRule(
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phaseChangeTransaction: phaseChangeTransaction,
                     phaseChangeTransactionSeed: phaseChangeTransactionSeed
                 )
@@ -626,7 +626,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -680,7 +680,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -724,7 +724,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -764,7 +764,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -812,7 +812,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -962,7 +962,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             let child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1000,7 +1000,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1042,7 +1042,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1081,7 +1081,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1117,7 +1117,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             let child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1153,7 +1153,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1204,7 +1204,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -1244,7 +1244,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1292,7 +1292,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1352,7 +1352,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1391,7 +1391,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1441,7 +1441,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -1481,7 +1481,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -1522,7 +1522,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -1581,7 +1581,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -1638,7 +1638,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1680,7 +1680,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1759,7 +1759,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1838,7 +1838,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1917,7 +1917,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -1996,7 +1996,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2077,7 +2077,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2156,7 +2156,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2237,7 +2237,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -2313,7 +2313,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2359,7 +2359,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2402,7 +2402,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2447,7 +2447,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2494,7 +2494,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2560,7 +2560,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2636,7 +2636,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2712,7 +2712,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2784,7 +2784,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -2862,7 +2862,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -2941,7 +2941,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3009,7 +3009,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3088,7 +3088,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 var child = Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -3170,7 +3170,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3244,7 +3244,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -3320,7 +3320,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3395,7 +3395,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3475,7 +3475,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3542,7 +3542,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3596,7 +3596,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3650,7 +3650,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3706,7 +3706,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3762,7 +3762,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3818,7 +3818,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -3871,7 +3871,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -3912,7 +3912,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: weakVisibility
@@ -3961,7 +3961,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: weakVisibility
@@ -4016,7 +4016,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: weakVisibility
@@ -4078,7 +4078,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: weakVisibility
@@ -4149,7 +4149,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -4201,7 +4201,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -4277,7 +4277,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -4341,7 +4341,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -4400,7 +4400,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -4471,7 +4471,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4557,7 +4557,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4643,7 +4643,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4724,7 +4724,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4808,7 +4808,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4891,7 +4891,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -4977,7 +4977,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -5057,7 +5057,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -5124,7 +5124,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -5193,7 +5193,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -5259,7 +5259,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -5322,7 +5322,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -5396,7 +5396,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -5482,7 +5482,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -5578,7 +5578,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -5669,7 +5669,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -5769,7 +5769,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: weakCompletion,
                     isVisible: isVisible.asWeak()
@@ -5865,7 +5865,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -5962,7 +5962,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -6059,7 +6059,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 Container.Child(
                     view: source,
                     transaction: transaction,
-                    transactionSeed: viewGraph.data.transactionSeedAttribute,
+                    transactionSeed: viewGraph.data._transactionSeed,
                     phase: phase,
                     animationCompletion: completion.asWeak(),
                     isVisible: isVisible.asWeak()
@@ -6137,7 +6137,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6213,7 +6213,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: weakCompletion,
                 isVisible: isVisible.asWeak()
@@ -6286,7 +6286,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6361,7 +6361,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6427,7 +6427,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6473,7 +6473,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6528,7 +6528,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6587,7 +6587,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6653,7 +6653,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var child = Container.Child(
                 view: source,
                 transaction: transaction,
-                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                transactionSeed: viewGraph.data._transactionSeed,
                 phase: phase,
                 animationCompletion: completion.asWeak(),
                 isVisible: isVisible.asWeak()
@@ -6936,14 +6936,10 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     private func makeViewInputs(graph: _AGGraph, transaction: Transaction = Transaction()) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: transaction),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: environment,
+            transaction: graph.makeInput(value: transaction)
         )
         return _ViewInputs(
             base: base,
@@ -6995,7 +6991,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         return PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer.Child(
             view: source,
             transaction: transaction,
-            transactionSeed: viewGraph.data.transactionSeedAttribute,
+            transactionSeed: viewGraph.data._transactionSeed,
             phase: phase,
             animationCompletion: completion.asWeak(),
             isVisible: isVisible.asWeak()

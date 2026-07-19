@@ -8,7 +8,7 @@
 import Foundation
 
 /// Bitset describing scrollable child groups that should stay pinned.
-public struct PinnedScrollableViews: OptionSet, Hashable, Sendable {
+public struct PinnedScrollableViews: OptionSet, Sendable {
     public var rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -49,14 +49,14 @@ struct ScrollableCollectionSubview {
 protocol ScrollableCollection: Scrollable {
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] { get }
     func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void)
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview?
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview?
     func nextVisibleCollectionViewID(
         towards point: UnitPoint,
         from id: _ViewList_ID.Canonical,
         border: CGSize,
         ignoring pinnedViews: PinnedScrollableViews
     ) -> _ViewList_ID.Canonical?
-    static func hasMultipleViews(in axis: Axis) -> Bool
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool
     func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int?
     func applyCollectionViewIDs(
         from index: inout Int,
@@ -82,12 +82,6 @@ extension ScrollableCollection {
         return subviews
     }
 
-    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
-        scroll(
-            toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
-            anchor: Transaction.current.scrollTargetAnchor
-        )
-    }
 }
 
 /// Collects scrollable hosts exposed by descendants.
@@ -109,7 +103,7 @@ struct UnaryScrollablePreferenceProvider: Rule {
         self.scrollable = scrollable
     }
 
-    func updateValue() -> [any Scrollable] {
+    var value: [any Scrollable] {
         [scrollable.value]
     }
 }

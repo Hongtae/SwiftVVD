@@ -6,8 +6,6 @@
 //
 
 import Foundation
-import Synchronization
-
 // ContentShapeKinds
 
 /// Specifies which interaction contexts a content shape applies to.
@@ -17,7 +15,8 @@ import Synchronization
 ///   .dragPreview         = 2
 ///   .contextMenuPreview  = 4
 ///   .hoverEffect         = 8
-///   .accessibility       = 16 (renamed from focusEffect in later SDKs)
+///   .focusEffect         = 16
+///   .accessibility       = 64
 public struct ContentShapeKinds: OptionSet, Sendable {
     public var rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
@@ -30,81 +29,304 @@ public struct ContentShapeKinds: OptionSet, Sendable {
     public static let contextMenuPreview = ContentShapeKinds(rawValue: 1 << 2)
     /// Shape used for hover effects.
     public static let hoverEffect        = ContentShapeKinds(rawValue: 1 << 3)
+    /// Shape used for focus effects.
+    public static let focusEffect        = ContentShapeKinds(rawValue: 1 << 4)
     /// Shape used for accessibility focus.
-    public static let accessibility      = ContentShapeKinds(rawValue: 1 << 4)
+    public static let accessibility      = ContentShapeKinds(rawValue: 1 << 6)
+}
+
+// Content responder core
+
+protocol ContentResponder {
+    func contains(points: UnsafeBufferPointer<CGPoint>, size: CGSize) -> BitVector64
+    func contentPath(size: CGSize) -> Path
+    func contentPath(size: CGSize, kind: ContentShapeKinds) -> Path
+}
+
+extension ContentResponder {
+    func contains(points: UnsafeBufferPointer<CGPoint>, size: CGSize) -> BitVector64 {
+        let path = contentPath(size: size)
+        var result = BitVector64()
+        for (index, point) in points.prefix(64).enumerated() {
+            result[index] = path.contains(point)
+        }
+        return result
+    }
+
+    func contentPath(size: CGSize, kind: ContentShapeKinds) -> Path {
+        contentPath(size: size)
+    }
+}
+
+struct ContentResponderHelper<Data: ContentResponder> {
+    var size: CGSize
+    var data: Data?
+    var transform: ViewTransform
+    var observers: ContentPathObservers
+    var cache: ViewResponder.ContainsPointsCache
+
+    init() {
+        size = .zero
+        data = nil
+        transform = ViewTransform()
+        observers = ContentPathObservers()
+        cache = ViewResponder.ContainsPointsCache()
+    }
+
+    mutating func update(
+        data: (value: Data, changed: Bool),
+        size: (value: ViewSize, changed: Bool),
+        position: (value: CGPoint, changed: Bool),
+        transform: (value: ViewTransform, changed: Bool),
+        parent: ViewResponder
+    ) {
+        let changed = data.changed || size.changed || position.changed || transform.changed
+        if data.changed || self.data == nil {
+            self.data = data.value
+        }
+        if size.changed || self.size == .zero {
+            self.size = size.value.value
+        }
+        if position.changed || transform.changed || self.transform.isEmpty {
+            var resolvedTransform = transform.value
+            resolvedTransform.appendPosition(position.value)
+            self.transform = resolvedTransform
+        }
+        if changed {
+            cache = ViewResponder.ContainsPointsCache()
+            var finished = false
+            let currentObservers = observers.takeObservers()
+            for observer in currentObservers {
+                observer.contentPathDidChange(
+                    for: parent,
+                    changes: [.data, .size, .transform],
+                    transform: (old: self.transform, new: self.transform),
+                    finished: &finished
+                )
+            }
+        }
+    }
+
+    mutating func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions,
+        children: [ViewResponder]
+    ) -> ViewResponder.ContainsPointsResult {
+        cache.fetch(key: cacheKey) {
+            guard let data else {
+                return .stop
+            }
+            var localPoints = Array(points.prefix(64))
+            transform.convertGlobal(to: .local, points: &localPoints)
+            let mask = localPoints.withUnsafeBufferPointer {
+                data.contains(points: $0, size: size)
+            }
+            return ViewResponder.ContainsPointsResult(
+                mask: mask,
+                priority: 0,
+                children: children
+            )
+        }
+    }
+
+    mutating func addContentPath(
+        to path: inout Path,
+        kind: ContentShapeKinds,
+        in coordinateSpace: CoordinateSpace,
+        observer: (any ContentPathObserver)?
+    ) {
+        guard let data else { return }
+        if let observer {
+            observers.add(observer: observer)
+        }
+        path.addPath(data.contentPath(size: size, kind: kind))
+    }
+
+    var globalPosition: CGPoint {
+        var points = [CGPoint.zero]
+        transform.convertGlobal(from: .local, points: &points)
+        return points[0]
+    }
 }
 
 // ContentShapeResponder
 
-private let _contentShapeResponderNextKey = Mutex<UInt32>(0x80000000)
+final class ContentShapeResponder<S: Shape>: DefaultLayoutViewResponder {
+    var helper = ContentResponderHelper<_ContentShapeModifier<S>>()
 
-/// Path-based `ViewResponder` created by `_ContentShapeModifier._makeView`.
-///
-/// When hit, returns the inner responders (collected from the subtree below
-/// the contentShape modifier) via `ContainsPointsResult.children`. The caller
-/// (`MultiViewResponder.respondersContaining`) follows `children` recursively
-/// to arrive at the concrete `GestureResponder` instances.
-final class ContentShapeResponder<S: Shape>: ViewResponder {
-
-    let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
-
-    let shape: Attribute<S>
-    let position: Attribute<CGPoint>
-    let size: Attribute<ViewSize>
-    let transform: Attribute<ViewTransform>
-    let innerResponders: Attribute<[any ViewResponder]>
-    let eoFill: Bool
-    let kinds: ContentShapeKinds
-
-    init(
-        shape: Attribute<S>,
-        position: Attribute<CGPoint>,
-        size: Attribute<ViewSize>,
-        transform: Attribute<ViewTransform>,
-        innerResponders: Attribute<[any ViewResponder]>,
-        eoFill: Bool,
-        kinds: ContentShapeKinds
-    ) {
-        self.hitTestKey = _contentShapeResponderNextKey.withLock { key in
-            defer { key &+= 1 }
-            return key
-        }
-        self.shape = shape
-        self.position = position
-        self.size = size
-        self.transform = transform
-        self.innerResponders = innerResponders
-        self.eoFill = eoFill
-        self.kinds = kinds
-    }
-
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.HitTestPolicy {
         .include
     }
 
-    func containsGlobalPoints(
+    override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
-        options: ContainsPointsOptions
-    ) -> ContainsPointsResult {
-        let sz = size.value.value
-        let t = transform.value
-        var localPts = Array(points.prefix(64))
-        t.convertGlobal(to: .local, points: &localPts)
-        let localBounds = CGRect(origin: .zero, size: sz)
-        let shapePath = shape.value.path(in: localBounds)
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        let inherited = super.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options
+        )
+        var result = helper.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options,
+            children: children
+        )
+        result.priority = max(result.priority, inherited.priority)
+        return result
+    }
 
-        var mask: UInt64 = 0
-        for (i, localPt) in localPts.enumerated() {
-            if shapePath.contains(localPt, eoFill: eoFill) {
-                mask |= (1 << i)
+    override func addContentPath(
+        to path: inout Path,
+        kind: ContentShapeKinds,
+        in coordinateSpace: CoordinateSpace,
+        observer: (any ContentPathObserver)?
+    ) {
+        helper.addContentPath(
+            to: &path,
+            kind: kind,
+            in: coordinateSpace,
+            observer: observer
+        )
+    }
+}
+
+struct ContentShapeResponderFilter<S: Shape>: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _modifier: Attribute<_ContentShapeModifier<S>>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _transform: Attribute<ViewTransform>
+    var _children: Attribute<[ViewResponder]>
+    var inputs: _ViewInputs
+    var viewSubgraph: AGSubgraph
+    var _responder: ContentShapeResponder<S>?
+
+    mutating func updateValue() {
+        if _responder == nil {
+            _responder = AGSubgraph.withCurrent(viewSubgraph) {
+                ContentShapeResponder<S>(inputs: inputs, viewSubgraph: viewSubgraph)
             }
         }
+        guard let responder = _responder else {
+            fatalError("ContentShapeResponderFilter failed to create its responder")
+        }
+        responder.helper.update(
+            data: (
+                value: _modifier.value,
+                changed: _AGGraph.currentStatefulInputChanged(_modifier.identifier)
+            ),
+            size: (
+                value: _size.value,
+                changed: _AGGraph.currentStatefulInputChanged(_size.identifier)
+            ),
+            position: (
+                value: _position.value,
+                changed: _AGGraph.currentStatefulInputChanged(_position.identifier)
+            ),
+            transform: (
+                value: _transform.value,
+                changed: _AGGraph.currentStatefulInputChanged(_transform.identifier)
+            ),
+            parent: responder
+        )
+        if _AGGraph.currentStatefulInputChanged(_children.identifier) || !context.hasValue {
+            responder.children = _children.value
+        }
+        if !context.hasValue {
+            _AGGraph.setStatefulOutput([responder])
+        }
+    }
+}
 
-        guard mask != 0 else { return .stop }
-        return ContainsPointsResult(mask: mask, priority: 0, children: innerResponders.value)
+final class ContentShapeKindResponder<S: Shape>: DefaultLayoutViewResponder {
+    var kind: ContentShapeKinds = []
+    var helper = ContentResponderHelper<_ContentShapeKindModifier<S>>()
+
+    override func hitTestPolicy(
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.HitTestPolicy {
+        .include
+    }
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        guard kind.contains(.interaction) else {
+            return super.containsGlobalPoints(points, cacheKey: cacheKey, options: options)
+        }
+        let inherited = super.containsGlobalPoints(points, cacheKey: cacheKey, options: options)
+        var result = helper.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options,
+            children: children
+        )
+        result.priority = max(result.priority, inherited.priority)
+        return result
+    }
+
+    override func addContentPath(
+        to path: inout Path,
+        kind: ContentShapeKinds,
+        in coordinateSpace: CoordinateSpace,
+        observer: (any ContentPathObserver)?
+    ) {
+        helper.addContentPath(
+            to: &path,
+            kind: kind,
+            in: coordinateSpace,
+            observer: observer
+        )
+    }
+}
+
+struct ContentShapeKindResponderFilter<S: Shape>: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _modifier: Attribute<_ContentShapeKindModifier<S>>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _transform: Attribute<ViewTransform>
+    var _children: Attribute<[ViewResponder]>
+    var responder: ContentShapeKindResponder<S>
+
+    mutating func updateValue() {
+        let modifier = _modifier.value
+        responder.helper.update(
+            data: (
+                value: modifier,
+                changed: _AGGraph.currentStatefulInputChanged(_modifier.identifier)
+            ),
+            size: (
+                value: _size.value,
+                changed: _AGGraph.currentStatefulInputChanged(_size.identifier)
+            ),
+            position: (
+                value: _position.value,
+                changed: _AGGraph.currentStatefulInputChanged(_position.identifier)
+            ),
+            transform: (
+                value: _transform.value,
+                changed: _AGGraph.currentStatefulInputChanged(_transform.identifier)
+            ),
+            parent: responder
+        )
+        responder.kind = modifier.kind
+        if _AGGraph.currentStatefulInputChanged(_children.identifier) || !context.hasValue {
+            responder.children = _children.value
+        }
+        if !context.hasValue {
+            _AGGraph.setStatefulOutput([responder])
+        }
     }
 }
 
@@ -114,7 +336,7 @@ final class ContentShapeResponder<S: Shape>: ViewResponder {
 /// Implicitly uses `.interaction` kind.
 ///
 /// Created by `View.contentShape(_:eoFill:)`.
-public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifier {
+public struct _ContentShapeModifier<S: Shape>: MultiViewModifier, PrimitiveViewModifier, ContentResponder {
     public var shape: S
     public var eoFill: Bool
 
@@ -124,6 +346,23 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
     }
 
     public typealias Body = Never
+
+    func contains(points: UnsafeBufferPointer<CGPoint>, size: CGSize) -> BitVector64 {
+        let path = contentPath(size: size)
+        var result = BitVector64()
+        for (index, point) in points.prefix(64).enumerated() {
+            result[index] = path.contains(point, eoFill: eoFill)
+        }
+        return result
+    }
+
+    func contentPath(size: CGSize) -> Path {
+        shape.path(in: CGRect(origin: .zero, size: size))
+    }
+
+    func contentPath(size: CGSize, kind: ContentShapeKinds) -> Path {
+        contentPath(size: size)
+    }
 
     public static func _makeView(
         modifier: _GraphValue<Self>,
@@ -136,38 +375,39 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
 
         var outputs = body(_Graph(), inputs)
 
-        // Only active when ViewRespondersKey is in the preference keys (gesture-enabled pass).
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
-        // Collect inner ViewRespondersKey nodes from body outputs.
         let innerNodes = outputs.preferences.values(for: ViewRespondersKey.self)
-        guard !innerNodes.isEmpty else { return outputs }
-
-        // Build a combined attribute for all inner responders.
-        let innerAttr: Attribute<[any ViewResponder]> = graph.makeRule {
-            var combined: [any ViewResponder] = []
-            for nodeID in innerNodes {
-                let responders = Attribute<[any ViewResponder]>(nodeID).value
-                combined.append(contentsOf: responders)
+        let innerAttr: Attribute<[ViewResponder]>
+        if innerNodes.isEmpty {
+            innerAttr = graph.makeInput(value: [])
+        } else {
+            innerAttr = graph.makeRule {
+                var combined: [ViewResponder] = []
+                for nodeID in innerNodes {
+                    combined.append(contentsOf: Attribute<[ViewResponder]>(nodeID).value)
+                }
+                return combined
             }
-            return combined
         }
 
-        // Remove existing ViewRespondersKey entries; ContentShapeResponder replaces them.
         let keyID = ObjectIdentifier(ViewRespondersKey.self)
         outputs.preferences.preferences.removeAll(where: { ObjectIdentifier($0.key) == keyID })
-
-        let responder = ContentShapeResponder(
-            shape: modifier[\.shape]._attribute,
-            position: inputs.position,
-            size: inputs.size,
-            transform: inputs.transform,
-            innerResponders: innerAttr,
-            eoFill: modifier._attribute.value.eoFill,
-            kinds: .interaction
+        guard let viewSubgraph = AGSubgraph.current else {
+            fatalError("_ContentShapeModifier._makeView requires a current AGSubgraph")
+        }
+        let respondersAttr = graph.makeStatefulRule(
+            ContentShapeResponderFilter(
+                _modifier: modifier._attribute,
+                _position: inputs.position,
+                _size: inputs.size,
+                _transform: inputs.transform,
+                _children: innerAttr,
+                inputs: inputs,
+                viewSubgraph: viewSubgraph,
+                _responder: nil
+            )
         )
-
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
 
         return outputs
@@ -179,7 +419,7 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
 /// View modifier that overrides the hit-test region for specified interaction kinds.
 ///
 /// Created by `View.contentShape(_:_:eoFill:)`.
-public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewModifier {
+public struct _ContentShapeKindModifier<S: Shape>: MultiViewModifier, PrimitiveViewModifier, ContentResponder {
     public var shape: S
     public var eoFill: Bool
     public var kind: ContentShapeKinds
@@ -191,6 +431,26 @@ public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewMo
     }
 
     public typealias Body = Never
+
+    func contains(points: UnsafeBufferPointer<CGPoint>, size: CGSize) -> BitVector64 {
+        guard kind.contains(.interaction) else { return [] }
+        let path = contentPath(size: size)
+        var result = BitVector64()
+        for (index, point) in points.prefix(64).enumerated() {
+            result[index] = path.contains(point, eoFill: eoFill)
+        }
+        return result
+    }
+
+    func contentPath(size: CGSize) -> Path {
+        guard kind.contains(.interaction) else { return Path() }
+        return shape.path(in: CGRect(origin: .zero, size: size))
+    }
+
+    func contentPath(size: CGSize, kind requestedKind: ContentShapeKinds) -> Path {
+        guard !kind.intersection(requestedKind).isEmpty else { return Path() }
+        return shape.path(in: CGRect(origin: .zero, size: size))
+    }
 
     public static func _makeView(
         modifier: _GraphValue<Self>,
@@ -205,39 +465,39 @@ public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewMo
 
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
-        let kinds = modifier._attribute.value.kind
-
-        // Only wire a ContentShapeResponder when the kind includes .interaction.
-        // Other kinds (dragPreview, contextMenuPreview, etc.) would go through
-        // ContentShapePathData preference; not yet implemented.
-        guard kinds.contains(.interaction) else { return outputs }
-
         let innerNodes = outputs.preferences.values(for: ViewRespondersKey.self)
-        guard !innerNodes.isEmpty else { return outputs }
-
-        let innerAttr: Attribute<[any ViewResponder]> = graph.makeRule {
-            var combined: [any ViewResponder] = []
-            for nodeID in innerNodes {
-                let responders = Attribute<[any ViewResponder]>(nodeID).value
-                combined.append(contentsOf: responders)
+        let innerAttr: Attribute<[ViewResponder]>
+        if innerNodes.isEmpty {
+            innerAttr = graph.makeInput(value: [])
+        } else {
+            innerAttr = graph.makeRule {
+                var combined: [ViewResponder] = []
+                for nodeID in innerNodes {
+                    combined.append(contentsOf: Attribute<[ViewResponder]>(nodeID).value)
+                }
+                return combined
             }
-            return combined
         }
 
         let keyID = ObjectIdentifier(ViewRespondersKey.self)
         outputs.preferences.preferences.removeAll(where: { ObjectIdentifier($0.key) == keyID })
-
-        let responder = ContentShapeResponder(
-            shape: modifier[\.shape]._attribute,
-            position: inputs.position,
-            size: inputs.size,
-            transform: inputs.transform,
-            innerResponders: innerAttr,
-            eoFill: modifier._attribute.value.eoFill,
-            kinds: kinds
+        guard let viewSubgraph = AGSubgraph.current else {
+            fatalError("_ContentShapeKindModifier._makeView requires a current AGSubgraph")
+        }
+        let responder = ContentShapeKindResponder<S>(
+            inputs: inputs,
+            viewSubgraph: viewSubgraph
         )
-
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr = graph.makeStatefulRule(
+            ContentShapeKindResponderFilter(
+                _modifier: modifier._attribute,
+                _position: inputs.position,
+                _size: inputs.size,
+                _transform: inputs.transform,
+                _children: innerAttr,
+                responder: responder
+            )
+        )
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
 
         return outputs

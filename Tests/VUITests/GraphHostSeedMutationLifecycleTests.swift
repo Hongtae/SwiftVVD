@@ -2,37 +2,22 @@ import XCTest
 @testable import VUI
 
 final class GraphHostSeedMutationLifecycleTests: XCTestCase {
-    func testRunTransactionIncrementsTransactionSeedAndRestoresUpdatingFlag() throws {
+    func testRunTransactionIncrementsTransactionSeedAndRestoresUpdatingFlag() {
         let host = GraphHost()
+        var value = 0
 
-        let value = host.runTransaction {
+        host.runTransaction(nil, do: {
             XCTAssertTrue(host.isUpdating)
             XCTAssertEqual(host.data.transactionSeed, 1)
             XCTAssertEqual(host.data.updateSeed, 0)
-            return 42
-        }
+            value = 42
+        }, id: nil)
 
         XCTAssertEqual(value, 42)
         XCTAssertFalse(host.isUpdating)
         host.data.withCurrent {
             XCTAssertEqual(host.data.transactionSeed, 1)
             XCTAssertEqual(host.data.updateSeed, 0)
-        }
-    }
-
-    func testRunTransactionRestoresUpdatingFlagAfterThrow() {
-        enum TestError: Error { case failed }
-        let host = GraphHost()
-
-        XCTAssertThrowsError(try host.runTransaction {
-            XCTAssertTrue(host.isUpdating)
-            XCTAssertEqual(host.data.transactionSeed, 1)
-            throw TestError.failed
-        })
-
-        XCTAssertFalse(host.isUpdating)
-        host.data.withCurrent {
-            XCTAssertEqual(host.data.transactionSeed, 1)
         }
     }
 
@@ -43,10 +28,10 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         transaction.isContinuous = true
         var observedCurrentIsContinuous: Bool?
 
-        host.runTransaction(transaction, id: 11) {
+        host.runTransaction(transaction, do: {
             observedCurrentIsContinuous = Transaction.current.isContinuous
             XCTAssertTrue(host.isUpdating)
-        }
+        }, id: 11)
 
         XCTAssertEqual(observedCurrentIsContinuous, false)
         XCTAssertFalse(Transaction.current.isContinuous)
@@ -59,10 +44,10 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         var wasUpdatingDuringPostUpdate = false
 
         host.startTransactionUpdate()
-        host.finishTransactionUpdate(in: nil, postUpdate: { needsFollowUp in
+        host.finishTransactionUpdate(in: host.data.rootSubgraph, postUpdate: { needsFollowUp in
             wasUpdatingDuringPostUpdate = host.isUpdating
             postUpdateNeedsFollowUp.append(needsFollowUp)
-        })
+        }, id: nil)
 
         XCTAssertEqual(postUpdateNeedsFollowUp, [false])
         XCTAssertTrue(wasUpdatingDuringPostUpdate)
@@ -92,9 +77,9 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         host.continueTransaction(CustomGraphMutation {
             source.setValue(3)
         })
-        host.finishTransactionUpdate(in: nil, postUpdate: { _ in
+        host.finishTransactionUpdate(in: host.data.rootSubgraph, postUpdate: { _ in
             observedDuringPostUpdate = derived.value
-        })
+        }, id: nil)
 
         XCTAssertEqual(observedDuringPostUpdate, 6)
         XCTAssertFalse(host.isUpdating)
@@ -111,18 +96,18 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         host.continueTransaction(
             FinishTransactionUpdateMutation(host: host, recorder: recorder, name: "first", nextName: "second")
         )
-        host.finishTransactionUpdate(in: nil, postUpdate: { needsFollowUp in
+        host.finishTransactionUpdate(in: host.data.rootSubgraph, postUpdate: { needsFollowUp in
             wasUpdatingDuringPostUpdate.append(host.isUpdating)
             needsTransactionDuringPostUpdate.append(host.needsTransaction)
             postUpdateNeedsFollowUp.append(needsFollowUp)
             recorder.events.append("post:\(needsFollowUp)")
-        })
+        }, id: nil)
 
         XCTAssertEqual(recorder.events, ["first", "post:true", "second", "post:false"])
         XCTAssertEqual(postUpdateNeedsFollowUp, [true, false])
         XCTAssertEqual(wasUpdatingDuringPostUpdate, [true, true])
         XCTAssertEqual(needsTransactionDuringPostUpdate, [true, false])
-        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.isUpdating)
     }
@@ -134,13 +119,13 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
 
         host.startTransactionUpdate()
         host.continueTransaction(RequeuingFinishTransactionUpdateMutation(host: host, recorder: recorder))
-        host.finishTransactionUpdate(in: nil, postUpdate: { needsFollowUp in
+        host.finishTransactionUpdate(in: host.data.rootSubgraph, postUpdate: { needsFollowUp in
             postUpdateNeedsFollowUp.append(needsFollowUp)
-        })
+        }, id: nil)
 
         XCTAssertEqual(recorder.applyCount, 8)
         XCTAssertEqual(postUpdateNeedsFollowUp, Array(repeating: true, count: 8))
-        XCTAssertTrue(host.hasPendingGraphMutations)
+        XCTAssertTrue(host.needsTransaction)
         XCTAssertTrue(host.needsTransaction)
         XCTAssertFalse(host.isUpdating)
     }

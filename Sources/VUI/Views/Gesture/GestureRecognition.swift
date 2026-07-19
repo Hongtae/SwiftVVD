@@ -46,7 +46,7 @@ struct DependentGesture<E>: GestureModifier {
 
     var dependency: GestureDependency
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
@@ -78,7 +78,7 @@ struct DependentPhase<E>: Rule {
     var _phase: Attribute<GesturePhase<E>>
     var _inheritedPhase: Attribute<_GestureInputs.InheritedPhase>
 
-    func updateValue() -> GesturePhase<E> {
+    var value: GesturePhase<E> {
         _phase.value.applyingDependency(
             _modifier.value.dependency,
             inheritedPhase: _inheritedPhase.value
@@ -139,7 +139,7 @@ struct EventFilter<E: EventType>: GestureModifier {
     // Retained for the API shape expected by callers that construct this modifier.
     var predicate: ((E) -> Bool)?
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
@@ -159,14 +159,48 @@ struct CategoryGesture<V>: GestureModifier {
     typealias Body = Never
 
     var category: GestureCategory
+    var includeChildren: Bool
 
-    static func makeGesture(
+    struct Combiner<T>: Rule {
+        var _modifier: Attribute<CategoryGesture<T>>
+        var _existingCategory: OptionalAttribute<GestureCategory>
+
+        var value: GestureCategory {
+            let modifier = _modifier.value
+            guard modifier.includeChildren,
+                  let existing = _existingCategory.attribute?.value else {
+                return modifier.category
+            }
+            return modifier.category.union(existing)
+        }
+    }
+
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<V>
     ) -> _GestureOutputs<V> {
-        // The category is stored on the modifier. makeGesture forwards the body outputs.
-        body(inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError("CategoryGesture.makeGesture requires AG context")
+        }
+        var outputs = body(inputs)
+        let existing: OptionalAttribute<GestureCategory>
+        if let identifier = outputs.preferences.value(for: GestureCategory.Key.self) {
+            existing = OptionalAttribute(Attribute(identifier))
+        } else {
+            existing = OptionalAttribute()
+        }
+        let category = graph.makeRule(
+            Combiner<V>(
+                _modifier: modifier._attribute,
+                _existingCategory: existing
+            )
+        )
+        outputs.preferences.setValue(
+            category.identifier,
+            for: GestureCategory.Key.self
+        )
+        return outputs
     }
 }
 
@@ -177,7 +211,13 @@ extension Gesture {
         _ cat: GestureCategory,
         includeChildren: Bool = false
     ) -> ModifierGesture<CategoryGesture<Value>, Self> {
-        ModifierGesture(modifier: CategoryGesture(category: cat), body: self)
+        ModifierGesture(
+            modifier: CategoryGesture(
+                category: cat,
+                includeChildren: includeChildren
+            ),
+            body: self
+        )
     }
 }
 
@@ -200,7 +240,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
         self.maximumDelay = maximumDelay
     }
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
@@ -217,7 +257,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
             globalSeedAttr: inputs.resetSeed,
             localCountAttr: tapCountAttr
         )
-        let seedAttr = graph.makeRule { repeatResetSeed.value }
+        let seedAttr = graph.makeRule(repeatResetSeed)
 
         let repeatPhase = RepeatPhase<E>(
             childPhaseAttr: bodyOutputs.phase,
@@ -233,7 +273,9 @@ struct RepeatGesture<E: EventType>: GestureModifier {
 }
 
 // RepeatResetSeed value is globalSeed + localCount.
-struct RepeatResetSeed {
+struct RepeatResetSeed: Rule {
+    typealias Value = UInt32
+
     var globalSeedAttr: Attribute<UInt32>
     var localCountAttr: Attribute<UInt32>
 
@@ -332,9 +374,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
            let context = _AGGraphContext.current,
            let gestureGraph = context.context as? GestureGraph {
             let deadline = Time(seconds: lastTapTime)
-            if deadline < gestureGraph.nextGestureUpdateTime {
-                gestureGraph.nextGestureUpdateTime = deadline
-            }
+            gestureGraph.scheduleGestureUpdate(at: deadline)
         }
     }
 }
@@ -358,7 +398,7 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
 
     var count: Int
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
@@ -378,7 +418,7 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
 
 // Wraps an inner gesture with the current reactive size from inputs.size.
 // The content closure is called with the latest CGSize to produce the child gesture.
-struct SizeGesture<T: Gesture>: Gesture {
+struct SizeGesture<T: Gesture>: Gesture, PrimitiveGesture {
     typealias Value = T.Value
     typealias Body = Never
 
@@ -408,18 +448,6 @@ struct SizeGesture<T: Gesture>: Gesture {
     }
 }
 
-extension SizeGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(T.self, eventType: eventType)
-    }
-}
-
-extension SizeGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(T.self, eventType: eventType)
-    }
-}
-
 // MARK: - DelayedGesture / DelayedPhase
 
 // DelayedGesture<T>: GestureModifier that requires T to be active for `duration` seconds
@@ -437,7 +465,7 @@ struct DelayedGesture<T: EventType>: GestureModifier {
         self.filter = filter
     }
 
-    static func makeGesture(
+    static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<T>

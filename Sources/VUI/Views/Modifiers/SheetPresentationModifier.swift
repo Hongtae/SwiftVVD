@@ -231,8 +231,8 @@ struct SheetContent<Content: View>: View {
             .environment(\.navigationSelectionSeed, NavigationState.SelectionSeed())
             // Step 14: clear sharing picker host
             .clearSharingPickerHost()
-            // Step 15: mark SheetStyleContext ViewInputFlag in AG customInputs
-            .input(SheetStyleContext.self)
+            // Step 15: mark navigation-bar ownership in graph inputs
+            .input(NavigationBarControlledNavigation.self)
             // Step 16: apply fixed sidebar state (gated on Semantics_v4)
             .modifier(StaticIf<_SemanticFeature<Semantics_v4>,
                                FixedSidebarModifier,

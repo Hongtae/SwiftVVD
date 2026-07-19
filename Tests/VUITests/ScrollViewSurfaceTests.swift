@@ -83,6 +83,13 @@ private final class ScrollViewChildCollectionScrollable: ScrollableCollection {
     var firstChildMarker: ScrollViewLookupMarker?
     var mapFirstChildCallCount = 0
 
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        scroll(
+            toCollectionViewID: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
+            anchor: Transaction.current.scrollTargetAnchor
+        )
+    }
+
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
         [_ViewList_ID(explicitID: AnyHashable("child")).canonicalID]
     }
@@ -90,7 +97,7 @@ private final class ScrollViewChildCollectionScrollable: ScrollableCollection {
     func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         nil
     }
 
@@ -103,7 +110,7 @@ private final class ScrollViewChildCollectionScrollable: ScrollableCollection {
         nil
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         false
     }
 
@@ -157,6 +164,10 @@ private final class ScrollViewBehaviorCollection: ScrollableCollection {
         self.subviews = subviews
     }
 
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        false
+    }
+
     var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
         subviews.map { $0.id.canonicalID }
     }
@@ -169,7 +180,7 @@ private final class ScrollViewBehaviorCollection: ScrollableCollection {
         }
     }
 
-    func subviewClosest(to rect: CGRect) -> ScrollableCollectionSubview? {
+    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
         subviews.min { lhs, rhs in
             lhs.frame.midpointDistance(to: rect) < rhs.frame.midpointDistance(to: rect)
         }
@@ -184,7 +195,7 @@ private final class ScrollViewBehaviorCollection: ScrollableCollection {
         nil
     }
 
-    static func hasMultipleViews(in axis: Axis) -> Bool {
+    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
         false
     }
 
@@ -657,7 +668,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollTargetRole.ContentKey.self)
+            preferenceKeys.add(ScrollTargetRole.ContentKey.self)
             let rows = (0..<2).map { ScrollViewTargetRow(id: $0) }
             let view = _ScrollableLayoutView(data: rows, layout: ScrollViewTargetLayout())
                 .scrollTargetLayout()
@@ -692,7 +703,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollTargetRole.ContentKey.self)
+            preferenceKeys.add(ScrollTargetRole.ContentKey.self)
             let rows = (0..<2).map { ScrollViewTargetRow(id: $0) }
             let view = _ScrollableLayoutView(data: rows, layout: ScrollViewTargetLayout())
                 .scrollTargetLayout(isEnabled: false)
@@ -892,7 +903,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollTargetRole.ContentKey.self)
+            preferenceKeys.add(ScrollTargetRole.ContentKey.self)
             let view = AnyLayout(DynamicScrollTargetLayout()) {
                 ForEach(Array(0..<2), id: \.self) { row in
                     ScrollViewTargetRow(id: row)
@@ -934,7 +945,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
             let view = AnyLayout(DynamicScrollTargetLayout()) {
                 ForEach(Array(0..<4), id: \.self) { row in
                     ScrollViewTargetRow(id: row, subgraphRecorder: recorder)
@@ -1005,7 +1016,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
             let view = AnyLayout(DynamicScrollTargetLayout()) {
                 ForEach(Array(0..<2), id: \.self) { row in
                     ScrollViewTargetRow(
@@ -1794,7 +1805,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let view = SystemScrollView(
                 configuration: ScrollViewConfiguration(),
@@ -1851,7 +1862,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let contentInsets = EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
             let view = SystemScrollView(
@@ -1884,7 +1895,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 states[0].geometry,
                 ScrollGeometry(
                     contentOffset: .zero,
-                    contentSize: recordingContentSize,
+                    contentSize: CGSize(
+                        width: recordingContentSize.width,
+                        height: size.height - contentInsets.top - contentInsets.bottom
+                    ),
                     contentInsets: contentInsets,
                     containerSize: size,
                     visibleRect: CGRect(
@@ -1910,7 +1924,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
             let updatedStates = Attribute<[ScrollGeometryState]>(geometryPreference).value
             XCTAssertEqual(updatedStates.first?.geometry.contentInsets, updatedInsets)
-            XCTAssertEqual(updatedStates.first?.geometry.contentSize, recordingContentSize)
+            XCTAssertEqual(
+                updatedStates.first?.geometry.contentSize,
+                CGSize(
+                    width: recordingContentSize.width,
+                    height: size.height - updatedInsets.top - updatedInsets.bottom
+                )
+            )
 
             var resizedView = updatedView
             let resizedContent = CGSize(width: 31, height: 47)
@@ -1919,14 +1939,17 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
             let resizedStates = Attribute<[ScrollGeometryState]>(geometryPreference).value
             XCTAssertEqual(resizedStates.first?.geometry.contentInsets, updatedInsets)
-            XCTAssertEqual(resizedStates.first?.geometry.contentSize, resizedContent)
+            XCTAssertEqual(
+                resizedStates.first?.geometry.contentSize,
+                CGSize(
+                    width: resizedContent.width,
+                    height: size.height - updatedInsets.top - updatedInsets.bottom
+                )
+            )
         }
     }
 
     func testSystemScrollViewContentTransformSuppliesScrollGeometryWindows() throws {
-        let previous = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previous }
 
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1981,7 +2004,11 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(containing.visibleRect, CGRect(origin: .zero, size: size))
 
             XCTAssertEqual(nearest.contentOffset, .zero)
-            XCTAssertEqual(nearest.contentSize, recordingContentSize)
+            let expectedContentSize = CGSize(
+                width: size.width - contentInsets.leading - contentInsets.trailing,
+                height: recordingContentSize.height
+            )
+            XCTAssertEqual(nearest.contentSize, expectedContentSize)
             XCTAssertEqual(nearest.contentInsets, contentInsets)
             XCTAssertEqual(nearest.containerSize, size)
             XCTAssertEqual(
@@ -2007,7 +2034,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(spaceSizes[1].0, .vertical)
             XCTAssertEqual(spaceSizes[1].1, size)
             XCTAssertEqual(spaceSizes[2].0, .content)
-            XCTAssertEqual(spaceSizes[2].1, recordingContentSize)
+            XCTAssertEqual(spaceSizes[2].1, expectedContentSize)
             XCTAssertEqual(spaceSizes[3].0, .safeArea)
             XCTAssertEqual(
                 spaceSizes[3].1,
@@ -2062,9 +2089,6 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewChildPositionUsesVerticalOriginEdgesForRightToLeftVerticalScroll() throws {
-        let previous = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previous }
 
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -2113,9 +2137,6 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testScrollViewContentTransformUsesSafeAreaPositionForSafeAreaSpace() {
-        let previous = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides()
-        defer { Semantics.overrides = previous }
 
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -2137,7 +2158,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 axes: graph.makeInput(value: Axis.Set.vertical)
             )
 
-            let transform = provider.updateValue()
+            let transform = provider.value
             XCTAssertEqual(transform.globalPosition, CGPoint(x: 100, y: 200))
             XCTAssertEqual(transform.scrollCoordinateSpaces, [
                 .all,
@@ -2161,55 +2182,14 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
-    func testSystemScrollViewContentTransformOmitsSafeAreaBeforeV6Semantics() throws {
-        let previous = Semantics.overrides
-        Semantics.overrides = Semantics.Overrides(build: .v5, runtime: previous.runtime)
-        defer { Semantics.overrides = previous }
-
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        try ref.withCurrent {
-            let recorder = ScrollViewInputRecorder()
-            let view = SystemScrollView(
-                configuration: ScrollViewConfiguration(
-                    contentInsets: EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
-                ),
-                content: ScrollViewRecordingContent(recorder: recorder)
-            )
-            let viewAttr = graph.makeInput(value: view)
-            var inputs = makeViewInputs(graph: graph)
-            inputs.position = graph.makeInput(value: CGPoint(x: 19, y: 29))
-            inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 80, height: 120)))
-
-            _ = SystemScrollView<ScrollViewRecordingContent>._makeView(
-                view: _GraphValue(_attribute: viewAttr),
-                inputs: inputs
-            )
-
-            let transform = try XCTUnwrap(recorder.transform).value
-            XCTAssertEqual(transform.scrollCoordinateSpaces, [
-                .all,
-                .vertical,
-                .content,
-            ])
-            XCTAssertEqual(transform.translations.last, Optional(CGSize.zero))
-            let childSafeAreaInsets = try XCTUnwrap(recorder.safeAreaInsets?.value)
-            XCTAssertEqual(childSafeAreaInsets.space, ScrollCoordinateSpace.safeArea.id)
-            XCTAssertEqual(childSafeAreaInsets.next, .empty)
-            XCTAssertTrue(childSafeAreaInsets.elements.isEmpty)
-            XCTAssertEqual(childSafeAreaInsets.value, EdgeInsets())
-        }
-    }
-
     func testSystemScrollViewScrollableAppliesScrollToPointRequestToGeometryState() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
-            preferenceKeys.insert(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let view = SystemScrollView(
                 configuration: ScrollViewConfiguration(),
@@ -2263,8 +2243,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
-            preferenceKeys.insert(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let view = SystemScrollView(
                 configuration: ScrollViewConfiguration(),
@@ -2334,7 +2314,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let child = ScrollViewChildCollectionScrollable()
             let view = SystemScrollView(
@@ -2389,8 +2369,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
         host.data.withCurrent {
             let graph = host.data.graph
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollablePreferenceKey.self)
-            preferenceKeys.insert(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ScrollablePreferenceKey.self)
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
             let rows = (0..<3).map { ScrollViewTargetRow(id: $0) }
             let view = SystemScrollView(
                 configuration: ScrollViewConfiguration(),
@@ -2456,8 +2436,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         ref.withCurrent {
             var preferenceKeys = PreferenceKeys()
-            preferenceKeys.insert(ScrollPhasePreferenceKey.self)
-            preferenceKeys.insert(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ScrollPhasePreferenceKey.self)
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
             let recorder = ScrollViewInputRecorder()
             let container = SystemScrollViewContainer(
                 configuration: ScrollViewConfiguration(),
@@ -2786,16 +2766,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
     ) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time()),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: graph.makeInput(value: EnvironmentValues.tracking()))
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: graph.makeInput(value: EnvironmentValues.tracking()),
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(

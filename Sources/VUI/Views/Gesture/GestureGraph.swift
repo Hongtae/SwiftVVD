@@ -14,10 +14,10 @@ import VVD
 /// Event wrapper used internally when bridging platform events into the gesture pipeline.
 /// Retained as a local bridge type. It is not part of EventGraphHost.sendEvents signature.
 struct EventRecord {
-    var mouseEvent: MouseEvent
+    var mouseEvent: PlatformMouseEvent
     var time: Time
 
-    init(_ mouseEvent: MouseEvent, at time: Time = Time(seconds: 0)) {
+    init(_ mouseEvent: PlatformMouseEvent, at time: Time = Time(seconds: 0)) {
         self.mouseEvent = mouseEvent
         self.time = time
     }
@@ -26,7 +26,7 @@ struct EventRecord {
 // GestureCategory
 
 /// Classifies the primary gesture type active in a gesture graph.
-struct GestureCategory: OptionSet, Sendable {
+struct GestureCategory: OptionSet, Defaultable, Sendable {
     var rawValue: Int
     init(rawValue: Int) { self.rawValue = rawValue }
 
@@ -36,6 +36,46 @@ struct GestureCategory: OptionSet, Sendable {
     static let select     = GestureCategory(rawValue: 8)   // bit 3
     static let longPress  = GestureCategory(rawValue: 16)  // bit 4
     static let windowDrag = GestureCategory(rawValue: 32)  // bit 5
+
+    static var defaultValue: GestureCategory { [] }
+
+    struct Key: PreferenceKey {
+        static var defaultValue: GestureCategory { [] }
+        static var _includesRemovedValues: Bool { true }
+
+        static func reduce(
+            value: inout GestureCategory,
+            nextValue: () -> GestureCategory
+        ) {
+            value.formUnion(nextValue())
+        }
+    }
+}
+
+struct GestureLabelKey: PreferenceKey {
+    static var defaultValue: String? { nil }
+
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        if value == nil {
+            value = nextValue()
+        }
+    }
+}
+
+struct IsCancellableGestureKey: PreferenceKey {
+    static var defaultValue: Bool { false }
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
+struct ScrollViewDragAutoScrollKey: PreferenceKey {
+    static var defaultValue: Bool { false }
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
 }
 
 // EventBinding / EventBindingManager
@@ -97,7 +137,9 @@ class EventBindingManager {
         at time: Time
     ) -> GesturePhase<Void> {
         withDispatchScope {
-            lastDirectConsumedEventIDs = delegate?.receiveDirectEvents(events, in: self) ?? []
+            lastDirectConsumedEventIDs =
+                (delegate as? any DirectEventBindingManagerDelegate)?
+                .receiveDirectEvents(events, in: self) ?? []
             return sendDownstreamBody(events, bridge: nil, at: time)
         }
     }
@@ -143,12 +185,15 @@ class EventBindingManager {
         guard let rootNode = rootResponder ?? host.responderNode else { return .possible(nil) }
         guard !events.isEmpty else { return .possible(nil) }
         let phase = host.sendEvents(events, rootNode: rootNode, at: time)
+        let callback: (any EventBindingManagerDelegate)? = bridge ?? delegate
         for eventID in events.keys {
-            bridge?.didBind(to: bindings[eventID], id: eventID)
+            if let binding = bindings[eventID] {
+                callback?.didBind(to: binding, id: eventID)
+            }
         }
-        bridge?.didUpdate(phase: phase, in: self)
+        callback?.didUpdate(phase: phase, in: self)
         if let category = host.gestureCategory() {
-            bridge?.didUpdate(gestureCategory: category)
+            callback?.didUpdate(gestureCategory: category, in: self)
         }
         return phase
     }
@@ -202,28 +247,43 @@ protocol GestureGraphDelegate: AnyObject {
 // EventBindingSource / EventBindingManagerDelegate / EventBindingBridge
 
 protocol EventBindingSource: AnyObject {
-    func didBind(to binding: EventBinding?, id: EventID)
-    func didUpdate(phase: GesturePhase<Void>)
-    func didUpdate(gestureCategory: GestureCategory)
-    func didRequestHoverUpdate()
+    func attach(to bridge: EventBindingBridge)
+    func `as`<T>(_ type: T.Type) -> T?
+    func didUpdate(phase: GesturePhase<Void>, in bridge: EventBindingBridge)
+    func didUpdate(gestureCategory: GestureCategory, in bridge: EventBindingBridge)
+    func didBind(to binding: EventBinding, id: EventID, in bridge: EventBindingBridge)
+    func didRequestHoverUpdate(in bridge: EventBindingBridge)
 }
 
 extension EventBindingSource {
-    func didBind(to binding: EventBinding?, id: EventID) {}
-    func didUpdate(phase: GesturePhase<Void>) {}
-    func didUpdate(gestureCategory: GestureCategory) {}
-    func didRequestHoverUpdate() {}
+    func `as`<T>(_ type: T.Type) -> T? { self as? T }
+    func didUpdate(phase: GesturePhase<Void>, in bridge: EventBindingBridge) {}
+    func didUpdate(gestureCategory: GestureCategory, in bridge: EventBindingBridge) {}
+    func didBind(to binding: EventBinding, id: EventID, in bridge: EventBindingBridge) {}
+    func didRequestHoverUpdate(in bridge: EventBindingBridge) {}
 }
 
 protocol EventBindingManagerDelegate: AnyObject {
+    func didBind(to binding: EventBinding, id: EventID)
+    func didUpdate(phase: GesturePhase<Void>, in manager: EventBindingManager)
+    func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager)
     func requestHoverUpdate(in manager: EventBindingManager)
+}
+
+extension EventBindingManagerDelegate {
+    func didBind(to binding: EventBinding, id: EventID) {}
+    func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager) {}
+    func requestHoverUpdate(in manager: EventBindingManager) {}
+}
+
+protocol DirectEventBindingManagerDelegate: AnyObject {
     func receiveDirectEvents(
         _ events: [EventID: any EventType],
         in manager: EventBindingManager
     ) -> Set<EventID>
 }
 
-extension EventBindingManagerDelegate {
+extension DirectEventBindingManagerDelegate {
     func receiveDirectEvents(
         _ events: [EventID: any EventType],
         in manager: EventBindingManager
@@ -241,7 +301,7 @@ private final class WeakEventBindingSource {
 }
 
 /// Bridge between concrete platform event producers and the shared event manager.
-class EventBindingBridge: GestureGraphDelegate {
+class EventBindingBridge: GestureGraphDelegate, EventBindingManagerDelegate {
     struct TrackedEventState {
         var sourceID: ObjectIdentifier
         var resetForwardedEventDispatchers: Bool
@@ -276,7 +336,7 @@ class EventBindingBridge: GestureGraphDelegate {
         source: any EventBindingSource,
         at time: Time
     ) -> Set<EventID> {
-        addEventSource(source)
+        source.attach(to: self)
         guard !events.isEmpty else {
             lastPhase = .possible(nil)
             return []
@@ -286,13 +346,13 @@ class EventBindingBridge: GestureGraphDelegate {
         var downstream: [EventID: any EventType] = [:]
         for (eventID, event) in events {
             downstream[eventID] = event
-            switch event.eventPhase {
-            case .began, .moved:
+            switch event.phase {
+            case .began, .active:
                 trackedStates[eventID] = TrackedEventState(
                     sourceID: sourceID,
                     resetForwardedEventDispatchers: false
                 )
-            case .ended, .cancelled:
+            case .ended, .failed:
                 trackedStates.removeValue(forKey: eventID)
             }
         }
@@ -331,27 +391,27 @@ class EventBindingBridge: GestureGraphDelegate {
         }
     }
 
-    func didBind(to binding: EventBinding?, id: EventID) {
+    func didBind(to binding: EventBinding, id: EventID) {
         for source in eventSources {
-            source.didBind(to: binding, id: id)
+            source.didBind(to: binding, id: id, in: self)
         }
     }
 
     func didUpdate(phase: GesturePhase<Void>, in manager: EventBindingManager) {
         for source in eventSources {
-            source.didUpdate(phase: phase)
+            source.didUpdate(phase: phase, in: self)
         }
     }
 
-    func didUpdate(gestureCategory: GestureCategory) {
+    func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager) {
         for source in eventSources {
-            source.didUpdate(gestureCategory: gestureCategory)
+            source.didUpdate(gestureCategory: gestureCategory, in: self)
         }
     }
 
-    func requestHoverUpdate() {
+    func requestHoverUpdate(in manager: EventBindingManager) {
         for source in eventSources {
-            source.didRequestHoverUpdate()
+            source.didRequestHoverUpdate(in: self)
         }
     }
 
@@ -369,6 +429,24 @@ class EventBindingBridge: GestureGraphDelegate {
                 action()
             }
         }
+    }
+}
+
+extension _ViewInputs {
+    func makeEventBindingBridge(
+        bindingManager: EventBindingManager,
+        responder: any AnyGestureResponder
+    ) -> EventBindingBridge {
+        EventBindingBridge(manager: bindingManager)
+    }
+
+    func makeGestureContainer(
+        responder: any AnyGestureContainingResponder
+    ) -> AnyObject {
+        if let gestureResponder = responder as? any AnyGestureResponder {
+            return gestureResponder.gestureGraph.eventBindingManager
+        }
+        fatalError("Gesture container requires an AnyGestureResponder")
     }
 }
 
@@ -422,19 +500,64 @@ extension EventGraphHost {
 
 // GestureGraph
 
+private final class GestureGraphRuntimeState: @unchecked Sendable {
+    let ownedRootResponder: MultiViewResponder
+    weak var rendererHost: (any ViewRendererHost)?
+
+    init(ownedRootResponder: MultiViewResponder) {
+        self.ownedRootResponder = ownedRootResponder
+    }
+}
+
+private let gestureGraphRuntimeStates = Mutex<[
+    ObjectIdentifier: GestureGraphRuntimeState
+]>([:])
+
+private func gestureGraphRuntimeState(
+    _ graph: GestureGraph
+) -> GestureGraphRuntimeState {
+    gestureGraphRuntimeStates.withLock { states in
+        guard let state = states[ObjectIdentifier(graph)] else {
+            fatalError("GestureGraph runtime state is not installed")
+        }
+        return state
+    }
+}
+
+func connectGestureGraph(
+    _ graph: GestureGraph,
+    rendererHost: (any ViewRendererHost)?
+) {
+    gestureGraphRuntimeState(graph).rendererHost = rendererHost
+}
+
 /// Manages the entire gesture processing pipeline for a single window/view-graph.
 ///
 /// Responsibilities:
 /// - Owns an independent `_AGGraph` that is not shared with ViewGraph.
 /// - Performs hit testing via `MultiViewResponder` to determine which `ViewResponder`
 ///   receives each event stream.
-/// - Dispatches events to matched responders and manages `ActiveGestureSession` lifecycles.
+/// - Dispatches events to the gesture graph owned by each matched responder.
 ///
 /// GestureFilter nodes live in ViewGraph's _AGGraph. GestureGraph.current resolves
 /// through _AGGraphContext.current while GestureGraph's graph is active.
 ///
 /// Adopts EventGraphHost for graph-side event delivery.
-class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
+class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
+    @unchecked Sendable
+{
+
+    var description: String {
+        let gestureType = rootResponder.map {
+            String(describing: $0.gestureType)
+        } ?? "nil"
+        let pointer = Unmanaged.passUnretained(self).toOpaque()
+        return "GestureGraph<\(gestureType)> \(pointer)"
+    }
+
+    override func hostKind() -> CustomEventTrace.InstantiationEventType.Kind {
+        .gesture
+    }
 
     // Resolves the active GestureGraph from the AG evaluation context.
     static var current: GestureGraph {
@@ -444,382 +567,108 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         return g
     }
 
-    // State
+    weak var rootResponder: (any AnyGestureResponder)?
+    weak var delegate: (any GestureGraphDelegate)?
+    var eventBindingManager: EventBindingManager
+    var _gestureTime: Attribute<Time>
+    var _gestureEvents: Attribute<[EventID: any EventType]>
+    var _inheritedPhase: Attribute<_GestureInputs.InheritedPhase>
+    var _gestureResetSeed: Attribute<UInt32>
+    var _rootPhase: OptionalAttribute<GesturePhase<Void>>
+    var _gestureCategoryAttr: OptionalAttribute<GestureCategory>
+    var _gestureLabelAttr: OptionalAttribute<String?>
+    var _isCancellableAttr: OptionalAttribute<Bool>
+    var _requiredTapCountAttr: OptionalAttribute<Int?>
+    var _gestureDependencyAttr: OptionalAttribute<GestureDependency>
+    var _autoScrollEnabledAttr: OptionalAttribute<Bool>
+    var _gesturePreferenceKeys: Attribute<PreferenceKeys>
+    var nextUpdateTime: Time
 
-    var responderNode: ResponderNode?
-    var focusedResponder: ResponderNode?
-    var delegate: GestureGraphDelegate?
-    var nextGestureUpdateTime: Time = .infinity
+    var responderNode: ResponderNode? {
+        (rootResponder as? ResponderNode) ?? eventBindingManager.rootResponder
+    }
 
-    let eventBindingManager: EventBindingManager
+    var focusedResponder: ResponderNode? {
+        eventBindingManager.focusedResponder
+    }
 
-    /// The root multi-view responder that aggregates all ViewResponders from the view tree.
-    /// Kept strongly by `_ownedRootResponder` so `rootResponder` can stay weak.
-    private var _ownedRootResponder: MultiViewResponder
-    weak var rootResponder: MultiViewResponder?
+    var nextGestureUpdateTime: Time {
+        nextUpdateTime
+    }
 
-    /// Back-reference to the owning ViewRendererHost (WindowController).
-    /// Used to access ViewGraph geometry attributes for cross-graph gesture inputs.
-    /// Set by WindowController.init immediately after creating GestureGraph.
-    weak var rendererHost: (any ViewRendererHost)?
+    var rendererHost: (any ViewRendererHost)? {
+        gestureGraphRuntimeState(self).rendererHost
+    }
 
-    // Active gesture sessions: each EventID maps to one session per hit responder.
-    var activeSessions: [EventID: [ActiveGestureSession]] = [:]
-
-    // Recognizers that remain possible after their current input ID ends.
-    // Repeated taps resume these persistent gesture chains from the next EventID.
-    private var continuingSessions: [ActiveGestureSession] = []
-
-    // Per-batch reset seed, incremented once per sendEvents call.
-    // Different from per-responder resetSeed (used for individual session teardown).
-    var batchResetSeedAttr: Attribute<UInt32>?
-
-    // Active while sendEvents is processing events.
-    // Prevents re-entrant sendEvents and gates enqueueAction to the internal queue.
-    private var _isProcessingEvents: Bool = false
-
-    // Actions enqueued during AG evaluation are drained by runEventLoop.
-    var pendingActions: [() -> Void] = []
-
-    // Current event state: the last dictionary published to active responder inputs.
-    // Set from the events parameter in sendEvents and cleared by teardownSessions.
-    var currentEvents: [EventID: any EventType] = [:]
-
-    // GestureGraph-local time attribute.
-    // Created lazily inside GestureGraph's AG context on the first event call.
-    var globalTimeAttr: Attribute<Time>?
-
-    // Root inherited-phase input shared by all sessions.
-    // Created alongside the other graph-level inputs in ensureAttrsInitialised.
-    // Initial value = [] (= .failed = all gestures may proceed).
-    var inheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase>?
-
-    // Aggregate GesturePhase of the current event batch.
-    // Written after session lifecycle changes in sendEvents and read to produce the return value.
-    var phaseAttr: Attribute<GesturePhase<Void>>?
+    func scheduleGestureUpdate(at time: Time) {
+        if time < nextUpdateTime {
+            nextUpdateTime = time
+        }
+    }
 
     // Init
 
     /// Creates a GestureGraph with its own independent _AGGraph.
     /// The gesture graph's AG is independent and not shared with ViewGraph.
-    override init() {
+    init() {
+        let data = GraphHost.Data()
+        let graph = data.graph
         let mvr = MultiViewResponder()
-        self._ownedRootResponder = mvr
+        var gestureTime: Attribute<Time>!
+        var gestureEvents: Attribute<[EventID: any EventType]>!
+        var inheritedPhase: Attribute<_GestureInputs.InheritedPhase>!
+        var gestureResetSeed: Attribute<UInt32>!
+        var gesturePreferenceKeys: Attribute<PreferenceKeys>!
+        data.withCurrent {
+            gestureTime = graph.makeInput(value: .zero)
+            gestureEvents = graph.makeInput(value: [:])
+            inheritedPhase = graph.makeInput(value: .defaultValue)
+            gestureResetSeed = graph.makeInput(value: 0)
+            gesturePreferenceKeys = graph.makeInput(value: PreferenceKeys())
+        }
+        self.rootResponder = nil
+        self.delegate = nil
         self.eventBindingManager = EventBindingManager()
-        super.init()
-        self.rootResponder = mvr
+        self._gestureTime = gestureTime
+        self._gestureEvents = gestureEvents
+        self._inheritedPhase = inheritedPhase
+        self._gestureResetSeed = gestureResetSeed
+        self._rootPhase = OptionalAttribute()
+        self._gestureCategoryAttr = OptionalAttribute()
+        self._gestureLabelAttr = OptionalAttribute()
+        self._isCancellableAttr = OptionalAttribute()
+        self._requiredTapCountAttr = OptionalAttribute()
+        self._gestureDependencyAttr = OptionalAttribute()
+        self._autoScrollEnabledAttr = OptionalAttribute()
+        self._gesturePreferenceKeys = gesturePreferenceKeys
+        self.nextUpdateTime = .infinity
+        super.init(data: data)
+        gestureGraphRuntimeStates.withLock { states in
+            states[ObjectIdentifier(self)] = GestureGraphRuntimeState(
+                ownedRootResponder: mvr
+            )
+        }
         self.eventBindingManager.host = self
         self.eventBindingManager.rootResponder = mvr
     }
 
-    // Session Management
-
-    /// Creates an `ActiveGestureSession` for a hit responder.
-    ///
-    /// Must be called while GestureGraph's own AG is current (established by sendEvents
-    /// via self.data.withCurrent). All session nodes live in GestureGraph's AG.
-    ///
-    /// Cross-graph isolation:
-    ///   GestureFilter (ViewGraph context) snapshots plain Swift values into GestureResponder.
-    ///   createSession (GestureGraph context) calls graph.makeInput(value: snapshot) to create
-    ///   GestureGraph-local attrs that mirror the ViewGraph geometry without cross-graph refs.
-    ///
-    /// Each responder owns its event input. This permits a lower-priority
-    /// recognizer to remain dormant while another recognizer is still possible.
-    /// Per-session resetSeedAttr is kept for individual session teardown signalling.
-    private func createSession(for responder: any AnyGestureResponder) -> ActiveGestureSession {
-        guard let graph = _AGGraph.current else {
-            fatalError("GestureGraph.createSession: no active _AGGraph context")
-        }
-        guard let sharedInheritedPhaseAttr = inheritedPhaseAttr else {
-            fatalError("GestureGraph.createSession: inheritedPhaseAttr not initialised - call sendEvents first")
-        }
-
-        let timeAttr = globalTimeAttr ?? {
-            let t = graph.makeInput(value: Time(seconds: 0))
-            globalTimeAttr = t
-            return t
-        }()
-
-        // Build GestureGraph-local _ViewInputs.
-        // transform and size: use cross-graph refs when the ViewGraph AG attributes are
-        // available so that gesture coordinate nodes always reflect the latest ViewGraph
-        // geometry (e.g. during animations). Fall back to snapshot copies otherwise.
-        let sourceGraph = rendererHost?.viewGraph.data.graph
-        var localViewInputs = responder.inputs
-        if let tAttr = responder.transformAttr,
-           let pAttr = responder.positionAttr,
-           let sAttr = responder.sizeAttr,
-           let sourceGraph {
-            localViewInputs.transform = graph.makeCrossGraphRef(source: tAttr, in: sourceGraph)
-            localViewInputs.position  = graph.makeCrossGraphRef(source: pAttr, in: sourceGraph)
-            localViewInputs.size      = graph.makeCrossGraphRef(source: sAttr, in: sourceGraph)
-        } else {
-            localViewInputs.transform = graph.makeInput(value: responder.snapshotTransform)
-            localViewInputs.position  = graph.makeInput(value: responder.snapshotPosition)
-            localViewInputs.size      = graph.makeInput(value: responder.snapshotSize)
-        }
-        localViewInputs.base.time = timeAttr
-        let localPreferenceKeysAttr: Attribute<PreferenceKeys> =
-            graph.makeInput(value: responder.snapshotPreferenceKeys)
-
-        // Reuse path: responder already has a built gesture chain and event input.
-        if let cachedEventsAttr = responder.eventsAttr,
-           let resetSeedAttr = responder.resetSeedAttr,
-           let sub = responder.childSubgraph, !sub.nodes.isEmpty,
-           !responder.needsRebuild {
-            var gi = _GestureInputs(
-                localViewInputs, viewSubgraph: nil,
-                events: cachedEventsAttr, time: timeAttr,
-                resetSeed: resetSeedAttr, inheritedPhase: sharedInheritedPhaseAttr,
-                gesturePreferenceKeys: localPreferenceKeysAttr
-            )
-            gi.options = .gestureGraph
-            let outputs = responder.makeGesture(inputs: gi)
-            let isTerminalAttr: Attribute<Bool> = graph.makeRule {
-                outputs.phase.value.isTerminal
-            }
-            return ActiveGestureSession(
-                eventsAttr: cachedEventsAttr,
-                phaseAttr: outputs.phase,
-                isTerminalAttr: isTerminalAttr,
-                responder: responder
-            )
-        }
-
-        // Build path: first session or modifier changed (needsRebuild).
-        // Per-session resetSeedAttr is created fresh. makeWrappedGesture stores it on the responder.
-        let perSessionResetSeedAttr: Attribute<UInt32> = graph.makeInput(value: UInt32(0))
-        let responderEventsAttr: Attribute<[EventID: any EventType]> = graph.makeInput(value: [:])
-
-        var gi = _GestureInputs(
-            localViewInputs, viewSubgraph: nil,
-            events: responderEventsAttr, time: timeAttr,
-            resetSeed: perSessionResetSeedAttr, inheritedPhase: sharedInheritedPhaseAttr,
-            gesturePreferenceKeys: localPreferenceKeysAttr
-        )
-        gi.options = .gestureGraph
-
-        // makeGesture calls makeWrappedGesture to build childSubgraph in GestureGraph's AG.
-        // It caches responderEventsAttr and perSessionResetSeedAttr on the responder.
-        let outputs = responder.makeGesture(inputs: gi)
-        let isTerminalAttr: Attribute<Bool> = graph.makeRule {
-            outputs.phase.value.isTerminal
-        }
-        return ActiveGestureSession(
-            eventsAttr: responderEventsAttr,
-            phaseAttr: outputs.phase,
-            isTerminalAttr: isTerminalAttr,
-            responder: responder
-        )
-    }
-
-    /// Tears down all sessions bound to `eventID` and removes their bindings.
-    private func teardownSessions(for eventID: EventID) {
-        guard let sessions = activeSessions.removeValue(forKey: eventID) else { return }
-        for session in sessions { teardownSessionTree(session) }
-        eventBindingManager.bindings.removeValue(forKey: eventID)
-        currentEvents.removeValue(forKey: eventID)
-    }
-
-    /// Releases the finished input ID without resetting recognizers that remain possible.
-    /// A multi-event recognizer, such as a repeated tap, carries its state in the
-    /// responder's persistent gesture subgraph and resumes from a new EventID.
-    private func releaseContinuingSessions(for eventID: EventID) {
-        if let sessions = activeSessions.removeValue(forKey: eventID) {
-            continuingSessions.append(contentsOf: sessions)
-        }
-        eventBindingManager.bindings.removeValue(forKey: eventID)
-        // Keep the terminal sample published while the recognizer waits. An
-        // exclusive fallback may need that ended value when the preferred
-        // recognizer reaches its timeout. The next input batch replaces it.
-    }
-
-    private func sessionContinuing(for responder: any AnyGestureResponder) -> ActiveGestureSession? {
-        guard let index = continuingSessions.firstIndex(where: {
-            $0.responder === responder
-        }) else {
-            return nil
-        }
-        return continuingSessions.remove(at: index)
-    }
-
-    private func cleanupTerminatedContinuingSessions() {
-        continuingSessions = continuingSessions.filter { session in
-            if session.isTerminal {
-                finishTerminalSession(session)
-                return false
-            }
-            return true
+    convenience init(rootResponder: any AnyGestureResponder) {
+        self.init()
+        self.rootResponder = rootResponder
+        if let responder = rootResponder as? ResponderNode {
+            eventBindingManager.rootResponder = responder
         }
     }
 
-    private func scheduleNextGestureUpdateIfNeeded() {
-        guard nextGestureUpdateTime.seconds.isFinite else { return }
-        rendererHost?.viewGraph.nextUpdate.gestures.at(nextGestureUpdateTime)
-    }
-
-    // MARK: - Event Dispatch
-
-    /// Lazily initialises GestureGraph-level shared AG attributes inside data.withCurrent.
-    /// Must be called at the top of the sendEvents entry point.
-    private func ensureAttrsInitialised(time: Time) {
-        guard let graph = _AGGraph.current else {
-            fatalError("GestureGraph.ensureAttrsInitialised: no AG context")
+    deinit {
+        gestureGraphRuntimeStates.withLock { states in
+            states.removeValue(forKey: ObjectIdentifier(self))
         }
-        if batchResetSeedAttr == nil {
-            batchResetSeedAttr = graph.makeInput(value: UInt32(0))
-        }
-        if globalTimeAttr == nil {
-            globalTimeAttr = graph.makeInput(value: time)
-        }
-        if inheritedPhaseAttr == nil {
-            inheritedPhaseAttr = graph.makeInput(value: _GestureInputs.InheritedPhase.defaultValue)
-        }
-        if phaseAttr == nil {
-            phaseAttr = graph.makeInput(value: GesturePhase<Void>.possible(nil))
-        }
-    }
-
-    /// Drains actions enqueued during AG evaluation.
-    /// AG evaluation is synchronous here, so the loop only drains queued actions.
-    private func runEventLoop() {
-        for _ in 0..<8 {
-            guard !pendingActions.isEmpty else { break }
-            let actions = pendingActions
-            pendingActions = []
-            for action in actions { action() }
-            // No explicit subgraph update is needed because synchronous evaluation already ran.
-        }
-    }
-
-    private func priorityOrdered(
-        _ sessions: [ActiveGestureSession]
-    ) -> [ActiveGestureSession] {
-        var remaining = sessions
-        var ordered: [ActiveGestureSession] = []
-        ordered.reserveCapacity(sessions.count)
-        while !remaining.isEmpty {
-            let index = remaining.firstIndex { candidate in
-                guard let candidateResponder = candidate.responder as? any ViewResponder else {
-                    return true
-                }
-                return !remaining.contains { other in
-                    guard other !== candidate,
-                          let otherResponder = other.responder else { return false }
-                    return otherResponder.isPrioritized(
-                        over: candidateResponder,
-                        otherExclusionPolicy: candidate.responder?.exclusionPolicy ?? .default
-                    )
-                }
-            } ?? remaining.startIndex
-            ordered.append(remaining.remove(at: index))
-        }
-        return ordered
-    }
-
-    private func cancelSession(
-        _ session: ActiveGestureSession,
-        for eventID: EventID
-    ) {
-        var cancelledEvents = currentEvents
-        cancelledEvents.removeValue(forKey: eventID)
-        session.eventsAttr.setValue(cancelledEvents)
-        if session.isTerminal {
-            finishTerminalSession(session)
-        } else {
-            teardownSessionTree(session)
-        }
-    }
-
-    /// Publishes one physical stream in recognizer-priority order. A successful
-    /// terminal recognizer prevents lower-priority peers before they consume the
-    /// same terminal sample. Continuous active-session prevention remains a
-    /// separate recognition-state boundary.
-    private func publishEventsWithTerminalArbitration() {
-        var published: Set<AGAttribute> = []
-        for eventID in Array(activeSessions.keys) {
-            guard let sessions = activeSessions[eventID] else { continue }
-            let ordered = priorityOrdered(sessions)
-            var prevented: Set<ObjectIdentifier> = []
-
-            for session in ordered {
-                let sessionID = ObjectIdentifier(session)
-                guard !prevented.contains(sessionID) else { continue }
-                if published.insert(session.eventsAttr.identifier).inserted {
-                    session.eventsAttr.setValue(currentEvents)
-                }
-                guard case .ended = session.phase,
-                      let winner = session.responder else { continue }
-
-                for other in ordered where other !== session {
-                    let otherID = ObjectIdentifier(other)
-                    guard !prevented.contains(otherID),
-                          let otherResponder = other.responder as? any ViewResponder,
-                          winner.canPrevent(
-                            otherResponder,
-                            otherExclusionPolicy: other.responder?.exclusionPolicy ?? .default
-                          ) else { continue }
-                    cancelSession(other, for: eventID)
-                    prevented.insert(otherID)
-                }
-            }
-
-            let survivors = ordered.filter { !prevented.contains(ObjectIdentifier($0)) }
-            if survivors.isEmpty {
-                activeSessions.removeValue(forKey: eventID)
-            } else {
-                activeSessions[eventID] = survivors
-            }
-        }
-    }
-
-    private func teardownSessionTree(_ session: ActiveGestureSession) {
-        for fallback in session.failureFallbacks {
-            teardownSessionTree(fallback)
-        }
-        session.failureFallbacks.removeAll()
-        session.teardown()
-    }
-
-    /// Resolves recognizers that were held dormant by a failure requirement.
-    /// The preferred recognizer already consumed the physical input, so its
-    /// retained beginning and terminal samples are replayed in order.
-    private func activateFailureFallbacks(from session: ActiveGestureSession) {
-        let fallbacks = session.failureFallbacks
-        session.failureFallbacks.removeAll()
-        for fallback in fallbacks {
-            fallback.eventsAttr.setValue(session.beganEvents)
-            _ = fallback.phase
-            fallback.eventsAttr.setValue(currentEvents)
-            if fallback.isTerminal {
-                finishTerminalSession(fallback)
-            } else {
-                continuingSessions.append(fallback)
-            }
-        }
-    }
-
-    private func finishTerminalSession(_ session: ActiveGestureSession) {
-        switch session.phase {
-        case .failed:
-            activateFailureFallbacks(from: session)
-        case .ended:
-            for fallback in session.failureFallbacks {
-                teardownSessionTree(fallback)
-            }
-            session.failureFallbacks.removeAll()
-        case .possible, .active:
-            return
-        }
-        session.teardown()
     }
 
     func eventBinding(at location: CGPoint, accepting eventType: Any.Type) -> EventBinding? {
-        refreshResponderGeometrySnapshots()
         guard let responder = hitTestResponders(
-            at: location,
-            accepting: eventType
+            at: location
         ).first,
               let node = responder as? ResponderNode else {
             return nil
@@ -829,156 +678,58 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
 
     // MARK: - EventGraphHost
 
-    /// EventGraphHost.sendEvents: the graph-side event entry point.
-    ///
-    /// WindowController builds the [EventID: EventType] dictionary
-    /// and calls this method. Session lifecycle (create / teardown) is driven by event phases
-    /// in the dictionary. Mouse and gesture event types share the same entry point.
-    ///
-    /// Processing steps:
-    ///   1. ensureAttrsInitialised
-    ///   2. active flag = true
-    ///   3. batchResetSeed += 1
-    ///   4. time update
-    ///   5. create sessions for new .began events (hit test + exclusion policy)
-    ///   6. publish event dictionary
-    ///   7. session lifecycle: teardown .ended/.cancelled, cleanup terminated
-    ///   8. action drain
     @discardableResult
     func sendEvents(
         _ events: [EventID: any EventType],
         rootNode: ResponderNode,
         at time: Time
     ) -> GesturePhase<Void> {
-        refreshResponderGeometrySnapshots()
+        if let responder = rootNode as? any AnyGestureResponder,
+           responder.gestureGraph !== self {
+            return responder.gestureGraph.sendEvents(
+                events,
+                rootNode: rootNode,
+                at: time
+            )
+        }
+
+        if rootResponder == nil {
+            let candidates: [any AnyGestureResponder]
+            if let bound = events.values.compactMap({ event -> AnyGestureResponder? in
+                (event as? any ResponderBoundEvent)?.binding?.responder
+                    as? any AnyGestureResponder
+            }).first {
+                candidates = [bound]
+            } else if let location = events.values.compactMap({ event in
+                (event as? any HitTestableEventType)?.hitTestLocation
+            }).first {
+                candidates = hitTestResponders(at: location)
+            } else {
+                candidates = []
+            }
+            let phases = candidates.compactMap { responder -> GesturePhase<Void>? in
+                guard let node = responder as? ResponderNode else { return nil }
+                return responder.gestureGraph.sendEvents(events, rootNode: node, at: time)
+            }
+            if phases.contains(where: { $0.isActive }) { return .active(()) }
+            if phases.contains(where: { $0.isEnded }) { return .ended(()) }
+            if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
+            return .possible(nil)
+        }
+
         return data.withCurrent {
-            // Drain cross-graph invalidations enqueued by ViewGraph since the last sendEvents.
-            // Cross-graph ref nodes (e.g. transform, size mirrors) are marked dirty here so
-            // that gesture coordinate nodes re-evaluate with the latest ViewGraph geometry.
             data.graph.inbox.drain()
-
-            ensureAttrsInitialised(time: time)
-            _isProcessingEvents = true
-            defer { _isProcessingEvents = false }
-
-            if let seed = batchResetSeedAttr { seed.setValue(seed.value &+ 1) }
-            if let t = globalTimeAttr, !(t.value == time) {
-                t.setValue(time)
+            instantiateIfNeeded()
+            if _gestureTime.value != time {
+                _gestureTime.setValue(time)
                 timeDidChange()
             }
-
-            // Create sessions for new events (.began phase, no existing session).
-            // Sessions must be wired BEFORE publishing so gesture nodes are ready.
-            for (eventID, event) in events where activeSessions[eventID] == nil {
-                guard event.eventPhase == .began else { continue }
-                let candidates: [any AnyGestureResponder]
-                if let boundEvent = event as? any ResponderBoundEvent,
-                   let binding = boundEvent.binding,
-                   let responder = binding.responder as? any AnyGestureResponder,
-                   responder.accepts(eventType: eventID.type) {
-                    candidates = [responder]
-                } else if let location = event.location {
-                    candidates = hitTestCandidateResponders(
-                        at: location,
-                        accepting: eventID.type
-                    )
-                } else {
-                    candidates = []
-                }
-                guard !candidates.isEmpty else { continue }
-                var candidateSessions: [ActiveGestureSession] = []
-                candidateSessions.reserveCapacity(candidates.count)
-                for responder in candidates {
-                    let session = sessionContinuing(for: responder) ?? createSession(for: responder)
-                    if session.beganEvents.isEmpty {
-                        session.beganEvents = events
-                    }
-                    candidateSessions.append(session)
-                }
-
-                // A recognizer host delays a lower tap-count recognizer through
-                // a failure relation. Raw-event hosts keep the same recognizer
-                // dormant and replay the retained input only if the selected
-                // recognizer later fails.
-                var waiting: Set<ObjectIdentifier> = []
-                for fallback in candidateSessions {
-                    guard let candidate = fallback.responder,
-                          let owner = candidateSessions.first(where: { selected in
-                            guard selected !== fallback,
-                                  let selectedResponder = selected.responder else { return false }
-                            return candidate.shouldRequireFailure(of: selectedResponder)
-                          }) else { continue }
-                    owner.failureFallbacks.append(fallback)
-                    waiting.insert(ObjectIdentifier(fallback))
-                }
-                let sessions = candidateSessions.filter {
-                    !waiting.contains(ObjectIdentifier($0))
-                }
-                activeSessions[eventID] = sessions
-                eventBindingManager.rebindEvent(eventID, to: rootResponder as ResponderNode?)
+            _gestureEvents.setValue(events)
+            let phase = _rootPhase.attribute?.value ?? .possible(nil)
+            if events.values.contains(where: { $0.phase == .failed }) {
+                _gestureResetSeed.setValue(_gestureResetSeed.value &+ 1)
             }
-
-            // Publish to independent recognizers while keeping explicit failure
-            // fallbacks dormant until the preferred recognizer fails.
-            currentEvents = events
-            publishEventsWithTerminalArbitration()
-
-            // Session lifecycle after publishing.
-            // For .ended/.cancelled: evaluate gesture chains first so dispatch() fires.
-            // An ended input may leave a multi-event recognizer possible; release that
-            // EventID without resetting the persistent chain so the next input can resume it.
-            // Cancellation always resets the chain.
-            // For .began/.moved: cleanup already-terminal sessions only.
-            for eventID in events.keys {
-                switch events[eventID]!.eventPhase {
-                case .ended:
-                    // Force AG evaluation before teardown so triggered gestures fire action().
-                    // cleanupTerminatedSessions resets chains that actually reached a
-                    // terminal gesture phase. Remaining possible chains continue.
-                    cleanupTerminatedSessions(for: eventID)
-                    runEventLoop()
-                    releaseContinuingSessions(for: eventID)
-                case .cancelled:
-                    cleanupTerminatedSessions(for: eventID)
-                    runEventLoop()
-                    teardownSessions(for: eventID)
-                default:
-                    cleanupTerminatedSessions(for: eventID)
-                }
-            }
-
-            runEventLoop()
-            scheduleNextGestureUpdateIfNeeded()
-
-            // Write aggregate phase to phaseAttr, then read back.
-            let phase = aggregatePhase(for: events)
-            phaseAttr?.setValue(phase)
-            return phaseAttr?.value ?? phase
-        }
-    }
-
-    private func refreshResponderGeometrySnapshots() {
-        guard let viewGraph = rendererHost?.viewGraph,
-              let rootResponder else { return }
-        viewGraph.data.withCurrent {
-            func refresh(_ responder: any ViewResponder) {
-                if let gesture = responder as? any AnyGestureResponder,
-                   let transformAttr = gesture.transformAttr,
-                   let positionAttr = gesture.positionAttr,
-                   let sizeAttr = gesture.sizeAttr {
-                    gesture.snapshotTransform = transformAttr.value
-                    gesture.snapshotPosition = positionAttr.value
-                    gesture.snapshotSize = sizeAttr.value
-                }
-                if let multi = responder as? MultiViewResponder {
-                    for child in multi.responders {
-                        refresh(child)
-                    }
-                }
-            }
-            for responder in rootResponder.responders {
-                refresh(responder)
-            }
+            return phase
         }
     }
 
@@ -988,26 +739,19 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     /// .simultaneous(.descendants/.ancestors): included only when the hierarchy relationship
     ///   is satisfied with at least one other hit responder (via isDescendant chain).
     private func hitTestCandidateResponders(
-        at location: CGPoint,
-        accepting eventType: Any.Type? = nil
+        at location: CGPoint
     ) -> [any AnyGestureResponder] {
-        guard let rootResponder else { return [] }
-        return rootResponder.respondersContaining(point: location)
+        let root = gestureGraphRuntimeState(self).ownedRootResponder
+        return root.respondersContaining(point: location)
             .compactMap { $0 as? any AnyGestureResponder }
             .filter { $0.mask.contains(.gesture) }
-            // Apply compatibility before exclusion. Otherwise an inner responder
-            // for another event family can hide the compatible ancestor.
-            .filter { responder in
-                eventType.map { responder.accepts(eventType: $0) } ?? true
-            }
     }
 
     private func hitTestResponders(
-        at location: CGPoint,
-        accepting eventType: Any.Type? = nil
+        at location: CGPoint
     ) -> [any AnyGestureResponder] {
         selectHitResponders(
-            from: hitTestCandidateResponders(at: location, accepting: eventType)
+            from: hitTestCandidateResponders(at: location)
         )
     }
 
@@ -1045,68 +789,68 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         return result
     }
 
-    /// Computes the aggregate GesturePhase for the current batch.
-    private func aggregatePhase(for events: [EventID: any EventType]) -> GesturePhase<Void> {
-        let hasTerminal = events.values.contains {
-            $0.eventPhase == .ended || $0.eventPhase == .cancelled
-        }
-        if hasTerminal { return .ended(()) }
-        if activeSessions.isEmpty { return .possible(nil) }
-        return .active(())
-    }
-
-    /// Removes sessions whose gesture phase has become terminal.
-    private func cleanupTerminatedSessions(for eventID: EventID) {
-        guard var sessions = activeSessions[eventID] else { return }
-        let before = sessions.count
-        sessions = sessions.filter { session in
-            if session.isTerminal {
-                finishTerminalSession(session)
-                return false
-            }
-            return true
-        }
-        if sessions.isEmpty {
-            activeSessions.removeValue(forKey: eventID)
-            eventBindingManager.bindings.removeValue(forKey: eventID)
-            currentEvents.removeValue(forKey: eventID)
-        } else if sessions.count != before {
-            activeSessions[eventID] = sessions
-        }
-    }
-
     func resetEvents() {
-        // Tear down sessions explicitly, then nil all lazy AG attrs so they are
-        // recreated fresh on the next sendEvents call.
-        data.withCurrent {
-            for sessions in activeSessions.values {
-                for session in sessions { teardownSessionTree(session) }
+        uninstantiate(immediately: false)
+    }
+
+    override func instantiateOutputs() {
+        guard let rootResponder else { return }
+
+        var inputs = _GestureInputs(
+            rootResponder.inputs,
+            viewSubgraph: nil,
+            events: _gestureEvents,
+            time: _gestureTime,
+            resetSeed: _gestureResetSeed,
+            inheritedPhase: _inheritedPhase,
+            gesturePreferenceKeys: _gesturePreferenceKeys
+        )
+        inputs.options = .gestureGraph
+        inputs.preferences.add(GestureCategory.Key.self)
+        inputs.preferences.add(ScrollViewDragAutoScrollKey.self)
+        inputs.preferences.add(GestureLabelKey.self)
+        inputs.preferences.add(IsCancellableGestureKey.self)
+        inputs.preferences.add(RequiredTapCountKey.self)
+        inputs.preferences.add(GestureDependency.Key.self)
+
+        let outputs = rootResponder.makeSubviewsGesture(inputs: inputs)
+        func preferenceAttribute<K: PreferenceKey>(
+            _ key: K.Type
+        ) -> OptionalAttribute<K.Value> {
+            guard let value = outputs.preferences.value(for: key) else {
+                return OptionalAttribute()
             }
-            for session in continuingSessions {
-                teardownSessionTree(session)
-            }
-            rootResponder?.resetGesture()
+            return OptionalAttribute(Attribute<K.Value>(value))
         }
-        activeSessions.removeAll()
-        continuingSessions.removeAll()
-        eventBindingManager.bindings.removeAll()
-        currentEvents.removeAll()
-        batchResetSeedAttr = nil
-        globalTimeAttr = nil
-        inheritedPhaseAttr = nil
-        phaseAttr = nil
+        _rootPhase = OptionalAttribute(outputs.phase)
+        _gestureCategoryAttr = preferenceAttribute(GestureCategory.Key.self)
+        _gestureLabelAttr = preferenceAttribute(GestureLabelKey.self)
+        _isCancellableAttr = preferenceAttribute(IsCancellableGestureKey.self)
+        _requiredTapCountAttr = preferenceAttribute(RequiredTapCountKey.self)
+        _gestureDependencyAttr = preferenceAttribute(GestureDependency.Key.self)
+        _autoScrollEnabledAttr = preferenceAttribute(ScrollViewDragAutoScrollKey.self)
     }
 
-    func instantiateOutputs() {
-        // Called when the window becomes active and connects indirect outputs.
+    override func uninstantiateOutputs() {
+        data.withCurrent {
+            _gestureEvents.setValue([:])
+            _inheritedPhase.setValue(.defaultValue)
+            _gestureResetSeed.setValue(0)
+            _gesturePreferenceKeys.setValue(PreferenceKeys())
+            (rootResponder as? ResponderNode)?.resetGesture()
+        }
+        _rootPhase = OptionalAttribute()
+        _gestureCategoryAttr = OptionalAttribute()
+        _gestureLabelAttr = OptionalAttribute()
+        _isCancellableAttr = OptionalAttribute()
+        _requiredTapCountAttr = OptionalAttribute()
+        _gestureDependencyAttr = OptionalAttribute()
+        _autoScrollEnabledAttr = OptionalAttribute()
+        nextUpdateTime = .infinity
     }
 
-    func uninstantiateOutputs() {
-        // Called when the window deactivates.
-    }
-
-    func timeDidChange() {
-        nextGestureUpdateTime = .infinity
+    override func timeDidChange() {
+        nextUpdateTime = .infinity
     }
 
     /// Advances time-only recognizers when their scheduled deadline is reached.
@@ -1114,62 +858,44 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
     func updateTimedGestures(at time: Time) -> Bool {
         guard !(time < nextGestureUpdateTime) else { return false }
         return data.withCurrent {
-            ensureAttrsInitialised(time: time)
-            _isProcessingEvents = true
-            defer { _isProcessingEvents = false }
+            instantiateIfNeeded()
+            guard isInstantiated else {
+                return false
+            }
+            if _gestureTime.value != time {
+                _gestureTime.setValue(time)
+            }
             timeDidChange()
-            if let globalTimeAttr, !(globalTimeAttr.value == time) {
-                globalTimeAttr.setValue(time)
-            }
-            for eventID in Array(activeSessions.keys) {
-                cleanupTerminatedSessions(for: eventID)
-            }
-            cleanupTerminatedContinuingSessions()
-            runEventLoop()
-            scheduleNextGestureUpdateIfNeeded()
+            _ = _rootPhase.attribute?.value
             return true
         }
     }
 
-    /// Enqueues an action to be drained by the event loop.
-    /// During sendEvents (_isProcessingEvents == true), actions are appended to
-    /// pendingActions and drained in runEventLoop.
-    /// Outside of event processing, falls back to delegate or DispatchQueue.main.
     func enqueueAction(_ action: @escaping () -> Void) {
-        if _isProcessingEvents {
-            pendingActions.append(action)
-        } else if let d = delegate {
-            d.enqueueAction(action)
-        } else {
-            // Fallback: defer to outbox, drained by WindowController after AG evaluation.
-            data.graph.actionOutbox.append(action)
+        delegate?.enqueueAction(action)
+    }
+
+    func gestureCategory() -> GestureCategory? {
+        data.withCurrent {
+            instantiateIfNeeded()
+            return _gestureCategoryAttr.attribute?.value
         }
     }
 
-    /// Enqueues an action ahead of ordinary gesture callbacks for the same event turn.
-    ///
-    /// Gesture-state terminal cleanup must run before terminal callbacks observe the
-    /// state. This preserves ordinary callback append ordering while giving cleanup
-    /// work a deterministic earlier drain slot.
-    func enqueueActionBeforeCallbacks(_ action: @escaping () -> Void) {
-        if _isProcessingEvents {
-            pendingActions.insert(action, at: 0)
-        } else if delegate != nil {
-            enqueueAction(action)
-        } else {
-            data.graph.actionOutbox.insert(action, at: 0)
+    func isAutoScrollEnabled() -> Bool {
+        data.withCurrent {
+            instantiateIfNeeded()
+            return _autoScrollEnabledAttr.attribute?.value ?? false
         }
     }
-
-    func gestureCategory() -> GestureCategory? { nil }
-
-    func isAutoScrollEnabled() -> Bool { false }
 
     // ViewRespondersKey update
 
     /// Called when the ViewRespondersKey preference value changes at the root.
-    func updateResponders(_ responders: [any ViewResponder]) {
-        rootResponder?.updateChildren((value: responders, changed: true))
+    func updateResponders(_ responders: [ViewResponder]) {
+        gestureGraphRuntimeState(self).ownedRootResponder.updateChildren(
+            (value: responders, changed: true)
+        )
     }
 }
 

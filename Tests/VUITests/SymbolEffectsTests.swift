@@ -1077,6 +1077,139 @@ final class SymbolEffectsTests: XCTestCase {
         }
     }
 
+    func testDrawHideDisplayRetainsPreviousPositionWhileLayoutMoves() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let hideCompletionTime =
+                symbol.drawMotionGroupDurations.reduce(0, +) / 0.5
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let transaction = graph.makeInput(value: Transaction())
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let position = graph.makeInput(value: CGPoint(x: 10, y: 20))
+            let size = graph.makeInput(value: ViewSize(
+                CGSize(width: 48, height: 48)
+            ))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: transaction,
+                    time: time,
+                    position: position,
+                    size: size
+                )
+            )
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+            XCTAssertEqual(
+                child.value.displaySize?.value,
+                CGSize(width: 48, height: 48)
+            )
+
+            var hiding = EnvironmentValues()
+            hiding.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.configuration,
+                    options: .speed(0.25),
+                    trigger: .indefinite
+                ),
+                for: 83
+            )
+            position.setValue(CGPoint(x: 29, y: 20))
+            environment.setValue(hiding)
+            XCTAssertTrue(child.value.retainsDrawHidePosition)
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+
+            time.setValue(Time(seconds: hideCompletionTime * 0.5))
+            XCTAssertTrue(child.value.retainsDrawHidePosition)
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+
+            time.setValue(Time(seconds: hideCompletionTime + 0.001))
+            XCTAssertFalse(child.value.retainsDrawHidePosition)
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 29, y: 20))
+
+            position.setValue(CGPoint(x: 10, y: 20))
+            environment.setValue(EnvironmentValues())
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertFalse(child.value.retainsDrawHidePosition)
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+
+            time.setValue(Time(seconds: hideCompletionTime * 2 + 0.002))
+            XCTAssertFalse(child.value.isSymbolEffectActive)
+
+            var pulse = EnvironmentValues()
+            pulse.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration:
+                        PulseSymbolEffect.pulse.wholeSymbol.configuration,
+                    options: .nonRepeating,
+                    trigger: .value(AnySymbolEffectTrigger(1))
+                ),
+                for: 83
+            )
+            environment.setValue(pulse)
+            XCTAssertFalse(child.value.isSymbolEffectActive)
+
+            pulse.symbolEffects[0].effect.trigger =
+                .value(AnySymbolEffectTrigger(2))
+            position.setValue(CGPoint(x: 29, y: 20))
+            environment.setValue(pulse)
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertFalse(child.value.retainsDrawHidePosition)
+            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 29, y: 20))
+
+            // ASSERTIONS symbolEffectLayoutMotionObserved
+            // ASSERTIONS symbolEffectLayoutDrawRestoreObserved
+            // ASSERTIONS symbolEffectLayoutPulseObserved
+        }
+    }
+
+    func testFramedSymbolImageLayoutDoesNotDependOnPresentationGeometry() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var environment = EnvironmentValues()
+            environment.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: PulseSymbolEffect.pulse.configuration,
+                    options: .nonRepeating,
+                    trigger: .value(AnySymbolEffectTrigger(0))
+                ),
+                for: 499
+            )
+            var inputs = makeViewInputs(graph: graph, environment: environment)
+            inputs.requestsLayoutComputer = true
+            let image = graph.makeInput(value: Image(systemName: "draw"))
+            let frame = graph.makeInput(value: _FrameLayout(
+                width: 48,
+                height: 48,
+                alignment: .center
+            ))
+            let outputs = _FrameLayout._makeView(
+                modifier: _GraphValue(_attribute: frame),
+                inputs: inputs
+            ) { _, childInputs in
+                Image._makeView(
+                    view: _GraphValue(_attribute: image),
+                    inputs: childInputs
+                )
+            }
+
+            let layoutComputer = outputs._layoutComputer.attribute?.value
+            XCTAssertEqual(
+                layoutComputer?.sizeThatFits(.unspecified),
+                CGSize(width: 48, height: 48)
+            )
+        }
+    }
+
     func testDrawTransitionPreservesWillAppearUntilSymbolResourceResolves() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -1544,16 +1677,32 @@ final class SymbolEffectsTests: XCTestCase {
         environment values: EnvironmentValues = EnvironmentValues()
     ) -> _GraphInputs {
         _GraphInputs(
-            customInputs: PropertyList(),
             time: graph.makeInput(value: Time(seconds: 0)),
-            cachedEnvironment: MutableBox(
-                CachedEnvironment(environment: graph.makeInput(value: values))
-            ),
             phase: graph.makeInput(value: Phase()),
-            transaction: graph.makeInput(value: Transaction()),
-            changedDebugProperties: 0,
-            options: [],
-            mergedInputs: []
+            environment: graph.makeInput(value: values),
+            transaction: graph.makeInput(value: Transaction())
+        )
+    }
+
+    private func makeViewInputs(
+        graph: _AGGraph,
+        environment values: EnvironmentValues = EnvironmentValues()
+    ) -> _ViewInputs {
+        let base = makeGraphInputs(graph: graph, environment: values)
+        return _ViewInputs(
+            base: base,
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
         )
     }
 }

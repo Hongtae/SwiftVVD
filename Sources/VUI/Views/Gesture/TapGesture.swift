@@ -17,7 +17,7 @@ import Foundation
 ///   -> CategoryGesture<E>         (GestureCategory.select)
 ///   -> RepeatGesture<E>           (requires count taps)
 ///   -> RequiredTapCountWriter<E>  (writes RequiredTapCountKey preference)
-struct SingleTapGesture<E: TappableEventType>: Gesture, PubliclyPrimitiveGesture {
+struct SingleTapGesture<E: TappableEventType>: Gesture {
     var count: Int
 
     typealias Value = E
@@ -39,7 +39,10 @@ struct SingleTapGesture<E: TappableEventType>: Gesture, PubliclyPrimitiveGesture
             body: ModifierGesture(
                 modifier: RepeatGesture(count: count),
                 body: ModifierGesture(
-                    modifier: CategoryGesture(category: .select),
+                    modifier: CategoryGesture(
+                        category: .select,
+                        includeChildren: false
+                    ),
                     body: EventListener<E>()
                 )
             )
@@ -47,17 +50,11 @@ struct SingleTapGesture<E: TappableEventType>: Gesture, PubliclyPrimitiveGesture
     }
 }
 
-extension SingleTapGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == E.self
-    }
-}
-
 // MARK: - TapGesture
 
 // TapGesture builds SingleTapGesture<TappableEvent> and maps TappableEvent to Void.
 
-public struct TapGesture: Gesture {
+public struct TapGesture: Gesture, PrimitiveGesture {
     public var count: Int
     public init(count: Int = 1) {
         self.count = count
@@ -85,12 +82,6 @@ public struct TapGesture: Gesture {
             rawOutputs.phase.value.map { _ in () }
         }
         return rawOutputs.withPhase(mappedPhase)
-    }
-}
-
-extension TapGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        eventType == TappableEvent.self
     }
 }
 

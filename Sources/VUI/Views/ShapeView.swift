@@ -7,27 +7,33 @@
 
 import Foundation
 
+public protocol ShapeView<Content>: View {
+    associatedtype Content: Shape
+    var shape: Content { get }
+}
+
 struct AnimatedShape<Content: Shape>: LeafViewLayout {
     var shape: Content
     var fillStyle: FillStyle
 
-    struct Init: Rule {
+    struct Init: Rule, AsyncAttribute {
         typealias Value = AnimatedShape<Content>
 
         var shape: Attribute<Content>
         var fillStyle: Attribute<FillStyle>
 
-        func updateValue() -> Value {
+        var value: Value {
             AnimatedShape(shape: shape.value, fillStyle: fillStyle.value)
         }
     }
 
     func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
-        shape.sizeThatFits(proposal)
+        shape.sizeThatFits(ProposedViewSize(proposal))
     }
 }
 
-public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
+public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
+    where Content: Shape, Style: ShapeStyle {
     public var shape: Content
     public var style: Style
     public var fillStyle: FillStyle
@@ -36,6 +42,10 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         self.shape = shape
         self.style = style
         self.fillStyle = fillStyle
+    }
+
+    func contentPath(size: CGSize) -> Path {
+        shape.path(in: CGRect(origin: .zero, size: size))
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -50,8 +60,11 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
             inputs: inputs,
             graph: graph
         )
-        let sizeAttr = inputs.size
-        let positionAttr = inputs.position
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let v = view._attribute.value   // dep: style/fillStyle changes
@@ -159,8 +172,15 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     public typealias Body = Never
 }
 
-extension _ShapeView: PrimitiveView, UnaryView, LeafViewLayout {
+extension _ShapeView: LeafViewLayout {
     func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
-        shape.sizeThatFits(proposal)
+        shape.sizeThatFits(ProposedViewSize(proposal))
     }
+}
+
+@available(*, unavailable)
+extension _ShapeView: Sendable {
+}
+
+extension _ShapeView: PrimitiveView, UnaryView {
 }

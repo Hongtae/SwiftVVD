@@ -55,9 +55,9 @@ where Key: PreferenceKey, Content: View {
         }
 
         var childInputs = inputs
-        childInputs.preferences.keys.insert(Key.self)
+        childInputs.preferences.keys.add(Key.self)
 
-        let preferenceValue: Attribute<Key.Value> = graph.makeStatefulRule(
+        let preferenceValue: Attribute<Key.Value> = graph.makeRule(
             PreferenceValueAttribute<Key>()
         )
         let child: Attribute<Content> = graph.makeRule(
@@ -74,7 +74,7 @@ where Key: PreferenceKey, Content: View {
         let source = outputs.preferences.value(for: Key.self).flatMap {
             graph.weakAttributeIfValid(for: $0)
         }
-        graph.mutateStatefulRule(
+        graph.mutateRule(
             preferenceValue.identifier,
             as: PreferenceValueAttribute<Key>.self
         ) { rule in
@@ -87,10 +87,29 @@ where Key: PreferenceKey, Content: View {
     public typealias Body = Never
 }
 
+@available(*, unavailable)
+extension _DelayedPreferenceView: Sendable {
+}
+
 extension _DelayedPreferenceView: PrimitiveView, UnaryView {
 }
 
 extension PreferenceKey {
+    static var readableName: String {
+        var name = String(describing: Self.self)
+        if name.hasSuffix("Key") {
+            name.removeLast(3)
+        }
+        if name.hasSuffix("Preference") {
+            name.removeLast(10)
+        }
+        if name.isEmpty {
+            let qualifiedName = String(reflecting: Self.self)
+            return qualifiedName.split(separator: ".").last.map(String.init) ?? qualifiedName
+        }
+        return name
+    }
+
     public static func _delay<T>(
         _ transform: @escaping (_PreferenceValue<Self>) -> T
     ) -> some View where T: View {
@@ -98,7 +117,9 @@ extension PreferenceKey {
     }
 }
 
-private struct PreferenceValueAttribute<Key: PreferenceKey>: StatefulRule {
+private struct PreferenceValueAttribute<Key: PreferenceKey>: Rule, AsyncAttribute,
+    CustomStringConvertible
+{
     typealias Value = Key.Value
 
     var source: WeakAttribute<Key.Value>?
@@ -107,33 +128,40 @@ private struct PreferenceValueAttribute<Key: PreferenceKey>: StatefulRule {
         self.source = source
     }
 
-    mutating func updateValue() {
+    var value: Key.Value {
         guard let graph = _AGGraph.current else {
-            fatalError("PreferenceValueAttribute.updateValue called outside an active _AGGraph context.")
+            fatalError("PreferenceValueAttribute.value accessed outside an active _AGGraph context.")
         }
-        let value: Key.Value
         if let source, source.isValid(in: graph) {
-            value = source.toStrong().value
+            return source.toStrong().value
         } else {
-            value = Key.defaultValue
+            return Key.defaultValue
         }
-        _AGGraph.setStatefulOutput(value)
+    }
+
+    var description: String {
+        "$" + Key.readableName
     }
 }
 
-private struct DelayedPreferenceChild<Key, Content>: Rule
+private struct DelayedPreferenceChild<Key, Content>: Rule, AsyncAttribute,
+    CustomStringConvertible
 where Key: PreferenceKey, Content: View {
     var view: Attribute<_DelayedPreferenceView<Key, Content>>
     var preferenceValue: WeakAttribute<Key.Value>
 
-    func updateValue() -> Content {
+    var value: Content {
         view.value.transform(_PreferenceValue(attribute: preferenceValue))
+    }
+
+    var description: String {
+        "Delay: " + Key.readableName
     }
 }
 
 /// Sub-protocol of PreferenceKey whose _isReadableByHost is always true.
 /// Used for preference keys that the host can register, read, and remove.
-public protocol HostPreferenceKey: PreferenceKey {}
+protocol HostPreferenceKey: PreferenceKey {}
 
 extension HostPreferenceKey {
     public static var _isReadableByHost: Bool { true }
@@ -146,29 +174,80 @@ extension HostPreferenceKey {
 /// `keys` stores the actual metatypes (not just ObjectIdentifiers) so that
 /// callers can open the existential and recover the concrete `K` via SE-0352.
 /// This matches the reference framework's `Array<PreferenceKey.Type>` layout.
-struct PreferenceKeys {
+struct PreferenceKeys: Equatable, RandomAccessCollection {
+    typealias Element = any PreferenceKey.Type
+    typealias Index = Array<Element>.Index
+
     var keys: [any PreferenceKey.Type] = []
 
-    mutating func insert<K: PreferenceKey>(_ keyType: K.Type) {
-        if !keys.contains(where: { $0 == keyType }) { keys.append(keyType) }
+    init() {}
+
+    var startIndex: Index { keys.startIndex }
+    var endIndex: Index { keys.endIndex }
+
+    func index(after i: Index) -> Index {
+        keys.index(after: i)
     }
 
-    mutating func insert(_ keyType: any PreferenceKey.Type) {
-        if !keys.contains(where: { $0 == keyType }) { keys.append(keyType) }
+    func index(before i: Index) -> Index {
+        keys.index(before: i)
     }
 
-    mutating func formUnion(_ other: PreferenceKeys) {
-        for key in other.keys {
-            insert(key)
+    subscript(position: Index) -> Element {
+        keys[position]
+    }
+
+    static func == (lhs: PreferenceKeys, rhs: PreferenceKeys) -> Bool {
+        lhs.keys.count == rhs.keys.count && zip(lhs.keys, rhs.keys).allSatisfy {
+            $0 == $1
         }
     }
 
-    func contains<K: PreferenceKey>(_ keyType: K.Type) -> Bool {
-        keys.contains(where: { $0 == keyType })
+    mutating func add(_ key: any PreferenceKey.Type) {
+        let index = _index(of: key)
+        if index == endIndex || keys[index] != key {
+            keys.insert(key, at: index)
+        }
     }
 
-    func contains(_ keyType: any PreferenceKey.Type) -> Bool {
-        keys.contains(where: { $0 == keyType })
+    mutating func remove(_ key: any PreferenceKey.Type) {
+        let index = _index(of: key)
+        if index != endIndex && keys[index] == key {
+            keys.remove(at: index)
+        }
+    }
+
+    func contains(_ key: any PreferenceKey.Type) -> Bool {
+        let index = _index(of: key)
+        return index != endIndex && keys[index] == key
+    }
+
+    func union(_ other: PreferenceKeys) -> PreferenceKeys {
+        var result = self
+        for key in other {
+            result.add(key)
+        }
+        return result
+    }
+
+    private func _index(of key: any PreferenceKey.Type) -> Index {
+        let target = unsafeBitCast(ObjectIdentifier(key), to: UInt.self)
+        var lower = startIndex
+        var upper = endIndex
+        while lower < upper {
+            let distance = upper - lower
+            let middle = lower + distance / 2
+            let candidate = unsafeBitCast(
+                ObjectIdentifier(keys[middle]),
+                to: UInt.self
+            )
+            if candidate < target {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
     }
 }
 
@@ -180,11 +259,36 @@ struct HostPreferencesKey: PreferenceKey {
     }
 }
 
-struct VersionSeed: Equatable, Hashable, Sendable {
+struct VersionSeed: CustomStringConvertible {
     var value: UInt32 = 0
 
     init(value: UInt32 = 0) {
         self.value = value
+    }
+
+    init(nodeId: UInt32, viewSeed: UInt32) {
+        value = merge32(nodeId, viewSeed)
+    }
+
+    static var invalid: VersionSeed { VersionSeed(value: .max) }
+    static var empty: VersionSeed { VersionSeed() }
+
+    var isEmpty: Bool { value == 0 }
+    var isInvalid: Bool { value == .max }
+
+    func matches(_ other: VersionSeed) -> Bool {
+        !isInvalid && !other.isInvalid && value == other.value
+    }
+
+    mutating func merge(_ other: VersionSeed) {
+        if isInvalid || other.isEmpty {
+            return
+        }
+        if isEmpty || other.isInvalid {
+            self = other
+            return
+        }
+        value = merge32(value, other.value)
     }
 
     mutating func mergeValue(_ newValue: UInt32) {
@@ -193,26 +297,35 @@ struct VersionSeed: Equatable, Hashable, Sendable {
             value = newValue
             return
         }
-
-        let allOnes = UInt64.max
-        var mixed = (allOnes ^ (UInt64(newValue) << 32)) &+ UInt64(newValue)
-        mixed = mixed &+ (UInt64(value) << 32)
-        mixed ^= mixed >> 22
-        mixed = mixed &+ (allOnes ^ (mixed << 13))
-        mixed ^= mixed >> 8
-        mixed = mixed &+ (mixed << 3)
-        mixed ^= mixed >> 15
-        mixed = mixed &+ (allOnes ^ (mixed << 27))
-        value = UInt32(truncatingIfNeeded: mixed >> 31)
-            ^ UInt32(truncatingIfNeeded: mixed)
+        value = merge32(value, newValue)
     }
 
-    func matches(_ other: VersionSeed) -> Bool {
-        self == other
+    var description: String {
+        if isEmpty {
+            return "empty"
+        } else if isInvalid {
+            return "invalid"
+        } else {
+            return String(value)
+        }
     }
 }
 
-struct PreferenceValues {
+private func merge32(_ first: UInt32, _ second: UInt32) -> UInt32 {
+    let allOnes = UInt64.max
+    var mixed = UInt64(second) | (UInt64(first) << 32)
+    mixed = mixed &+ (allOnes ^ (UInt64(second) << 32))
+    mixed ^= mixed >> 22
+    mixed = mixed &+ (allOnes ^ (mixed << 13))
+    mixed ^= mixed >> 8
+    mixed = mixed &+ (mixed << 3)
+    mixed ^= mixed >> 15
+    mixed = mixed &+ (allOnes ^ (mixed << 27))
+    return UInt32(truncatingIfNeeded: mixed >> 31)
+        ^ UInt32(truncatingIfNeeded: mixed)
+}
+
+struct PreferenceValues: CustomStringConvertible {
     struct Value<A> {
         var value: A
         var seed: VersionSeed
@@ -225,6 +338,21 @@ struct PreferenceValues {
     }
 
     var entries: [Entry] = []
+
+    var seed: VersionSeed {
+        var result = VersionSeed.empty
+        for entry in entries {
+            result.merge(entry.seed)
+        }
+        return result
+    }
+
+    var description: String {
+        let values = entries.lazy.map { entry in
+            entry.key.readableName + " = " + String(describing: entry.value)
+        }.joined(separator: ", ")
+        return "\(seed): [\(values)]"
+    }
 
     mutating func append<K: PreferenceKey>(
         _ key: K.Type,
@@ -313,7 +441,9 @@ struct PreferenceValues {
     }
 }
 
-struct PreferenceCombiner<A: PreferenceKey>: StatefulRule {
+struct PreferenceCombiner<A: PreferenceKey>: Rule, AsyncAttribute,
+    CustomStringConvertible
+{
     typealias Value = A.Value
 
     var attributes: [WeakAttribute<A.Value>] = []
@@ -325,12 +455,8 @@ struct PreferenceCombiner<A: PreferenceKey>: StatefulRule {
     @discardableResult
     mutating func remove(_ attribute: AGAttribute) -> Bool {
         let oldCount = attributes.count
-        attributes.removeAll { $0.raw.identifier == attribute.rawValue }
+        attributes.removeAll { $0.base.identifier == attribute.rawValue }
         return attributes.count != oldCount
-    }
-
-    mutating func updateValue() {
-        _AGGraph.setStatefulOutput(value)
     }
 
     var value: A.Value {
@@ -344,9 +470,14 @@ struct PreferenceCombiner<A: PreferenceKey>: StatefulRule {
         }
         return combined
     }
+
+
+    var description: String {
+        "∪ " + A.readableName
+    }
 }
 
-struct HostPreferencesCombiner: StatefulRule {
+struct HostPreferencesCombiner: Rule, AsyncAttribute {
     typealias Value = PreferenceValues
 
     struct Child {
@@ -364,7 +495,7 @@ struct HostPreferencesCombiner: StatefulRule {
     ) {
         let child = Child(_keys: keys.asWeak(), _values: values)
         if let index = children.firstIndex(where: {
-            $0._keys.raw.identifier == keys.identifier.rawValue
+            $0._keys.base.identifier == keys.identifier.rawValue
         }) {
             children[index] = child
         } else {
@@ -375,16 +506,12 @@ struct HostPreferencesCombiner: StatefulRule {
     @discardableResult
     mutating func removeChild(for keys: Attribute<PreferenceKeys>) -> Bool {
         guard let index = children.firstIndex(where: {
-            $0._keys.raw.identifier == keys.identifier.rawValue
+            $0._keys.base.identifier == keys.identifier.rawValue
         }) else {
             return false
         }
         children.remove(at: index)
         return true
-    }
-
-    mutating func updateValue() {
-        _AGGraph.setStatefulOutput(value)
     }
 
     var value: PreferenceValues {
@@ -454,7 +581,7 @@ final class PreferenceBridge {
         }
         let requestedKeys = PreferenceKeys()
         let hostKeys = graph.makeInput(value: requestedKeys)
-        let hostCombiner = graph.makeStatefulRule(
+        let hostCombiner = graph.makeRule(
             HostPreferencesCombiner(
                 _keys: hostKeys,
                 _values: OptionalAttribute()
@@ -479,7 +606,7 @@ final class PreferenceBridge {
 
         inputs.customInputs = bridgedViewInputs
         for key in requestedPreferences.keys {
-            inputs.preferences.keys.insert(key)
+            inputs.preferences.keys.add(key)
         }
 
         inputs.preferences.hostKeys = graph.makeRule(
@@ -504,7 +631,7 @@ final class PreferenceBridge {
             if output.key == HostPreferencesKey.self {
                 let hostValues = outputs.value(for: HostPreferencesKey.self)
                     .map { OptionalAttribute(Attribute<PreferenceValues>($0)) } ?? OptionalAttribute()
-                let hostCombiner = graph.makeStatefulRule(
+                let hostCombiner = graph.makeRule(
                     HostPreferencesCombiner(
                         _keys: inputs.preferences.hostKeys,
                         _values: hostValues
@@ -572,8 +699,8 @@ final class PreferenceBridge {
         }
 
         let combiner = bridgedPreference.combiner.toStrong()
-        graph.mutateStatefulRule(combiner, as: PreferenceCombiner<K>.self) { body in
-            body.add(WeakAttribute<K.Value>(weakValue))
+        graph.mutateRule(combiner, as: PreferenceCombiner<K>.self) { body in
+            body.add(WeakAttribute<K.Value>(base: weakValue))
         }
         graph.invalidateAttribute(combiner)
         viewGraph?.graphInvalidation(from: value.identifier)
@@ -612,7 +739,7 @@ final class PreferenceBridge {
 
         let combiner = bridgedPreference.combiner.toStrong()
         var didMutate = false
-        graph.mutateStatefulRule(combiner, as: PreferenceCombiner<K>.self) { body in
+        graph.mutateRule(combiner, as: PreferenceCombiner<K>.self) { body in
             didMutate = body.remove(value.identifier)
         }
         guard didMutate else { return false }
@@ -633,7 +760,7 @@ final class PreferenceBridge {
         }
 
         let combiner = _hostPreferencesCombiner.toStrong().identifier
-        graph.mutateStatefulRule(combiner, as: HostPreferencesCombiner.self) { body in
+        graph.mutateRule(combiner, as: HostPreferencesCombiner.self) { body in
             body.addChild(keys: keys, values: values)
         }
         graph.invalidateAttribute(combiner)
@@ -658,7 +785,7 @@ final class PreferenceBridge {
             return
         }
 
-        addHostValues(WeakAttribute<PreferenceValues>(weakValues), for: keys)
+        addHostValues(WeakAttribute<PreferenceValues>(base: weakValues), for: keys)
     }
 
     @discardableResult
@@ -674,7 +801,7 @@ final class PreferenceBridge {
 
         let combiner = _hostPreferencesCombiner.toStrong().identifier
         var didMutate = false
-        graph.mutateStatefulRule(combiner, as: HostPreferencesCombiner.self) { body in
+        graph.mutateRule(combiner, as: HostPreferencesCombiner.self) { body in
             didMutate = body.removeChild(for: keys)
         }
         guard didMutate else { return false }
@@ -727,8 +854,8 @@ final class PreferenceBridge {
                 return
             }
             let weakValue = graph.weakAttributeIfValid(for: value)
-                .map { WeakAttribute<K.Value>($0) }
-            let combiner = graph.makeStatefulRule(
+                .map { WeakAttribute<K.Value>(base: $0) }
+            let combiner = graph.makeRule(
                 PreferenceCombiner<K>(
                     attributes: weakValue.map { [$0] } ?? []
                 )
@@ -736,7 +863,7 @@ final class PreferenceBridge {
             guard let weakCombiner = graph.weakAttributeIfValid(for: combiner.identifier) else {
                 return
             }
-            requestedPreferences.insert(key)
+            requestedPreferences.add(key)
             replaceBridgedPreference(key: key, combiner: weakCombiner)
             outputs.setValue(combiner.identifier, for: key)
         }
@@ -745,26 +872,26 @@ final class PreferenceBridge {
     }
 }
 
-private struct MergePreferenceKeys: Rule {
+private struct MergePreferenceKeys: Rule, AsyncAttribute {
     typealias Value = PreferenceKeys
 
     var local: WeakAttribute<PreferenceKeys>
     var bridged: WeakAttribute<PreferenceKeys>
 
-    func updateValue() -> PreferenceKeys {
+    var value: PreferenceKeys {
         guard let graph = _AGGraph.current else {
-            fatalError("MergePreferenceKeys.updateValue() called outside AG context.")
+            fatalError("MergePreferenceKeys.value read outside AG context.")
         }
 
         var keys = PreferenceKeys()
         if local.isValid(in: graph) {
             for key in local.toStrong().value.keys {
-                keys.insert(key)
+                keys.add(key)
             }
         }
         if bridged.isValid(in: graph) {
             for key in bridged.toStrong().value.keys {
-                keys.insert(key)
+                keys.add(key)
             }
         }
         return keys
@@ -823,7 +950,15 @@ public enum _ViewDebug {
     }
 
     /// Opaque container for collected debug data.
-    public struct Data {}
+    public struct Data {
+        var data: [Property: Any]
+        var childData: [Data]
+
+        init() {
+            data = [:]
+            childData = []
+        }
+    }
 }
 
 /// Inputs controlling which preferences a view subtree needs to collect.
@@ -839,6 +974,12 @@ struct PreferencesInputs {
     init(keys: PreferenceKeys, hostKeys: Attribute<PreferenceKeys>) {
         self.keys = keys
         self.hostKeys = hostKeys
+    }
+}
+
+extension PreferencesInputs {
+    mutating func add<K: PreferenceKey>(_ key: K.Type) {
+        keys.add(key)
     }
 }
 
@@ -1114,7 +1255,7 @@ extension PreferencesOutputs {
                 host.asyncTransaction(
                     transaction,
                     id: id,
-                    mutation: AssignmentGraphMutation(attribute: targetWeak, value: value),
+                    mutation: AssignmentGraphMutation(targetWeak, newValue: value),
                     style: .deferred,
                     mayDeferUpdate: true
                 )

@@ -285,7 +285,7 @@ struct ScrollTargetRole {
         var role: Attribute<Role?>
         var collection: Attribute<any ScrollableCollection>
 
-        func updateValue() -> Value {
+        var value: Value {
             let role = role.value
             let collection = collection.value
             return { value in
@@ -781,7 +781,7 @@ public struct ViewAlignedScrollTargetBehavior: ScrollTargetBehavior {
                 )
                 stop = false
             }
-            if let closest = collection.subviewClosest(to: target.rect) {
+            if let closest = collection.subviewClosestTo(rect: target.rect) {
                 appendCandidate(
                     closest.frameInContent,
                     maximumLength: maximumCandidateLength,
@@ -1019,7 +1019,7 @@ private struct ScrollTargetModifier: ViewModifier, _GraphInputsModifier {
     }
 }
 
-private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModifier {
+private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: UnaryViewModifier, PrimitiveViewModifier {
     var behavior: Behavior
 
     typealias Body = Never
@@ -1034,7 +1034,7 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         }
         let shouldForwardRoleLayouts = inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self)
         var inputs = inputs
-        inputs.preferences.keys.insert(ScrollTargetRole.ContentKey.self)
+        inputs.preferences.keys.add(ScrollTargetRole.ContentKey.self)
         let layouts: Attribute<[ScrollTargetRole.Role: [any ScrollableCollection]]> =
             graph.makeIndirectAttribute(defaultValue: ScrollTargetRole.ContentKey.defaultValue)
         Self._makeViewInputs(modifier: modifier, inputs: &inputs, layouts: layouts)
@@ -1048,23 +1048,6 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
             outputs.preferences.setValue(nil, for: ScrollTargetRole.ContentKey.self)
         }
         return outputs
-    }
-
-    static func _makeViewList(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewListInputs,
-        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-    ) -> _ViewListOutputs {
-        var inputs = inputs
-        Self._applyToListInputs(modifier: modifier, inputs: &inputs)
-        return body(_Graph(), inputs)
-    }
-
-    static func _viewListCount(
-        inputs: _ViewListCountInputs,
-        body: (_ViewListCountInputs) -> Int?
-    ) -> Int? {
-        body(inputs)
     }
 
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
@@ -1118,7 +1101,7 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         var role: ScrollTargetRole.Role
         var _layouts: Attribute<[ScrollTargetRole.Role: [any ScrollableCollection]]>
 
-        func updateValue() -> [any ScrollableCollection] {
+        var value: [any ScrollableCollection] {
             _layouts.value[role] ?? []
         }
     }
@@ -1152,7 +1135,7 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
         var _environment: Attribute<EnvironmentValues>
         var _resolvedBehavior: Attribute<ResolvedScrollBehavior>
 
-        func updateValue() -> EnvironmentValues {
+        var value: EnvironmentValues {
             var values = _environment.value.trackingCopy()
             var properties = ScrollEnvironmentProperties(environment: values)
             properties.scrollBehavior = _resolvedBehavior.value
@@ -1160,9 +1143,6 @@ private struct ScrollBehaviorModifier<Behavior: ScrollTargetBehavior>: ViewModif
             return values
         }
     }
-}
-
-extension ScrollBehaviorModifier: _ViewInputsModifier {
 }
 
 extension View {

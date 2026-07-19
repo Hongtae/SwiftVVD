@@ -20,7 +20,7 @@ private struct ExclusiveState<A>: Rule {
     let parentInheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase>
     let firstPhaseAttr: Attribute<GesturePhase<A>>
 
-    func updateValue() -> _GestureInputs.InheritedPhase {
+    var value: _GestureInputs.InheritedPhase {
         let parentIP = parentInheritedPhaseAttr.value
         var result = parentIP.rawValue
 
@@ -64,7 +64,7 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
         let firstPhase: Attribute<GesturePhase<First.Value>>
         let secondPhase: Attribute<GesturePhase<Second.Value>>
 
-        func updateValue() -> Value {
+        var value: Value {
             let f = firstPhase.value
             let s = secondPhase.value
             switch f {
@@ -126,19 +126,10 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
 extension ExclusiveGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension ExclusiveGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
 
-extension ExclusiveGesture: GestureEventTypeAccepting {
-    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureTypeAcceptsEvent(First.self, eventType: eventType) ||
-            gestureTypeAcceptsEvent(Second.self, eventType: eventType)
-    }
-}
+extension ExclusiveGesture: PrimitiveGesture, PrimitiveDebuggableGesture {}
 
-extension ExclusiveGesture: DynamicGestureEventTypeAccepting {
-    func acceptsEventType(_ eventType: Any.Type) -> Bool {
-        gestureValueAcceptsEvent(first, eventType: eventType) ||
-            gestureValueAcceptsEvent(second, eventType: eventType)
-    }
-}
+@available(*, unavailable)
+extension ExclusiveGesture: Sendable {}
 
 extension Gesture {
     @inlinable public func exclusively<Other>(before other: Other) -> ExclusiveGesture<Self, Other> where Other: Gesture {

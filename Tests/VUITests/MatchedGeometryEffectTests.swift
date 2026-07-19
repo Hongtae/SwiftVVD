@@ -7,7 +7,12 @@ private final class MatchedGeometryRootScopeCapture: @unchecked Sendable {
 
 private final class MatchedGeometryTransformCapture: @unchecked Sendable {
     var transform: Attribute<ViewTransform>?
+    var position: Attribute<CGPoint>?
+    var containerPosition: Attribute<CGPoint>?
     var size: Attribute<ViewSize>?
+    var requestsLayoutComputer = false
+    var cachedFramePosition: Attribute<CGPoint>?
+    var cachedAnimatedPosition: Attribute<CGPoint>?
 }
 
 private final class MatchedGeometryPlacementCapture: @unchecked Sendable {
@@ -16,9 +21,47 @@ private final class MatchedGeometryPlacementCapture: @unchecked Sendable {
     var proposal: ProposedViewSize?
 }
 
+private final class SecondaryLayerPlacementCapture: @unchecked Sendable {
+    var count = 0
+    var position: CGPoint?
+    var anchor: UnitPoint?
+    var proposal: ProposedViewSize?
+}
+
+private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
+    typealias Body = Never
+
+    var capture: SecondaryLayerPlacementCapture
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("SecondaryLayerPlacementProbe called outside an active graph.")
+        }
+        let capture = view._attribute.value.capture
+        return _ViewOutputs(
+            layoutComputer: OptionalAttribute(
+                graph.makeInput(value: LayoutComputer(
+                    sizeThatFits: { _ in CGSize(width: 40, height: 20) },
+                    place: { position, anchor, proposal in
+                        capture.count += 1
+                        capture.position = position
+                        capture.anchor = anchor
+                        capture.proposal = proposal
+                    }
+                ))
+            )
+        )
+    }
+}
+
 private final class LayoutPlacementStateCapture: @unchecked Sendable {
     var attribute: Attribute<Bool>?
     var position: Attribute<CGPoint>?
+    var size: Attribute<ViewSize>?
+    var transform: Attribute<ViewTransform>?
     var animationsDisabled = false
 }
 
@@ -34,6 +77,8 @@ private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
         view._attribute.value.capture.attribute =
             inputs[LayoutPlacementStateInput.self].attribute
         view._attribute.value.capture.position = inputs.position
+        view._attribute.value.capture.size = inputs.size
+        view._attribute.value.capture.transform = inputs.transform
         view._attribute.value.capture.animationsDisabled =
             inputs[LayoutPlacementAnimationsDisabledInput.self]
         guard let graph = _AGGraph.current else {
@@ -43,6 +88,43 @@ private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
             layoutComputer: OptionalAttribute(
                 graph.makeInput(value: LayoutComputer.fixed(
                     CGSize(width: 40, height: 20)
+                ))
+            )
+        )
+    }
+}
+
+private struct MatchedGeometryTextDisplayProbe: View, TestPrimitiveView {
+    typealias Body = Never
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("MatchedGeometryTextDisplayProbe called outside an active graph.")
+        }
+        let displayList: Attribute<DisplayList> = graph.makeRule {
+            var list = DisplayList()
+            list.appendTextItem(
+                foreground: .color(.white),
+                bounds: CGRect(
+                    origin: inputs.position.value,
+                    size: inputs.size.value.value
+                )
+            ) { _ in }
+            return list
+        }
+        var preferences = PreferencesOutputs()
+        preferences.append(
+            DisplayList.Key.self,
+            node: displayList.identifier
+        )
+        return _ViewOutputs(
+            preferences: preferences,
+            layoutComputer: OptionalAttribute(
+                graph.makeInput(value: LayoutComputer.fixed(
+                    CGSize(width: 60, height: 20)
                 ))
             )
         )
@@ -134,6 +216,99 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
+    func testOverlayDefersSecondaryPlacementUntilParentPlacement() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let capture = SecondaryLayerPlacementCapture()
+            let inputs = makeViewInputs(graph: graph)
+            let modifier = graph.makeInput(value: _OverlayModifier(
+                overlay: SecondaryLayerPlacementProbe(capture: capture),
+                alignment: .center
+            ))
+
+            let outputs = _OverlayModifier<SecondaryLayerPlacementProbe>._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(value: LayoutComputer.fixed(
+                            CGSize(width: 100, height: 60)
+                        ))
+                    )
+                )
+            }
+
+            XCTAssertEqual(capture.count, 0)
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            layout.place(
+                at: CGPoint(x: 100, y: 80),
+                anchor: .center,
+                proposal: ProposedViewSize(width: 100, height: 60)
+            )
+            XCTAssertEqual(capture.count, 1)
+            XCTAssertEqual(capture.position, CGPoint(x: 80, y: 70))
+            XCTAssertEqual(capture.anchor, .topLeading)
+            XCTAssertEqual(
+                capture.proposal,
+                ProposedViewSize(width: 100, height: 60)
+            )
+        }
+    }
+
+    // ASSERTIONS matchedGeometryUnaryLayoutOwnershipObserved
+    func testUnaryLayoutSeparatesOuterFrameFromBodyGeometry() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let capture = LayoutPlacementStateCapture()
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
+            inputs.requestsLayoutComputer = true
+            inputs.position = graph.makeInput(value: CGPoint(x: 100, y: 50))
+            inputs.size = graph.makeInput(value: ViewSize(
+                width: 120,
+                height: 60
+            ))
+            let modifier = graph.makeInput(value: _FrameLayout(
+                width: 120,
+                height: 60,
+                alignment: .center
+            ))
+            let outputs = _FrameLayout._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, childInputs in
+                capture.position = childInputs.position
+                capture.size = childInputs.size
+                return _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(value: LayoutComputer.fixed(
+                            CGSize(width: 20, height: 10)
+                        ))
+                    )
+                )
+            }
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            let proposal = ProposedViewSize(width: 120, height: 60)
+            layout.place(
+                at: CGPoint(x: 160, y: 80),
+                anchor: .center,
+                proposal: proposal
+            )
+
+            XCTAssertEqual(inputs.position.value, CGPoint(x: 100, y: 50))
+            XCTAssertEqual(inputs.size.value.value, CGSize(width: 120, height: 60))
+            XCTAssertEqual(
+                try XCTUnwrap(capture.position).value,
+                CGPoint(x: 150, y: 75)
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.size).value.value,
+                CGSize(width: 20, height: 10)
+            )
+        }
+    }
+
     // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
     func testScopeSelectsActiveSourceAndReleasesItByOwner() throws {
         let graph = _AGGraph()
@@ -157,11 +332,11 @@ final class MatchedGeometryEffectTests: XCTestCase {
             var sourceIndex: Int?
             let shared = scope.frame(index: &sourceIndex, for: key, view: source)
             XCTAssertEqual(
-                shared.value?.origin,
+                shared.frame?.origin,
                 CGPoint(x: 100, y: 50)
             )
             XCTAssertEqual(
-                shared.value?.size.value,
+                shared.frame?.size.value,
                 CGSize(width: 80, height: 40)
             )
 
@@ -175,10 +350,56 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
             var followerIndex: Int?
             _ = scope.frame(index: &followerIndex, for: key, view: follower)
-            XCTAssertEqual(shared.value?.origin, CGPoint(x: 100, y: 50))
+            XCTAssertEqual(
+                scope.sourceInfo(frameIndex: try XCTUnwrap(sourceIndex))?.frame.origin,
+                CGPoint(x: 100, y: 50)
+            )
 
             scope.releaseFrame(index: try XCTUnwrap(sourceIndex), owner: sourceOwner.identifier)
-            XCTAssertNil(shared.value)
+            XCTAssertNil(
+                scope.sourceInfo(frameIndex: try XCTUnwrap(followerIndex))
+            )
+        }
+    }
+
+    // ASSERTIONS matchedGeometryRegistrationLifecycleObserved
+    func testScopeKeepsSoleRemovingSourceUntilReplacementRegisters() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.makeRootMatchedGeometryScope()
+            let scope = try XCTUnwrap(
+                inputs.base.customInputs.value(forKey: MatchedGeometryScope.self)
+            )
+            let namespace = Namespace().wrappedValue
+            let key = AnyHashable(MatchedGeometryKeyForTest(
+                id: "hero",
+                namespace: namespace
+            ))
+            let phase = graph.makeInput(value: Phase())
+            var frameIndex: Int?
+            _ = scope.frame(
+                index: &frameIndex,
+                for: key,
+                view: registration(
+                    graph: graph,
+                    owner: graph.makeInput(value: 1).identifier,
+                    isSource: true,
+                    position: CGPoint(x: 100, y: 50),
+                    size: CGSize(width: 80, height: 40),
+                    phase: phase
+                )
+            )
+
+            var removed = Phase()
+            removed.isBeingRemoved = true
+            phase.setValue(removed)
+
+            let source = try XCTUnwrap(
+                scope.sourceInfo(frameIndex: try XCTUnwrap(frameIndex))
+            )
+            XCTAssertEqual(source.frame.origin, CGPoint(x: 100, y: 50))
+            XCTAssertTrue(source.phase.isBeingRemoved)
         }
     }
 
@@ -301,7 +522,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
     }
 
     // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testFrameMatchProjectsFollowerTransformIntoSourceFrame() throws {
+    func testFrameMatchProjectsFollowerLayoutFrameIntoSourceFrame() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             var baseInputs = makeViewInputs(graph: graph)
@@ -327,6 +548,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 inputs: sourceInputs
             ) { _, childInputs in
                 sourceCapture.transform = childInputs.transform
+                sourceCapture.position = childInputs.position
                 sourceCapture.size = childInputs.size
                 return _ViewOutputs(
                     layoutComputer: OptionalAttribute(
@@ -336,7 +558,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     )
                 )
             }
-            _ = try XCTUnwrap(sourceCapture.transform).value
+            _ = try XCTUnwrap(sourceCapture.position).value
 
             let followerCapture = MatchedGeometryTransformCapture()
             let followerModifier = graph.makeInput(value: _MatchedGeometryEffect(
@@ -357,6 +579,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 inputs: followerInputs
             ) { _, childInputs in
                 followerCapture.transform = childInputs.transform
+                followerCapture.position = childInputs.position
                 followerCapture.size = childInputs.size
                 return _ViewOutputs(
                     layoutComputer: OptionalAttribute(
@@ -367,18 +590,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 )
             }
 
-            var points = [
-                CGPoint(x: 0, y: 0),
-                CGPoint(x: 20, y: 10),
-                CGPoint(x: 10, y: 5),
-            ]
-            try XCTUnwrap(followerCapture.transform).value.convertGlobal(
-                from: .local,
-                points: &points
+            XCTAssertEqual(
+                try XCTUnwrap(followerCapture.position).value,
+                CGPoint(x: 130, y: 65)
             )
-            XCTAssertEqual(points[0], CGPoint(x: 130, y: 65))
-            XCTAssertEqual(points[1], CGPoint(x: 150, y: 75))
-            XCTAssertEqual(points[2], CGPoint(x: 140, y: 70))
             XCTAssertEqual(
                 try XCTUnwrap(followerCapture.size).value.value,
                 CGSize(width: 20, height: 10)
@@ -416,11 +631,11 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 _animatedCGSize: nil
             )
             inputs.base.cachedEnvironment = MutableBox(cachedEnvironment)
-            inputs.position = presentationPosition
-            inputs.size = presentationSize
+            inputs.position = targetPosition
+            inputs.size = targetSize
             inputs.transform = graph.makeRule {
                 var transform = ViewTransform()
-                transform.appendPosition(presentationPosition.value)
+                transform.appendPosition(targetPosition.value)
                 return transform
             }
 
@@ -438,7 +653,13 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 inputs: inputs
             ) { _, childInputs in
                 capture.transform = childInputs.transform
+                capture.position = childInputs.position
+                capture.containerPosition = childInputs.containerPosition
                 capture.size = childInputs.size
+                capture.requestsLayoutComputer = childInputs.requestsLayoutComputer
+                let cachedFrame = childInputs.base.cachedEnvironment.value.animatedFrame
+                capture.cachedFramePosition = cachedFrame?.position
+                capture.cachedAnimatedPosition = cachedFrame?._animatedPosition
                 disablesNestedPlacementAnimations = childInputs[
                     LayoutPlacementAnimationsDisabledInput.self
                 ]
@@ -451,17 +672,31 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 )
             }
 
-            var points = [CGPoint.zero, CGPoint(x: 120, y: 60)]
-            try XCTUnwrap(capture.transform).value.convertGlobal(
-                from: .local,
-                points: &points
+            XCTAssertEqual(
+                try XCTUnwrap(capture.position).value,
+                CGPoint(x: 300, y: 200)
             )
-            XCTAssertEqual(points[0], CGPoint(x: 300, y: 200))
-            XCTAssertEqual(points[1], CGPoint(x: 420, y: 260))
+            XCTAssertEqual(
+                try XCTUnwrap(capture.containerPosition).value,
+                CGPoint(x: 300, y: 200)
+            )
             XCTAssertEqual(
                 try XCTUnwrap(capture.size).value.value,
                 CGSize(width: 120, height: 60)
             )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.transform).identifier,
+                inputs.transform.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.cachedFramePosition).identifier,
+                try XCTUnwrap(capture.position).identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.cachedAnimatedPosition).identifier,
+                try XCTUnwrap(capture.containerPosition).identifier
+            )
+            XCTAssertTrue(capture.requestsLayoutComputer)
             XCTAssertTrue(disablesNestedPlacementAnimations)
         }
     }
@@ -502,7 +737,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                         layoutComputer: OptionalAttribute(
                             graph.makeInput(value: LayoutComputer(
                                 sizeThatFits: { proposal in
-                                    proposal.replacingUnspecifiedDimensions()
+                                    proposal.fixingUnspecifiedDimensions()
                                 },
                                 place: { position, anchor, proposal in
                                     placement.position = position
@@ -582,6 +817,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     inputs: inputs
                 ) { _, childInputs in
                     capture.transform = childInputs.transform
+                    capture.position = childInputs.position
                     capture.size = childInputs.size
                     return _ViewOutputs(
                         layoutComputer: OptionalAttribute(
@@ -593,12 +829,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             }
 
             func origin(of capture: MatchedGeometryTransformCapture) throws -> CGPoint {
-                var points = [CGPoint.zero]
-                try XCTUnwrap(capture.transform).value.convertGlobal(
-                    from: .local,
-                    points: &points
-                )
-                return points[0]
+                try XCTUnwrap(capture.position).value
             }
 
             let sourceSize = CGSize(width: 80, height: 40)
@@ -620,7 +851,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     size: sourceSize,
                     layoutComputer: fixedSource
                 )
-                _ = try XCTUnwrap(source.transform).value
+                _ = try XCTUnwrap(source.position).value
                 let follower = capture(
                     id: id,
                     properties: properties,
@@ -652,7 +883,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 size: sourceSize,
                 layoutComputer: fixedSource
             )
-            _ = try XCTUnwrap(sizeSource.transform).value
+            _ = try XCTUnwrap(sizeSource.position).value
             let sizeFollower = capture(
                 id: "size",
                 properties: .size,
@@ -670,7 +901,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
-    func testStaticLayoutPublishesPlacementOnlyAfterPlace() throws {
+    func testStaticLayoutPublishesProjectedGeometryOnDemand() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let capture = LayoutPlacementStateCapture()
@@ -684,20 +915,17 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
             let placement = try XCTUnwrap(capture.attribute)
-            XCTAssertFalse(placement.value)
-
-            let size = layout.sizeThatFits(.unspecified)
-            layout.place(
-                at: CGPoint(x: size.width * 0.5, y: size.height * 0.5),
-                anchor: .center,
-                proposal: ProposedViewSize(size)
-            )
+            _ = layout.sizeThatFits(.unspecified)
             XCTAssertTrue(placement.value)
+            XCTAssertEqual(
+                try XCTUnwrap(capture.position).value,
+                CGPoint(x: -20, y: -10)
+            )
         }
     }
 
     // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testProjectedLayoutPlacementUpdatesWithoutSecondaryAnimation() throws {
+    func testDisabledNestedLayoutPlacementUpdatesWithoutSecondaryAnimation() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let capture = LayoutPlacementStateCapture()
@@ -706,6 +934,9 @@ final class MatchedGeometryEffectTests: XCTestCase {
             }
             let source = graph.makeInput(value: root)
             var inputs = makeViewInputs(graph: graph)
+            let parentPosition = graph.makeInput(value: CGPoint.zero)
+            inputs.position = parentPosition
+            inputs.size = graph.makeInput(value: ViewSize(width: 40, height: 20))
             inputs[LayoutPlacementAnimationsDisabledInput.self] = true
             let outputs = type(of: root)._makeView(
                 view: _GraphValue(_attribute: source),
@@ -713,26 +944,17 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
             let position = try XCTUnwrap(capture.position)
-            let size = layout.sizeThatFits(.unspecified)
-            let proposal = ProposedViewSize(size)
-
-            layout.place(
-                at: CGPoint(x: size.width * 0.5, y: size.height * 0.5),
-                anchor: .center,
-                proposal: proposal
-            )
+            _ = layout.sizeThatFits(.unspecified)
             let initialPosition = position.value
 
             Transaction.withScopedThreadTransaction(
                 Transaction(animation: .linear(duration: 1.0))
             ) {
-                layout.place(
-                    at: CGPoint(
-                        x: size.width * 0.5 + 100,
-                        y: size.height * 0.5 + 50
-                    ),
-                    anchor: .center,
-                    proposal: proposal
+                parentPosition.setValue(
+                    CGPoint(
+                        x: initialPosition.x + 100,
+                        y: initialPosition.y + 50
+                    )
                 )
             }
             XCTAssertEqual(
@@ -742,47 +964,211 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testProjectedLayoutPlacementTracksPresentationWithoutRelayout() throws {
+    // ASSERTIONS matchedGeometryDisplayListCanonicalizationObserved
+    func testMatchedDisplayUsesIdentityWrapperWithPresentationFrame() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
-            let capture = LayoutPlacementStateCapture()
-            let root = ZStack {
-                LayoutPlacementStateProbe(capture: capture)
+            var baseInputs = makeViewInputs(graph: graph)
+            baseInputs.makeRootMatchedGeometryScope()
+            let namespace = Namespace().wrappedValue
+
+            func makeMatchedOutputs(
+                isSource: Bool,
+                position: CGPoint,
+                size: CGSize,
+                itemCount: Int
+            ) -> _ViewOutputs {
+                let modifier = graph.makeInput(value: _MatchedGeometryEffect(
+                    id: "hero",
+                    namespace: namespace,
+                    properties: .frame,
+                    anchor: UnitPoint.center,
+                    isSource: isSource
+                ))
+                let inputs = matchedInputs(
+                    from: baseInputs,
+                    graph: graph,
+                    position: position,
+                    size: size
+                )
+                return _MatchedGeometryEffect<String>._makeView(
+                    modifier: _GraphValue(_attribute: modifier),
+                    inputs: inputs
+                ) { _, childInputs in
+                    let contentAttribute: Attribute<DisplayList> = graph.makeRule {
+                        var content = DisplayList()
+                        let presentationPosition = childInputs.position.value
+                        for index in 0..<itemCount {
+                            content.appendItem(bounds: CGRect(
+                                x: presentationPosition.x + CGFloat(index),
+                                y: presentationPosition.y,
+                                width: 1,
+                                height: 1
+                            )) { _ in }
+                        }
+                        return content
+                    }
+                    var preferences = PreferencesOutputs()
+                    preferences.append(
+                        DisplayList.Key.self,
+                        node: contentAttribute.identifier
+                    )
+                    return _ViewOutputs(
+                        preferences: preferences,
+                        layoutComputer: OptionalAttribute(
+                            graph.makeInput(value: LayoutComputer.fixed(size))
+                        )
+                    )
+                }
             }
-            let source = graph.makeInput(value: root)
-            var inputs = makeViewInputs(graph: graph)
-            let targetFrame = graph.makeInput(value: ViewFrame(
-                origin: CGPoint(x: 100, y: 100),
-                size: ViewSize(width: 100, height: 60)
+
+            let sourceOutputs = makeMatchedOutputs(
+                isSource: true,
+                position: CGPoint(x: 100, y: 50),
+                size: CGSize(width: 80, height: 40),
+                itemCount: 1
+            )
+            let sourceDisplay = Attribute<DisplayList>(try XCTUnwrap(
+                sourceOutputs.preferences.value(for: DisplayList.Key.self)
             ))
-            let presentationFrame = graph.makeInput(value: targetFrame.value)
-            inputs[LayoutPlacementAnimationsDisabledInput.self] = true
-            inputs[LayoutPlacementProjectionInput.self] = LayoutPlacementProjection(
-                targetFrame: targetFrame,
-                presentationFrame: presentationFrame
+            _ = sourceDisplay.value
+
+            let followerOutputs = makeMatchedOutputs(
+                isSource: false,
+                position: CGPoint(x: 300, y: 200),
+                size: CGSize(width: 120, height: 60),
+                itemCount: 64
             )
-            let outputs = type(of: root)._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: inputs
+            let followerDisplay = Attribute<DisplayList>(try XCTUnwrap(
+                followerOutputs.preferences.value(for: DisplayList.Key.self)
+            )).value
+
+            XCTAssertEqual(followerDisplay.items.count, 1)
+            let item = try XCTUnwrap(followerDisplay.items.first)
+            XCTAssertEqual(item.frame.origin, CGPoint(x: 80, y: 40))
+            XCTAssertEqual(item.frame.size, CGSize(width: 120, height: 60))
+            XCTAssertNotEqual(item.identity, .none)
+            XCTAssertGreaterThan(item.version.value, 0)
+            guard case let .effect(.identity, content) = item.value else {
+                return XCTFail("expected one matched display-list identity item")
+            }
+            XCTAssertEqual(content.renderItems.count, 64)
+            XCTAssertTrue(content.effects.isEmpty)
+            XCTAssertEqual(
+                content.renderItems.first?.command.bounds?.origin,
+                CGPoint(x: 80, y: 40)
             )
-            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            let position = try XCTUnwrap(capture.position)
-            let size = layout.sizeThatFits(.unspecified)
-            let targetCenter = CGPoint(x: 150, y: 130)
-            layout.place(
-                at: targetCenter,
+            XCTAssertEqual(
+                content.renderItems.last?.command.bounds?.origin,
+                CGPoint(x: 143, y: 40)
+            )
+        }
+    }
+
+    // ASSERTIONS matchedGeometryPresentationHitTestObserved
+    func testNestedTransformAndDisplayTrackMatchedPresentation() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var baseInputs = makeViewInputs(graph: graph)
+            baseInputs.makeRootMatchedGeometryScope()
+            let namespace = Namespace().wrappedValue
+
+            func makeMatchedOutputs(
+                isSource: Bool,
+                position: CGPoint,
+                capture: LayoutPlacementStateCapture
+            ) -> _ViewOutputs {
+                let modifier = graph.makeInput(value: _MatchedGeometryEffect(
+                    id: "hero",
+                    namespace: namespace,
+                    properties: .frame,
+                    anchor: UnitPoint.center,
+                    isSource: isSource
+                ))
+                let inputs = matchedInputs(
+                    from: baseInputs,
+                    graph: graph,
+                    position: position,
+                    size: CGSize(width: 100, height: 60)
+                )
+                return _MatchedGeometryEffect<String>._makeView(
+                    modifier: _GraphValue(_attribute: modifier),
+                    inputs: inputs
+                ) { _, childInputs in
+                    let root = ZStack {
+                        LayoutPlacementStateProbe(capture: capture)
+                    }
+                    let source = graph.makeInput(value: root)
+                    var outputs = type(of: root)._makeView(
+                        view: _GraphValue(_attribute: source),
+                        inputs: childInputs
+                    )
+                    let display = graph.makeRule {
+                        var list = DisplayList()
+                        let origin = capture.position?.value ?? .zero
+                        list.appendItem(bounds: CGRect(
+                            origin: origin,
+                            size: CGSize(width: 40, height: 20)
+                        )) { _ in }
+                        return list
+                    }
+                    outputs.preferences.setValue(
+                        display.identifier,
+                        for: DisplayList.Key.self
+                    )
+                    return outputs
+                }
+            }
+
+            let sourceCapture = LayoutPlacementStateCapture()
+            let sourceOutputs = makeMatchedOutputs(
+                isSource: true,
+                position: CGPoint(x: 100, y: 50),
+                capture: sourceCapture
+            )
+            let sourceLayout = try XCTUnwrap(sourceOutputs._layoutComputer.attribute?.value)
+            sourceLayout.place(
+                at: CGPoint(x: 150, y: 80),
                 anchor: .center,
-                proposal: ProposedViewSize(size)
+                proposal: ProposedViewSize(width: 100, height: 60)
             )
-            XCTAssertEqual(position.value, CGPoint(x: 130, y: 120))
+            _ = Attribute<DisplayList>(try XCTUnwrap(
+                sourceOutputs.preferences.value(for: DisplayList.Key.self)
+            )).value
 
-            presentationFrame.setValue(ViewFrame(
-                origin: CGPoint(x: 300, y: 200),
-                size: ViewSize(width: 200, height: 120)
-            ))
+            let followerCapture = LayoutPlacementStateCapture()
+            let followerOutputs = makeMatchedOutputs(
+                isSource: false,
+                position: CGPoint(x: 300, y: 200),
+                capture: followerCapture
+            )
+            let followerLayout = try XCTUnwrap(
+                followerOutputs._layoutComputer.attribute?.value
+            )
+            followerLayout.place(
+                at: CGPoint(x: 350, y: 230),
+                anchor: .center,
+                proposal: ProposedViewSize(width: 100, height: 60)
+            )
 
-            XCTAssertEqual(position.value, CGPoint(x: 380, y: 250))
+            let display = Attribute<DisplayList>(try XCTUnwrap(
+                followerOutputs.preferences.value(for: DisplayList.Key.self)
+            )).value
+            let item = try XCTUnwrap(display.items.first)
+            guard case let .effect(.identity, content) = item.value else {
+                return XCTFail("expected matched display identity item")
+            }
+            let presentationOrigin = try XCTUnwrap(followerCapture.position).value
+            let contentOrigin = try XCTUnwrap(
+                content.renderItems.first?.command.bounds?.origin
+            )
+            XCTAssertEqual(contentOrigin, presentationOrigin)
+            var points = [CGPoint.zero]
+            try XCTUnwrap(followerCapture.transform).value.convertGlobal(
+                from: .local,
+                points: &points
+            )
+            XCTAssertEqual(points[0], contentOrigin)
         }
     }
 
@@ -810,16 +1196,20 @@ final class MatchedGeometryEffectTests: XCTestCase {
         try viewGraph.data.withCurrent {
             let graph = viewGraph.data.graph
             inputs = makeViewInputs(graph: graph)
+            inputs.requestsLayoutComputer = true
             inputs.makeRootMatchedGeometryScope()
-            inputs.preferences.keys.insert(DisplayList.Key.self)
+            inputs.preferences.keys.add(DisplayList.Key.self)
             source = graph.makeInput(value: root(stage: 0))
             let outputs = MatchedGeometryReplacementRoot._makeView(
                 view: _GraphValue(_attribute: source),
                 inputs: inputs
             )
             layout = try XCTUnwrap(outputs._layoutComputer.attribute)
-            display = Attribute<DisplayList>(
-                try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            display = try XCTUnwrap(
+                outputs.preferences.reducedValue(
+                    for: DisplayList.Key.self,
+                    in: graph
+                )
             )
 
             func finishTransactionBody() {
@@ -828,10 +1218,20 @@ final class MatchedGeometryEffectTests: XCTestCase {
             }
 
             func sample() {
-                _ = layout.value.sizeThatFits(.unspecified)
+                let size = layout.value.sizeThatFits(.unspecified)
+                layout.value.place(
+                    at: .zero,
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
                 _ = display.value
                 graph.inbox.drain()
-                _ = layout.value.sizeThatFits(.unspecified)
+                let refreshedSize = layout.value.sizeThatFits(.unspecified)
+                layout.value.place(
+                    at: .zero,
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(refreshedSize)
+                )
                 _ = display.value
             }
 
@@ -903,6 +1303,204 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS matchedGeometryDisplayListCanonicalizationObserved
+    @MainActor
+    func testRetainedReplacementKeepsOverlayInSharedPresentationFrame() throws {
+        let probe = MatchedGeometryTextRuntimeProbe()
+        let controller = WindowController(
+            content: MatchedGeometryTextRuntimeRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MatchedGeometryTextRuntimeRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+
+        func update(_ time: Double, tick: UInt64) {
+            var redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(time),
+                contentSize: CGSize(width: 700, height: 500),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        func displayList() throws -> DisplayList {
+            try controller.viewGraph.data.withCurrent {
+                try XCTUnwrap(controller.viewGraph.rootDisplayList?.value)
+            }
+        }
+
+        func matchedFrames() throws -> [CGRect] {
+            try displayList().items.compactMap {
+                guard case .effect(.identity, _) = $0.value else { return nil }
+                return $0.frame
+            }
+        }
+
+        func assertFrameEqual(
+            _ lhs: CGRect,
+            _ rhs: CGRect,
+            accuracy: CGFloat = 0.001,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            XCTAssertEqual(lhs.origin.x, rhs.origin.x, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(lhs.origin.y, rhs.origin.y, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(lhs.size.width, rhs.size.width, accuracy: accuracy, file: file, line: line)
+            XCTAssertEqual(lhs.size.height, rhs.size.height, accuracy: accuracy, file: file, line: line)
+        }
+
+        func assertSharedPresentation(
+            _ list: DisplayList,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            let matchedItems: [(frame: CGRect, contents: DisplayList)] = list.items.compactMap {
+                guard case let .effect(.identity, contents) = $0.value else {
+                    return nil
+                }
+                return ($0.frame, contents)
+            }
+            XCTAssertEqual(matchedItems.count, 2, file: file, line: line)
+            guard matchedItems.count == 2 else { return }
+            XCTAssertEqual(matchedItems[0].frame, matchedItems[1].frame, file: file, line: line)
+
+            let textFrames = matchedItems.flatMap { recursiveTextFrames(in: $0.contents) }
+            XCTAssertEqual(textFrames.count, 2, file: file, line: line)
+            guard textFrames.count == 2 else { return }
+            XCTAssertEqual(
+                textFrames[0].origin.x,
+                textFrames[1].origin.x,
+                accuracy: 0.001,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(
+                textFrames[0].origin.y,
+                textFrames[1].origin.y,
+                accuracy: 0.001,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(
+                textFrames[0].midX,
+                matchedItems[0].frame.midX,
+                // Text drawing is pixel-aligned while the matched wrapper keeps
+                // its subpixel presentation frame.
+                accuracy: 0.501,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(
+                textFrames[0].midY,
+                matchedItems[0].frame.midY,
+                accuracy: 0.501,
+                file: file,
+                line: line
+            )
+        }
+
+        var tick: UInt64 = 0
+        func sample(_ time: Double) {
+            update(time, tick: tick)
+            tick &+= 1
+        }
+
+        sample(0)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.20))
+        sample(0)
+        let initialFrames = try matchedFrames()
+        let initialFrame = try XCTUnwrap(initialFrames.first)
+        XCTAssertEqual(initialFrames.count, 1)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        sample(0)
+        for frame in 1...240 {
+            let time = Double(frame) / 60.0
+            sample(time)
+            if frame == 30 {
+                assertSharedPresentation(try displayList())
+            }
+        }
+        let forwardFrames = try matchedFrames()
+        let forwardFrame = try XCTUnwrap(forwardFrames.first)
+        XCTAssertEqual(forwardFrames.count, 1)
+        XCTAssertGreaterThan(forwardFrame.minX, initialFrame.minX)
+        XCTAssertGreaterThan(forwardFrame.width, initialFrame.width)
+        XCTAssertGreaterThan(forwardFrame.height, initialFrame.height)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        sample(4.0)
+        let reverseStartFrames = try matchedFrames()
+        XCTAssertEqual(reverseStartFrames.count, 2)
+        for frame in reverseStartFrames {
+            assertFrameEqual(frame, forwardFrame)
+        }
+
+        for frame in 1...240 {
+            let time = 4.0 + Double(frame) / 60.0
+            sample(time)
+            if frame == 30 {
+                assertSharedPresentation(try displayList())
+                let reverseMidFrames = try matchedFrames()
+                let reverseMidFrame = try XCTUnwrap(reverseMidFrames.first)
+                XCTAssertGreaterThan(reverseMidFrame.minX, initialFrame.minX)
+                XCTAssertLessThan(reverseMidFrame.minX, forwardFrame.minX)
+                XCTAssertGreaterThan(reverseMidFrame.width, initialFrame.width)
+                XCTAssertLessThan(reverseMidFrame.width, forwardFrame.width)
+            }
+        }
+        let reverseEndFrames = try matchedFrames()
+        XCTAssertEqual(reverseEndFrames.count, 1)
+        assertFrameEqual(try XCTUnwrap(reverseEndFrames.first), initialFrame)
+    }
+
+    private func recursiveTextFrames(in list: DisplayList) -> [CGRect] {
+        list.items.reduce(into: []) { frames, item in
+            switch item.value {
+            case let .content(content):
+                if case .text = content.command {
+                    frames.append(item.frame)
+                }
+                switch content.value {
+                case .text:
+                    break
+                case let .style(style):
+                    frames.append(contentsOf: recursiveTextFrames(in: style.contents))
+                case let .crossFade(crossFade):
+                    if let source = crossFade.source {
+                        frames.append(contentsOf: recursiveTextFrames(in: source.contents))
+                    }
+                    if let target = crossFade.target {
+                        frames.append(contentsOf: recursiveTextFrames(in: target.contents))
+                    }
+                case let .flattened(contents, _, _):
+                    frames.append(contentsOf: recursiveTextFrames(in: contents))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        frames.append(contentsOf: recursiveTextFrames(in: local.list))
+                    }
+                case .backend, .shape, .image:
+                    break
+                }
+            case let .effect(_, contents):
+                frames.append(contentsOf: recursiveTextFrames(in: contents))
+            case let .states(states):
+                for (_, contents) in states {
+                    frames.append(contentsOf: recursiveTextFrames(in: contents))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
     private func flushCompletionActions(in graph: _AGGraph) {
         while !graph.actionOutbox.isEmpty {
             let actions = graph.actionOutbox
@@ -942,14 +1540,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         return _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(CachedEnvironment(environment: environment)),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(
@@ -1013,11 +1607,64 @@ private struct MatchedGeometryReplacementRoot: View {
         .frame(width: 340, height: 230)
     }
 
-    private func matchedBox(size: CGSize, position: CGPoint) -> some View {
+    private func matchedBox(
+        size: CGSize,
+        position: CGPoint
+    ) -> some View {
         Rectangle()
             .fill(Color.red)
             .frame(width: size.width, height: size.height)
             .matchedGeometryEffect(id: "hero", in: namespace, properties: .frame)
             .offset(x: position.x, y: position.y)
+    }
+}
+
+private final class MatchedGeometryTextRuntimeProbe {
+    var toggle: (() -> Void)?
+}
+
+private struct MatchedGeometryTextRuntimeRoot: View {
+    let probe: MatchedGeometryTextRuntimeProbe
+
+    @Namespace private var namespace
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.spring(duration: 2.0, bounce: 0.25)) {
+                expanded.toggle()
+            }
+        }
+        return ZStack {
+            if expanded {
+                HStack {
+                    Spacer()
+                    card
+                        .frame(width: 230, height: 130)
+                }
+                .padding(24)
+            } else {
+                HStack {
+                    card
+                        .frame(width: 110, height: 78)
+                    Spacer()
+                }
+                .padding(24)
+            }
+        }
+        .frame(width: 560, height: 210)
+    }
+
+    private var card: some View {
+        RoundedRectangle(cornerRadius: expanded ? 30 : 12)
+            .fill(Color.indigo)
+            .overlay {
+                MatchedGeometryTextDisplayProbe()
+            }
+            .matchedGeometryEffect(
+                id: "matched-card",
+                in: namespace,
+                properties: .frame
+            )
     }
 }

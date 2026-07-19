@@ -10,7 +10,7 @@ import Foundation
 // MARK: - BodyInputElement
 // One entry on the BodyInput<Content> stack.
 // Stores Swift closures for make-view and make-view-list body paths.
-struct BodyInputElement: @unchecked Sendable {
+struct BodyInputElement {
     let isViewList: Bool
     // Valid when isViewList == false:
     let makeViewFn: ((_Graph, _ViewInputs) -> _ViewOutputs)?
@@ -91,24 +91,13 @@ extension _ViewListCountInputs {
     }
 }
 
-// MARK: - ViewModifierContentProvider
-// Protocol adopted by _ViewModifier_Content<Modifier>.
-// providerMakeView: pops a BodyInputElement from the base stack and calls it.
-// isViewList=false: calls the make-view closure directly.
-// isViewList=true: routes through the implicit-root bridge.
-// The bridge uses the default VStack implicit root for this body path.
-protocol ViewModifierContentProvider: View {
-    static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
-    static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
-}
-
 // MARK: - _ViewModifier_Content<Modifier>
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 }
 
-extension _ViewModifier_Content: PrimitiveView {
+extension _ViewModifier_Content: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Self.providerMakeView(view: view, inputs: inputs)
     }
@@ -129,7 +118,7 @@ extension _ViewModifier_Content: PrimitiveView {
     }
 }
 
-extension _ViewModifier_Content: ViewModifierContentProvider {
+extension _ViewModifier_Content {
     // Consumes the latest BodyInputElement and calls the stored closure.
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var inputs = inputs
@@ -182,6 +171,13 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
             }
         }
     }
+}
+
+@available(*, unavailable)
+extension _ViewModifier_Content: Sendable {
+}
+
+extension _ViewModifier_Content: PrimitiveView {
 }
 
 // MARK: - ViewModifier
@@ -245,14 +241,6 @@ extension ViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        if let modifierType = self as? any _ViewInputsModifier.Type {
-            func makeInputs<T: _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewInputs) {
-                T._makeViewInputs(modifier: graph.unsafeCast(to: T.self), inputs: &inputs)
-            }
-            var inputs = inputs
-            makeInputs(modifierType, graph: modifier.unsafeCast(to: Any.self), inputs: &inputs)
-            return body(_Graph(), inputs)
-        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
@@ -273,14 +261,6 @@ extension ViewModifier {
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        if let modType = self as? any _ViewInputsModifier.Type {
-            func applyListMod<T: _ViewInputsModifier>(_: T.Type, mod: _GraphValue<Any>, inputs: inout _ViewListInputs) {
-                T._applyToListInputs(modifier: mod.unsafeCast(to: T.self), inputs: &inputs)
-            }
-            var modifiedInputs = inputs
-            applyListMod(modType, mod: modifier.unsafeCast(to: Any.self), inputs: &modifiedInputs)
-            return body(_Graph(), modifiedInputs)
-        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
@@ -304,29 +284,39 @@ public protocol _GraphInputsModifier {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs)
 }
 
-// _ViewInputsModifier is a type of modifier that modifies _ViewInputs.
-// Conformers implement _makeViewInputs which operates on the full _ViewInputs.
-//
-// During _makeViewList, _makeViewInputs is called through a synthetic _ViewInputs bridge
-// so that the modified inputs.base (e.g. cachedEnvironment) is captured in the
-// inner view's TypedUnaryViewGenerator.baseInputs. This ensures env effects such
-// as foregroundStyle are applied correctly when the layout phase calls makeView.
-protocol _ViewInputsModifier {
+protocol ViewInputsModifier: ViewModifier {
+    static var graphInputsSemantics: Semantics? { get }
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs)
 }
 
-extension _ViewInputsModifier {
-    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+extension ViewInputsModifier {
+    static var graphInputsSemantics: Semantics? {
+        nil
     }
 
-    // Bridge for the list phase: applies _makeViewInputs using a synthetic _ViewInputs wrapper
-    // so that the modified base (cachedEnvironment etc.) can be extracted without requiring
-    // real layout Attributes. Conformers that only modify inputs.base can use this directly.
-    // Conformers with additional layout-Attribute side effects should override _makeViewList.
-    static func _applyToListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs) {
+    public static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        var inputs = inputs
+        Self._makeViewInputs(modifier: modifier, inputs: &inputs)
+        return body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard let graphInputsSemantics,
+              isDeployedOnOrAfter(graphInputsSemantics) else {
+            var outputs = body(_Graph(), inputs)
+            outputs.multiModifier(modifier, inputs: inputs)
+            return outputs
+        }
         guard let graph = _AGGraph.current else {
-            fatalError("\(Self.self)._applyToListInputs called outside an active _AGGraph context.")
+            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         let stubPoint: Attribute<CGPoint> = graph.makeInput(value: .zero)
         let stubSize: Attribute<ViewSize> = graph.makeInput(value: ViewSize(width: 0, height: 0))
@@ -345,7 +335,71 @@ extension _ViewInputsModifier {
             stackOrientation: nil
         )
         Self._makeViewInputs(modifier: modifier, inputs: &viewInputs)
+        var inputs = inputs
         inputs.base = viewInputs.base
+        return body(_Graph(), inputs)
+    }
+
+    public static func _viewListCount(
+        inputs: _ViewListCountInputs,
+        body: (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        body(inputs)
+    }
+}
+
+protocol UnaryViewModifier: ViewModifier {
+}
+
+extension UnaryViewModifier {
+    public static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        makeUnaryViewList(modifier: modifier, inputs: inputs, body: body)
+    }
+
+    public static func _viewListCount(
+        inputs: _ViewListCountInputs,
+        body: (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        1
+    }
+}
+
+extension ViewModifier {
+    static func makeUnaryViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(viewType: Self.self, inputs: inputs) { viewInputs in
+            makeImplicitRoot(
+                modifier: modifier,
+                inputs: viewInputs,
+                body: body
+            )
+        }
+    }
+
+    static func makeImplicitRoot(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewOutputs {
+        Self._makeView(modifier: modifier, inputs: inputs) { _, inputs in
+            guard let graph = _AGGraph.current else {
+                fatalError("\(Self.self).makeImplicitRoot called outside an active _AGGraph context.")
+            }
+            let root = graph.makeInput(value: _VStackLayout())
+            return _VStackLayout._makeLayoutView(
+                root: _GraphValue(_attribute: root),
+                inputs: inputs
+            ) { _, inputs in
+                body(_Graph(), inputs.listInputs)
+            }
+        }
     }
 }
 
@@ -479,20 +533,14 @@ extension View {
     }
 }
 
-/// Marker protocol for all modifiers that encode themselves as `ModifiedElements`
-/// during `_makeViewList`. Element materialization then dispatches via
-/// `UnaryLayout` (layout path) or `PrimitiveViewModifier` (rendering path, `_makeView` per child).
-///
-/// Conformers: layout modifiers (`UnaryLayout`) and rendering modifiers such as
-/// background, overlay, gesture, and alert.
-/// No `Body == Never` constraint. This is a pure marker.
+/// Marker protocol for modifiers whose view construction is implemented
+/// without evaluating a modifier body.
 protocol PrimitiveViewModifier: ViewModifier {}
 
-/// Sub-protocol of `PrimitiveViewModifier`. Provides the default `_makeViewList` that calls the
-/// inner body and wraps the result with `ModifiedElements` via `multiModifier`.
-/// Behavior: calls body(_Graph(), inputs), wraps inner elements with ModifiedElements.
-/// Element materialization processes the resulting .modified case.
-protocol MultiViewModifier: PrimitiveViewModifier {}
+/// View-modifier marker that provides the default multi-element list wrapper.
+/// Primitive construction is a separate capability and is intentionally not
+/// implied by this protocol.
+protocol MultiViewModifier: ViewModifier where Body == Never {}
 
 extension MultiViewModifier {
     // Calls body to get inner outputs, then wraps via multiModifier.
@@ -510,12 +558,373 @@ extension MultiViewModifier {
     }
 }
 
-/// Layout-specific sub-protocol of `MultiViewModifier`. Geometry-only modifiers
-/// such as frame, padding, and fixedSize conform to this protocol.
-/// Conforming types implement `modifyLayoutComputer(_:)` and receive a
-/// correct `_makeView` implementation for free. `_makeViewList` is inherited from `MultiViewModifier`.
-protocol UnaryLayout: MultiViewModifier, Animatable {
-    func modifyLayoutComputer(_ layoutComputer: LayoutComputer) -> LayoutComputer
+/// Layout-specific modifier protocol used by geometry-only modifiers.
+protocol UnaryLayout: Animatable, MultiViewModifier, PrimitiveViewModifier {
+    associatedtype PlacementContextType
+    static func makeViewImpl(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs
+    func spacing(
+        in context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> Spacing
+    func placement(
+        of child: LayoutProxy,
+        in context: PlacementContextType
+    ) -> _Placement
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize
+    func layoutPriority(child: LayoutProxy) -> Double
+    func ignoresAutomaticPadding(child: LayoutProxy) -> Bool
+}
+
+extension UnaryLayout {
+    func spacing(
+        in context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> Spacing {
+        child.layoutComputer.spacing()
+    }
+
+    func layoutPriority(child: LayoutProxy) -> Double {
+        child.layoutComputer.layoutPriority()
+    }
+
+    func ignoresAutomaticPadding(child: LayoutProxy) -> Bool {
+        false
+    }
+}
+
+struct PlacementContext {
+    private enum ParentSize {
+        case eager(ViewSize)
+        case lazy(Attribute<ViewSize>)
+
+        var value: ViewSize {
+            switch self {
+            case .eager(let size):
+                return size
+            case .lazy(let size):
+                return size.value
+            }
+        }
+    }
+
+    var context: AnyRuleContext
+    var owner: AGAttribute?
+    var _environment: Attribute<EnvironmentValues>
+    private var parentSize: ParentSize
+
+    init(
+        context: AnyRuleContext,
+        owner: AGAttribute?,
+        environment: Attribute<EnvironmentValues>,
+        parentSize: ViewSize
+    ) {
+        self.context = context
+        self.owner = owner
+        self._environment = environment
+        self.parentSize = .eager(parentSize)
+    }
+
+    init(
+        context: AnyRuleContext,
+        owner: AGAttribute?,
+        environment: Attribute<EnvironmentValues>,
+        parentSize: Attribute<ViewSize>
+    ) {
+        self.context = context
+        self.owner = owner
+        self._environment = environment
+        self.parentSize = .lazy(parentSize)
+    }
+
+    var size: CGSize {
+        parentSize.value.value
+    }
+
+    var proposedSize: _ProposedSize {
+        parentSize.value.proposal
+    }
+}
+
+struct Cache3<Key: Equatable, Value> {
+    typealias Entry = (key: Key, value: Value)
+
+    var store: (Entry?, Entry?, Entry?) = (nil, nil, nil)
+
+    func find(_ key: Key) -> Value? {
+        if let entry = store.0, entry.key == key { return entry.value }
+        if let entry = store.1, entry.key == key { return entry.value }
+        if let entry = store.2, entry.key == key { return entry.value }
+        return nil
+    }
+
+    mutating func get(_ key: Key, makeValue: () -> Value) -> Value {
+        if let value = find(key) {
+            return value
+        }
+        let value = makeValue()
+        put(key, value: value)
+        return value
+    }
+
+    mutating func put(_ key: Key, value: Value) {
+        if store.0?.key == key {
+            store.0 = (key, value)
+        } else if store.1?.key == key {
+            store.1 = (key, value)
+        } else if store.2?.key == key {
+            store.2 = (key, value)
+        } else {
+            store = (store.1, store.2, (key, value))
+        }
+    }
+
+    func map(
+        _ transform: (Entry?) -> Entry?
+    ) -> Cache3<Key, Value> {
+        var result = Cache3<Key, Value>()
+        result.store = (
+            transform(store.0),
+            transform(store.1),
+            transform(store.2)
+        )
+        return result
+    }
+}
+
+struct ViewSizeCache {
+    var cache: Cache3<_ProposedSize, CGSize>
+
+    init(cache: Cache3<_ProposedSize, CGSize> = Cache3()) {
+        self.cache = cache
+    }
+
+    mutating func get(
+        _ proposal: _ProposedSize,
+        makeValue: () -> CGSize
+    ) -> CGSize {
+        cache.get(proposal, makeValue: makeValue)
+    }
+}
+
+struct ViewPlacementCache {
+    var cache = Cache3<ViewSize, _Placement>()
+
+    mutating func get(
+        _ size: ViewSize,
+        makeValue: () -> _Placement
+    ) -> _Placement {
+        cache.get(size, makeValue: makeValue)
+    }
+}
+
+private struct UnaryLayoutEngine<L: UnaryLayout>: LayoutEngine, LayoutEnginePlacing
+where L.PlacementContextType == PlacementContext {
+    var layout: L
+    var layoutContext: SizeAndSpacingContext
+    var child: LayoutProxy
+    var dimensionsCache: ViewSizeCache
+    var placementCache: ViewPlacementCache
+
+    mutating func update(
+        layout: L,
+        layoutContext: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) {
+        self.layout = layout
+        self.layoutContext = layoutContext
+        self.child = child
+        dimensionsCache = ViewSizeCache()
+        placementCache = ViewPlacementCache()
+    }
+
+    func layoutPriority() -> Double {
+        var result: Double!
+        layoutContext.context.update {
+            result = layout.layoutPriority(child: child)
+        }
+        return result
+    }
+
+    func ignoresAutomaticPadding() -> Bool {
+        var result: Bool!
+        layoutContext.context.update {
+            result = layout.ignoresAutomaticPadding(child: child)
+        }
+        return result
+    }
+
+    func spacing() -> Spacing {
+        var result: Spacing!
+        layoutContext.context.update {
+            result = layout.spacing(in: layoutContext, child: child)
+        }
+        return result
+    }
+
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        let layout = layout
+        let layoutContext = layoutContext
+        let child = child
+        return dimensionsCache.get(proposal) {
+            var result: CGSize!
+            layoutContext.context.update {
+                result = layout.sizeThatFits(
+                    in: proposal,
+                    context: layoutContext,
+                    child: child
+                )
+            }
+            return result
+        }
+    }
+
+    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+        var result: CGFloat?
+        layoutContext.context.update {
+            result = child.layoutComputer.explicitAlignment(key, at: size)
+        }
+        return result
+    }
+
+    mutating func childPlacement(at size: ViewSize) -> _Placement {
+        let layout = layout
+        let layoutContext = layoutContext
+        let child = child
+        return placementCache.get(size) {
+            var result: _Placement!
+            layoutContext.context.update {
+                result = layout.placement(
+                    of: child,
+                    in: PlacementContext(
+                        context: layoutContext.context,
+                        owner: layoutContext.owner,
+                        environment: layoutContext._environment,
+                        parentSize: size
+                    )
+                )
+            }
+            return result
+        }
+    }
+
+    mutating func place(
+        at position: CGPoint,
+        anchor: UnitPoint,
+        proposal: ProposedViewSize
+    ) {
+        let internalProposal = _ProposedSize(proposal)
+        let resolvedSize = sizeThatFits(internalProposal)
+        let size = ViewSize(resolvedSize, proposal: internalProposal)
+        let placement = childPlacement(at: size)
+        let origin = CGPoint(
+            x: position.x - size.width * anchor.x,
+            y: position.y - size.height * anchor.y
+        )
+        let childPosition = CGPoint(
+            x: origin.x + placement.anchorPosition.x,
+            y: origin.y + placement.anchorPosition.y
+        )
+        child.layoutComputer.place(
+            at: childPosition,
+            anchor: placement.anchor,
+            proposal: ProposedViewSize(placement.proposedSize)
+        )
+    }
+}
+
+private struct UnaryLayoutComputer<L: UnaryLayout>: StatefulRule, AsyncAttribute
+where L.PlacementContextType == PlacementContext {
+    typealias Value = LayoutComputer
+
+    var _layout: Attribute<L>
+    var _environment: Attribute<EnvironmentValues>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
+
+    mutating func updateValue() {
+        guard let childLayoutComputer = _childLayoutComputer.attribute else {
+            fatalError(
+                "UnaryLayoutComputer<\(L.self)> evaluated before its child was connected."
+            )
+        }
+        let layout = _layout.value
+        _ = _environment.value
+        _ = childLayoutComputer.value
+        var child = LayoutProxy(
+            attributes: LayoutProxyAttributes(
+                layoutComputer: childLayoutComputer
+            )
+        )
+        child.context = AnyRuleContext(context)
+        let layoutContext = SizeAndSpacingContext(
+            context: AnyRuleContext(context),
+            owner: context.attribute.identifier,
+            environment: _environment
+        )
+        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
+           let box = current.box as? LayoutEngineBox<UnaryLayoutEngine<L>> {
+            box.engine.update(
+                layout: layout,
+                layoutContext: layoutContext,
+                child: child
+            )
+            current.changeCount &+= 1
+            _AGGraph.setStatefulOutput(current)
+        } else {
+            let engine = UnaryLayoutEngine(
+                layout: layout,
+                layoutContext: layoutContext,
+                child: child,
+                dimensionsCache: ViewSizeCache(),
+                placementCache: ViewPlacementCache()
+            )
+            _AGGraph.setStatefulOutput(
+                LayoutComputer(box: LayoutEngineBox(engine: engine))
+            )
+        }
+    }
+}
+
+private struct UnaryChildGeometry<L: UnaryLayout>: Rule, AsyncAttribute {
+    var _parentSize: Attribute<ViewSize>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _parentLayoutComputer: Attribute<LayoutComputer>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
+
+    var value: ViewGeometry {
+        guard let childLayoutComputer = _childLayoutComputer.attribute else {
+            fatalError("UnaryChildGeometry evaluated before its child was connected.")
+        }
+        let size = _parentSize.value
+        let placement = _parentLayoutComputer.value.childPlacement(at: size)
+        return LayoutProxy(
+            attributes: LayoutProxyAttributes(
+                layoutComputer: childLayoutComputer
+            )
+        ).finallyPlaced(
+            at: placement,
+            in: size.value,
+            layoutDirection: _layoutDirection.value
+        )
+    }
+}
+
+struct LayoutPositionQuery: Rule, AsyncAttribute {
+    var parentPosition: Attribute<CGPoint>
+    var localPosition: Attribute<CGPoint>
+
+    var value: CGPoint {
+        let parent = parentPosition.value
+        let local = localPosition.value
+        return CGPoint(x: parent.x + local.x, y: parent.y + local.y)
+    }
 }
 
 extension UnaryLayout {
@@ -524,19 +933,96 @@ extension UnaryLayout {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        let childOutputs = body(_Graph(), inputs)
-        guard let childLCAttr = childOutputs._layoutComputer.attribute else {
-            return childOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let modifierValue = modifier._attribute.value  // dep: modifier config changes
-            let childLC = childLCAttr.value                // dep: child layout changes
-            return modifierValue.modifyLayoutComputer(childLC)
-        }
+        makeViewImpl(modifier: modifier, inputs: inputs, body: body)
+    }
+}
 
+extension UnaryLayout where PlacementContextType == PlacementContext {
+    static func makeViewImpl(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard inputs.needsLayout else {
+            return body(_Graph(), inputs)
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self).makeViewImpl called outside an active _AGGraph context.")
+        }
+        var modifier = modifier
+        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+        let environment = inputs.base.cachedEnvironment.value.environment
+        let parentLayoutComputer = graph.makeStatefulRule(
+            UnaryLayoutComputer(
+                _layout: modifier._attribute,
+                _environment: environment,
+                _childLayoutComputer: OptionalAttribute()
+            )
+        )
+        var childInputs = inputs
+        childInputs.copyCaches()
+        let childGeometry: Attribute<UnaryChildGeometry<Self>.Value>?
+        if inputs.needsGeometry {
+            let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
+                environment.value.layoutDirection
+            }
+            let geometry = graph.makeRule(
+                UnaryChildGeometry<Self>(
+                    _parentSize: inputs.size,
+                    _layoutDirection: layoutDirection,
+                    _parentLayoutComputer: parentLayoutComputer,
+                    _childLayoutComputer: OptionalAttribute()
+                )
+            )
+            childGeometry = geometry
+            let localChildPosition: Attribute<CGPoint> = graph.makeRule {
+                geometry.value.origin
+            }
+            let childSize: Attribute<ViewSize> = graph.makeRule {
+                geometry.value.dimensions.size
+            }
+            let childPosition = graph.makeRule(
+                LayoutPositionQuery(
+                    parentPosition: inputs.position,
+                    localPosition: localChildPosition
+                )
+            )
+            let parentTransform = inputs.transform
+            let childTransform: Attribute<ViewTransform> = graph.makeRule {
+                var transform = parentTransform.value
+                transform.appendPosition(childPosition.value)
+                return transform
+            }
+            childInputs.position = childPosition
+            childInputs.size = childSize
+            childInputs.transform = childTransform
+            childInputs.containerPosition = inputs.position
+            childInputs.containerSize = OptionalAttribute(inputs.size)
+        } else {
+            childGeometry = nil
+        }
+        childInputs.requestsLayoutComputer = true
+
+        let childOutputs = body(_Graph(), childInputs)
+        guard childOutputs._layoutComputer.attribute != nil else {
+            fatalError("UnaryLayout<\(Self.self)> body returned no layout computer.")
+        }
+        graph.mutateStatefulRule(
+            parentLayoutComputer.identifier,
+            as: UnaryLayoutComputer<Self>.self,
+            invalidating: true
+        ) { computer in
+            computer._childLayoutComputer = childOutputs._layoutComputer
+        }
+        if let childGeometry {
+            graph.mutateRule(
+                childGeometry.identifier,
+                as: UnaryChildGeometry<Self>.self,
+                invalidating: true
+            ) { geometry in
+                geometry._childLayoutComputer = childOutputs._layoutComputer
+            }
+        }
         let cachedEnvAttr = inputs.base.cachedEnvironment
         let positionAttr  = inputs.position
         let sizeAttr      = inputs.size
@@ -554,7 +1040,12 @@ extension UnaryLayout {
         }
         var prefs = childOutputs.preferences
         prefs.append(DisplayList.Key.self, node: debugDLAttr.identifier)
-        return _ViewOutputs(preferences: prefs, layoutComputer: OptionalAttribute(lcAttr))
+        return _ViewOutputs(
+            preferences: prefs,
+            layoutComputer: inputs.requestsLayoutComputer
+                ? OptionalAttribute(parentLayoutComputer)
+                : OptionalAttribute()
+        )
     }
 }
 

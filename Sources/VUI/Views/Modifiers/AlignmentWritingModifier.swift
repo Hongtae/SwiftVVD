@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AlignmentWritingModifier: ViewModifier {
+public struct _AlignmentWritingModifier: MultiViewModifier, PrimitiveViewModifier {
     @usableFromInline
     let key: AlignmentKey
     @usableFromInline
@@ -22,37 +22,102 @@ public struct _AlignmentWritingModifier: ViewModifier {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        let childOutputs = body(_Graph(), inputs)
-        guard let childLCAttr = childOutputs._layoutComputer.attribute else {
-            return childOutputs
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let m = modifier._attribute.value   // dep: key/computeValue changes
-            let childLC = childLCAttr.value     // dep: child layout changes
-            return LayoutComputer(
-                sizeThatFits: { childLC.sizeThatFits($0) },
-                spacing: childLC.spacing,
-                place: { childLC.place(at: $0, anchor: $1, proposal: $2) },
-                explicitAlignment: { key, size in
-                    if key == m.key {
-                        let dims = ViewDimensions(guideComputer: childLC, size: size)
-                        return m.computeValue(dims)
-                    }
-                    return childLC.explicitAlignment(key, at: size)
-                }
+        var outputs = body(_Graph(), inputs)
+        if inputs.requestsLayoutComputer {
+            let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                AlignmentModifiedLayoutComputer(
+                    modifier: modifier._attribute,
+                    layoutComputer: outputs._layoutComputer
+                )
             )
+            outputs._layoutComputer = OptionalAttribute(layoutComputer)
         }
-        return _ViewOutputs(
-            preferences: childOutputs.preferences,
-            layoutComputer: OptionalAttribute(lcAttr)
-        )
+        return outputs
     }
     public typealias Body = Never
 }
 
-extension _AlignmentWritingModifier {
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+private struct AlignmentModifiedLayoutComputer: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+
+    var modifier: Attribute<_AlignmentWritingModifier>
+    var layoutComputer: OptionalAttribute<LayoutComputer>
+
+    mutating func updateValue() {
+        let modifier = modifier.value
+        let layoutComputer = layoutComputer.attribute?.value ?? .defaultValue
+        update(
+            to: Engine(
+                key: modifier.key,
+                computeValue: modifier.computeValue,
+                layoutComputer: layoutComputer
+            )
+        )
+    }
+
+    struct Engine: LayoutEngine, LayoutEnginePlacing {
+        var key: AlignmentKey
+        var computeValue: @Sendable (ViewDimensions) -> CGFloat
+        var layoutComputer: LayoutComputer
+
+        func layoutPriority() -> Double {
+            layoutComputer.layoutPriority()
+        }
+
+        func ignoresAutomaticPadding() -> Bool {
+            layoutComputer.ignoresAutomaticPadding()
+        }
+
+        func requiresSpacingProjection() -> Bool {
+            layoutComputer.requiresSpacingProjection()
+        }
+
+        func spacing() -> Spacing {
+            layoutComputer.spacing()
+        }
+
+        func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            layoutComputer.sizeThatFits(proposal)
+        }
+
+        func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
+            layoutComputer.lengthThatFits(proposal, in: axis)
+        }
+
+        func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+            layoutComputer.childGeometries(at: size, origin: origin)
+        }
+
+        func explicitAlignment(_ requestedKey: AlignmentKey, at size: ViewSize) -> CGFloat? {
+            if requestedKey == key {
+                return computeValue(
+                    ViewDimensions(guideComputer: layoutComputer, size: size)
+                )
+            }
+            return layoutComputer.explicitAlignment(requestedKey, at: size)
+        }
+
+        mutating func childPlacement(at size: ViewSize) -> _Placement {
+            layoutComputer.childPlacement(at: size)
+        }
+
+        mutating func childPlacement(
+            at size: ViewSize,
+            placementContext: _PositionAwarePlacementContext
+        ) -> _Placement {
+            layoutComputer.childPlacement(
+                at: size,
+                placementContext: placementContext
+            )
+        }
+
+        mutating func place(
+            at position: CGPoint,
+            anchor: UnitPoint,
+            proposal: ProposedViewSize
+        ) {
+            layoutComputer.place(at: position, anchor: anchor, proposal: proposal)
+        }
     }
 }
 

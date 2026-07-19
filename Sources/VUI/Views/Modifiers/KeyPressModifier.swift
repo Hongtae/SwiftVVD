@@ -8,8 +8,8 @@
 import Foundation
 import Synchronization
 
-public struct KeyPress: Sendable, Hashable {
-    public struct Phases: OptionSet, Sendable, Hashable, CustomDebugStringConvertible {
+public struct KeyPress: Sendable {
+    public struct Phases: OptionSet, Sendable, CustomDebugStringConvertible {
         public let rawValue: Int
 
         public init(rawValue: Int) {
@@ -61,12 +61,13 @@ public struct KeyPress: Sendable, Hashable {
     }
 
     init?(_ event: KeyEvent) {
-        guard let phase = Phases(event.eventPhase) else { return nil }
-        let key = event.key ?? event.characters.first.map { KeyEquivalent($0) }
+        guard let phase = Phases(event.phase) else { return nil }
+        let key = (event.keyID.base as? KeyEquivalent)
+            ?? event.keys.first.map { KeyEquivalent($0) }
         guard let key else { return nil }
         self.init(
             key: key,
-            characters: event.characters,
+            characters: event.stringValue,
             modifiers: event.modifiers,
             phase: phase
         )
@@ -84,11 +85,11 @@ extension KeyPress.Phases {
         switch eventPhase {
         case .began:
             self = .down
-        case .moved:
+        case .active:
             self = .repeat
         case .ended:
             self = .up
-        case .cancelled:
+        case .failed:
             return nil
         }
     }
@@ -96,10 +97,8 @@ extension KeyPress.Phases {
 
 private let _keyPressResponderNextKey = Mutex<UInt32>(0xB0000000)
 
-final class KeyPressResponder: MultiViewResponder, ViewResponder {
+final class KeyPressResponder: MultiViewResponder {
     let hitTestKey: UInt32
-    weak var nextResponder: ResponderNode?
-    var gestureContainer: AnyObject? { nil }
 
     var phases: KeyPress.Phases
     var keys: Set<KeyEquivalent>?
@@ -113,7 +112,7 @@ final class KeyPressResponder: MultiViewResponder, ViewResponder {
         characters: CharacterSet?,
         callback: @escaping (KeyPress) -> KeyPress.Result,
         isEnabled: Bool,
-        innerResponders: [any ViewResponder]
+        innerResponders: [ViewResponder]
     ) {
         self.hitTestKey = _keyPressResponderNextKey.withLock { key in
             defer { key &+= 1 }
@@ -128,25 +127,20 @@ final class KeyPressResponder: MultiViewResponder, ViewResponder {
         updateInnerResponders(innerResponders)
     }
 
-    func updateInnerResponders(_ innerResponders: [any ViewResponder]) {
-        responders = innerResponders
-        for responder in responders {
-            if responder.nextResponder == nil {
-                responder.nextResponder = self
-            }
-        }
+    func updateInnerResponders(_ innerResponders: [ViewResponder]) {
+        children = innerResponders
     }
 
-    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
         .passthrough
     }
 
-    func containsGlobalPoints(
+    override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
-        options: ContainsPointsOptions
-    ) -> ContainsPointsResult {
-        ContainsPointsResult(mask: 0, priority: 0, children: responders)
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        ViewResponder.ContainsPointsResult(mask: [], priority: 0, children: children)
     }
 
     func handle(_ keyPress: KeyPress) -> KeyPress.Result {
@@ -174,7 +168,7 @@ final class KeyEventDispatcher {
                   let keyPress = KeyPress(keyEvent) else { continue }
             if dispatch(
                 keyPress,
-                responders: rootResponder.responders,
+                responders: rootResponder.children,
                 enqueueAction: enqueueAction
             ) {
                 consumed.insert(eventID)
@@ -185,7 +179,7 @@ final class KeyEventDispatcher {
 
     private func dispatch(
         _ keyPress: KeyPress,
-        responders: [any ViewResponder],
+        responders: [ViewResponder],
         enqueueAction: (@escaping () -> Void) -> Void
     ) -> Bool {
         for responder in responders {
@@ -201,7 +195,7 @@ final class KeyEventDispatcher {
             if let multiResponder = responder as? MultiViewResponder,
                dispatch(
                    keyPress,
-                   responders: multiResponder.responders,
+                   responders: multiResponder.children,
                    enqueueAction: enqueueAction
                ) {
                 return true
@@ -248,16 +242,16 @@ public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
             .filter { $0.key == ViewRespondersKey.self }
             .map { $0.value }
 
-        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        let innerRespondersAttr: Attribute<[ViewResponder]>
         if innerResponderNodes.isEmpty {
             innerRespondersAttr = graph.makeInput(value: [])
         } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
         } else {
             innerRespondersAttr = graph.makeRule {
                 var combined = ViewRespondersKey.defaultValue
                 for nodeID in innerResponderNodes {
-                    let value = Attribute<[any ViewResponder]>(nodeID).value
+                    let value = Attribute<[ViewResponder]>(nodeID).value
                     ViewRespondersKey.reduce(value: &combined) { value }
                 }
                 return combined
@@ -286,7 +280,7 @@ public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
         }
 
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
         return outputs
     }

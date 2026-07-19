@@ -9,16 +9,43 @@
 
 // MARK: - EnvironmentModifier protocol
 
-// EnvironmentModifier: refinement of ViewModifier + _GraphInputsModifier.
-// Types conforming to this protocol write multiple EnvironmentValues at once
-// via _makeInputs instead of using body(content:).
-protocol EnvironmentModifier: ViewModifier, _GraphInputsModifier where Body == Never {}
+// EnvironmentModifier writes a complete environment transformation through
+// the graph-input modifier path.
+protocol EnvironmentModifier: _GraphInputsModifier {
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    )
+}
+
+extension EnvironmentModifier {
+    static func _makeInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(Self.self)._makeInputs called outside an active _AGGraph context.")
+        }
+        let parentEnvironment = inputs.cachedEnvironment.value.environment
+        let environment = graph.makeRule {
+            var environment = parentEnvironment.value.trackingCopy()
+            Self.makeEnvironment(
+                modifier: modifier._attribute,
+                environment: &environment
+            )
+            return environment
+        }
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(environment)
+        )
+    }
+}
 
 // MARK: - TintAdjustmentMode environment key
 
 // TintAdjustmentMode controls tint color adjustment behavior.
 // Written as nil (Optional.none) by SheetContent.body to reset tint.
-enum TintAdjustmentMode: Equatable {
+enum TintAdjustmentMode: Hashable {
     case automatic
     case dimmed
     case normal
@@ -72,15 +99,23 @@ extension EnvironmentValues {
 // ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier
 // body(content:) applies AdditionalResetModifier and TransformScrollStorageModifier<ResetTransform>.
 // Wrapped in StaticIf<_SemanticFeature<Semantics_v6>, ...> in SheetContent.body.
-struct ResetScrollEnvironmentModifier: ViewModifier {
+struct ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier {
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {}
+
     // AdditionalResetModifier resets: scrollAnchors, ScrollToTopGestureActionKey,
     // ScrollContentBackgroundKey, popoverAutomaticallyDismissesWhenScrolledOutOfView
     // ResetTransform resets ScrollEnvironmentProperties.
     // The scroll-specific environment keys are owned by the scroll subsystem.
     // Until those keys are available here, this reset modifier leaves inputs unchanged.
-    struct AdditionalResetModifier: ViewModifier, _GraphInputsModifier {
+    struct AdditionalResetModifier: ViewModifier, EnvironmentModifier {
         typealias Body = Never
-        static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        static func makeEnvironment(
+            modifier: Attribute<Self>,
+            environment: inout EnvironmentValues
+        ) {
             // Writes the scroll reset values once scroll environment storage is available.
         }
     }
@@ -130,8 +165,13 @@ extension View {
 //   __Key_searchStorage, IsSearchingKey, SearchScopeActivationKey,
 //   SearchFocusContextKey, __Key_searchTextClearAction
 // Search environment storage is added by the search subsystem.
-struct ResetSearchEnvironmentModifier: EnvironmentModifier {
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+struct ResetSearchEnvironmentModifier: ViewModifier, EnvironmentModifier {
+    typealias Body = Never
+
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
         // Writes the search reset values once search environment storage is available.
     }
 }
@@ -143,8 +183,13 @@ struct ResetSearchEnvironmentModifier: EnvironmentModifier {
 // Env keys reset: FormInsetsKey, FormRowInfoVisibilityKey, FormRowAccessoryVisibilityKey,
 //   EffectiveFormStyleKey, GroupedFormSizeVariantKey
 // Form environment storage is added by the form subsystem.
-struct ResetFormEnvironmentModifier: EnvironmentModifier {
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+struct ResetFormEnvironmentModifier: ViewModifier, EnvironmentModifier {
+    typealias Body = Never
+
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
         // Writes the form reset values once form environment storage is available.
     }
 }
@@ -155,8 +200,13 @@ struct ResetFormEnvironmentModifier: EnvironmentModifier {
 // Resets tab view-related environment values for sheet content.
 // Env keys reset: TabBarPlacementKey (rawValue 5 = .automatic), IsTabBarShowingSectionsKey (false)
 // Tab view environment storage is added by the tab view subsystem.
-struct ResetTabViewEnvironmentModifier: EnvironmentModifier {
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+struct ResetTabViewEnvironmentModifier: ViewModifier, EnvironmentModifier {
+    typealias Body = Never
+
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
         // Writes the tab view reset values once tab view environment storage is available.
     }
 }
@@ -166,7 +216,7 @@ struct ResetTabViewEnvironmentModifier: EnvironmentModifier {
 // ClearNavigationContextModifier: ViewInputsModifier, ViewModifier
 // Clears navigation context from _ViewInputs using _makeViewInputs path.
 // Has no body(content:). Uses ViewInputsModifier protocol (_makeViewInputs).
-struct ClearNavigationContextModifier: ViewModifier, _ViewInputsModifier {
+struct ClearNavigationContextModifier: ViewInputsModifier {
     typealias Body = Never
 
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
@@ -179,6 +229,10 @@ extension View {
         modifier(ClearNavigationContextModifier())
     }
 }
+
+// MARK: - NavigationBarControlledNavigation
+
+struct NavigationBarControlledNavigation: ViewInputBoolFlag {}
 
 // MARK: - NavigationEnabled
 

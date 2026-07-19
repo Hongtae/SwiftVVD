@@ -18,6 +18,10 @@ private struct LeafLayoutProbe: LeafViewLayout {
     }
 }
 
+private func spacingDistance(_ spacing: Spacing, at edge: AbsoluteEdge) -> CGFloat? {
+    spacing.minima[Spacing.Key(category: .default, edge: edge)]?.value
+}
+
 private struct LeafAnimatableShape: Shape {
     var width: CGFloat
 
@@ -72,7 +76,7 @@ private struct RootLeafLayoutProbe: View {
     }
 
     func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
-        proposal.replacingUnspecifiedDimensions(by: measuredSize)
+        proposal.fixingUnspecifiedDimensions(at: measuredSize)
     }
 
     typealias Body = Never
@@ -113,14 +117,14 @@ final class LeafViewLayoutTests: XCTestCase {
             let computer = try! XCTUnwrap(requestedOutputs._layoutComputer.attribute).value
             XCTAssertEqual(computer.sizeThatFits(.unspecified), CGSize(width: 12, height: 7))
             XCTAssertEqual(
-                computer.sizeThatFits(ProposedViewSize(width: 30, height: nil)),
+                computer.sizeThatFits(_ProposedSize(width: 30, height: nil)),
                 CGSize(width: 30, height: 7)
             )
-            XCTAssertEqual(computer.spacing.top, 1)
-            XCTAssertEqual(computer.spacing.leading, 2)
-            XCTAssertEqual(computer.spacing.bottom, 3)
-            XCTAssertEqual(computer.spacing.trailing, 4)
-            XCTAssertEqual(computer.priority, 0)
+            XCTAssertEqual(spacingDistance(computer.spacing(), at: .top), 1)
+            XCTAssertEqual(spacingDistance(computer.spacing(), at: .left), 2)
+            XCTAssertEqual(spacingDistance(computer.spacing(), at: .bottom), 3)
+            XCTAssertEqual(spacingDistance(computer.spacing(), at: .right), 4)
+            XCTAssertEqual(computer.layoutPriority(), 0)
         }
     }
 
@@ -149,8 +153,8 @@ final class LeafViewLayoutTests: XCTestCase {
             )
             let updated = computerAttribute.value
             XCTAssertEqual(updated.sizeThatFits(.unspecified), CGSize(width: 19, height: 11))
-            XCTAssertEqual(updated.spacing.top, 0)
-            XCTAssertEqual(updated.spacing.trailing, 0)
+            XCTAssertEqual(spacingDistance(updated.spacing(), at: .top), 0)
+            XCTAssertEqual(spacingDistance(updated.spacing(), at: .right), 0)
         }
     }
 
@@ -175,7 +179,7 @@ final class LeafViewLayoutTests: XCTestCase {
                 computer.box is LayoutEngineBox<LeafLayoutEngine<_ShapeView<Rectangle, Color>>>
             )
             XCTAssertEqual(
-                computer.sizeThatFits(ProposedViewSize(width: 30, height: 20)),
+                computer.sizeThatFits(_ProposedSize(width: 30, height: 20)),
                 CGSize(width: 30, height: 20)
             )
 
@@ -234,16 +238,10 @@ final class LeafViewLayoutTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         var inputs = _ViewInputs(
             base: _GraphInputs(
-                customInputs: PropertyList(),
                 time: graph.makeInput(value: Time(seconds: 0)),
-                cachedEnvironment: MutableBox(
-                    CachedEnvironment(environment: environment)
-                ),
                 phase: graph.makeInput(value: Phase()),
-                transaction: graph.makeInput(value: Transaction()),
-                changedDebugProperties: 0,
-                options: [],
-                mergedInputs: []
+                environment: environment,
+                transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
             preferences: PreferencesInputs(

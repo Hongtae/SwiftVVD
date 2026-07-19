@@ -5,10 +5,38 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// StyleContext: marker protocol for style context types.
-// Context operations are implemented directly on AnyStyleContextType using
-// ObjectIdentifier membership.
-protocol StyleContext: Sendable {}
+protocol StyleContextVisitor {
+    mutating func visit<Context: StyleContext>(_ type: Context.Type)
+}
+
+protocol StyleContext {
+    static func accepts<Context>(_ type: Context.Type, at index: Int) -> Bool
+    static func acceptsAny<each Context: StyleContext>(
+        _ types: repeat (each Context).Type
+    ) -> Bool
+    static func visitStyle<Visitor: StyleContextVisitor>(_ visitor: inout Visitor)
+}
+
+extension StyleContext {
+    static func accepts<Context>(_ type: Context.Type, at index: Int) -> Bool {
+        index == 0 && ObjectIdentifier(type) == ObjectIdentifier(Self.self)
+    }
+
+    static func acceptsAny<each Context: StyleContext>(
+        _ types: repeat (each Context).Type
+    ) -> Bool {
+        for type in repeat each types {
+            if accepts(type, at: 0) {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func visitStyle<Visitor: StyleContextVisitor>(_ visitor: inout Visitor) {
+        visitor.visit(Self.self)
+    }
+}
 
 // Marker types: empty structs with no stored properties.
 struct NoStyleContext: StyleContext {}
@@ -32,15 +60,7 @@ struct MenuStyleContext: StyleContext {}
 
 struct ScrollViewStyleContext: StyleContext {}
 
-// SheetStyleContext: StyleContext + ViewInputFlag.
-// styleContext(.sheet) pushes SheetStyleContext into customInputs via
-// StyleContextWriter<SheetStyleContext>. input(SheetStyleContext.self) writes
-// the Bool flag via ViewInputFlagModifier<SheetStyleContext>.
-struct SheetStyleContext: StyleContext, ViewInputFlag {
-    typealias Value = Bool
-    static var defaultValue: Bool { false }
-    var description: String { "SheetStyleContext" }
-}
+struct SheetStyleContext: StyleContext {}
 
 // AnyStyleContextType: value type representing the current style context stack.
 // Uses a Set<ObjectIdentifier> for context membership:
@@ -79,7 +99,7 @@ struct AnyStyleContextType: Equatable {
 
 // StyleContextInput: PropertyKey storing the current AnyStyleContextType
 // in _GraphInputs.customInputs.
-struct StyleContextInput: PropertyKey {
+struct StyleContextInput: ViewInput {
     typealias Value = AnyStyleContextType
     static var defaultValue: AnyStyleContextType { .defaultValue }
     var description: String { "StyleContextInput" }
@@ -111,10 +131,10 @@ extension View {
         modifier(StyleContextWriter<T>())
     }
 
-    // input(_:) marks T as active in customInputs via ViewInputFlagModifier<T>(value: true).
+    // input(_:) installs T through ViewInputFlagModifier<T>.
     // The concrete return type is ModifiedContent<Self, ViewInputFlagModifier<T>>.
     func input<T: ViewInputFlag>(_ type: T.Type) -> some View {
-        modifier(ViewInputFlagModifier<T>(value: true))
+        modifier(ViewInputFlagModifier(flag: T()))
     }
 }
 

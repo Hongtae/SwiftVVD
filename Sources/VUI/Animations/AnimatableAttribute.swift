@@ -25,43 +25,46 @@ extension Animatable {
     }
 }
 
+extension Attribute where Value: Animatable {
+    func animated(inputs: _GraphInputs) -> Attribute<Value> {
+        var value = _GraphValue(_attribute: self)
+        Value._makeAnimatable(value: &value, inputs: inputs)
+        return value._attribute
+    }
+}
+
 private extension _AGGraph {
     func transactionForAttributeOrKeyPathParent(_ id: AGAttribute) -> Transaction? {
         var visited: Set<UInt32> = []
-        return transactionForAttributeOrInputs(id, visited: &visited, depth: 0)
-    }
+        var pending: [(attribute: AGAttribute, depth: Int)] = [(id, 0)]
+        pending.reserveCapacity(64)
 
-    func transactionForAttributeOrInputs(
-        _ id: AGAttribute,
-        visited: inout Set<UInt32>,
-        depth: Int
-    ) -> Transaction? {
-        guard visited.insert(id.rawValue).inserted else {
-            return nil
-        }
-        if let transaction = transaction(for: id) {
-            return transaction
-        }
-        if let parent = parent(of: id),
-           let transaction = transactionForAttributeOrInputs(parent, visited: &visited, depth: depth) {
-            return transaction
-        }
-        guard depth < 32 else {
-            return nil
-        }
-        let index = Int(id.rawValue)
-        guard slots.indices.contains(index),
-              let node = slots[index].node else {
-            return nil
-        }
-        for input in node.inputs.union(node.staticInputs) {
-            let inputID = AGAttribute(rawValue: input)
-            if let transaction = transactionForAttributeOrInputs(
-                inputID,
-                visited: &visited,
-                depth: depth + 1
-            ) {
+        while let current = pending.popLast() {
+            let id = current.attribute
+            guard visited.insert(id.rawValue).inserted else {
+                continue
+            }
+            if let transaction = transaction(for: id) {
                 return transaction
+            }
+
+            // Push inputs first so the key-path parent remains the next item
+            // visited, matching the previous parent-first depth-first search.
+            if current.depth < 32 {
+                let index = Int(id.rawValue)
+                if slots.indices.contains(index),
+                   let node = slots[index].node {
+                    let inputs = Array(node.inputs.union(node.staticInputs))
+                    for input in inputs.reversed() {
+                        pending.append((
+                            AGAttribute(rawValue: input),
+                            current.depth + 1
+                        ))
+                    }
+                }
+            }
+            if let parent = parent(of: id) {
+                pending.append((parent, current.depth))
             }
         }
         return nil
@@ -86,7 +89,7 @@ private func isSourceCustomReplacementAnimationBox(_ box: AnimationBoxBase) -> B
         !isVelocityTrackingAnimationBox(box)
 }
 
-private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
+private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, ObservedAttribute, AsyncAttribute, CustomStringConvertible {
     typealias Value = AnimatedValue
 
     var _source: Attribute<AnimatedValue>
@@ -122,6 +125,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     // replacement animation deadline while the newest listener is inserted
     // first.
     private var completionRecords: [CompletionRecord] = []
+
+    var description: String {
+        "Animatable<\(AnimatedValue.self)>"
+    }
 
     private typealias AnimationLayer = AnimatorState<AnimatedValue>.PresentationLayer
     private typealias StateCompletionListener = AnimatorState<AnimatedValue>.CompletionListener
@@ -3416,4 +3423,3 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
 }
-

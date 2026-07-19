@@ -63,6 +63,10 @@ public struct SectionCollection: RandomAccessCollection {
     public typealias SubSequence = Slice<SectionCollection>
 }
 
+@available(*, unavailable)
+extension SectionCollection: Sendable {
+}
+
 public struct SectionConfiguration: Identifiable {
     public struct ID: Hashable {
         var base: AnyHashable
@@ -127,6 +131,14 @@ public struct SectionConfiguration: Identifiable {
     public var content: SubviewsCollection { storage.content }
 }
 
+@available(*, unavailable)
+extension SectionConfiguration: Sendable {
+}
+
+@available(*, unavailable)
+extension SectionConfiguration.ID: Sendable {
+}
+
 public struct Subview: View, Identifiable {
     public struct ID: Hashable {
         var base: AnyHashable
@@ -161,6 +173,14 @@ public struct Subview: View, Identifiable {
     }
 
     public typealias Body = Never
+}
+
+@available(*, unavailable)
+extension Subview.ID: Sendable {
+}
+
+@available(*, unavailable)
+extension Subview: Sendable {
 }
 
 extension Subview: PrimitiveView, UnaryView {
@@ -281,7 +301,7 @@ public struct SubviewsCollection: RandomAccessCollection, View {
 
         var built: [Subview] = []
         _ = _forEachSublist(in: viewList()) { sublist in
-            let sharedElements = _ViewList_SubgraphElements(base: sublist.elements)
+            let sharedElements = sublist.elements
             for offset in 0..<sublist.count {
                 let elementIndex = sublist.start + offset
                 built.append(Subview(view: _ViewList_View(
@@ -298,8 +318,14 @@ public struct SubviewsCollection: RandomAccessCollection, View {
     }
 }
 
+@available(*, unavailable)
+extension SubviewsCollection: Sendable {
+}
+
 extension SubviewsCollection: PrimitiveView {
 }
+
+extension SubviewsCollection: MultiView {}
 
 public struct SubviewsCollectionSlice: RandomAccessCollection, View {
     var base: SubviewsCollection
@@ -351,8 +377,14 @@ public struct SubviewsCollectionSlice: RandomAccessCollection, View {
     }
 }
 
+@available(*, unavailable)
+extension SubviewsCollectionSlice: Sendable {
+}
+
 extension SubviewsCollectionSlice: PrimitiveView {
 }
+
+extension SubviewsCollectionSlice: MultiView {}
 
 public struct ForEachSectionCollection<Content: View>: RandomAccessCollection {
     var configurations: [SectionConfiguration]
@@ -421,6 +453,10 @@ extension ForEachSectionCollection: _ForEachSectionCollectionViewListProducing {
     }
 }
 
+@available(*, unavailable)
+extension ForEachSectionCollection: Sendable {
+}
+
 extension _ViewListOutputs {
     static func sectionListOutputs(
         _ outputs: [_ViewListOutputs],
@@ -429,7 +465,7 @@ extension _ViewListOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("_ViewListOutputs.sectionListOutputs called outside an active _AGGraph context.")
         }
-        let listAttributes = outputs.map { $0.viewListAttribute() }
+        let listAttributes = outputs.map { $0.viewListAttribute(inputs: inputs) }
         let viewListAttr: Attribute<any ViewList> = graph.makeRule {
             let group = _ViewList_Group(lists: listAttributes.map { ($0.value, $0) })
             return SectionedViewList(base: group) as any ViewList
@@ -692,7 +728,7 @@ private struct SectionedViewList: ViewList {
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        var materializedBaseIndex = max(0, from)
+        var headerFooterImplicitID = 0
         var sectionIndex = 0
         return base.applyNodes(
             from: &from,
@@ -703,14 +739,16 @@ private struct SectionedViewList: ViewList {
             let sectioned = sectionedNode(
                 from: node,
                 sectionIndex: sectionIndex,
-                materializedBaseIndex: materializedBaseIndex,
+                headerFooterImplicitID: headerFooterImplicitID,
                 temporaryTransform: temporaryTransform
             )
-            if case .section = sectioned.node {
+            if case .section(let section) = sectioned.node {
                 sectionIndex += 1
+                if sectioned.usesImplicitBoundaryIDs {
+                    headerFooterImplicitID += sectionBoundaryCount(section)
+                }
             }
             let shouldContinue = to(&nodeFrom, nodeStyle, sectioned.node, sectioned.temporaryTransform)
-            materializedBaseIndex += estimatedCount(of: sectioned.node, style: nodeStyle)
             return shouldContinue
         }
     }
@@ -742,12 +780,17 @@ private struct SectionedViewList: ViewList {
     private func sectionedNode(
         from node: _ViewList_Node,
         sectionIndex: Int,
-        materializedBaseIndex: Int,
+        headerFooterImplicitID: Int,
         temporaryTransform: _ViewList_TemporarySublistTransform
-    ) -> (node: _ViewList_Node, temporaryTransform: _ViewList_TemporarySublistTransform) {
+    ) -> (
+        node: _ViewList_Node,
+        temporaryTransform: _ViewList_TemporarySublistTransform,
+        usesImplicitBoundaryIDs: Bool
+    ) {
         switch node {
         case .sublist(var sublist):
             temporaryTransform.apply(to: &sublist)
+            let usesImplicitBoundaryIDs = _sectionExplicitIDs(from: sublist.id).isEmpty
             let rowGeneratedSeed = SectionAccumulator.rowGeneratedSeed(
                 for: sublist.id,
                 sectionIndex: sectionIndex,
@@ -759,11 +802,15 @@ private struct SectionedViewList: ViewList {
                 sharedGeneratedSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedOwner: sharedGeneratedSubviewIDOwner,
                 rowGeneratedSeed: rowGeneratedSeed,
-                materializedSectionBaseIndex: materializedBaseIndex
+                headerFooterImplicitID: headerFooterImplicitID
             ) {
-                return (.section(section), _ViewList_TemporarySublistTransform())
+                return (
+                    .section(section),
+                    _ViewList_TemporarySublistTransform(),
+                    usesImplicitBoundaryIDs
+                )
             }
-            return (node, temporaryTransform)
+            return (node, temporaryTransform, false)
         case .list(let list, let attribute):
             return (.list(SectionedViewList(
                 base: list,
@@ -771,7 +818,7 @@ private struct SectionedViewList: ViewList {
                 sharedGeneratedSubviewIDSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedSubviewIDOwner: sharedGeneratedSubviewIDOwner,
                 rowGeneratedSubviewIDBase: rowGeneratedSubviewIDBase
-            ), nil), temporaryTransform)
+            ), nil), temporaryTransform, false)
         case .group(let group):
             return (.group(_ViewList_Group(lists: group.lists.map { entry in
                 let sectioned = SectionedViewList(
@@ -782,9 +829,9 @@ private struct SectionedViewList: ViewList {
                     rowGeneratedSubviewIDBase: rowGeneratedSubviewIDBase
                 )
                 return (sectioned as any ViewList, entry.attribute)
-            })), temporaryTransform)
+            })), temporaryTransform, false)
         case .section:
-            return (node, temporaryTransform)
+            return (node, temporaryTransform, true)
         }
     }
 
@@ -803,6 +850,12 @@ private struct SectionedViewList: ViewList {
         case .sublist(let sublist):
             return sublist.count
         }
+    }
+
+    private func sectionBoundaryCount(_ section: _ViewList_Section) -> Int {
+        let style = _ViewList_IteratorStyle()
+        return (section.header?.list.estimatedCount(style: style) ?? 0)
+            + (section.footer?.list.estimatedCount(style: style) ?? 0)
     }
 }
 
@@ -836,6 +889,7 @@ private struct SectionAccumulator {
     var sharedGeneratedSubviewIDOwner = _makeSectionGeneratedSubviewIDOwner()
     var rowGeneratedSubviewIDBase = UniqueID()
     var rowGeneratedSectionIndex = 0
+    var headerFooterImplicitID = 0
 
     mutating func collect() {
         Update.begin()
@@ -866,18 +920,23 @@ private struct SectionAccumulator {
                 return
             }
             let rowGeneratedSeed = rowGeneratedSeed(for: sublist.id)
+            let usesImplicitBoundaryIDs = _sectionExplicitIDs(from: sublist.id).isEmpty
             if let section = SectionAccumulator.makeSectionConfiguration(
                 from: sublist,
                 transform: transform,
                 contentSubgraph: contentSubgraph,
                 sharedGeneratedSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedOwner: sharedGeneratedSubviewIDOwner,
-                rowGeneratedSeed: rowGeneratedSeed
+                rowGeneratedSeed: rowGeneratedSeed,
+                headerFooterImplicitID: headerFooterImplicitID
             ) {
                 appendImplicitSectionIfNeeded()
                 configurations.append(section)
                 sawExplicitSection = true
                 advanceRowGeneratedSectionIndex()
+                if usesImplicitBoundaryIDs {
+                    advanceHeaderFooterImplicitID(section.storage)
+                }
             } else {
                 appendImplicit(count: sublist.count)
             }
@@ -891,6 +950,7 @@ private struct SectionAccumulator {
                 contentSubgraph: contentSubgraph
             ))
             sawExplicitSection = true
+            advanceHeaderFooterImplicitID(section)
             currentOffset += section.estimatedCount(style: _ViewList_IteratorStyle())
 
         case .list(let list, let attribute):
@@ -902,10 +962,12 @@ private struct SectionAccumulator {
                 sharedGeneratedSubviewIDSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedSubviewIDOwner: sharedGeneratedSubviewIDOwner,
                 rowGeneratedSubviewIDBase: rowGeneratedSubviewIDBase,
-                rowGeneratedSectionIndex: rowGeneratedSectionIndex
+                rowGeneratedSectionIndex: rowGeneratedSectionIndex,
+                headerFooterImplicitID: headerFooterImplicitID
             )
             nested.collect()
             rowGeneratedSectionIndex = nested.rowGeneratedSectionIndex
+            headerFooterImplicitID = nested.headerFooterImplicitID
             if nested.sawExplicitSection {
                 appendImplicitSectionIfNeeded()
                 configurations.append(contentsOf: nested.configurations)
@@ -924,10 +986,12 @@ private struct SectionAccumulator {
                 sharedGeneratedSubviewIDSeed: sharedGeneratedSubviewIDSeed,
                 sharedGeneratedSubviewIDOwner: sharedGeneratedSubviewIDOwner,
                 rowGeneratedSubviewIDBase: rowGeneratedSubviewIDBase,
-                rowGeneratedSectionIndex: rowGeneratedSectionIndex
+                rowGeneratedSectionIndex: rowGeneratedSectionIndex,
+                headerFooterImplicitID: headerFooterImplicitID
             )
             nested.collect()
             rowGeneratedSectionIndex = nested.rowGeneratedSectionIndex
+            headerFooterImplicitID = nested.headerFooterImplicitID
             if nested.sawExplicitSection {
                 appendImplicitSectionIfNeeded()
                 configurations.append(contentsOf: nested.configurations)
@@ -1013,24 +1077,29 @@ private struct SectionAccumulator {
             start: 0,
             count: count,
             id: _ViewList_ID(implicitID: currentOffset),
-            elements: elements,
+            elements: _ViewList_SubgraphElements(base: elements),
             traits: traits,
             list: nil
         )
         let rowGeneratedSeed = rowGeneratedSeed(for: sublist.id)
+        let usesImplicitBoundaryIDs = _sectionExplicitIDs(from: sublist.id).isEmpty
         if let section = SectionAccumulator.makeSectionConfiguration(
             from: sublist,
             transform: transform,
             contentSubgraph: contentSubgraph,
             sharedGeneratedSeed: sharedGeneratedSubviewIDSeed,
-            sharedGeneratedOwner: sharedGeneratedSubviewIDOwner,
-            rowGeneratedSeed: rowGeneratedSeed
-        ) {
-            appendImplicitSectionIfNeeded()
-            configurations.append(section)
-            sawExplicitSection = true
-            advanceRowGeneratedSectionIndex()
-        } else {
+                sharedGeneratedOwner: sharedGeneratedSubviewIDOwner,
+                rowGeneratedSeed: rowGeneratedSeed,
+                headerFooterImplicitID: headerFooterImplicitID
+            ) {
+                appendImplicitSectionIfNeeded()
+                configurations.append(section)
+                sawExplicitSection = true
+                advanceRowGeneratedSectionIndex()
+                if usesImplicitBoundaryIDs {
+                    advanceHeaderFooterImplicitID(section.storage)
+                }
+            } else {
             appendImplicit(count: count)
         }
         currentOffset += count
@@ -1092,20 +1161,33 @@ private struct SectionAccumulator {
         rowGeneratedSectionIndex += 1
     }
 
+    mutating func advanceHeaderFooterImplicitID(_ section: _ViewList_Section) {
+        let style = _ViewList_IteratorStyle()
+        headerFooterImplicitID += section.header?.list.estimatedCount(style: style) ?? 0
+        headerFooterImplicitID += section.footer?.list.estimatedCount(style: style) ?? 0
+    }
+
+    mutating func advanceHeaderFooterImplicitID(_ storage: SectionConfiguration.Storage) {
+        headerFooterImplicitID += storage.header.count
+        headerFooterImplicitID += storage.footer.count
+    }
+
     static func makeSectionConfiguration(
         from sublist: _ViewList_Sublist,
         transform: _ViewList_SublistTransform,
         contentSubgraph: AGSubgraph?,
         sharedGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
         sharedGeneratedOwner: AGAttribute,
-        rowGeneratedSeed: _ViewList_ID.GeneratedIDSeed
+        rowGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
+        headerFooterImplicitID: Int
     ) -> SectionConfiguration? {
         guard let section = makeSection(
             from: sublist,
             contentSubgraph: contentSubgraph,
             sharedGeneratedSeed: sharedGeneratedSeed,
             sharedGeneratedOwner: sharedGeneratedOwner,
-            rowGeneratedSeed: rowGeneratedSeed
+            rowGeneratedSeed: rowGeneratedSeed,
+            headerFooterImplicitID: headerFooterImplicitID
         ) else {
             return nil
         }
@@ -1122,8 +1204,11 @@ private struct SectionAccumulator {
         sharedGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
         sharedGeneratedOwner: AGAttribute,
         rowGeneratedSeed: _ViewList_ID.GeneratedIDSeed,
-        materializedSectionBaseIndex: Int? = nil
+        headerFooterImplicitID: Int = 0
     ) -> _ViewList_Section? {
+        let resolvedHeaderFooterImplicitID = _sectionExplicitIDs(from: sublist.id).isEmpty
+            ? headerFooterImplicitID
+            : 0
         guard sublist.count == 1,
               let generator = typedUnaryGenerator(in: sublist.elements),
               let sectionType = generator.viewType as? any SectionViewListProducing.Type,
@@ -1131,19 +1216,12 @@ private struct SectionAccumulator {
                   from: generator,
                   traits: sublist.traits,
                   transform: _ViewList_SublistTransform(),
-                  contentSubgraph: contentSubgraph
+                  contentSubgraph: contentSubgraph,
+                  headerFooterImplicitID: resolvedHeaderFooterImplicitID
         ) else {
             return nil
         }
-        let contentBaseIndex = materializedSectionBaseIndex.map {
-            $0 + (section.header?.list.estimatedCount(style: _ViewList_IteratorStyle()) ?? 0)
-        }
-        let materializedRowGeneratedSeed = contentBaseIndex.map {
-            _ViewList_ID.GeneratedIDSeed(
-                base: UniqueID(value: rowGeneratedSeed.base.value &- UInt32(truncatingIfNeeded: $0)),
-                kind: rowGeneratedSeed.kind
-            )
-        } ?? rowGeneratedSeed
+        let materializedRowGeneratedSeed = rowGeneratedSeed
         let includeSharedGeneratedID = !section.isHierarchical
         let contentRowGeneratedSeed = section.isHierarchical
             ? _ViewList_ID.GeneratedIDSeed(
@@ -1200,7 +1278,7 @@ private struct SectionAccumulator {
 private struct SectionSubviewIDTransformItem: _ViewList_SublistTransform_Item {
     var explicitIDs: [_ViewList_ID.Explicit]
 
-    func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(sublist: inout _ViewList_Sublist) {
         sublist.id.explicitIDs.append(contentsOf: regionExplicitIDs)
     }
 
@@ -1223,7 +1301,7 @@ private struct SectionGeneratedSubviewIDTransformItem: _ViewList_SublistTransfor
     var owner: AGAttribute
     var reuseID: Int
 
-    func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(sublist: inout _ViewList_Sublist) {
         bindID(&sublist.id)
     }
 
@@ -1310,7 +1388,8 @@ private protocol SectionViewListProducing {
         from generator: TypedUnaryViewGenerator,
         traits: ViewTraitCollection,
         transform: _ViewList_SublistTransform,
-        contentSubgraph: AGSubgraph?
+        contentSubgraph: AGSubgraph?,
+        headerFooterImplicitID: Int
     ) -> _ViewList_Section?
 }
 
@@ -1319,7 +1398,8 @@ extension Section: SectionViewListProducing where Parent: View, Content: View, F
         from generator: TypedUnaryViewGenerator,
         traits: ViewTraitCollection,
         transform: _ViewList_SublistTransform,
-        contentSubgraph: AGSubgraph?
+        contentSubgraph: AGSubgraph?,
+        headerFooterImplicitID: Int
     ) -> _ViewList_Section? {
         guard let graph = _AGGraph.current else {
             fatalError("Section accumulator requires an active _AGGraph context.")
@@ -1330,9 +1410,9 @@ extension Section: SectionViewListProducing where Parent: View, Content: View, F
         }
 
         let sectionAttr = Attribute<Self>(generator.view.toStrong())
-        let regionInputs = _ViewListInputs(
+        let headerInputs = _ViewListInputs(
             base: generator.baseInputs,
-            implicitID: 0,
+            implicitID: headerFooterImplicitID,
             options: 0,
             _traits: generator.traitListAttr,
             traitKeys: nil,
@@ -1340,7 +1420,8 @@ extension Section: SectionViewListProducing where Parent: View, Content: View, F
             contentOffset: nil,
             debugReplaceableViewCount: nil
         )
-        var contentRegionInputs = regionInputs
+        var contentRegionInputs = headerInputs
+        contentRegionInputs.implicitID = 0
         contentRegionInputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
 
         let headerAttr: Attribute<Parent> = graph.makeRule {
@@ -1355,16 +1436,18 @@ extension Section: SectionViewListProducing where Parent: View, Content: View, F
 
         let headerList = Parent._makeViewList(
             view: _GraphValue(_attribute: headerAttr),
-            inputs: regionInputs
-        ).viewListAttribute()
+            inputs: headerInputs
+        ).viewListAttribute(inputs: headerInputs)
+        var footerInputs = headerInputs
+        footerInputs.implicitID += headerList.value.estimatedCount(style: _ViewList_IteratorStyle())
         let contentList = Content._makeViewList(
             view: _GraphValue(_attribute: contentAttr),
             inputs: contentRegionInputs
-        ).viewListAttribute()
+        ).viewListAttribute(inputs: contentRegionInputs)
         let footerList = Footer._makeViewList(
             view: _GraphValue(_attribute: footerAttr),
-            inputs: regionInputs
-        ).viewListAttribute()
+            inputs: footerInputs
+        ).viewListAttribute(inputs: footerInputs)
         let isHierarchical = _viewListContainsSection(contentList.value, listAttribute: contentList)
 
         return _ViewList_Section(
@@ -1513,17 +1596,7 @@ private func _containerValues(
 }
 
 private extension _ViewListOutputs {
-    func viewListAttribute() -> Attribute<any ViewList> {
-        guard let graph = _AGGraph.current else {
-            fatalError("_ViewListOutputs.viewListAttribute called outside an active _AGGraph context.")
-        }
-        switch views {
-        case .staticList(let elements):
-            return graph.makeRule {
-                BaseViewList(elements: elements) as any ViewList
-            }
-        case .dynamicList(let attribute, _):
-            return attribute
-        }
+    func viewListAttribute(inputs: _ViewListInputs) -> Attribute<any ViewList> {
+        makeAttribute(inputs: inputs)
     }
 }

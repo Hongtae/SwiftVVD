@@ -8,8 +8,48 @@
 import Foundation
 
 // Modifier protocol for renderer effects that rewrite child DisplayList output.
-protocol _RendererEffect: ViewModifier where Body == Never {
+protocol _RendererEffect: MultiViewModifier, PrimitiveViewModifier where Body == Never {
     func effectValue(size: CGSize) -> DisplayList.Effect
+    static var isolatesChildPosition: Bool { get }
+    static var disabledForFlattenedContent: Bool { get }
+    static var preservesEmptyContent: Bool { get }
+    static var isScrapeable: Bool { get }
+    var scrapeableContent: ScrapeableContent.Content? { get }
+}
+
+extension _RendererEffect {
+    static var isolatesChildPosition: Bool { false }
+    static var disabledForFlattenedContent: Bool { false }
+    static var preservesEmptyContent: Bool { false }
+    static var isScrapeable: Bool { false }
+    var scrapeableContent: ScrapeableContent.Content? { nil }
+}
+
+protocol RendererEffect: Animatable, _RendererEffect {}
+
+extension RendererEffect {
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _RendererEffectSupport.makeView(
+            effect: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
+struct _GeometryGroupEffect: Equatable, RendererEffect {
+    typealias AnimatableData = EmptyAnimatableData
+    typealias Body = Never
+
+    static var isolatesChildPosition: Bool { true }
+
+    func effectValue(size: CGSize) -> DisplayList.Effect {
+        .geometryGroup
+    }
 }
 
 // Shared _AGGraph plumbing for renderer-effect modifiers.
