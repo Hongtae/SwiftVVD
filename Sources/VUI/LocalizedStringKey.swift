@@ -44,12 +44,21 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
         static func == (lhs: FormatArgument, rhs: FormatArgument) -> Bool {
             switch (lhs.storage, rhs.storage) {
             case let (.value(lhs, lhsFormatter), .value(rhs, rhsFormatter)):
-                guard lhsFormatter === rhsFormatter else { return false }
-                if let lhs = lhs as? LocalizationValueArgument,
-                   let rhs = rhs as? LocalizationValueArgument {
-                    return lhs === rhs
+                guard compareValues(
+                    lhs,
+                    rhs,
+                    options: AGComparisonOptions(rawValue: 0x103)
+                ) else {
+                    return false
                 }
-                return false
+                switch (lhsFormatter, rhsFormatter) {
+                case (nil, nil):
+                    return true
+                case let (lhs?, rhs?):
+                    return lhs.isEqual(rhs)
+                default:
+                    return false
+                }
             case let (.text(lhs, lhsToken), .text(rhs, rhsToken)):
                 return lhs == rhs && lhsToken == rhsToken
             case let (.attributedString(lhs), .attributedString(rhs)):
@@ -347,7 +356,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
         ) {
             key.append(specifier)
             arguments.append(FormatArgument(
-                storage: .value(LocalizationValueArgument(argument), formatter)
+                storage: .value(argument, formatter)
             ))
         }
 
@@ -404,18 +413,6 @@ private extension AttributedString {
     }
 }
 
-private final class LocalizationValueArgument: CVarArg {
-    let value: any CVarArg
-
-    init(_ value: any CVarArg) {
-        self.value = value
-    }
-
-    var _cVarArgEncoding: [Int] {
-        value._cVarArgEncoding
-    }
-}
-
 private struct UniqueSeedGenerator {
     var nextID = 0
 
@@ -429,9 +426,8 @@ private extension LocalizedStringKey.FormatArgument {
     var replacement: any CVarArg {
         switch storage {
         case let .value(argument, formatter):
-            let value = (argument as? LocalizationValueArgument)?.value ?? argument
-            guard let formatter else { return value }
-            return formatter.string(for: value) ?? String(describing: value)
+            guard let formatter else { return argument }
+            return formatter.string(for: argument) ?? String(describing: argument)
         case .text, .attributedString, .localizedStringResource:
             return "\u{FFFC}"
         }

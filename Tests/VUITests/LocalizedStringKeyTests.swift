@@ -32,6 +32,12 @@ final class LocalizedStringKeyTests: XCTestCase {
         }
     }
 
+    private final class NeverEqualFormatter: Formatter {
+        override func isEqual(_ object: Any?) -> Bool {
+            false
+        }
+    }
+
     private struct AttributedIntegerStyle: FormatStyle {
         func format(_ value: Int) -> AttributedString {
             var result = AttributedString("value \(value)")
@@ -63,10 +69,10 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertEqual(arguments, 1)
     }
 
-    func testEqualityPreservesInterpolatedArgumentIdentity() {
+    func testValueArgumentEqualityUsesRawStorageAndFormatterEquality() {
         let first: LocalizedStringKey = "integer \(42)"
         let copied = first
-        let independentlyConstructed: LocalizedStringKey = "integer \(42)"
+        let different: LocalizedStringKey = "integer \(43)"
         let attributedFirst: LocalizedStringKey = "attributed \(AttributedString("value"))"
         let attributedSecond: LocalizedStringKey = "attributed \(AttributedString("value"))"
         let formattedFirst: LocalizedStringKey = "formatted \(42, format: .number)"
@@ -80,7 +86,7 @@ final class LocalizedStringKeyTests: XCTestCase {
 
         XCTAssertEqual(first, first)
         XCTAssertEqual(first, copied)
-        XCTAssertNotEqual(first, independentlyConstructed)
+        XCTAssertNotEqual(first, different)
         XCTAssertEqual(LocalizedStringKey("literal"), LocalizedStringKey("literal"))
         XCTAssertEqual(attributedFirst, attributedSecond)
         XCTAssertEqual(formattedFirst, formattedSecond)
@@ -88,6 +94,18 @@ final class LocalizedStringKeyTests: XCTestCase {
             LocalizedStringKey(stringInterpolation: interpolation),
             LocalizedStringKey(stringInterpolation: interpolation)
         )
+
+        guard case let .value(firstValue, nil) = first.arguments[0].storage else {
+            return XCTFail("Expected unformatted value argument storage")
+        }
+        XCTAssertEqual(String(reflecting: type(of: firstValue)), "Swift.Int64")
+
+        let rawValue: any CVarArg = Int64(42)
+        let neverEqual = LocalizedStringKey.FormatArgument(
+            storage: .value(rawValue, NeverEqualFormatter())
+        )
+        let neverEqualCopy = neverEqual
+        XCTAssertNotEqual(neverEqual, neverEqualCopy)
     }
 
     func testLiteralAndRuntimeStringChooseDifferentTextStorage() {
