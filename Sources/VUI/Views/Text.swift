@@ -1363,6 +1363,16 @@ public struct Text: Equatable {
         if font == nil {
             font = .system(.body)
         }
+        if let fontWeight {
+            font = font?.weight(fontWeight)
+        } else if boldValue == true {
+            font = font?.bold()
+        }
+        if italicValue == true {
+            font = font?.italic()
+        }
+        var resolutionContext = context
+        resolutionContext.environment.font = font
         font = font?.resolved(in: context.environment)
         font = font?.displayScale(displayScale)
         let defaultFace = font?.typeface(forContext: context.sceneResources)
@@ -1381,7 +1391,7 @@ public struct Text: Equatable {
             else if case let .anyTextStorage(text) = self.storage {
                 let resolved = text.resolve(
                     typefaces: faces,
-                    context: context,
+                    context: resolutionContext,
                     referenceDate: referenceDate
                 )
                 guard !customAttributes.isEmpty else { return resolved }
@@ -1450,6 +1460,14 @@ public struct Text: Equatable {
 
         let displayScale = context.sceneResources.contentScaleFactor
         var font = self.font ?? context.environment.font ?? .system(.body)
+        if let fontWeight {
+            font = font.weight(fontWeight)
+        } else if boldValue == true {
+            font = font.bold()
+        }
+        if italicValue == true {
+            font = font.italic()
+        }
         font = font.resolved(in: context.environment).displayScale(displayScale)
         let faces = ([font.typeface(forContext: context.sceneResources)] + font.fallbackTypefaces)
             .compactMap { $0 }
@@ -1544,6 +1562,46 @@ extension Text {
             if case let .fontWeight(weight) = $0 { return weight }
             return nil
         }.first
+    }
+
+    public func bold() -> Text {
+        bold(true)
+    }
+
+    public func bold(_ isActive: Bool) -> Text {
+        var modifiers = modifiers.filter {
+            guard case .bold = $0 else { return true }
+            return false
+        }
+        modifiers.append(.bold(isActive))
+        return Text(storage: storage, modifiers: modifiers)
+    }
+
+    var boldValue: Bool? {
+        for modifier in modifiers {
+            if case let .bold(value) = modifier { return value }
+        }
+        return nil
+    }
+
+    public func italic() -> Text {
+        italic(true)
+    }
+
+    public func italic(_ isActive: Bool) -> Text {
+        var modifiers = modifiers.filter {
+            guard case .italic = $0 else { return true }
+            return false
+        }
+        modifiers.append(.italic(isActive))
+        return Text(storage: storage, modifiers: modifiers)
+    }
+
+    var italicValue: Bool? {
+        for modifier in modifiers {
+            if case let .italic(value) = modifier { return value }
+        }
+        return nil
     }
 }
 

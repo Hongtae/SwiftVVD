@@ -100,10 +100,14 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
                arguments.indices.contains(replacementIndex) {
                 switch arguments[replacementIndex].storage {
                 case let .text(text, _):
-                    segments.append(.text(text))
+                    segments.append(.text(text.applyingPlaceholderAttributes(
+                        from: AttributedString(resolved[run.range])
+                    )))
                     continue
                 case let .attributedString(value):
-                    append(value, to: &segments)
+                    append(value.applyingPlaceholderAttributes(
+                        from: AttributedString(resolved[run.range])
+                    ), to: &segments)
                     continue
                 case let .localizedStringResource(resource):
                     append(AttributedString(localized: resource), to: &segments)
@@ -353,6 +357,50 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
                 storage: .text(text, FormatArgument.Token(id: seed.take()))
             ))
         }
+    }
+}
+
+private extension Text {
+    func applyingPlaceholderAttributes(from placeholder: AttributedString) -> Text {
+        var hasStrong = false
+        var hasEmphasis = false
+        for run in placeholder.runs {
+            guard let intent = run.inlinePresentationIntent else { continue }
+            hasStrong = hasStrong || intent.contains(.stronglyEmphasized)
+            hasEmphasis = hasEmphasis || intent.contains(.emphasized)
+        }
+
+        var result = self
+        if hasStrong, boldValue == nil, fontWeight == nil {
+            result = result.bold()
+        }
+        if hasEmphasis, italicValue == nil {
+            result = result.italic()
+        }
+        return result
+    }
+}
+
+private extension AttributedString {
+    func applyingPlaceholderAttributes(
+        from placeholder: AttributedString
+    ) -> AttributedString {
+        var placeholderIntent = InlinePresentationIntent()
+        for run in placeholder.runs {
+            if let intent = run.inlinePresentationIntent {
+                placeholderIntent.formUnion(intent)
+            }
+        }
+        guard !placeholderIntent.isEmpty else { return self }
+
+        var result = self
+        let runs = result.runs.map { ($0.range, $0.inlinePresentationIntent) }
+        for (range, existingIntent) in runs {
+            var intent = existingIntent ?? InlinePresentationIntent()
+            intent.formUnion(placeholderIntent)
+            result[range].inlinePresentationIntent = intent
+        }
+        return result
     }
 }
 

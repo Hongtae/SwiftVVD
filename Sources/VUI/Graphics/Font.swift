@@ -41,6 +41,12 @@ var defaultFontURL: URL? {
                       subdirectory: "Fonts/Roboto")
 }
 
+var defaultItalicFontURL: URL? {
+    Bundle.module.url(forResource: "Roboto-Italic",
+                      withExtension: "ttf",
+                      subdirectory: "Fonts/Roboto")
+}
+
 let defaultDPI = 72
 
 enum TypefaceGlyph {
@@ -312,15 +318,18 @@ struct SystemFontProvider: TypefaceProvider {
     let weight: Font.Weight
     let design: Font.Design
     let renderingMode: Font.RenderingMode
+    let isItalic: Bool
 
     init(size: CGFloat,
          weight: Font.Weight,
          design: Font.Design,
-         renderingMode: Font.RenderingMode = .automatic) {
+         renderingMode: Font.RenderingMode = .automatic,
+         isItalic: Bool = false) {
         self.size = size
         self.weight = weight
         self.design = design
         self.renderingMode = renderingMode
+        self.isItalic = isItalic
     }
 
     static func embolden(for weight: Font.Weight) -> CGFloat {
@@ -344,7 +353,8 @@ struct SystemFontProvider: TypefaceProvider {
         return Self(size: size,
                     weight: weight,
                     design: design,
-                    renderingMode: renderingMode)
+                    renderingMode: renderingMode,
+                    isItalic: isItalic)
     }
 
     func isEqual(to: any TypefaceProvider) -> Bool {
@@ -352,7 +362,8 @@ struct SystemFontProvider: TypefaceProvider {
             return self.size == other.size && 
                    self.weight == other.weight &&
                    self.design == other.design &&
-                   self.renderingMode == other.renderingMode
+                   self.renderingMode == other.renderingMode &&
+                   self.isItalic == other.isItalic
         }
         return false
     }
@@ -362,11 +373,12 @@ struct SystemFontProvider: TypefaceProvider {
         hasher.combine(weight)
         hasher.combine(design)
         hasher.combine(renderingMode)
+        hasher.combine(isItalic)
     }
 
     func makeTypeface(_ context: AppContext,
                       displayScale: CGFloat) -> Typeface? {
-        if let url = defaultFontURL {
+        if let url = isItalic ? defaultItalicFontURL : defaultFontURL {
             var data = context.resourceData(forURL: url)
             if data == nil {
                 do {
@@ -736,6 +748,51 @@ extension Font {
         public static let bold = Weight(value: 700)
         public static let heavy = Weight(value: 800)
         public static let black = Weight(value: 900)
+    }
+
+    public func weight(_ weight: Weight) -> Font {
+        guard let system = provider.fontBox as? SystemFontProvider else {
+            return self
+        }
+        return Font(
+            provider: AnyFontBox(SystemFontProvider(
+                size: system.size,
+                weight: weight,
+                design: system.design,
+                renderingMode: system.renderingMode,
+                isItalic: system.isItalic
+            )),
+            displayScale: displayScale
+        )
+    }
+
+    public func bold() -> Font {
+        weight(.bold)
+    }
+
+    public func bold(_ isActive: Bool) -> Font {
+        isActive ? bold() : self
+    }
+
+    public func italic() -> Font {
+        italic(true)
+    }
+
+    public func italic(_ isActive: Bool) -> Font {
+        guard isActive,
+              let system = provider.fontBox as? SystemFontProvider else {
+            return self
+        }
+        return Font(
+            provider: AnyFontBox(SystemFontProvider(
+                size: system.size,
+                weight: system.weight,
+                design: system.design,
+                renderingMode: system.renderingMode,
+                isItalic: true
+            )),
+            displayScale: displayScale
+        )
     }
 
     public static let largeTitle = Font.system(Font.TextStyle.largeTitle)

@@ -155,7 +155,7 @@ private func _resolvedAttributedRuns(
         let text = String(value.characters[run.range])
         guard !text.isEmpty else { return nil }
 
-        let attributes = _ResolvedTextRunAttributes(
+        var attributes = _ResolvedTextRunAttributes(
             font: run.font,
             foregroundColor: run.foregroundColor,
             backgroundColor: run.backgroundColor,
@@ -166,10 +166,19 @@ private func _resolvedAttributedRuns(
             baselineOffset: run.baselineOffset
         )
         let typefaces: [Typeface]
-        if var font = attributes.font {
+        let presentationIntent = run.inlinePresentationIntent
+        if attributes.font != nil || presentationIntent != nil {
+            var font = attributes.font ?? context.environment.font ?? .system(.body)
+            if presentationIntent?.contains(.stronglyEmphasized) == true {
+                font = font.bold()
+            }
+            if presentationIntent?.contains(.emphasized) == true {
+                font = font.italic()
+            }
             font = font
                 .resolved(in: context.environment)
                 .displayScale(context.sceneResources.contentScaleFactor)
+            attributes.font = font
             typefaces = ([font.typeface(forContext: context.sceneResources)] +
                 font.fallbackTypefaces).compactMap { $0 }
         } else {

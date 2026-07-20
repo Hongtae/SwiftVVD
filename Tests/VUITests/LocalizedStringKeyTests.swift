@@ -3,6 +3,35 @@ import XCTest
 @testable import VUI
 
 final class LocalizedStringKeyTests: XCTestCase {
+    private final class MutableFormatSubject: NSObject {
+        var value: String
+
+        init(_ value: String) {
+            self.value = value
+        }
+    }
+
+    private final class RecordingFormatter: Formatter {
+        var prefix: String
+        private(set) var calls: [String] = []
+
+        init(prefix: String) {
+            self.prefix = prefix
+            super.init()
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func string(for obj: Any?) -> String? {
+            guard let subject = obj as? MutableFormatSubject else { return nil }
+            let output = "\(prefix):\(subject.value)"
+            calls.append(output)
+            return output
+        }
+    }
+
     private struct AttributedIntegerStyle: FormatStyle {
         func format(_ value: Int) -> AttributedString {
             var result = AttributedString("value \(value)")
@@ -95,6 +124,121 @@ final class LocalizedStringKeyTests: XCTestCase {
             Text("formatted \(value, format: .number)")._resolveText(in: environment),
             "formatted 1.234"
         )
+    }
+
+    func testFormatterAndSubjectAreEvaluatedAtEachResolution() {
+        let subject = MutableFormatSubject("initial")
+        let formatter = RecordingFormatter(prefix: "first")
+        let key: LocalizedStringKey = "value \(subject, formatter: formatter)"
+        let text = Text(key)
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "en_US")
+
+        XCTAssertTrue(formatter.calls.isEmpty)
+
+        subject.value = "before-first-resolve"
+        formatter.prefix = "second"
+        XCTAssertEqual(
+            text._resolveText(in: environment),
+            "value second:before-first-resolve"
+        )
+        XCTAssertEqual(formatter.calls, ["second:before-first-resolve"])
+
+        subject.value = "before-second-resolve"
+        formatter.prefix = "third"
+        XCTAssertEqual(
+            text._resolveText(in: environment),
+            "value third:before-second-resolve"
+        )
+        XCTAssertEqual(
+            formatter.calls,
+            ["second:before-first-resolve", "third:before-second-resolve"]
+        )
+    }
+
+    func testLocalizedPlaceholderPresentationIntentUsesArgumentPrecedence() {
+        func resolvedTextArgument(_ key: LocalizedStringKey) -> Text {
+            let segments = key.resolve(
+                table: nil,
+                bundle: .module,
+                locale: Locale(identifier: "en_US")
+            )
+            guard case let .text(text)? = segments.first else {
+                XCTFail("Expected a localized Text argument")
+                return Text(verbatim: "")
+            }
+            return text
+        }
+
+        func resolvedAttributedArgument(_ key: LocalizedStringKey) -> AttributedString {
+            let segments = key.resolve(
+                table: nil,
+                bundle: .module,
+                locale: Locale(identifier: "en_US")
+            )
+            guard case let .attributedString(value)? = segments.first else {
+                XCTFail("Expected a localized AttributedString argument")
+                return AttributedString()
+            }
+            return value
+        }
+
+        let plain = Text(verbatim: "value")
+        let strong: LocalizedStringKey = "**\(plain)**"
+        let strongFalse: LocalizedStringKey = "**\(plain.bold(false))**"
+        let strongRegularWeight: LocalizedStringKey =
+            "**\(plain.fontWeight(.regular))**"
+        let strongRegularFont: LocalizedStringKey =
+            "**\(plain.font(.system(size: 20, weight: .regular)))**"
+        let emphasis: LocalizedStringKey = "*\(plain)*"
+        let emphasisFalse: LocalizedStringKey = "*\(plain.italic(false))*"
+
+        XCTAssertEqual(resolvedTextArgument(strong).boldValue, true)
+        XCTAssertEqual(resolvedTextArgument(strongFalse).boldValue, false)
+        XCTAssertNil(resolvedTextArgument(strongRegularWeight).boldValue)
+        XCTAssertEqual(
+            resolvedTextArgument(strongRegularWeight).fontWeight,
+            .regular
+        )
+        XCTAssertEqual(resolvedTextArgument(strongRegularFont).boldValue, true)
+        XCTAssertEqual(resolvedTextArgument(emphasis).italicValue, true)
+        XCTAssertEqual(resolvedTextArgument(emphasisFalse).italicValue, false)
+
+        let attributed = AttributedString("value")
+        let strongAttributed: LocalizedStringKey = "**\(attributed)**"
+        let emphasisAttributed: LocalizedStringKey = "*\(attributed)*"
+        var attributedRegularFont = attributed
+        attributedRegularFont.font = .system(size: 20, weight: .regular)
+        let strongRegularFontAttributed: LocalizedStringKey =
+            "**\(attributedRegularFont)**"
+
+        let resolvedStrongAttributed = resolvedAttributedArgument(strongAttributed)
+        XCTAssertTrue(resolvedStrongAttributed.runs.allSatisfy {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        })
+        let resolvedEmphasisAttributed = resolvedAttributedArgument(emphasisAttributed)
+        XCTAssertTrue(resolvedEmphasisAttributed.runs.allSatisfy {
+            $0.inlinePresentationIntent?.contains(.emphasized) == true
+        })
+        let resolvedStrongRegularFont = resolvedAttributedArgument(
+            strongRegularFontAttributed
+        )
+        XCTAssertTrue(resolvedStrongRegularFont.runs.allSatisfy {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        })
+        XCTAssertTrue(resolvedStrongRegularFont.runs.allSatisfy {
+            $0.font == Font.system(size: 20, weight: .regular)
+        })
+
+        guard let boldProvider = Font.system(size: 20).bold().provider.fontBox
+                as? SystemFontProvider,
+              let italicProvider = Font.system(size: 20).italic().provider.fontBox
+                as? SystemFontProvider else {
+            return XCTFail("Expected system font modifier providers")
+        }
+        XCTAssertEqual(boldProvider.weight, .bold)
+        XCTAssertFalse(boldProvider.isItalic)
+        XCTAssertTrue(italicProvider.isItalic)
     }
 
     func testFormatSpecifiableLookupSpecifiers() {
