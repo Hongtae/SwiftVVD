@@ -167,10 +167,28 @@ private struct LocaleKey: EnvironmentKey {
     static let defaultValue: Locale = .current
 }
 
+private struct CalendarKey: EnvironmentKey {
+    static let defaultValue: Calendar = .autoupdatingCurrent
+}
+
+private struct TimeZoneKey: EnvironmentKey {
+    static let defaultValue: TimeZone = .autoupdatingCurrent
+}
+
 extension EnvironmentValues {
     public var locale: Locale {
         get { self[LocaleKey.self] }
         set { self[LocaleKey.self] = newValue }
+    }
+
+    public var calendar: Calendar {
+        get { self[CalendarKey.self] }
+        set { self[CalendarKey.self] = newValue }
+    }
+
+    public var timeZone: TimeZone {
+        get { self[TimeZoneKey.self] }
+        set { self[TimeZoneKey.self] = newValue }
     }
 
     public var isEnabled: Bool {

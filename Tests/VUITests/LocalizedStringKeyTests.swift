@@ -308,6 +308,92 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertEqual(sourceToken.id, 0)
     }
 
+    func testDateIntervalStorageInterpolationAndEnvironmentFormatting() {
+        let defaults = EnvironmentValues()
+        XCTAssertEqual(defaults.calendar, Calendar.autoupdatingCurrent)
+        XCTAssertEqual(defaults.timeZone, TimeZone.autoupdatingCurrent)
+
+        var sourceCalendar = Calendar(identifier: .gregorian)
+        let gmt = TimeZone(secondsFromGMT: 0)!
+        sourceCalendar.timeZone = gmt
+        let start = sourceCalendar.date(from: DateComponents(
+            year: 2024,
+            month: 1,
+            day: 15,
+            hour: 10,
+            minute: 30
+        ))!
+        let sameDayEnd = sourceCalendar.date(from: DateComponents(
+            year: 2024,
+            month: 1,
+            day: 15,
+            hour: 12
+        ))!
+        let nextDayEnd = sourceCalendar.date(from: DateComponents(
+            year: 2024,
+            month: 1,
+            day: 16,
+            hour: 12
+        ))!
+
+        let rangeText = Text(start...sameDayEnd)
+        guard case let .anyTextStorage(rangeStorage) = rangeText.storage else {
+            return XCTFail("A date range should use date text storage")
+        }
+        XCTAssertEqual(String(describing: type(of: rangeStorage)), "DateTextStorage")
+        XCTAssertEqual(
+            Mirror(reflecting: rangeStorage).children.compactMap(\.label),
+            ["storage"]
+        )
+        let storedValue = Mirror(reflecting: rangeStorage).children.first!.value
+        XCTAssertEqual(
+            Mirror(reflecting: storedValue).children.compactMap(\.label),
+            ["interval"]
+        )
+
+        let interval = DateInterval(start: start, end: sameDayEnd)
+        XCTAssertEqual(rangeText, Text(interval))
+
+        let rangeKey: LocalizedStringKey = "range \(start...sameDayEnd)"
+        let intervalKey: LocalizedStringKey = "interval \(interval)"
+        guard case let .text(_, rangeToken) = rangeKey.arguments[0].storage,
+              case let .text(_, intervalToken) = intervalKey.arguments[0].storage else {
+            return XCTFail("Date intervals should use tokenized text arguments")
+        }
+        XCTAssertEqual(rangeKey.key, "range %@")
+        XCTAssertEqual(intervalKey.key, "interval %@")
+        XCTAssertEqual(rangeToken.id, 0)
+        XCTAssertEqual(intervalToken.id, 0)
+
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "en_US")
+        environment.calendar = sourceCalendar
+        environment.timeZone = gmt
+        XCTAssertEqual(rangeText._resolveText(in: environment), "10:30 AM–12:00 PM")
+        XCTAssertEqual(
+            Text(start...nextDayEnd)._resolveText(in: environment),
+            "Jan 15 – Jan 16"
+        )
+
+        environment.locale = Locale(identifier: "ko_KR")
+        XCTAssertEqual(rangeText._resolveText(in: environment), "오전 10:30–오후 12:00")
+        XCTAssertEqual(
+            Text(start...nextDayEnd)._resolveText(in: environment),
+            "1월 15일 – 1월 16일"
+        )
+
+        environment.locale = Locale(identifier: "en_US")
+        environment.calendar = Calendar(identifier: .islamicCivil)
+        XCTAssertEqual(
+            Text(start...nextDayEnd)._resolveText(in: environment),
+            "Rajb. 4 – Rajb. 5"
+        )
+
+        environment.calendar = sourceCalendar
+        environment.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        XCTAssertEqual(rangeText._resolveText(in: environment), "2:30–4:00 AM")
+    }
+
     func testEmbeddedTextForegroundBecomesRunSpecificStyle() {
         let embedded = Text(verbatim: "red").foregroundColor(VUI.Color.red)
         let key: LocalizedStringKey = "value \(embedded)"

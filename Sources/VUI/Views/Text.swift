@@ -341,6 +341,83 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
     }
 }
 
+private final class DateTextStorage: AnyTextStorage {
+    enum Storage: Equatable {
+        case interval(interval: DateInterval)
+    }
+
+    let storage: Storage
+
+    init(_ storage: Storage) {
+        self.storage = storage
+    }
+
+    override func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        .init(
+            runs: [.text(typefaces, resolveText(in: context.environment))],
+            scaleFactor: context.contentScaleFactor
+        )
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        switch storage {
+        case let .interval(interval):
+            format(interval: interval, environment: environment)
+        }
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        guard let other = other as? DateTextStorage else { return false }
+        return storage == other.storage
+    }
+
+    private func format(
+        interval: DateInterval,
+        environment: EnvironmentValues
+    ) -> String {
+        var calendar = environment.calendar
+        calendar.timeZone = environment.timeZone
+
+        let formatter = DateFormatter()
+        formatter.locale = environment.locale
+        formatter.calendar = calendar
+        formatter.timeZone = environment.timeZone
+
+        let day = calendar.dateComponents(
+            [.day],
+            from: interval.start,
+            to: interval.end
+        ).day
+        if day != 0 {
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
+            return formatter.string(from: interval.start) +
+                " – " + formatter.string(from: interval.end)
+        }
+
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        var start = formatter.string(from: interval.start)
+        let end = formatter.string(from: interval.end)
+        let startHour = calendar.component(.hour, from: interval.start)
+        let endHour = calendar.component(.hour, from: interval.end)
+        let startDesignator = (
+            startHour < 12 ? formatter.amSymbol : formatter.pmSymbol
+        ) ?? ""
+        let endDesignator = (
+            endHour < 12 ? formatter.amSymbol : formatter.pmSymbol
+        ) ?? ""
+        if !startDesignator.isEmpty,
+           startDesignator == endDesignator,
+           let range = start.range(of: startDesignator) {
+            start.removeSubrange(range)
+            start = start.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return start + "–" + end
+    }
+}
+
 private protocol _TimeDataFormattingSource: Equatable {
     associatedtype Value
 
@@ -1156,6 +1233,23 @@ public struct Text: Equatable {
                 )
             )
         }
+        self.modifiers = []
+    }
+
+    public init(_ dates: ClosedRange<Date>) {
+        self.storage = .anyTextStorage(DateTextStorage(
+            .interval(interval: DateInterval(
+                start: dates.lowerBound,
+                end: dates.upperBound
+            ))
+        ))
+        self.modifiers = []
+    }
+
+    public init(_ interval: DateInterval) {
+        self.storage = .anyTextStorage(DateTextStorage(
+            .interval(interval: interval)
+        ))
         self.modifiers = []
     }
 

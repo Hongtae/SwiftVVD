@@ -290,6 +290,14 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             appendText(Text(date, style: style))
         }
 
+        public mutating func appendInterpolation(_ dates: ClosedRange<Date>) {
+            appendText(Text(dates))
+        }
+
+        public mutating func appendInterpolation(_ interval: DateInterval) {
+            appendText(Text(interval))
+        }
+
         public mutating func appendInterpolation(
             timerInterval: ClosedRange<Date>,
             pauseTime: Date? = nil,
