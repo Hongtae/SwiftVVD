@@ -712,10 +712,6 @@ where Source: _TimeDataFormattingSource,
     }
 }
 
-// This carrier stores localization data without requiring a platform localization value.
-//typealias LocalizedStringKey = String.LocalizationValue
-public typealias LocalizedStringKey = String
-
 class LocalizedTextStorage: AnyTextStorage {
     let key: LocalizedStringKey
     let table: String?
@@ -727,14 +723,62 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 
     override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        //let text = String(localized: self.key)
-        let text = self.key
+        let text = resolve(locale: context.environment.locale)
         return .init(runs: [.text(typefaces, text)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        //String(localized: key)
-        self.key
+        resolve(locale: environment.locale)
+    }
+
+    private func resolve(locale: Locale) -> String {
+        String(
+            localized: key.foundationValue,
+            table: table,
+            bundle: localizedBundle(for: locale),
+            locale: locale
+        )
+    }
+
+    private func localizedBundle(for locale: Locale) -> Bundle {
+        let rootBundle = bundle ?? .main
+        let availableLocalizations = rootBundle.localizations
+        guard !availableLocalizations.isEmpty else {
+            return rootBundle
+        }
+
+        var candidates = Bundle.preferredLocalizations(
+            from: availableLocalizations,
+            forPreferences: [locale.identifier]
+        )
+        if let developmentLocalization = rootBundle.developmentLocalization,
+           !candidates.contains(developmentLocalization) {
+            candidates.append(developmentLocalization)
+        }
+        for localization in Bundle.preferredLocalizations(from: availableLocalizations)
+        where !candidates.contains(localization) {
+            candidates.append(localization)
+        }
+
+        let tableName = table ?? "Localizable"
+        for localization in candidates {
+            let tableURL = rootBundle.url(
+                forResource: tableName,
+                withExtension: "strings",
+                subdirectory: nil,
+                localization: localization
+            ) ?? rootBundle.url(
+                forResource: tableName,
+                withExtension: "stringsdict",
+                subdirectory: nil,
+                localization: localization
+            )
+            if let tableURL,
+               let localizedBundle = Bundle(url: tableURL.deletingLastPathComponent()) {
+                return localizedBundle
+            }
+        }
+        return rootBundle
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
@@ -932,9 +976,21 @@ public struct Text: Equatable {
 
     let modifiers: [Modifier]
 
+    public init(
+        _ key: LocalizedStringKey,
+        tableName: String? = nil,
+        bundle: Bundle? = nil,
+        comment: StaticString? = nil
+    ) {
+        self.storage = .anyTextStorage(
+            LocalizedTextStorage(key: key, table: tableName, bundle: bundle)
+        )
+        self.modifiers = []
+    }
+
+    @_disfavoredOverload
     public init<S>(_ content: S) where S: StringProtocol {
-        let key = LocalizedStringKey(String(content))
-        self.storage = .anyTextStorage(LocalizedTextStorage(key: key, table: nil, bundle: nil))
+        self.storage = .verbatim(String(content))
         self.modifiers = []
     }
 

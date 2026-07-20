@@ -20,6 +20,7 @@ let arch = {
 
 let package = Package(
     name: "VVD",
+    defaultLocalization: "en",
     platforms: [.macOS(.v15), .iOS(.v18), .macCatalyst(.v18)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
@@ -156,6 +157,9 @@ let package = Package(
             dependencies: [
                 .target(name: "VVD"),
                 .target(name: "VUI"),
+            ],
+            resources: [
+                .process("Resources")
             ]),
         .executableTarget(
             name: "TestApp1",
