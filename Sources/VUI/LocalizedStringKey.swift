@@ -10,7 +10,7 @@ import Foundation
 public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
     var key: String
     var hasFormatting: Bool = false
-    private var arguments: [FormatArgument]
+    var arguments: [FormatArgument]
 
     public init(_ value: String) {
         self.key = value
@@ -22,105 +22,208 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
     }
 
     public init(stringInterpolation: StringInterpolation) {
-        let value = String.LocalizationValue(
-            stringInterpolation: stringInterpolation.foundationInterpolation
-        )
         self.key = stringInterpolation.key
-        self.hasFormatting = !stringInterpolation.argumentComparisons.isEmpty
-
-        if stringInterpolation.argumentComparisons.isEmpty {
-            self.arguments = []
-        } else {
-            self.arguments = stringInterpolation.argumentComparisons.map { comparison in
-                FormatArgument(storage: .value(value, comparison))
-            }
-        }
-    }
-
-    var foundationValue: String.LocalizationValue {
-        arguments.first?.storage.foundationValue ?? String.LocalizationValue(key)
+        self.hasFormatting = !stringInterpolation.arguments.isEmpty
+        self.arguments = stringInterpolation.arguments
     }
 
     struct FormatArgument: Equatable {
-        final class Identity {}
-
-        struct AnyEquatable {
-            var value: Any
-            var isEqual: (Any) -> Bool
-
-            init<Value: Equatable>(_ value: Value) {
-                self.value = value
-                self.isEqual = { other in
-                    (other as? Value) == value
-                }
-            }
-
-            func isEqual(to other: AnyEquatable) -> Bool {
-                isEqual(other.value)
-            }
-        }
-
-        enum Comparison {
-            case identity(Identity)
-            case equatable(AnyEquatable)
-
-            static func == (lhs: Comparison, rhs: Comparison) -> Bool {
-                switch (lhs, rhs) {
-                case let (.identity(lhs), .identity(rhs)):
-                    return lhs === rhs
-                case let (.equatable(lhs), .equatable(rhs)):
-                    return lhs.isEqual(to: rhs)
-                default:
-                    return false
-                }
-            }
+        struct Token: Equatable {
+            var id: Int
         }
 
         enum Storage {
-            case value(String.LocalizationValue, Comparison)
-
-            var foundationValue: String.LocalizationValue {
-                switch self {
-                case let .value(value, _):
-                    return value
-                }
-            }
+            case value(any CVarArg, Formatter?)
+            case text(Text, Token)
+            case attributedString(AttributedString)
+            case localizedStringResource(LocalizedStringResource)
         }
 
         var storage: Storage
 
         static func == (lhs: FormatArgument, rhs: FormatArgument) -> Bool {
             switch (lhs.storage, rhs.storage) {
-            case let (.value(_, lhsComparison), .value(_, rhsComparison)):
-                return lhsComparison == rhsComparison
+            case let (.value(lhs, lhsFormatter), .value(rhs, rhsFormatter)):
+                guard lhsFormatter === rhsFormatter else { return false }
+                if let lhs = lhs as? LocalizationValueArgument,
+                   let rhs = rhs as? LocalizationValueArgument {
+                    return lhs === rhs
+                }
+                return false
+            case let (.text(lhs, lhsToken), .text(rhs, rhsToken)):
+                return lhs == rhs && lhsToken == rhsToken
+            case let (.attributedString(lhs), .attributedString(rhs)):
+                return lhs == rhs
+            case let (.localizedStringResource(lhs), .localizedStringResource(rhs)):
+                return lhs == rhs
+            default:
+                return false
             }
         }
     }
 
+    enum ResolvedSegment {
+        case attributedString(AttributedString)
+        case text(Text)
+    }
+
+    func resolve(
+        table: String?,
+        bundle: Bundle,
+        locale: Locale
+    ) -> [ResolvedSegment] {
+        guard hasFormatting else {
+            return [.attributedString(AttributedString(
+                localized: String.LocalizationValue(key),
+                table: table,
+                bundle: bundle,
+                locale: locale
+            ))]
+        }
+
+        let localizationValue = foundationLocalizationValue()
+        var options = AttributedString.LocalizationOptions()
+        options.replacements = arguments.map(\.replacement)
+        options.applyReplacementIndexAttribute = true
+        let resolved = AttributedString(
+            localized: localizationValue,
+            options: options,
+            table: table,
+            bundle: bundle,
+            locale: locale
+        )
+
+        var segments: [ResolvedSegment] = []
+        for run in resolved.runs {
+            let replacementIndex = run.replacementIndex.map { $0 - 1 }
+            if let replacementIndex,
+               arguments.indices.contains(replacementIndex) {
+                switch arguments[replacementIndex].storage {
+                case let .text(text, _):
+                    segments.append(.text(text))
+                    continue
+                case let .attributedString(value):
+                    append(value, to: &segments)
+                    continue
+                case let .localizedStringResource(resource):
+                    append(AttributedString(localized: resource), to: &segments)
+                    continue
+                case .value:
+                    break
+                }
+            }
+            append(AttributedString(resolved[run.range]), to: &segments)
+        }
+        return segments
+    }
+
+    private func foundationLocalizationValue() -> String.LocalizationValue {
+        var interpolation = String.LocalizationValue.StringInterpolation(
+            literalCapacity: key.count,
+            interpolationCount: arguments.count
+        )
+        var literalStart = key.startIndex
+        var cursor = key.startIndex
+        var argumentIndex = 0
+
+        while cursor < key.endIndex, argumentIndex < arguments.count {
+            guard key[cursor] == "%" else {
+                cursor = key.index(after: cursor)
+                continue
+            }
+
+            let next = key.index(after: cursor)
+            guard next < key.endIndex else { break }
+            if key[next] == "%" {
+                cursor = key.index(after: next)
+                continue
+            }
+
+            guard let specifierEnd = formatSpecifierEnd(startingAt: cursor) else {
+                cursor = next
+                continue
+            }
+            let literal = unescapedLiteral(String(key[literalStart..<cursor]))
+            interpolation.appendLiteral(literal)
+            let specifier = String(key[cursor...specifierEnd])
+            interpolation.appendInterpolation(
+                placeholder: placeholder(for: specifier),
+                specifier: specifier
+            )
+            argumentIndex += 1
+            cursor = key.index(after: specifierEnd)
+            literalStart = cursor
+        }
+
+        interpolation.appendLiteral(unescapedLiteral(String(key[literalStart...])))
+        return String.LocalizationValue(stringInterpolation: interpolation)
+    }
+
+    private func formatSpecifierEnd(startingAt start: String.Index) -> String.Index? {
+        let conversions = "diouxXfFeEgGaAcCsSp@"
+        var cursor = key.index(after: start)
+        while cursor < key.endIndex {
+            if conversions.contains(key[cursor]) {
+                return cursor
+            }
+            cursor = key.index(after: cursor)
+        }
+        return nil
+    }
+
+    private func placeholder(
+        for specifier: String
+    ) -> String.LocalizationValue.Placeholder {
+        guard let conversion = specifier.last else { return .object }
+        switch conversion {
+        case "d", "i", "c":
+            return .int
+        case "o", "u", "x", "X":
+            return .uint
+        case "f", "F", "e", "E", "g", "G", "a", "A":
+            return specifier.contains("l") ? .double : .float
+        default:
+            return .object
+        }
+    }
+
+    private func unescapedLiteral(_ value: String) -> String {
+        value.replacingOccurrences(of: "%%", with: "%")
+    }
+
+    private func append(
+        _ value: AttributedString,
+        to segments: inout [ResolvedSegment]
+    ) {
+        guard !value.characters.isEmpty else { return }
+        if case let .attributedString(previous)? = segments.last {
+            var combined = previous
+            combined.append(value)
+            segments[segments.count - 1] = .attributedString(combined)
+        } else {
+            segments.append(.attributedString(value))
+        }
+    }
+
     public struct StringInterpolation: StringInterpolationProtocol {
-        fileprivate var foundationInterpolation: String.LocalizationValue.StringInterpolation
         fileprivate var key: String
-        fileprivate var argumentComparisons: [FormatArgument.Comparison]
+        fileprivate var arguments: [FormatArgument]
+        fileprivate var seed: UniqueSeedGenerator
 
         public init(literalCapacity: Int, interpolationCount: Int) {
-            self.foundationInterpolation = .init(
-                literalCapacity: literalCapacity,
-                interpolationCount: interpolationCount
-            )
             self.key = String()
             self.key.reserveCapacity(literalCapacity + interpolationCount * 2)
-            self.argumentComparisons = []
-            self.argumentComparisons.reserveCapacity(interpolationCount)
+            self.arguments = []
+            self.arguments.reserveCapacity(interpolationCount)
+            self.seed = UniqueSeedGenerator()
         }
 
         public mutating func appendLiteral(_ literal: String) {
-            foundationInterpolation.appendLiteral(literal)
-            key.append(literal)
+            key.append(literal.replacingOccurrences(of: "%", with: "%%"))
         }
 
         public mutating func appendInterpolation(_ string: String) {
-            foundationInterpolation.appendInterpolation(string)
-            appendIdentityArgument(formatSpecifier: "%@")
+            appendValue(string, specifier: "%@")
         }
 
         public mutating func appendInterpolation(_ substring: Substring) {
@@ -131,68 +234,93 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             _ subject: Subject,
             formatter: Formatter? = nil
         ) where Subject: ReferenceConvertible {
-            let object = subject._bridgeToObjectiveC()
-            if let formatter, let formatted = formatter.string(for: object) {
-                foundationInterpolation.appendInterpolation(formatted)
-            } else {
-                foundationInterpolation.appendInterpolation(object as! NSObject)
-            }
-            appendIdentityArgument(formatSpecifier: "%@")
+            appendValue(subject._bridgeToObjectiveC() as! NSObject, formatter: formatter)
         }
 
         public mutating func appendInterpolation<Subject>(
             _ subject: Subject,
             formatter: Formatter? = nil
         ) where Subject: NSObject {
-            if let formatter, let formatted = formatter.string(for: subject) {
-                foundationInterpolation.appendInterpolation(formatted)
-            } else {
-                foundationInterpolation.appendInterpolation(subject)
-            }
-            appendIdentityArgument(formatSpecifier: "%@")
+            appendValue(subject, formatter: formatter)
         }
 
         public mutating func appendInterpolation<T>(_ value: T)
         where T: _FormatSpecifiable {
-            appendFoundationArgument(value._arg, specifier: value._specifier)
-            appendIdentityArgument(formatSpecifier: value._specifier)
+            appendValue(value._arg, specifier: value._specifier)
         }
 
         public mutating func appendInterpolation<T>(_ value: T, specifier: String)
         where T: _FormatSpecifiable {
-            appendFoundationArgument(value._arg, specifier: specifier)
-            appendIdentityArgument(formatSpecifier: specifier)
+            appendValue(value._arg, specifier: specifier)
         }
 
         public mutating func appendInterpolation<F>(_ input: F.FormatInput, format: F)
         where F: FormatStyle, F.FormatInput: Equatable, F.FormatOutput == String {
-            let wrappedInput = LocalizationFormatInput(value: input)
-            let wrappedFormat = LocalizationFormatStyle(base: format)
-            foundationInterpolation.appendInterpolation(wrappedInput, format: wrappedFormat)
-            appendEquatableArgument(
-                LocalizationFormatArgument(input: input, format: format),
-                formatSpecifier: "%@"
-            )
+            appendText(Text(input, format: format))
         }
 
         public mutating func appendInterpolation<F>(_ input: F.FormatInput, format: F)
         where F: FormatStyle, F.FormatInput: Equatable, F.FormatOutput == AttributedString {
-            let wrappedInput = LocalizationFormatInput(value: input)
-            let wrappedFormat = LocalizationFormatStyle(base: format)
-            foundationInterpolation.appendInterpolation(wrappedInput, format: wrappedFormat)
-            appendEquatableArgument(
-                LocalizationFormatArgument(input: input, format: format),
-                formatSpecifier: "%@"
-            )
+            appendText(Text(input, format: format))
+        }
+
+        public mutating func appendInterpolation(_ text: Text) {
+            appendText(text)
+        }
+
+        public mutating func appendInterpolation(_ image: Image) {
+            appendText(Text(image))
         }
 
         public mutating func appendInterpolation(_ attributedString: AttributedString) {
-            foundationInterpolation.appendInterpolation(attributedString)
-            appendEquatableArgument(attributedString, formatSpecifier: "%@")
+            key.append("%@")
+            arguments.append(FormatArgument(storage: .attributedString(attributedString)))
         }
 
         public mutating func appendInterpolation(_ attributedSubstring: AttributedSubstring) {
             appendInterpolation(AttributedString(attributedSubstring))
+        }
+
+        public mutating func appendInterpolation(_ resource: LocalizedStringResource) {
+            key.append("%@")
+            arguments.append(FormatArgument(storage: .localizedStringResource(resource)))
+        }
+
+        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) {
+            appendText(Text(date, style: style))
+        }
+
+        public mutating func appendInterpolation(
+            timerInterval: ClosedRange<Date>,
+            pauseTime: Date? = nil,
+            countsDown: Bool = true,
+            showsHours: Bool = true
+        ) {
+            appendText(Text(
+                timerInterval: timerInterval,
+                pauseTime: pauseTime,
+                countsDown: countsDown,
+                showsHours: showsHours
+            ))
+        }
+
+        @_disfavoredOverload
+        public mutating func appendInterpolation<Value, Format>(
+            _ source: TimeDataSource<Value>,
+            format: Format
+        ) where Value == Format.FormatInput,
+                Format: DiscreteFormatStyle,
+                Format.FormatOutput == String {
+            appendText(Text(source, format: format))
+        }
+
+        public mutating func appendInterpolation<Value, Format>(
+            _ source: TimeDataSource<Value>,
+            format: Format
+        ) where Value == Format.FormatInput,
+                Format: DiscreteFormatStyle,
+                Format.FormatOutput == AttributedString {
+            appendText(Text(source, format: format))
         }
 
         @_disfavoredOverload
@@ -200,35 +328,56 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             appendInterpolation(String(describing: object))
         }
 
-        private mutating func appendIdentityArgument(formatSpecifier: String) {
-            key.append(formatSpecifier)
-            argumentComparisons.append(.identity(FormatArgument.Identity()))
-        }
-
-        private mutating func appendEquatableArgument<Value: Equatable>(
-            _ value: Value,
-            formatSpecifier: String
-        ) {
-            key.append(formatSpecifier)
-            argumentComparisons.append(.equatable(FormatArgument.AnyEquatable(value)))
-        }
-
-        private mutating func appendFoundationArgument<Argument: CVarArg>(
+        private mutating func appendValue<Argument: CVarArg>(
             _ argument: Argument,
-            specifier: String
+            formatter: Formatter? = nil,
+            specifier: String = "%@"
         ) {
-            guard let argument = argument as? any Foundation._FormatSpecifiable else {
-                foundationInterpolation.appendInterpolation(String(describing: argument))
-                return
-            }
-            appendFoundationArgument(argument, specifier: specifier)
+            key.append(specifier)
+            arguments.append(FormatArgument(
+                storage: .value(LocalizationValueArgument(argument), formatter)
+            ))
         }
 
-        private mutating func appendFoundationArgument<Argument: Foundation._FormatSpecifiable>(
-            _ argument: Argument,
-            specifier: String
-        ) {
-            foundationInterpolation.appendInterpolation(argument, specifier: specifier)
+        private mutating func appendText(_ text: Text) {
+            key.append("%@")
+            arguments.append(FormatArgument(
+                storage: .text(text, FormatArgument.Token(id: seed.take()))
+            ))
+        }
+    }
+}
+
+private final class LocalizationValueArgument: CVarArg {
+    let value: any CVarArg
+
+    init(_ value: any CVarArg) {
+        self.value = value
+    }
+
+    var _cVarArgEncoding: [Int] {
+        value._cVarArgEncoding
+    }
+}
+
+private struct UniqueSeedGenerator {
+    var nextID = 0
+
+    mutating func take() -> Int {
+        defer { nextID += 1 }
+        return nextID
+    }
+}
+
+private extension LocalizedStringKey.FormatArgument {
+    var replacement: any CVarArg {
+        switch storage {
+        case let .value(argument, formatter):
+            let value = (argument as? LocalizationValueArgument)?.value ?? argument
+            guard let formatter else { return value }
+            return formatter.string(for: value) ?? String(describing: value)
+        case .text, .attributedString, .localizedStringResource:
+            return "\u{FFFC}"
         }
     }
 }
@@ -289,29 +438,4 @@ extension Double: _FormatSpecifiable {
 
 extension CGFloat: _FormatSpecifiable {
     public var _specifier: String { "%lf" }
-}
-
-private struct LocalizationFormatArgument<Input: Equatable, Style: Equatable>: Equatable {
-    var input: Input
-    var format: Style
-}
-
-private struct LocalizationFormatInput<Value: Equatable>: Equatable, @unchecked Sendable {
-    var value: Value
-}
-
-private struct LocalizationFormatStyle<Base: FormatStyle>: FormatStyle, @unchecked Sendable
-where Base.FormatInput: Equatable {
-    typealias FormatInput = LocalizationFormatInput<Base.FormatInput>
-    typealias FormatOutput = Base.FormatOutput
-
-    var base: Base
-
-    func format(_ value: LocalizationFormatInput<Base.FormatInput>) -> Base.FormatOutput {
-        base.format(value.value)
-    }
-
-    func locale(_ locale: Locale) -> Self {
-        Self(base: base.locale(locale))
-    }
 }

@@ -215,49 +215,129 @@ where Value: RawRepresentable & Equatable,
     }
 }
 
-private struct _DateFormatStyleBox: Equatable {
-    enum Format: Equatable {
-        case time
-        case date
+private class AnyFormatStyleBox {
+    func resolve(
+        locale: Locale,
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        fatalError("This method should be overridden by subclasses.")
     }
 
-    var input: Date
-    var format: Format
+    func resolveText(locale: Locale) -> String {
+        fatalError("This method should be overridden by subclasses.")
+    }
 
-    func formatted() -> String {
-        switch format {
-        case .time:
-            input.formatted(.dateTime.hour().minute())
-        case .date:
-            input.formatted(.dateTime.year().month().day())
+    func isEqual(to other: AnyFormatStyleBox) -> Bool {
+        false
+    }
+}
+
+private final class FormatStyleBox<Style>: AnyFormatStyleBox
+where Style: FormatStyle, Style.FormatInput: Equatable {
+    let input: Style.FormatInput
+    let format: Style
+
+    init(input: Style.FormatInput, format: Style) {
+        self.input = input
+        self.format = format
+    }
+
+    override func resolve(
+        locale: Locale,
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        let output = format.locale(locale).format(input)
+        if let string = output as? String {
+            return .init(
+                runs: [.text(typefaces, string)],
+                scaleFactor: context.contentScaleFactor
+            )
         }
+        if let attributed = output as? AttributedString {
+            return _resolvedAttributedText(
+                attributed,
+                defaultTypefaces: typefaces,
+                context: context
+            )
+        }
+        return .init(runs: [], scaleFactor: context.contentScaleFactor)
+    }
+
+    override func resolveText(locale: Locale) -> String {
+        let output = format.locale(locale).format(input)
+        if let string = output as? String { return string }
+        if let attributed = output as? AttributedString {
+            return String(attributed.characters)
+        }
+        return String(describing: output)
+    }
+
+    override func isEqual(to other: AnyFormatStyleBox) -> Bool {
+        guard let other = other as? FormatStyleBox<Style> else {
+            return false
+        }
+        return input == other.input && format == other.format
     }
 }
 
 private final class FormatStyleStorage: AnyTextStorage {
-    let storage: _DateFormatStyleBox
+    let storage: AnyFormatStyleBox
 
-    init(input: Date, format: _DateFormatStyleBox.Format) {
-        self.storage = _DateFormatStyleBox(input: input, format: format)
+    init<Style>(input: Style.FormatInput, format: Style)
+    where Style: FormatStyle, Style.FormatInput: Equatable {
+        self.storage = FormatStyleBox(input: input, format: format)
     }
 
     override func resolve(
         typefaces: [Typeface],
         context: GraphicsContext
     ) -> GraphicsContext.ResolvedText {
-        .init(
-            runs: [.text(typefaces, storage.formatted())],
-            scaleFactor: context.contentScaleFactor
+        storage.resolve(
+            locale: context.environment.locale,
+            typefaces: typefaces,
+            context: context
         )
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        storage.formatted()
+        storage.resolveText(locale: environment.locale)
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
         guard let other = other as? FormatStyleStorage else { return false }
-        return storage == other.storage
+        return storage.isEqual(to: other.storage)
+    }
+}
+
+private final class LocalizedStringResourceStorage: AnyTextStorage {
+    let resource: LocalizedStringResource
+
+    init(_ resource: LocalizedStringResource) {
+        self.resource = resource
+    }
+
+    override func resolve(
+        typefaces: [Typeface],
+        context: GraphicsContext
+    ) -> GraphicsContext.ResolvedText {
+        _resolvedAttributedText(
+            AttributedString(localized: resource),
+            defaultTypefaces: typefaces,
+            context: context
+        )
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        String(localized: resource)
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        guard let other = other as? LocalizedStringResourceStorage else {
+            return false
+        }
+        return resource == other.resource
     }
 }
 
@@ -723,17 +803,37 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 
     override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        let text = resolve(locale: context.environment.locale)
-        return .init(runs: [.text(typefaces, text)], scaleFactor: context.contentScaleFactor)
+        let segments = resolve(locale: context.environment.locale)
+        let runs = segments.flatMap { segment -> [GraphicsContext.ResolvedText.Run] in
+            switch segment {
+            case let .attributedString(value):
+                return _resolvedAttributedText(
+                    value,
+                    defaultTypefaces: typefaces,
+                    context: context
+                ).runs
+            case let .text(text):
+                return text._resolve(context: context).runs.map {
+                    $0.applying(foregroundColor: text.foregroundColor)
+                }
+            }
+        }
+        return .init(runs: runs, scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        resolve(locale: environment.locale)
+        resolve(locale: environment.locale).reduce(into: String()) { result, segment in
+            switch segment {
+            case let .attributedString(value):
+                result.append(contentsOf: value.characters)
+            case let .text(text):
+                result.append(text._resolveText(in: environment))
+            }
+        }
     }
 
-    private func resolve(locale: Locale) -> String {
-        String(
-            localized: key.foundationValue,
+    private func resolve(locale: Locale) -> [LocalizedStringKey.ResolvedSegment] {
+        key.resolve(
             table: table,
             bundle: localizedBundle(for: locale),
             locale: locale
@@ -1010,15 +1110,43 @@ public struct Text: Equatable {
         self.modifiers = []
     }
 
+    public init<F>(_ input: F.FormatInput, format: F)
+    where F: FormatStyle, F.FormatInput: Equatable, F.FormatOutput == String {
+        self.storage = .anyTextStorage(
+            FormatStyleStorage(input: input, format: format)
+        )
+        self.modifiers = []
+    }
+
+    public init<F>(_ input: F.FormatInput, format: F)
+    where F: FormatStyle, F.FormatInput: Equatable, F.FormatOutput == AttributedString {
+        self.storage = .anyTextStorage(
+            FormatStyleStorage(input: input, format: format)
+        )
+        self.modifiers = []
+    }
+
+    @_disfavoredOverload
+    public init(_ resource: LocalizedStringResource) {
+        self.storage = .anyTextStorage(LocalizedStringResourceStorage(resource))
+        self.modifiers = []
+    }
+
     public init(_ date: Date, style: DateStyle) {
         switch style.kind {
         case .time:
             self.storage = .anyTextStorage(
-                FormatStyleStorage(input: date, format: .time)
+                FormatStyleStorage(
+                    input: date,
+                    format: Date.FormatStyle.dateTime.hour().minute()
+                )
             )
         case .date:
             self.storage = .anyTextStorage(
-                FormatStyleStorage(input: date, format: .date)
+                FormatStyleStorage(
+                    input: date,
+                    format: Date.FormatStyle.dateTime.year().month().day()
+                )
             )
         case .relative, .offset, .timer:
             self.storage = .anyTextStorage(

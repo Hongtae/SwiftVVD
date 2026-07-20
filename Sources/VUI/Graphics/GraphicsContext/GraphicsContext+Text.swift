@@ -44,6 +44,33 @@ extension GraphicsContext {
                     return .styledText(faces, text, merged, style)
                 }
             }
+
+            func applying(foregroundColor: Color?) -> Run {
+                guard let foregroundColor else { return self }
+                switch self {
+                case let .text(faces, text):
+                    return .styledText(
+                        faces,
+                        text,
+                        _TextAttributeValues(),
+                        _ResolvedTextRunAttributes(foregroundColor: foregroundColor)
+                    )
+                case let .attributedText(faces, text, attributes):
+                    return .styledText(
+                        faces,
+                        text,
+                        attributes,
+                        _ResolvedTextRunAttributes(foregroundColor: foregroundColor)
+                    )
+                case let .styledText(faces, text, attributes, existing):
+                    guard existing.foregroundColor == nil else { return self }
+                    var style = existing
+                    style.foregroundColor = foregroundColor
+                    return .styledText(faces, text, attributes, style)
+                case .attachment, .attributedAttachment:
+                    return self
+                }
+            }
         }
 
         final class Storage: AppLifetimeResource, @unchecked Sendable {

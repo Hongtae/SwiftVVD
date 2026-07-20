@@ -1,2 +1,3 @@
 "greeting" = "Hello";
 "items %lld" = "%lld items";
+"rich %@ %lld %@" = "%3$@ | %2$lld | %1$@ | %3$@";

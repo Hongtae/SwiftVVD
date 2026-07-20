@@ -253,6 +253,14 @@ final class TextVariantPreferenceTests: XCTestCase {
                 Mirror(reflecting: storage).children.compactMap(\.label),
                 ["storage"]
             )
+            guard let box = Mirror(reflecting: storage).children.first?.value else {
+                return XCTFail("FormatStyleStorage should retain its box")
+            }
+            XCTAssertTrue(String(reflecting: type(of: box)).contains("FormatStyleBox"))
+            XCTAssertEqual(
+                Mirror(reflecting: box).children.compactMap(\.label),
+                ["input", "format"]
+            )
             XCTAssertNil(text._sizeVariantTexts(in: EnvironmentValues()))
             XCTAssertFalse(text._resolveText(in: EnvironmentValues()).isEmpty)
         }
