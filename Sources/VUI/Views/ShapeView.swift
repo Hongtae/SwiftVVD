@@ -32,6 +32,72 @@ struct AnimatedShape<Content: Shape>: LeafViewLayout {
     }
 }
 
+extension AnimatedShape: ContentResponder {
+    func contentPath(size: CGSize) -> Path {
+        shape.path(in: CGRect(origin: .zero, size: size))
+    }
+}
+
+struct ShapeStyledResponderData<Content: ContentResponder>: ContentResponder {
+    var view: Content
+    var styles: _ShapeStyle_Pack
+
+    func contains(
+        points: UnsafeBufferPointer<CGPoint>,
+        size: CGSize
+    ) -> BitVector64 {
+        guard !isClear else { return [] }
+        return view.contains(points: points, size: size)
+    }
+
+    func contentPath(size: CGSize) -> Path {
+        guard !isClear else { return Path() }
+        return view.contentPath(size: size)
+    }
+
+    private var isClear: Bool {
+        styles.isClear(name: .foreground) &&
+            styles.isClear(name: .background)
+    }
+}
+
+private struct ShapeStyledResponderFilter<Content: ContentResponder>: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _view: Attribute<Content>
+    var _styles: Attribute<_ShapeStyle_Pack>
+    var _size: Attribute<ViewSize>
+    var _position: Attribute<CGPoint>
+    var _transform: Attribute<ViewTransform>
+    var responder: LeafViewResponder<ShapeStyledResponderData<Content>>
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        let viewChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(_view.identifier)
+        let stylesChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(_styles.identifier)
+        let sizeChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(_size.identifier)
+        let positionChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(_position.identifier)
+        let transformChanged = isInitialValue || _AGGraph.currentStatefulInputChanged(_transform.identifier)
+
+        responder.helper.update(
+            data: (
+                value: ShapeStyledResponderData(
+                    view: _view.value,
+                    styles: _styles.value
+                ),
+                changed: viewChanged || stylesChanged
+            ),
+            size: (value: _size.value, changed: sizeChanged),
+            position: (value: _position.value, changed: positionChanged),
+            transform: (value: _transform.value, changed: transformChanged),
+            parent: responder
+        )
+        if isInitialValue {
+            _AGGraph.setStatefulOutput([responder])
+        }
+    }
+}
+
 public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
     where Content: Shape, Style: ShapeStyle {
     public var shape: Content
@@ -66,6 +132,19 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
         let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
         cachedEnvironmentAttribute.value = cachedEnvironment
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let responderStyles: Attribute<_ShapeStyle_Pack>
+        if let animatedColorStyle {
+            responderStyles = graph.makeRule {
+                _ShapeStyle_Pack.fill(.color(animatedColorStyle.value))
+            }
+        } else {
+            responderStyles = graph.makeRule {
+                _ = view._attribute.value.style
+                return _ShapeStyle_Pack.fill(
+                    .color(Color.black.resolve(in: environmentAttr.value))
+                )
+            }
+        }
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let v = view._attribute.value   // dep: style/fillStyle changes
             let shape = animatedShape._attribute.value
@@ -129,8 +208,23 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
             return list
         }
         var outputs = _ViewOutputs()
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+
+        let responderSizeAttr = cachedEnvironment.animatedSize(for: inputs)
+        let responderPositionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         if MemoryLayout<Content.AnimatableData>.size == 0 {
             makeLeafLayout(&outputs, view: view, inputs: inputs)
+            makeShapeResponder(
+                &outputs,
+                view: view._attribute,
+                styles: responderStyles,
+                size: responderSizeAttr,
+                position: responderPositionAttr,
+                transform: inputs.transform,
+                requested: inputs.preferences.keys.contains(ViewRespondersKey.self),
+                graph: graph
+            )
         } else {
             let layoutShape: Attribute<AnimatedShape<Content>> = graph.makeRule(
                 AnimatedShape.Init(
@@ -143,9 +237,45 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
                 view: _GraphValue(_attribute: layoutShape),
                 inputs: inputs
             )
+            makeShapeResponder(
+                &outputs,
+                view: layoutShape,
+                styles: responderStyles,
+                size: responderSizeAttr,
+                position: responderPositionAttr,
+                transform: inputs.transform,
+                requested: inputs.preferences.keys.contains(ViewRespondersKey.self),
+                graph: graph
+            )
         }
-        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         return outputs
+    }
+
+    private static func makeShapeResponder<ResponderContent: ContentResponder>(
+        _ outputs: inout _ViewOutputs,
+        view: Attribute<ResponderContent>,
+        styles: Attribute<_ShapeStyle_Pack>,
+        size: Attribute<ViewSize>,
+        position: Attribute<CGPoint>,
+        transform: Attribute<ViewTransform>,
+        requested: Bool,
+        graph: _AGGraph
+    ) {
+        guard requested else { return }
+        let responder = LeafViewResponder<ShapeStyledResponderData<ResponderContent>>()
+        let filter = ShapeStyledResponderFilter(
+            _view: view,
+            _styles: styles,
+            _size: size,
+            _position: position,
+            _transform: transform,
+            responder: responder
+        )
+        let responders = graph.makeStatefulRule(filter)
+        outputs.preferences.append(
+            ViewRespondersKey.self,
+            node: responders.identifier
+        )
     }
 
     private static func makeAnimatedColorStyle(

@@ -701,7 +701,10 @@ struct WeakAttribute<T>: Hashable, CustomStringConvertible, Sendable {
     func isValid(in graph: _AGGraph) -> Bool { base.isValid(in: graph) }
 
     var attribute: Attribute<T>? {
-        get { base.attribute.map(Attribute<T>.init(identifier:)) }
+        get {
+            guard let identifier = base.attribute else { return nil }
+            return Attribute<T>(identifier: identifier)
+        }
         set { self = WeakAttribute(newValue) }
     }
 
@@ -782,7 +785,10 @@ struct OptionalAttribute<Value>: Hashable, CustomStringConvertible {
     init(_ attribute: WeakAttribute<Value>) { base = AnyOptionalAttribute(attribute.base) }
 
     var attribute: Attribute<Value>? {
-        get { base.attribute.map(Attribute<Value>.init(identifier:)) }
+        get {
+            guard let identifier = base.attribute else { return nil }
+            return Attribute<Value>(identifier: identifier)
+        }
         set { base.attribute = newValue?.identifier }
     }
 

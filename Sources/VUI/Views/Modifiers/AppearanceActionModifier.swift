@@ -29,10 +29,7 @@ public struct _AppearanceActionModifier: ViewModifier {
                 phase: inputs.base.phase
             )
         )
-        graph.makeSideEffectRule {
-            _ = effect.value
-            return ()
-        }
+        effect.flags = [.transactional, .removable]
 
         return body(_Graph(), inputs)
     }

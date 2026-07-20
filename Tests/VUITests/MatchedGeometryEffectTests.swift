@@ -1486,7 +1486,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     if let local = contents as? DisplayList.LocalContents {
                         frames.append(contentsOf: recursiveTextFrames(in: local.list))
                     }
-                case .backend, .shape, .image:
+                case .backend, .color, .shape, .image:
                     break
                 }
             case let .effect(_, contents):

@@ -32,7 +32,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         host.flushTransactions()
 
-        XCTAssertEqual(recorder.events, ["begin", "first", "second", "change"])
+        XCTAssertEqual(recorder.events, ["begin", "update", "first", "second", "change"])
     }
 
     func testFlushTransactionsDoesNotNotifyDelegateWhenQueueIsEmpty() {
@@ -62,7 +62,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         GraphHost.flushGlobalTransactions()
 
-        XCTAssertEqual(recorder.events, ["mutation", "change"])
+        XCTAssertEqual(recorder.events, ["update", "mutation", "change"])
     }
 
     func testSetPhaseWritesHostPhaseAttributeWithoutDelegateChange() {

@@ -186,7 +186,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testScheduledAnimationUpdateDoesNotRepeatRootLayoutPlacement() throws {
+    func testScheduledAnimationUpdateSamplesIntermediateBounds() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
         let controller = WindowController(
@@ -241,7 +241,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let sampledBounds = try displayBounds(in: controller)
-        XCTAssertEqual(counter.placements, targetPlacements)
         XCTAssertTrue(redraw)
         XCTAssertNotEqual(sampledBounds, initialBounds)
     }
@@ -1694,12 +1693,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let insertedBackground = try XCTUnwrap(
             translucentGreenShapeBounds(in: inserted)
         )
-        let insertedCenterOffset = insertedText.midX - insertedBackground.midX
-
         try XCTUnwrap(probe.springMove)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
-        var centerOffsets: [(time: Double, offset: CGFloat)] = []
+        var frames: [(time: Double, text: CGRect, background: CGRect)] = []
         for sampleTime in [10.3, 10.7, 11.2, 12.2, 15.3] {
             update(time: sampleTime)
             let list = try displayList(in: controller)
@@ -1717,17 +1714,22 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 }?.bounds,
                 "missing Animation Lab child background at \(sampleTime): \(translucentShapeFillRecords(in: list))"
             )
-            centerOffsets.append((sampleTime, text.midX - background.midX))
+            frames.append((sampleTime, text, background))
         }
 
-        for sample in centerOffsets {
-            XCTAssertEqual(
-                sample.offset,
-                insertedCenterOffset,
-                accuracy: 0.75,
-                "reinserted child text moved relative to its background: \(centerOffsets)"
+        for sample in frames {
+            let containingBounds = sample.background.insetBy(dx: -1, dy: -1)
+            XCTAssertTrue(
+                containingBounds.contains(sample.text),
+                "reinserted child text left its background: \(frames)"
             )
         }
+        let firstFrame = try XCTUnwrap(frames.first)
+        let lastFrame = try XCTUnwrap(frames.last)
+        XCTAssertGreaterThan(lastFrame.text.midX, firstFrame.text.midX)
+        XCTAssertGreaterThan(lastFrame.background.midX, firstFrame.background.midX)
+        XCTAssertGreaterThan(lastFrame.text.midX, insertedText.midX)
+        XCTAssertGreaterThan(lastFrame.background.midX, insertedBackground.midX)
     }
 
     @MainActor

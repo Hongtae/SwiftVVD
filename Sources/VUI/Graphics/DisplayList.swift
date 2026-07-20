@@ -265,6 +265,19 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
     }
 
+    struct Options: OptionSet, ViewInput, Sendable {
+        typealias Value = Options
+
+        var rawValue: UInt8
+
+        init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        static let disableCanonicalization = Options(rawValue: 1)
+        static let defaultValue = Options()
+    }
+
     // Compact change token used by interpolation groups to detect display-list content updates.
     struct Seed: Equatable, Hashable {
         private(set) var value: UInt16
@@ -1199,6 +1212,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
         enum Value {
             case backend(ItemCommand, (GraphicsContext) -> Void)
+            case color(ColorView)
             case shape(ShapeValue)
             case image(ImageValue)
             case style(StyleValue)
@@ -1344,6 +1358,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             switch value {
             case let .backend(command, _):
                 return command
+            case .color:
+                return .closure(bounds: nil)
             case let .shape(shape):
                 return shape.command
             case let .image(image):
@@ -1378,6 +1394,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             switch value {
             case let .backend(_, body):
                 body(context)
+            case .color:
+                break
             case let .shape(shape):
                 shape.draw(in: context)
             case let .image(image):
@@ -1413,6 +1431,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     context.concatenate(affineTransform)
                     self.draw(in: context)
                 }
+            case .color:
+                return self
             case let .shape(shape):
                 var copy = self
                 copy.value = .shape(shape.transformed(
@@ -2643,6 +2663,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             case let .content(content):
                 switch content.value {
                 case .backend:
+                    content.draw(in: context)
+                case .color:
                     content.draw(in: context)
                 case .shape, .image:
                     content.draw(in: context)

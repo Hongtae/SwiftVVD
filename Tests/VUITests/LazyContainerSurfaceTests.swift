@@ -3391,11 +3391,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     func testLazyLayoutRootPropagatesSectionListOptionsToContent() {
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
+        let host = GraphHost()
         let recorder = ViewListOptionsRecorder()
 
-        ref.withCurrent {
+        host.data.withCurrent {
+            let graph = host.data.graph
             let tree = _VariadicView.Tree(
                 root: LazyVStackLayout(
                     base: _VStackLayout(alignment: .center, spacing: nil),
@@ -5308,7 +5308,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             let subviews = cache.subviews(context: ruleContext)
 
-            let hCache = _LazyStack_Cache<LazyHStackLayout>()
+            let hCache = _LazyStack_Cache<LazyHStackLayout>(
+                minor: MinorProperties(count: 2, size: 33, geometry: 33)
+            )
             let hLayout = LazyHStackLayout(base: _HStackLayout(), pinnedViews: [])
             let hPlacementContext = _LazyLayout_PlacementContext(
                 base: context,
@@ -5334,7 +5336,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _Placement(proposedSize: CGSize(width: 10, height: 33))
             )
 
-            let vCache = _LazyStack_Cache<LazyVStackLayout>()
+            let vCache = _LazyStack_Cache<LazyVStackLayout>(
+                minor: MinorProperties(count: 2, size: 44, geometry: 44)
+            )
             let vLayout = LazyVStackLayout(base: _VStackLayout(), pinnedViews: [])
             let vPlacementContext = _LazyLayout_PlacementContext(
                 base: context,
@@ -7130,7 +7134,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 uniformSpacing: nil
             )
             XCTAssertEqual(vertical.length, 36)
-            XCTAssertEqual(vertical.spacing, 7)
+            XCTAssertEqual(vertical.spacing, 12)
 
             let horizontal = current.lengthAndSpacing(
                 size: ProposedViewSize(width: 24, height: 36),
@@ -7139,7 +7143,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 uniformSpacing: nil
             )
             XCTAssertEqual(horizontal.length, 24)
-            XCTAssertEqual(horizontal.spacing, 11)
+            XCTAssertEqual(horizontal.spacing, 14)
             XCTAssertTrue(cache.item(for: currentID.canonicalID) === item)
             XCTAssertTrue(cache.item(for: predecessorID.canonicalID) === predecessorItem)
         }

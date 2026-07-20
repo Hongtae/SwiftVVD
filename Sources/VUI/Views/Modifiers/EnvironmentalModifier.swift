@@ -46,6 +46,6 @@ extension EnvironmentalModifier {
         return ResolvedModifier._makeViewList(modifier: resolvedGV, inputs: inputs, body: body)
     }
 
-    public static var _requiresMainThread: Bool { false }
+    public static var _requiresMainThread: Bool { true }
     public static var _tracksEnvironmentDependencies: Bool { true }
 }

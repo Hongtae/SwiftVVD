@@ -15,6 +15,7 @@ private struct PhaseSizedView: View, TestPrimitiveView {
             let value = view._attribute.value
             return LayoutComputer.fixed(CGSize(width: value.width, height: 19))
         }
+        layout.flags = .transactional
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
     }
 }
@@ -184,7 +185,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             }
 
             XCTAssertEqual(try currentSize(), CGSize(width: 0, height: 19))
-            viewGraph.flushTransactions()
+            viewGraph.updateOutputs(at: Time(seconds: 0))
             recorder.removeAll()
 
             viewGraph.asyncTransaction(
@@ -6753,24 +6754,31 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    func testStateTransitioningContainerMakeViewQueuesAppearanceHandler() throws {
+    func testStateTransitioningContainerMakeViewEvaluatesAppearanceDuringHostUpdate() throws {
         try withPhaseAnimatorHost { viewGraph, graph in
             let view = PhaseAnimator([7]) { phase in
                 PhaseSizedView(width: CGFloat(phase))
             }
-            let source = graph.makeInput(value: view)
-            let outputs = type(of: view)._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: makeViewInputs(graph: graph)
-            )
+            let outputs = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let source = graph.makeInput(value: view)
+                return type(of: view)._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph)
+                )
+            }
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(layout.sizeThatFits(.unspecified), CGSize(width: 7, height: 19))
-            XCTAssertTrue(viewGraph.hasPendingTransactions)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+
+            viewGraph.updateOutputs(at: Time(seconds: 0))
+
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+            XCTAssertEqual(viewGraph.data.transactionSeed, 2)
         }
     }
 
-    func testStateTransitioningContainerMakeViewListQueuesAppearanceHandlerWhenMaterialized() throws {
+    func testStateTransitioningContainerMakeViewListEvaluatesAppearanceDuringHostUpdate() throws {
         try withPhaseAnimatorHost { viewGraph, graph in
             typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
             let view = Container(
@@ -6781,12 +6789,14 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in .default },
                 behavior: .eventDriven(trigger: AnyEquatable(0))
             )
-            let source = graph.makeInput(value: view)
-            let listInputs = makeViewInputs(graph: graph).listInputs
-            let outputs = Container._makeViewList(
-                view: _GraphValue(_attribute: source),
-                inputs: listInputs
-            )
+            let outputs = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let source = graph.makeInput(value: view)
+                let listInputs = makeViewInputs(graph: graph).listInputs
+                return Container._makeViewList(
+                    view: _GraphValue(_attribute: source),
+                    inputs: listInputs
+                )
+            }
 
             guard case let .staticList(elements) = outputs.views else {
                 return XCTFail("Expected a static list output.")
@@ -6796,17 +6806,24 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             }
 
             var from = 0
-            let (materialized, _) = elements.makeElements(
-                from: &from,
-                inputs: makeViewInputs(graph: graph),
-                indirectMap: nil
-            ) { inputs, makeView in
-                (makeView(inputs), false)
+            let (materialized, _) = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                elements.makeElements(
+                    from: &from,
+                    inputs: makeViewInputs(graph: graph),
+                    indirectMap: nil
+                ) { inputs, makeView in
+                    (makeView(inputs), false)
+                }
             }
             let layout = try XCTUnwrap(materialized?._layoutComputer.attribute?.value)
 
             XCTAssertEqual(layout.sizeThatFits(.unspecified), CGSize(width: 7, height: 19))
-            XCTAssertTrue(viewGraph.hasPendingTransactions)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+
+            viewGraph.updateOutputs(at: Time(seconds: 0))
+
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+            XCTAssertEqual(viewGraph.data.transactionSeed, 2)
         }
     }
 

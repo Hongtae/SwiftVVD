@@ -425,6 +425,15 @@ private final class ScrollViewTestResponder: ViewResponder {
         resetCount += 1
     }
 
+    override func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewTestResponder.makeGesture requires AG context.")
+        }
+        return _GestureOutputs(
+            phase: graph.makeInput(value: GesturePhase<Void>.possible(nil))
+        )
+    }
+
     override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
@@ -1802,38 +1811,55 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         let childResponder = ScrollViewTestResponder()
 
         try _AGGraph.withCurrent(graph) {
-            typealias Scroll = _ScrollView<ScrollViewResponderProvider>
+            let subgraph = AGSubgraph()
+            try AGSubgraph.withCurrent(subgraph) {
+                typealias Scroll = _ScrollView<ScrollViewResponderProvider>
 
-            let provider = ScrollViewResponderProvider(responder: childResponder)
-            let mainAttr = graph.makeInput(
-                value: Scroll.Main(contentProvider: provider, config: _ScrollViewConfig())
-            )
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ViewRespondersKey.self)
+                let provider = ScrollViewResponderProvider(responder: childResponder)
+                let mainAttr = graph.makeInput(
+                    value: Scroll.Main(contentProvider: provider, config: _ScrollViewConfig())
+                )
+                let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+                var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+                inputs.preferences.keys.add(ViewRespondersKey.self)
 
-            let outputs = Scroll.Main._makeView(
-                view: _GraphValue(_attribute: mainAttr),
-                inputs: inputs
-            )
-            let respondersID = try XCTUnwrap(outputs.preferences.value(for: ViewRespondersKey.self))
-            let responders = Attribute<ViewRespondersKey.Value>(respondersID).value
-            XCTAssertEqual(responders.count, 1)
+                let outputs = Scroll.Main._makeView(
+                    view: _GraphValue(_attribute: mainAttr),
+                    inputs: inputs
+                )
+                let respondersID = try XCTUnwrap(
+                    outputs.preferences.value(for: ViewRespondersKey.self)
+                )
+                let responders = Attribute<ViewRespondersKey.Value>(respondersID).value
+                XCTAssertEqual(responders.count, 1)
 
-            let responder = try XCTUnwrap(responders.first as? DefaultLayoutViewResponder)
-            XCTAssertEqual(responder.children.count, 1)
-            XCTAssertTrue(responder.children.first === childResponder)
-            XCTAssertTrue(childResponder.parent === responder)
+                let responder = try XCTUnwrap(
+                    responders.first as? DefaultLayoutViewResponder
+                )
+                let gestureResponder = try XCTUnwrap(
+                    responder.children.first as? GestureResponder<ScrollViewGesture>
+                )
+                let contentShapeResponder = try XCTUnwrap(
+                    gestureResponder.children.first as? ContentShapeResponder<Rectangle>
+                )
+                XCTAssertEqual(responder.children.count, 1)
+                XCTAssertTrue(gestureResponder.parent === responder)
+                XCTAssertEqual(gestureResponder.children.count, 1)
+                XCTAssertTrue(contentShapeResponder.parent === gestureResponder)
+                XCTAssertEqual(contentShapeResponder.children.count, 1)
+                XCTAssertTrue(contentShapeResponder.children.first === childResponder)
+                XCTAssertTrue(childResponder.parent === contentShapeResponder)
 
-            let result = responder.containsGlobalPoints(
-                [CGPoint(x: 10, y: 10)],
-                cacheKey: nil,
-                options: ViewResponder.ContainsPointsOptions()
-            )
-            XCTAssertEqual(result.mask.rawValue, 1)
-            XCTAssertEqual(result.priority, 0)
-            XCTAssertEqual(result.children.count, 1)
-            XCTAssertTrue(result.children.first === childResponder)
+                let result = responder.containsGlobalPoints(
+                    [CGPoint(x: 10, y: 10)],
+                    cacheKey: nil,
+                    options: ViewResponder.ContainsPointsOptions()
+                )
+                XCTAssertEqual(result.mask.rawValue, 1)
+                XCTAssertEqual(result.priority, 16)
+                XCTAssertEqual(result.children.count, 1)
+                XCTAssertTrue(result.children.first === gestureResponder)
+            }
         }
     }
 
@@ -1879,12 +1905,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testGestureGraphResetEventsResetsRootResponders() {
-        let gestureGraph = GestureGraph()
+    func testMultiViewResponderResetGesturePropagatesToChildren() {
         let responder = ScrollViewTestResponder()
+        let root = testResponderGroup([responder])
 
-        gestureGraph.updateResponders([responder])
-        gestureGraph.resetEvents()
+        root.resetGesture()
 
         XCTAssertEqual(responder.resetCount, 1)
     }
@@ -1908,7 +1933,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         defer { RecordingLayoutGestureEventBindingStore.reset() }
 
         let gestureGraph = GestureGraph()
-        let child = MultiViewResponder()
+        let child = ScrollViewTestResponder()
         let root = testResponderGroup([child])
         let eventID = EventID(type: VUI.MouseEvent.self, serial: 31)
 
@@ -2017,8 +2042,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testLayoutGestureChildProxyCollectionUsesResponderChildren() {
-        let first = MultiViewResponder()
-        let second = MultiViewResponder()
+        let first = ScrollViewTestResponder()
+        let second = ScrollViewTestResponder()
         let root = testResponderGroup([first, second])
         let proxy = LayoutGestureChildProxy(responder: root)
 
@@ -2030,7 +2055,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testLayoutGestureChildProxyBindChildRoutesThroughEventBindingManager() {
-        let child = MultiViewResponder()
+        let child = ScrollViewTestResponder()
         let root = testResponderGroup([child])
         let eventBindingManager = EventBindingManager()
         let proxy = LayoutGestureChildProxy(
@@ -2060,7 +2085,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         defer { RecordingLayoutGestureEventBindingStore.reset() }
 
         let eventBindingManager = EventBindingManager()
-        let child = MultiViewResponder()
+        let child = ScrollViewTestResponder()
         let root = testResponderGroup([child])
         let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
         let eventID = EventID(type: VUI.MouseEvent.self, serial: 41)
@@ -2089,8 +2114,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
     func testLayoutGestureBoxBumpsPreviousChildSeedWhenBindingMoves() {
         let eventBindingManager = EventBindingManager()
-        let first = MultiViewResponder()
-        let second = MultiViewResponder()
+        let first = ScrollViewTestResponder()
+        let second = ScrollViewTestResponder()
         let root = testResponderGroup([first, second])
         let box = LayoutGestureBox(eventBindingManager: eventBindingManager)
         let proxy = LayoutGestureChildProxy(box: box)

@@ -10,7 +10,7 @@ import Synchronization
 
 // AnyGestureResponder
 
-protocol AnyGestureResponder: AnyGestureContainingResponder {
+protocol AnyGestureResponder: AnyGestureContainingResponder where Self: ResponderNode {
     var relatedAttribute: AGAttribute { get }
     var inputs: _ViewInputs { get }
     var childSubgraph: AGSubgraph? { get set }
@@ -232,10 +232,14 @@ extension AnyGestureResponder {
         guard _AGGraph.current != nil, let parentSubgraph = AGSubgraph.current else {
             fatalError("makeWrappedGesture: no _AGGraph context")
         }
+        let defaults: _GestureOutputs<()> = inputs.makeDefaultOutputs()
+
         if let childSubgraph, childSubgraph.isValid {
-            return AGSubgraph.withCurrent(childSubgraph) {
+            let outputs = AGSubgraph.withCurrent(childSubgraph) {
                 makeChild(inputs)
             }
+            outputs.overrideDefaultValues(defaults)
+            return defaults
         }
 
         let newSubgraph = AGSubgraph()
@@ -244,15 +248,48 @@ extension AnyGestureResponder {
         let outputs = AGSubgraph.withCurrent(newSubgraph) {
             makeChild(inputs)
         }
-        switch outputs.phase.value {
-        case .possible:
-            return inputs.makeDefaultOutputs()
-        case .active:
-            return outputs
-        case .ended, .failed:
-            childSubgraph = nil
-            return outputs
+        outputs.overrideDefaultValues(defaults)
+        return defaults
+    }
+}
+
+private extension _GestureInputs {
+    mutating func useViewInputs(
+        _ source: _ViewInputs,
+        from sourceGraph: _AGGraph,
+        in graph: _AGGraph
+    ) {
+        guard sourceGraph !== graph else {
+            viewInputs = source
+            return
         }
+
+        func proxy<Value>(_ attribute: Attribute<Value>) -> Attribute<Value> {
+            graph.makeCrossGraphRef(source: attribute, in: sourceGraph)
+        }
+
+        func proxy<Value>(_ attribute: OptionalAttribute<Value>) -> OptionalAttribute<Value> {
+            OptionalAttribute(attribute.attribute.map(proxy))
+        }
+
+        var localized = source
+        localized.transform = proxy(source.transform)
+        localized.position = proxy(source.position)
+        localized.containerPosition = proxy(source.containerPosition)
+        localized.size = proxy(source.size)
+        localized.safeAreaInsets = proxy(source.safeAreaInsets)
+        localized.containerSize = proxy(source.containerSize)
+
+        localized.base.time = time
+        localized.base.phase = proxy(source.base.phase)
+        localized.base.transaction = proxy(source.base.transaction)
+        localized.base.mergedInputs.removeAll()
+        localized.base.cachedEnvironment = MutableBox(
+            CachedEnvironment(
+                environment: proxy(source.base.cachedEnvironment.value.environment)
+            )
+        )
+        viewInputs = localized
     }
 }
 
@@ -852,10 +889,14 @@ final class GestureResponder<M: GestureViewModifier>:
     var childSubgraph: AGSubgraph?
     var childViewSubgraph: AGSubgraph?
     lazy var gestureGraph = GestureGraph(rootResponder: self)
-    lazy var bindingBridge = inputs.makeEventBindingBridge(
-        bindingManager: gestureGraph.eventBindingManager,
-        responder: self
-    )
+    lazy var bindingBridge: EventBindingBridge = {
+        let bridge = inputs.makeEventBindingBridge(
+            bindingManager: gestureGraph.eventBindingManager,
+            responder: self
+        )
+        gestureGraph.delegate = bridge
+        return bridge
+    }()
     private var _gestureContainer: AnyObject?
 
     init(modifier: Attribute<M>, inputs: _ViewInputs) {
@@ -904,12 +945,21 @@ final class GestureResponder<M: GestureViewModifier>:
     }
 
     override func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
-        makeWrappedGesture(inputs: inputs) { [modifier] inputs in
-            guard let graph = _AGGraph.current else {
-                fatalError("GestureResponder.makeGesture requires AG context")
-            }
+        _ = bindingBridge
+        guard let graph = _AGGraph.current else {
+            fatalError("GestureResponder.makeGesture requires AG context")
+        }
+        guard let sourceGraph = viewSubgraph.graph else {
+            fatalError("GestureResponder.makeGesture requires a live source graph")
+        }
+        let localModifier = sourceGraph === graph
+            ? modifier
+            : graph.makeCrossGraphRef(source: modifier, in: sourceGraph)
+        var localInputs = inputs
+        localInputs.useViewInputs(self.inputs, from: sourceGraph, in: graph)
+        return makeWrappedGesture(inputs: localInputs) { [localModifier] inputs in
             let outputs = M.ContentGesture._makeGesture(
-                gesture: _GraphValue(_attribute: modifier[keyPath: \.gesture]),
+                gesture: _GraphValue(_attribute: localModifier[keyPath: \.gesture]),
                 inputs: inputs
             )
             let phase = graph.makeRule {

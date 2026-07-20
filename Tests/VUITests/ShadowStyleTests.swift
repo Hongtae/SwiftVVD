@@ -2,7 +2,23 @@ import Foundation
 import XCTest
 @testable import VUI
 
+private struct DefaultThreadRequirementModifier: EnvironmentalModifier {
+    func resolve(in environment: EnvironmentValues) -> _ShadowEffect._Resolved {
+        _ShadowEffect(
+            color: .black,
+            radius: 0,
+            offset: .zero
+        ).resolve(in: environment)
+    }
+}
+
 final class ShadowStyleTests: XCTestCase {
+    func testEnvironmentalThreadRequirementValues() {
+        XCTAssertTrue(DefaultThreadRequirementModifier._requiresMainThread)
+        XCTAssertFalse(_ShadowEffect._requiresMainThread)
+        XCTAssertFalse(_ColorMultiplyEffect._requiresMainThread)
+    }
+
     func testResolvedHDRPreservesOptionalHeadroomAndColorAnimation() throws {
         let base = Color.Resolved(
             colorSpace: .sRGBLinear,

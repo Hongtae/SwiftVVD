@@ -1,9 +1,27 @@
 import XCTest
 @testable import VUI
 
+private final class GestureActionQueue: GestureGraphDelegate {
+    private var actions: [() -> Void] = []
+
+    func enqueueAction(_ action: @escaping () -> Void) {
+        actions.append(action)
+    }
+
+    func drain() {
+        while !actions.isEmpty {
+            let pending = actions
+            actions.removeAll()
+            pending.forEach { $0() }
+        }
+    }
+}
+
 final class GestureStateTransactionTests: XCTestCase {
     func testUpdatingThenOnEndedDrainsGestureStateResetBeforeEndedCallback() {
         let gestureGraph = GestureGraph()
+        let actionQueue = GestureActionQueue()
+        gestureGraph.delegate = actionQueue
         let graph = gestureGraph.data.graph
 
         gestureGraph.data.withCurrent {
@@ -29,12 +47,12 @@ final class GestureStateTransactionTests: XCTestCase {
 
             phase.setValue(.active(4))
             _ = outputs.phase.value
-            drainGestureGraphActions(gestureGraph)
+            actionQueue.drain()
             XCTAssertEqual(events, ["updating:4:0"])
 
             phase.setValue(.ended(4))
             _ = outputs.phase.value
-            drainGestureGraphActions(gestureGraph)
+            actionQueue.drain()
             XCTAssertEqual(events, [
                 "updating:4:0",
                 "reset:4",
@@ -45,6 +63,8 @@ final class GestureStateTransactionTests: XCTestCase {
 
     func testUpdatingThenOnChangedDrainsThroughGestureActionQueue() {
         let gestureGraph = GestureGraph()
+        let actionQueue = GestureActionQueue()
+        gestureGraph.delegate = actionQueue
         let graph = gestureGraph.data.graph
 
         gestureGraph.data.withCurrent {
@@ -70,7 +90,7 @@ final class GestureStateTransactionTests: XCTestCase {
             _ = outputs.phase.value
             XCTAssertEqual(events, [])
 
-            drainGestureGraphActions(gestureGraph)
+            actionQueue.drain()
             XCTAssertEqual(events, [
                 "updating:6:1",
                 "changed:6",
@@ -230,15 +250,6 @@ final class GestureStateTransactionTests: XCTestCase {
             inputs.options = .gestureGraph
         }
         return inputs
-    }
-
-    private func drainGestureGraphActions(_ gestureGraph: GestureGraph) {
-        for _ in 0..<8 {
-            let actions = gestureGraph.data.graph.actionOutbox
-            guard !actions.isEmpty else { return }
-            gestureGraph.data.graph.actionOutbox.removeAll()
-            actions.forEach { $0() }
-        }
     }
 
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {

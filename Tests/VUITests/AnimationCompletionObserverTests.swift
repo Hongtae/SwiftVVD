@@ -114,13 +114,16 @@ final class AnimationCompletionObserverTests: XCTestCase {
         transaction.addAnimationCompletion(criteria: .removed) {
             events.append("removed")
         }
+        XCTAssertGreaterThan(
+            transaction.animation?.box.noRegisteredCompletionDelay() ?? 0,
+            0
+        )
 
         finalizeAnimationCompletions(
             in: transaction,
             animation: transaction.animation
         )
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
         XCTAssertTrue(events.isEmpty)
 
         waitForMainQueue(until: { events.count == 2 })
@@ -143,13 +146,17 @@ final class AnimationCompletionObserverTests: XCTestCase {
             transaction.addAnimationCompletion(criteria: .removed) {
                 events.append("\(testCase.name) removed")
             }
+            XCTAssertGreaterThan(
+                testCase.animation.box.noRegisteredCompletionDelay() ?? 0,
+                0,
+                testCase.name
+            )
 
             finalizeAnimationCompletions(
                 in: transaction,
                 animation: transaction.animation
             )
 
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
             XCTAssertTrue(events.isEmpty, testCase.name)
 
             waitForMainQueue(until: { events.count == 2 })
@@ -666,6 +673,7 @@ final class AnimationCompletionObserverTests: XCTestCase {
                 animation.box.noRegisteredCompletionDelay(for: .removed)
             )
             XCTAssertEqual(logicalDelay, removedDelay, accuracy: 0.000_000_1)
+            XCTAssertGreaterThan(logicalDelay, 0)
             XCTAssertLessThan(removedDelay, 0.08)
 
             var events: [String] = []
@@ -682,7 +690,6 @@ final class AnimationCompletionObserverTests: XCTestCase {
                 animation: transaction.animation
             )
 
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
             XCTAssertTrue(events.isEmpty, testCase.name)
 
             waitForMainQueue(timeout: 0.30, until: { events.count == 2 })
@@ -1918,6 +1925,7 @@ final class AnimationCompletionObserverTests: XCTestCase {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
         }
     }
+
 }
 
 private final class PendingFinalizeProbeListener: AnimationListener, @unchecked Sendable {

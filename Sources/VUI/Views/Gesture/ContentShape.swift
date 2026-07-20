@@ -44,6 +44,10 @@ protocol ContentResponder {
 }
 
 extension ContentResponder {
+    func contentPath(size: CGSize) -> Path {
+        Path(CGRect(origin: .zero, size: size))
+    }
+
     func contains(points: UnsafeBufferPointer<CGPoint>, size: CGSize) -> BitVector64 {
         let path = contentPath(size: size)
         var result = BitVector64()
@@ -147,6 +151,44 @@ struct ContentResponderHelper<Data: ContentResponder> {
         var points = [CGPoint.zero]
         transform.convertGlobal(from: .local, points: &points)
         return points[0]
+    }
+}
+
+class LeafViewResponder<Data: ContentResponder>: ViewResponder {
+    var helper = ContentResponderHelper<Data>()
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        guard hitTestPolicy(options: options) != .exclude else {
+            return .stop
+        }
+        return helper.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options,
+            children: []
+        )
+    }
+
+    override func addContentPath(
+        to path: inout Path,
+        kind: ContentShapeKinds,
+        in coordinateSpace: CoordinateSpace,
+        observer: (any ContentPathObserver)?
+    ) {
+        helper.addContentPath(
+            to: &path,
+            kind: kind,
+            in: coordinateSpace,
+            observer: observer
+        )
+    }
+
+    override func addObserver(_ observer: any ContentPathObserver) {
+        helper.observers.add(observer: observer)
     }
 }
 

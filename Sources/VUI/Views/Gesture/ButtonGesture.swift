@@ -227,18 +227,9 @@ struct PrimitiveButtonGesture: Gesture {
 
         let gestureAttr = gesture._attribute
 
-        // GestureGraph has a separate AG from ViewGraph, so use the view graph's cached
-        // environment value instead of reading inputs.environment inside a gesture rule.
         let envAttr = inputs.environment
-        let viewGraphAG: _AGGraph? = (_AGGraphContext.current?.context as? GestureGraph)?
-            .rendererHost?.viewGraph.data.graph
         let outsetAttr: Attribute<CGFloat> = graph.makeRule {
-            if let vg = viewGraphAG,
-               let env = vg.cachedValue(for: envAttr.identifier) as? EnvironmentValues,
-               let outset = env.buttonOutset {
-                return outset
-            }
-            return gestureAttr.value.outset
+            envAttr.value.buttonOutset ?? gestureAttr.value.outset
         }
 
         // Build the reactive callback/core gesture chain from the current primitive fields.

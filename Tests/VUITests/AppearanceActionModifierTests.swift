@@ -31,6 +31,32 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
+    func testMakeViewMarksAppearanceEffectTransactionalAndRemovable() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let inputs = makeAppearanceViewInputs(graph: graph)
+            let modifier = graph.makeInput(value: _AppearanceActionModifier())
+            let lowerBound = graph.makeInput(value: ())
+
+            _ = _AppearanceActionModifier._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                _ViewOutputs()
+            }
+
+            let upperBound = graph.makeInput(value: ())
+            let effects = (lowerBound.identifier.rawValue + 1..<upperBound.identifier.rawValue)
+                .map { AGAttribute(rawValue: $0) }
+                .filter { $0._bodyType == AppearanceEffect.self }
+
+            XCTAssertEqual(effects.count, 1)
+            XCTAssertEqual(graph.flags(for: effects[0]).rawValue, 3)
+        }
+    }
+
     func testAppearanceEffectStoresCurrentAttributeDuringUpdate() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -539,6 +565,31 @@ final class AppearanceActionModifierTests: XCTestCase {
             }
         }
     }
+}
+
+private func makeAppearanceViewInputs(graph: _AGGraph) -> _ViewInputs {
+    let environment = graph.makeInput(value: EnvironmentValues())
+    let base = _GraphInputs(
+        time: graph.makeInput(value: Time(seconds: 0)),
+        phase: graph.makeInput(value: Phase()),
+        environment: environment,
+        transaction: graph.makeInput(value: Transaction())
+    )
+    return _ViewInputs(
+        base: base,
+        customInputs: PropertyList(),
+        preferences: PreferencesInputs(
+            keys: PreferenceKeys(),
+            hostKeys: graph.makeInput(value: PreferenceKeys())
+        ),
+        transform: graph.makeInput(value: ViewTransform()),
+        position: graph.makeInput(value: CGPoint.zero),
+        containerPosition: graph.makeInput(value: CGPoint.zero),
+        size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+        safeAreaInsets: OptionalAttribute(),
+        containerSize: OptionalAttribute(),
+        stackOrientation: nil
+    )
 }
 
 private func drainActionOutbox(for host: GraphHost) {

@@ -348,6 +348,10 @@ extension Color: ShapeStyle {
     public func resolve(in environment: EnvironmentValues) -> Resolved {
         provider.resolve(in: environment)
     }
+
+    public func resolveHDR(in environment: EnvironmentValues) -> ResolvedHDR {
+        ResolvedHDR(resolve(in: environment))
+    }
     
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         shape.shading = .color(self)
@@ -632,22 +636,81 @@ extension Color {
     }
 }
 
+struct ColorView: Equatable, Animatable {
+    var color: Color.ResolvedHDR
+    var isAntialiased: Bool
+    var allowedDynamicRange: Image.DynamicRange
+
+    init(
+        _ color: Color.ResolvedHDR,
+        isAntialiased: Bool = true,
+        allowedDynamicRange: Image.DynamicRange = .standard
+    ) {
+        self.color = color
+        self.isAntialiased = isAntialiased
+        self.allowedDynamicRange = allowedDynamicRange
+    }
+
+    var animatableData: Color.ResolvedHDR._Animatable {
+        get { color.animatableData }
+        set { color.animatableData = newValue }
+    }
+
+    var contentHeadroom: Float {
+        color.headroom ?? 1
+    }
+
+    var isClear: Bool {
+        color.opacity <= 0
+    }
+
+    var isOpaque: Bool {
+        color.opacity >= 1
+    }
+}
+
+extension ColorView: RendererLeafView {
+    func contains(
+        points: UnsafeBufferPointer<CGPoint>,
+        size: CGSize
+    ) -> BitVector64 {
+        guard color.opacity > 0 else { return [] }
+        var result = BitVector64()
+        for (index, point) in points.prefix(64).enumerated() {
+            result[index] = point.x >= 0 && point.y >= 0 &&
+                point.x < size.width && point.y < size.height
+        }
+        return result
+    }
+
+    func content() -> DisplayList.Content.Value {
+        .color(self)
+    }
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        var animatedView = view
+        Self._makeAnimatable(value: &animatedView, inputs: inputs.base)
+        return makeLeafView(view: animatedView, inputs: inputs)
+    }
+}
+
 extension Color: View {
     public typealias Body = Never
 }
 
-extension Color: PrimitiveView, UnaryView {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            LayoutComputer(
-                sizeThatFits: { proposal in
-                    CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
-                }
-            )
-        }
-        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+extension Color: EnvironmentalView {
+    func body(environment: EnvironmentValues) -> ColorView {
+        let color = resolveHDR(in: environment)
+        let dynamicRange: Image.DynamicRange = (color.headroom ?? 1) > 1
+            ? .high
+            : .standard
+        return ColorView(
+            color,
+            isAntialiased: true,
+            allowedDynamicRange: dynamicRange
+        )
     }
 }

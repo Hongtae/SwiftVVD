@@ -1097,10 +1097,13 @@ extension _AGGraph {
 
     func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
         assert(_AGGraph.current === self)
-        _ = flags
         inbox.drain()
         for node in subgraph.nodes {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
+                continue
+            }
+            let nodeFlags = slots[Int(liveNode.rawValue)].node?.flags.rawValue ?? 0
+            guard nodeFlags & flags != 0 else {
                 continue
             }
             _ = value(for: liveNode)

@@ -105,6 +105,8 @@ public struct _ShadowEffect: EnvironmentalModifier, Equatable {
     public var radius: CGFloat
     public var offset: CGSize
 
+    public static var _requiresMainThread: Bool { false }
+
     @inlinable public init(color: Color, radius: CGFloat, offset: CGSize) {
         self.color = color
         self.radius = radius

@@ -340,16 +340,18 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
 
         data.withCurrent {
             // Flush async invalidations before applying root-value changes.
-            let inboxTransaction = data.graph.inbox.drain()
+            var inboxTransaction: Transaction?
+            while data.graph.inbox.hasPendingWork {
+                let pendingTransaction = data.graph.inbox.nextTransaction
+                if let viewGraph = self as? ViewGraph {
+                    viewGraph.setCurrentUpdateTransaction(pendingTransaction)
+                    viewGraph.beginNextUpdate(at: time)
+                }
+                inboxTransaction = data.graph.inbox.drainOne()
+            }
             data.graph.drainActions()
-            if let viewGraph = self as? ViewGraph,
-               inboxTransaction != nil {
-                // WindowController samples transaction-bearing inbox entries one
-                // at a time. Other ViewGraph hosts still need the last drained
-                // transaction installed before lazily evaluated geometry rules
-                // consume the frame transaction attribute.
+            if let viewGraph = self as? ViewGraph {
                 viewGraph.setCurrentUpdateTransaction(inboxTransaction)
-                viewGraph.beginNextUpdate(at: time)
             }
 
             // Apply dirty root values through the host updater.

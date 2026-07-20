@@ -322,7 +322,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
         XCTAssertEqual(style.fill, .color(color))
         XCTAssertEqual(style.opacity, 1)
-        XCTAssertNil(style.blendMode)
+        XCTAssertNil(style._blend)
         XCTAssertTrue(style.effects.isEmpty)
 
         let truncated = ResolvedTextSuffix.truncated(line, [style])

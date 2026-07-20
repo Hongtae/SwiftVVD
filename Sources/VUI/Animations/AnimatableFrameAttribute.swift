@@ -358,6 +358,7 @@ func makeAnimatableFrameAttributes(
             )
         )
     }
+    frame.flags = .transactional
     let animatedPosition: Attribute<CGPoint> = graph.subscriptNode(
         parent: frame,
         keyPath: \ViewFrame.origin
@@ -401,6 +402,28 @@ extension CachedEnvironment {
     ) -> Attribute<ViewSize> {
         guard inputs.needsGeometry else { return inputs.size }
         return animatedFrame(for: inputs)._animatedSize!
+    }
+
+    mutating func animatedCGSize(
+        for inputs: _ViewInputs
+    ) -> Attribute<CGSize> {
+        guard let graph = _AGGraph.current else {
+            fatalError("CachedEnvironment.animatedCGSize(for:) called outside an active _AGGraph context.")
+        }
+        if !inputs.needsGeometry {
+            return graph.subscriptNode(parent: inputs.size, keyPath: \ViewSize.value)
+        }
+
+        let frame = animatedFrame(for: inputs)
+        if let size = frame._animatedCGSize {
+            return size
+        }
+        let size = graph.subscriptNode(
+            parent: frame._animatedSize!,
+            keyPath: \ViewSize.value
+        )
+        animatedFrame?._animatedCGSize = size
+        return size
     }
 
     private mutating func animatedFrame(
@@ -459,6 +482,7 @@ extension CachedEnvironment {
                 )
             )
         }
+        frame.flags = .transactional
         let position = graph.subscriptNode(
             parent: frame,
             keyPath: \ViewFrame.origin

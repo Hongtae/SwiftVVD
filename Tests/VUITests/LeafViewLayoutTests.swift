@@ -4,9 +4,9 @@ import XCTest
 
 private struct LeafLayoutProbe: LeafViewLayout {
     var measuredSize: CGSize
-    var measuredSpacing: ViewSpacing
+    var measuredSpacing: Spacing
 
-    func spacing() -> ViewSpacing {
+    func spacing() -> Spacing {
         measuredSpacing
     }
 
@@ -96,7 +96,7 @@ final class LeafViewLayoutTests: XCTestCase {
                         leading: 2,
                         bottom: 3,
                         trailing: 4
-                    )
+                    ).spacing
                 )
             )
 
@@ -133,7 +133,7 @@ final class LeafViewLayoutTests: XCTestCase {
             let leaf = graph.makeInput(
                 value: LeafLayoutProbe(
                     measuredSize: CGSize(width: 8, height: 5),
-                    measuredSpacing: ViewSpacing()
+                    measuredSpacing: Spacing()
                 )
             )
             var outputs = _ViewOutputs()

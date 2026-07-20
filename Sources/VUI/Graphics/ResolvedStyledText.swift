@@ -129,7 +129,28 @@ private struct KnownAttributeRange: ProtobufEncodableMessage {
     }
 }
 
-struct _ShapeStyle_Pack {
+enum _ShapeStyle_Name: UInt8, Comparable, Sendable {
+    case foreground
+    case background
+    case multicolor
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+struct _ShapeStyle_Pack: @unchecked Sendable {
+    struct Key: Hashable, Sendable {
+        var name: _ShapeStyle_Name
+        var _level: UInt8
+
+        init(_ name: _ShapeStyle_Name, _ level: Int) {
+            precondition((0...Int(UInt8.max)).contains(level))
+            self.name = name
+            self._level = UInt8(level)
+        }
+    }
+
     enum Fill: Equatable, Sendable {
         case color(Color.Resolved)
     }
@@ -148,14 +169,40 @@ struct _ShapeStyle_Pack {
     struct Style: Equatable, Sendable {
         var fill: Fill
         var opacity: Float
-        var blendMode: GraphicsContext.BlendMode?
+        var _blend: GraphicsContext.BlendMode?
         var effects: [Effect]
 
         init(_ fill: Fill) {
             self.fill = fill
             self.opacity = 1
-            self.blendMode = nil
+            self._blend = nil
             self.effects = []
+        }
+    }
+
+    var styles: [(key: Key, style: Style)]
+
+    init(styles: [(key: Key, style: Style)] = []) {
+        self.styles = styles
+    }
+
+    static func fill(
+        _ fill: Fill,
+        name: _ShapeStyle_Name = .foreground,
+        level: Int = 0
+    ) -> _ShapeStyle_Pack {
+        _ShapeStyle_Pack(styles: [(Key(name, level), Style(fill))])
+    }
+
+    func isClear(name: _ShapeStyle_Name) -> Bool {
+        !styles.contains { entry in
+            guard entry.key.name == name, entry.style.opacity > 0 else {
+                return false
+            }
+            switch entry.style.fill {
+            case .color(let color):
+                return color.opacity > 0
+            }
         }
     }
 }

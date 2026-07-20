@@ -954,12 +954,13 @@ class WindowController: WindowDelegate,
             flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()
             var lastViewInboxTransaction: Transaction?
             while viewGraph.data.graph.inbox.hasPendingWork {
+                let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
+                viewGraph.setCurrentUpdateTransaction(pendingTransaction)
                 viewGraph.beginNextUpdate(at: time)
                 viewGraph.data.withCurrent {
                     lastViewInboxTransaction = viewGraph.data.graph.inbox.drainOne()
                     viewGraph.data.graph.drainActions()
                 }
-                viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
                 drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 let currentRequiresPresentation =
                     lastViewInboxTransaction?.effectiveAnimation != nil ||
@@ -999,11 +1000,13 @@ class WindowController: WindowDelegate,
                 viewGraph.data.withCurrent {
                     var lastResourceTransaction: Transaction?
                     while viewGraph.data.graph.inbox.hasPendingWork {
+                        let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
+                        viewGraph.setCurrentUpdateTransaction(pendingTransaction)
                         viewGraph.beginNextUpdate(at: time)
                         lastResourceTransaction = viewGraph.data.graph.inbox.drainOne()
                         viewGraph.data.graph.drainActions()
-                        viewGraph.setCurrentUpdateTransaction(lastResourceTransaction)
                     }
+                    viewGraph.setCurrentUpdateTransaction(lastResourceTransaction)
                     drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 }
             }

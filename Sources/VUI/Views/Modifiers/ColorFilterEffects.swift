@@ -493,6 +493,8 @@ public struct _ColorMatrixEffect: Animatable, ViewModifier, Sendable {
 public struct _ColorMultiplyEffect: EnvironmentalModifier, Equatable {
     public var color: Color
 
+    public static var _requiresMainThread: Bool { false }
+
     @inlinable public init(color: Color) {
         self.color = color
     }

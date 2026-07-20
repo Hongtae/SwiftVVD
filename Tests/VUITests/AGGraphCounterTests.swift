@@ -132,6 +132,14 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testEmptyTypedAttributeWrappersReturnNil() {
+        let optional = OptionalAttribute<Int>()
+        let weak = WeakAttribute<Int>()
+
+        XCTAssertNil(optional.attribute)
+        XCTAssertNil(weak.attribute)
+    }
+
     func testExplicitInputRegistersDependencyWithoutReadingValue() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

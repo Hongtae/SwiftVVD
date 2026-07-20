@@ -21,6 +21,7 @@ extension Animatable {
                 environment: inputs.cachedEnvironment.value.environment
             )
         )
+        attr.flags = .transactional
         value = _GraphValue(_attribute: attr)
     }
 }

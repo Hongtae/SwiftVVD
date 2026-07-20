@@ -1440,6 +1440,13 @@ public struct _GestureOutputs<V> {
         preferences.attachIndirectOutputs(to: outputs.preferences)
     }
 
+    /// Connects this concrete output to the placeholders created by
+    /// `_GestureInputs.makeDefaultOutputs()`.
+    func overrideDefaultValues(_ defaults: _GestureOutputs<V>) {
+        defaults.phase.overrideDefaultValue(phase, type: GesturePhase<V>.self)
+        preferences.attachIndirectOutputs(to: defaults.preferences)
+    }
+
     func detachIndirectOutputs() {
         guard let graph = _AGGraph.current else {
             fatalError("_GestureOutputs.detachIndirectOutputs requires AG context")

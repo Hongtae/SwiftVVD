@@ -315,6 +315,7 @@ class EventBindingBridge: GestureGraphDelegate, EventBindingManagerDelegate {
 
     init(manager: EventBindingManager? = nil) {
         self.manager = manager
+        manager?.delegate = self
     }
 
     var eventSources: [any EventBindingSource] {
@@ -813,7 +814,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
         inputs.preferences.add(RequiredTapCountKey.self)
         inputs.preferences.add(GestureDependency.Key.self)
 
-        let outputs = rootResponder.makeSubviewsGesture(inputs: inputs)
+        let outputs = rootResponder.makeGesture(inputs: inputs)
         func preferenceAttribute<K: PreferenceKey>(
             _ key: K.Type
         ) -> OptionalAttribute<K.Value> {
