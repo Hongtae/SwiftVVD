@@ -33,6 +33,11 @@ private typealias _ReflectionNameFreeFunc = @convention(c) (
     UnsafePointer<CChar>?
 ) -> Void
 
+private typealias _EnumTagWitness = @convention(c) (
+    UnsafeRawPointer,
+    UnsafeRawPointer
+) -> UInt32
+
 @_silgen_name("swift_reflectionMirror_count")
 private func _getChildCount<Value>(_: Value, type: Any.Type) -> Int
 
@@ -44,9 +49,6 @@ private func _getChild<Value>(
     outName: UnsafeMutablePointer<UnsafePointer<CChar>?>,
     outFreeFunc: UnsafeMutablePointer<_ReflectionNameFreeFunc?>
 ) -> Any
-
-@_silgen_name("swift_EnumCaseName")
-private func _getEnumCaseName<Value>(_: Value) -> UnsafePointer<CChar>?
 
 enum _MetadataKind: UInt, Sendable {
     case `class` = 0
@@ -77,8 +79,21 @@ struct _EachFieldMetadata: Sendable {
     let isVar: Bool
 }
 
-func _enumCaseName<Value>(of value: Value) -> UnsafePointer<CChar>? {
-    _getEnumCaseName(value)
+func _enumTag<Value>(of value: UnsafePointer<Value>) -> UInt32 {
+    let wordSize = MemoryLayout<UInt>.size
+    let metadata = unsafeBitCast(Value.self, to: UnsafeRawPointer.self)
+    let witnesses = metadata.advanced(by: -wordSize).load(
+        as: UnsafeRawPointer.self
+    )
+    // Required function witnesses, stored-size values, and UInt32 layout
+    // values precede the enum-specific witnesses in the runtime ABI.
+    let enumWitnessOffset = 10 * wordSize + 2 * MemoryLayout<UInt32>.size
+    let function = witnesses.load(
+        fromByteOffset: enumWitnessOffset,
+        as: UnsafeRawPointer.self
+    )
+    let getTag = unsafeBitCast(function, to: _EnumTagWitness.self)
+    return getTag(value, metadata)
 }
 
 func _enumPayload<Value>(of value: Value) -> Any? {

@@ -230,6 +230,27 @@ final class AGValueComparisonTests: XCTestCase {
                     options: options
                 )
             )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    SameTypeCaseComparisonPayload.first(7),
+                    SameTypeCaseComparisonPayload.first(7),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    SameTypeCaseComparisonPayload.first(7),
+                    SameTypeCaseComparisonPayload.second(7),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    SameTypeCaseComparisonPayload.firstEmpty,
+                    SameTypeCaseComparisonPayload.secondEmpty,
+                    options: options
+                )
+            )
         }
 
         for rawValue: UInt32 in [3, 0x103] {
@@ -638,6 +659,13 @@ private enum StringComparisonPayload {
 
 private enum LargeComparisonPayload {
     case value(UInt64, UInt64, UInt64, UInt64)
+}
+
+private enum SameTypeCaseComparisonPayload {
+    case first(Int)
+    case second(Int)
+    case firstEmpty
+    case secondEmpty
 }
 
 private protocol ComparisonMarkerA {}

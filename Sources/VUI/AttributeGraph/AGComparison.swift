@@ -218,11 +218,7 @@ extension _AGGraph {
         _ lhs: UnsafePointer<Value>,
         _ rhs: UnsafePointer<Value>
     ) -> Bool {
-        guard let lhsCase = _enumCaseName(of: lhs.pointee),
-              let rhsCase = _enumCaseName(of: rhs.pointee) else {
-            return compareRawValues(lhs, rhs, type: Value.self)
-        }
-        guard cStringsEqual(lhsCase, rhsCase) else {
+        guard _enumTag(of: lhs) == _enumTag(of: rhs) else {
             return false
         }
 
@@ -258,20 +254,6 @@ extension _AGGraph {
             }
         }
         return _openExistential(lhsPayload, do: compare)
-    }
-
-    private static func cStringsEqual(
-        _ lhs: UnsafePointer<CChar>,
-        _ rhs: UnsafePointer<CChar>
-    ) -> Bool {
-        var index = 0
-        while lhs[index] == rhs[index] {
-            if lhs[index] == 0 {
-                return true
-            }
-            index += 1
-        }
-        return false
     }
 
     private static func compareRawValues(
