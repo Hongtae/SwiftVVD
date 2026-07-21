@@ -63,6 +63,7 @@ enum _MetadataKind: UInt, Sendable {
     case metatype = 0x304
     case objcClassWrapper = 0x305
     case existentialMetatype = 0x306
+    case extendedExistential = 0x307
     case heapLocalVariable = 0x400
     case heapGenericLocalVariable = 0x500
     case errorObject = 0x501

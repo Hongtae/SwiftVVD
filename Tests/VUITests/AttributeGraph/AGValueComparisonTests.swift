@@ -615,6 +615,118 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testExtendedExistentialUsesStoredRepresentation() {
+        XCTAssertEqual(
+            _MetadataKind((any ParameterizedComparisonProtocol<Int>).self),
+            .extendedExistential
+        )
+        XCTAssertEqual(
+            _MetadataKind(
+                (any ClassParameterizedComparisonProtocol<Int>).self
+            ),
+            .extendedExistential
+        )
+        XCTAssertEqual(
+            _MetadataKind((any ParameterizedComparisonProtocol<Int>.Type).self),
+            .extendedExistential
+        )
+
+        let lhs = makeParameterizedExistentialComparisonPointer(
+            fill: 0x11,
+            value: 7
+        )
+        let sameStorage = makeParameterizedExistentialComparisonPointer(
+            fill: 0x11,
+            value: 7
+        )
+        let differentUnusedStorage = makeParameterizedExistentialComparisonPointer(
+            fill: 0xee,
+            value: 7
+        )
+        defer {
+            lhs.deinitialize(count: 1)
+            lhs.deallocate()
+            sameStorage.deinitialize(count: 1)
+            sameStorage.deallocate()
+            differentUnusedStorage.deinitialize(count: 1)
+            differentUnusedStorage.deallocate()
+        }
+
+        let reference = ParameterizedComparisonReference(1)
+        let alias = reference
+        let other = ParameterizedComparisonReference(1)
+        for rawValue: UInt32 in [2, 3, 0x102, 0x103, 0x202, 0x302] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareStoredValues(lhs, sameStorage, options: options)
+            )
+            XCTAssertFalse(
+                _AGGraph.compareStoredValues(
+                    lhs,
+                    differentUnusedStorage,
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ParameterizedExistentialComparisonPayload(
+                        value: ParameterizedLargeComparisonValue(
+                            a: 1,
+                            b: 2,
+                            c: 3,
+                            d: 4
+                        )
+                    ),
+                    ParameterizedExistentialComparisonPayload(
+                        value: ParameterizedLargeComparisonValue(
+                            a: 1,
+                            b: 2,
+                            c: 3,
+                            d: 4
+                        )
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ClassParameterizedComparisonPayload(value: reference),
+                    ClassParameterizedComparisonPayload(value: alias),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ClassParameterizedComparisonPayload(value: reference),
+                    ClassParameterizedComparisonPayload(value: other),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    MetatypeParameterizedComparisonPayload(
+                        value: ParameterizedInlineComparisonValue.self
+                    ),
+                    MetatypeParameterizedComparisonPayload(
+                        value: ParameterizedInlineComparisonValue.self
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    MetatypeParameterizedComparisonPayload(
+                        value: ParameterizedInlineComparisonValue.self
+                    ),
+                    MetatypeParameterizedComparisonPayload(
+                        value: AlternateParameterizedInlineComparisonValue.self
+                    ),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testTypedNodeStorageOwnsAndReleasesReferenceValues() {
         var first: ComparisonReference? = ComparisonReference(1)
         weak let weakFirst = first
@@ -705,6 +817,12 @@ private protocol ComparisonMarkerA {}
 private protocol ComparisonMarkerB {}
 private protocol ComparisonMarkerC {}
 private protocol ComparisonClassMarker: AnyObject {}
+private protocol ParameterizedComparisonProtocol<Element> {
+    associatedtype Element
+}
+private protocol ClassParameterizedComparisonProtocol<Element>: AnyObject {
+    associatedtype Element
+}
 
 private final class ComparisonReference:
     ComparisonMarkerA,
@@ -758,6 +876,53 @@ private struct AnyExistentialComparisonPayload {
 
 private struct AnyObjectComparisonPayload {
     var value: AnyObject
+}
+
+private struct ParameterizedExistentialComparisonPayload {
+    var value: any ParameterizedComparisonProtocol<Int>
+}
+
+private struct ClassParameterizedComparisonPayload {
+    var value: any ClassParameterizedComparisonProtocol<Int>
+}
+
+private struct MetatypeParameterizedComparisonPayload {
+    var value: any ParameterizedComparisonProtocol<Int>.Type
+}
+
+private struct ParameterizedInlineComparisonValue:
+    ParameterizedComparisonProtocol
+{
+    typealias Element = Int
+    var value: Int
+}
+
+private struct AlternateParameterizedInlineComparisonValue:
+    ParameterizedComparisonProtocol
+{
+    typealias Element = Int
+    var value: Int
+}
+
+private struct ParameterizedLargeComparisonValue:
+    ParameterizedComparisonProtocol
+{
+    typealias Element = Int
+    var a: UInt64
+    var b: UInt64
+    var c: UInt64
+    var d: UInt64
+}
+
+private final class ParameterizedComparisonReference:
+    ClassParameterizedComparisonProtocol
+{
+    typealias Element = Int
+    var value: Int
+
+    init(_ value: Int) {
+        self.value = value
+    }
 }
 
 private struct LargeExistentialValue:
@@ -854,6 +1019,25 @@ private func makeExistentialComparisonPointer(
         capacity: 1
     )
     pointer.initialize(to: ExistentialComparisonPayload(value: value))
+    let raw = UnsafeMutableRawPointer(pointer)
+    for offset in MemoryLayout<Int>.size..<(3 * MemoryLayout<UInt>.size) {
+        raw.advanced(by: offset).storeBytes(of: fill, as: UInt8.self)
+    }
+    return pointer
+}
+
+private func makeParameterizedExistentialComparisonPointer(
+    fill: UInt8,
+    value: Int
+) -> UnsafeMutablePointer<ParameterizedExistentialComparisonPayload> {
+    let pointer = UnsafeMutablePointer<
+        ParameterizedExistentialComparisonPayload
+    >.allocate(capacity: 1)
+    pointer.initialize(
+        to: ParameterizedExistentialComparisonPayload(
+            value: ParameterizedInlineComparisonValue(value: value)
+        )
+    )
     let raw = UnsafeMutableRawPointer(pointer)
     for offset in MemoryLayout<Int>.size..<(3 * MemoryLayout<UInt>.size) {
         raw.advanced(by: offset).storeBytes(of: fill, as: UInt8.self)
