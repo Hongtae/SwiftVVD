@@ -36,10 +36,25 @@ private struct PlainPayload {
 }
 
 private final class ReferencePayload {
-    let value: Int
+    var value: Int
 
     init(_ value: Int) {
         self.value = value
+    }
+}
+
+private final class SemanticEquatableReference: Equatable {
+    nonisolated(unsafe) static var equalityCallCount = 0
+
+    var value: Int
+
+    init(_ value: Int) {
+        self.value = value
+    }
+
+    static func == (lhs: SemanticEquatableReference, rhs: SemanticEquatableReference) -> Bool {
+        equalityCallCount += 1
+        return lhs.value == rhs.value
     }
 }
 
@@ -96,6 +111,23 @@ final class TransactionStateEqualityTests: XCTestCase {
                 options: options
             )
         )
+
+        let reference = ReferencePayload(1)
+        let referenceAlias = reference
+        XCTAssertTrue(_AGGraph.compareValues(reference, referenceAlias, options: options))
+        reference.value = 2
+        XCTAssertTrue(_AGGraph.compareValues(reference, referenceAlias, options: options))
+        XCTAssertFalse(_AGGraph.compareValues(reference, ReferencePayload(2), options: options))
+
+        SemanticEquatableReference.equalityCallCount = 0
+        XCTAssertFalse(
+            _AGGraph.compareValues(
+                SemanticEquatableReference(1),
+                SemanticEquatableReference(1),
+                options: options
+            )
+        )
+        XCTAssertEqual(SemanticEquatableReference.equalityCallCount, 0)
     }
 
     func testAGBackedSameValueWriteUsesNoMutationCompletionTiming() {

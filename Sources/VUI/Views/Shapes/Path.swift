@@ -30,6 +30,13 @@ public struct Path: Equatable {
     public var isEmpty: Bool { self.elements.isEmpty }
 
     public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
+        let bounds = boundingBoxOfPath
+        guard !bounds.isNull,
+              p.x >= bounds.minX, p.x <= bounds.maxX,
+              p.y >= bounds.minY, p.y <= bounds.maxY else {
+            return false
+        }
+
         var winding: Int = 0
 
         let lineCheck = { (p0: CGPoint, p1: CGPoint) in

@@ -335,6 +335,43 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testEagerSideEffectUsesEstablishedDependencyTraversal() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = NestedEvaluationDepthRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            var output = source
+
+            for _ in 0..<64 {
+                let input = output
+                output = graph.makeRule {
+                    recorder.depth += 1
+                    recorder.maximumDepth = max(
+                        recorder.maximumDepth,
+                        recorder.depth
+                    )
+                    defer { recorder.depth -= 1 }
+                    return input.value + 1
+                }
+            }
+
+            var observed: [Int] = []
+            graph.makeSideEffectRule {
+                observed.append(output.value)
+            }
+            XCTAssertEqual(observed, [65])
+
+            recorder.depth = 0
+            recorder.maximumDepth = 0
+            source.setValue(2)
+
+            XCTAssertEqual(observed, [65, 66])
+            XCTAssertEqual(recorder.maximumDepth, 1)
+        }
+    }
+
     func testUnevaluatedRuleChainUsesLightweightNestedPulls() async {
         let result = await Task.detached {
             let graph = _AGGraph()
@@ -344,7 +381,7 @@ final class AGGraphCounterTests: XCTestCase {
                 let source = graph.makeInput(value: 1)
                 var output = source
 
-                for _ in 0..<24 {
+                for _ in 0..<64 {
                     let input = output
                     output = graph.makeRule {
                         input.value + 1
@@ -355,7 +392,7 @@ final class AGGraphCounterTests: XCTestCase {
             }
         }.value
 
-        XCTAssertEqual(result, 25)
+        XCTAssertEqual(result, 65)
     }
 
     func testUnevaluatedDeepKeyPathChainUpdatesIteratively() {
@@ -627,6 +664,41 @@ final class AGGraphCounterTests: XCTestCase {
             )
             XCTAssertEqual(graph.graphCounter(lane: 1), 1)
         }
+    }
+
+    func testSideEffectCreatedDuringAnotherGraphUpdateWaitsForOwnGraphUpdate() {
+        let outerGraph = _AGGraph()
+        let outerRef = _AGGraphContext(graph: outerGraph)
+        let innerGraph = _AGGraph()
+        let innerRef = _AGGraphContext(graph: innerGraph)
+        var events: [String] = []
+
+        outerRef.withCurrent {
+            let producer = outerGraph.makeRule {
+                events.append("outer.begin")
+                _ = innerRef.withCurrent {
+                    innerGraph.makeSideEffectRule {
+                        events.append("inner.sideEffect")
+                    }
+                }
+                events.append("outer.end")
+                return 1
+            }
+
+            XCTAssertEqual(producer.value, 1)
+        }
+
+        XCTAssertEqual(events, ["outer.begin", "outer.end"])
+
+        innerRef.withCurrent {
+            let trigger = innerGraph.makeRule { 1 }
+            XCTAssertEqual(trigger.value, 1)
+        }
+
+        XCTAssertEqual(
+            events,
+            ["outer.begin", "outer.end", "inner.sideEffect"]
+        )
     }
 
     func testEagerSideEffectDoesNotReenterWhileDependencyMutatesDuringEvaluation() {
@@ -994,6 +1066,11 @@ private final class OutputPropagationRecorder {
     var intermediateEvaluations = 0
     var downstreamEvaluations = 0
     var sideEffectEvaluations = 0
+}
+
+private final class NestedEvaluationDepthRecorder {
+    var depth = 0
+    var maximumDepth = 0
 }
 
 private final class OutgoingEdgeBatchRecorder {

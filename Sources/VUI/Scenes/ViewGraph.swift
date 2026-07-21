@@ -829,6 +829,9 @@ class ViewGraph: ViewGraphHost {
         var rootRLResult:    Attribute<ResourceList>?      = nil
 
         self.data.withCurrent {
+            // Root construction inherits the host's root subgraph so every
+            // node and nested responder has a stable lifecycle owner.
+            AGSubgraph.withCurrent(self.rootSubgraph) {
             let g = self.graph
             let contentGV = makeContent(g)
 
@@ -987,6 +990,7 @@ class ViewGraph: ViewGraphHost {
             timeAttrResult  = timeAttr
             transactionAttrResult = transactionAttr
             phaseAttrResult = phaseAttr
+            }
         }
 
         self.sizeAttr           = sizeAttrResult

@@ -220,9 +220,13 @@ class EventBindingManager {
         return explicitHost.sendEvents(events, rootNode: rootNode, at: time)
     }
 
-    func reset() {
+    func reset(resetForwardedEventDispatchers: Bool = false) {
         bindings.removeAll()
         lastDirectConsumedEventIDs.removeAll()
+        // Tear down outputs after the current event callbacks have drained.
+        Update.enqueueAction { [weak host] in
+            host?.resetEvents()
+        }
     }
 
     func enqueueHoverUpdateIfNeeded() {
@@ -378,8 +382,12 @@ class EventBindingBridge: GestureGraphDelegate, EventBindingManagerDelegate {
         } else {
             trackedStates.removeAll()
         }
-        if resetForwardedEventDispatchers {
-            manager?.reset()
+        if !trackedStates.values.contains(where: {
+            !$0.resetForwardedEventDispatchers
+        }) {
+            manager?.reset(
+                resetForwardedEventDispatchers: resetForwardedEventDispatchers
+            )
         }
     }
 
@@ -401,6 +409,9 @@ class EventBindingBridge: GestureGraphDelegate, EventBindingManagerDelegate {
     func didUpdate(phase: GesturePhase<Void>, in manager: EventBindingManager) {
         for source in eventSources {
             source.didUpdate(phase: phase, in: self)
+        }
+        if phase.isTerminal {
+            resetEvents()
         }
     }
 
@@ -708,9 +719,14 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             } else {
                 candidates = []
             }
-            let phases = candidates.compactMap { responder -> GesturePhase<Void>? in
-                guard let node = responder as? ResponderNode else { return nil }
-                return responder.gestureGraph.sendEvents(events, rootNode: node, at: time)
+            let phases = candidates.map { responder -> GesturePhase<Void> in
+                let manager = responder.gestureGraph.eventBindingManager
+                let phase = manager.sendDownstream(events, at: time)
+                if phase.isTerminal {
+                    // The raw event host owns the terminal boundary of each session.
+                    manager.reset()
+                }
+                return phase
             }
             if phases.contains(where: { $0.isActive }) { return .active(()) }
             if phases.contains(where: { $0.isEnded }) { return .ended(()) }
