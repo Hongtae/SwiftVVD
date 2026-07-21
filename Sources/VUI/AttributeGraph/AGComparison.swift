@@ -297,15 +297,59 @@ extension _AGGraph {
         )
         let dynamicType = unsafeBitCast(metadata, to: Any.Type.self)
         let layout = valueLayout(of: dynamicType)
-        if layout.size > metadataOffset || layout.alignment > wordSize {
-            return compareRawRange(lhs, rhs, offset: 0, count: wordSize)
+        let isInline = isValueInlineInExistentialContainer(dynamicType)
+        guard
+            let lhsValue = projectExistentialValue(
+                lhs,
+                isInline: isInline,
+                alignment: layout.alignment
+            ),
+            let rhsValue = projectExistentialValue(
+                rhs,
+                isInline: isInline,
+                alignment: layout.alignment
+            )
+        else {
+            return false
         }
         return compareLayoutValues(
-            lhs,
-            rhs,
+            lhsValue,
+            rhsValue,
             type: dynamicType,
             kind: _MetadataKind(dynamicType)
         )
+    }
+
+    private static func isValueInlineInExistentialContainer(
+        _ type: Any.Type
+    ) -> Bool {
+        func isInline<Value>(_ type: Value.Type) -> Bool {
+            _isBitwiseTakable(type)
+                && MemoryLayout<Value>.size <= 3 * MemoryLayout<UInt>.size
+                && MemoryLayout<Value>.alignment <= MemoryLayout<UInt>.alignment
+        }
+        return _openExistential(type, do: isInline)
+    }
+
+    private static func projectExistentialValue(
+        _ container: UnsafeRawPointer,
+        isInline: Bool,
+        alignment: Int
+    ) -> UnsafeRawPointer? {
+        if isInline {
+            return container
+        }
+        guard let box = container.load(as: UnsafeRawPointer?.self) else {
+            return nil
+        }
+
+        // Out-of-line existential storage starts with the two-word heap object
+        // header. The value begins at the next address satisfying its runtime
+        // alignment.
+        let alignmentMask = alignment - 1
+        let headerSize = 2 * MemoryLayout<UInt>.size
+        let valueOffset = (headerSize + alignmentMask) & ~alignmentMask
+        return box.advanced(by: valueOffset)
     }
 
     private static func compareRawRange(

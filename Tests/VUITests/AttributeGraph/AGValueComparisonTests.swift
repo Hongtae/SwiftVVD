@@ -272,6 +272,191 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testLayoutComparisonProjectsOutOfLineExistentialPayloads() {
+        let reference = ComparisonReference(1)
+        let alias = reference
+        let other = ComparisonReference(1)
+
+        for rawValue: UInt32 in [2, 0x102] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 5)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 5))
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: reference)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: alias)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: reference)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: other)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(value: Int(7)),
+                    ExistentialComparisonPayload(value: UInt(7)),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    AnyExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    AnyExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    AnyExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    AnyExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    AnyExistentialComparisonPayload(value: Int(7)),
+                    AnyExistentialComparisonPayload(value: UInt(7)),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    AnyObjectComparisonPayload(value: reference),
+                    AnyObjectComparisonPayload(value: alias),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    AnyObjectComparisonPayload(value: reference),
+                    AnyObjectComparisonPayload(value: other),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    ExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: reference)
+                    ),
+                    ExistentialComparisonPayload(
+                        value: WeakExistentialValue(object: alias)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    AnyExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    AnyExistentialComparisonPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    AnyExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    AnyExistentialComparisonPayload(
+                        value: AlignedExistentialValue(value: SIMD4(1, 2, 3, 4))
+                    ),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testTypedNodeStorageOwnsAndReleasesReferenceValues() {
         var first: ComparisonReference? = ComparisonReference(1)
         weak let weakFirst = first
@@ -373,6 +558,33 @@ private struct ClosureComparisonPayload {
 
 private struct ExistentialComparisonPayload {
     var value: any Equatable
+}
+
+private struct AnyExistentialComparisonPayload {
+    var value: Any
+}
+
+private struct AnyObjectComparisonPayload {
+    var value: AnyObject
+}
+
+private struct LargeExistentialValue: Equatable {
+    var a: UInt64
+    var b: UInt64
+    var c: UInt64
+    var d: UInt64
+}
+
+private struct AlignedExistentialValue: Equatable {
+    var value: SIMD4<Float>
+}
+
+private struct WeakExistentialValue: Equatable {
+    weak var object: ComparisonReference?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.object === rhs.object
+    }
 }
 
 private struct PaddedComparisonPayload {
