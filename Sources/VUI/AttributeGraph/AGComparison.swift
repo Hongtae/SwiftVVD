@@ -11,12 +11,13 @@ private struct _AGComparisonField {
     var offset: Int
     var type: Any.Type
     var kind: _MetadataKind
+    var isStrong: Bool
 }
 
 private extension _MetadataKind {
     var supportsStoredFieldTraversal: Bool {
         switch self {
-        case .struct, .enum, .optional, .tuple:
+        case .struct, .tuple:
             return true
         default:
             return false
@@ -76,12 +77,23 @@ private enum _AGComparisonLayout {
         }
 
         var fields: [_AGComparisonField] = []
-        _forEachField(of: type) { _, offset, fieldType, kind in
+        let collect: (
+            UnsafePointer<CChar>,
+            Int,
+            Any.Type,
+            _EachFieldMetadata
+        ) -> Bool = { _, offset, fieldType, metadata in
             fields.append(
-                _AGComparisonField(offset: offset, type: fieldType, kind: kind)
+                _AGComparisonField(
+                    offset: offset,
+                    type: fieldType,
+                    kind: metadata.kind,
+                    isStrong: metadata.isStrong
+                )
             )
             return true
         }
+        _forEachFieldWithMetadata(of: type, body: collect)
         return cache.withLock { cache in
             if let cached = cache[identifier] {
                 return cached
@@ -133,6 +145,10 @@ extension _AGGraph {
         if lhs == rhs {
             return true
         }
+        if type == String.self {
+            return lhs.assumingMemoryBound(to: String.self).pointee
+                == rhs.assumingMemoryBound(to: String.self).pointee
+        }
         if type is AnyClass {
             // Class storage is the reference itself. Instance fields belong to
             // the referenced object and do not participate in value equality.
@@ -145,22 +161,108 @@ extension _AGGraph {
                 type: type
             )
         }
+        if kind == .enum || kind == .optional {
+            return compareEnumValues(lhs, rhs, type: type)
+        }
 
         let fields = _AGComparisonLayout.fields(of: type, kind: kind)
         if fields.isEmpty {
             return compareRawValues(lhs, rhs, type: type)
         }
         for field in fields {
-            if !compareLayoutValues(
-                lhs.advanced(by: field.offset),
-                rhs.advanced(by: field.offset),
-                type: field.type,
-                kind: field.kind
-            ) {
+            let lhsField = lhs.advanced(by: field.offset)
+            let rhsField = rhs.advanced(by: field.offset)
+            let isEqual = if field.isStrong {
+                compareLayoutValues(
+                    lhsField,
+                    rhsField,
+                    type: field.type,
+                    kind: field.kind
+                )
+            } else {
+                // Non-strong references use runtime-managed storage and cannot
+                // be interpreted as ordinary values of the reported type.
+                compareRawValues(lhsField, rhsField, type: field.type)
+            }
+            if !isEqual {
                 return false
             }
         }
         return true
+    }
+
+    private static func compareEnumValues(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer,
+        type: Any.Type
+    ) -> Bool {
+        func compare<Value>(_ type: Value.Type) -> Bool {
+            compareEnumValues(
+                lhs.assumingMemoryBound(to: Value.self),
+                rhs.assumingMemoryBound(to: Value.self)
+            )
+        }
+        return _openExistential(type, do: compare)
+    }
+
+    private static func compareEnumValues<Value>(
+        _ lhs: UnsafePointer<Value>,
+        _ rhs: UnsafePointer<Value>
+    ) -> Bool {
+        guard let lhsCase = _enumCaseName(of: lhs.pointee),
+              let rhsCase = _enumCaseName(of: rhs.pointee) else {
+            return compareRawValues(lhs, rhs, type: Value.self)
+        }
+        guard cStringsEqual(lhsCase, rhsCase) else {
+            return false
+        }
+
+        switch (_enumPayload(of: lhs.pointee), _enumPayload(of: rhs.pointee)) {
+        case (nil, nil):
+            return true
+        case let (lhsPayload?, rhsPayload?):
+            return compareEnumPayloads(lhsPayload, rhsPayload)
+        default:
+            return false
+        }
+    }
+
+    private static func compareEnumPayloads(
+        _ lhsPayload: Any,
+        _ rhsPayload: Any
+    ) -> Bool {
+        // Open the payload type before comparing so an out-of-line existential
+        // box does not become part of the value comparison.
+        func compare<Payload>(_ lhs: Payload) -> Bool {
+            guard let rhs = rhsPayload as? Payload else {
+                return false
+            }
+            return withUnsafePointer(to: lhs) { lhsPointer in
+                withUnsafePointer(to: rhs) { rhsPointer in
+                    compareLayoutValues(
+                        lhsPointer,
+                        rhsPointer,
+                        type: Payload.self,
+                        kind: _MetadataKind(Payload.self)
+                    )
+                }
+            }
+        }
+        return _openExistential(lhsPayload, do: compare)
+    }
+
+    private static func cStringsEqual(
+        _ lhs: UnsafePointer<CChar>,
+        _ rhs: UnsafePointer<CChar>
+    ) -> Bool {
+        var index = 0
+        while lhs[index] == rhs[index] {
+            if lhs[index] == 0 {
+                return true
+            }
+            index += 1
+        }
+        return false
     }
 
     private static func compareRawValues(

@@ -29,6 +29,25 @@ private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMut
 @_silgen_name("swift_reflectionMirror_recursiveChildOffset")
 private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
+private typealias _ReflectionNameFreeFunc = @convention(c) (
+    UnsafePointer<CChar>?
+) -> Void
+
+@_silgen_name("swift_reflectionMirror_count")
+private func _getChildCount<Value>(_: Value, type: Any.Type) -> Int
+
+@_silgen_name("swift_reflectionMirror_subscript")
+private func _getChild<Value>(
+    of: Value,
+    type: Any.Type,
+    index: Int,
+    outName: UnsafeMutablePointer<UnsafePointer<CChar>?>,
+    outFreeFunc: UnsafeMutablePointer<_ReflectionNameFreeFunc?>
+) -> Any
+
+@_silgen_name("swift_EnumCaseName")
+private func _getEnumCaseName<Value>(_: Value) -> UnsafePointer<CChar>?
+
 enum _MetadataKind: UInt, Sendable {
     case `class` = 0
     case `struct` = 0x200
@@ -50,6 +69,33 @@ enum _MetadataKind: UInt, Sendable {
     init(_ type: Any.Type) {
         self = _MetadataKind(rawValue: _getMetadataKind(type)) ?? .unknown
     }
+}
+
+struct _EachFieldMetadata: Sendable {
+    let kind: _MetadataKind
+    let isStrong: Bool
+    let isVar: Bool
+}
+
+func _enumCaseName<Value>(of value: Value) -> UnsafePointer<CChar>? {
+    _getEnumCaseName(value)
+}
+
+func _enumPayload<Value>(of value: Value) -> Any? {
+    guard _getChildCount(value, type: Value.self) == 1 else {
+        return nil
+    }
+    var name: UnsafePointer<CChar>?
+    var freeName: _ReflectionNameFreeFunc?
+    let payload = _getChild(
+        of: value,
+        type: Value.self,
+        index: 0,
+        outName: &name,
+        outFreeFunc: &freeName
+    )
+    freeName?(name)
+    return payload
 }
 
 struct _EachFieldOptions: OptionSet, Sendable {
@@ -115,6 +161,49 @@ func _forEachField(
             }
         } else {
             if !body("", offset, childType, kind) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+/// Visits each stored field and includes its runtime kind and storage flags.
+/// Returning false stops traversal.
+@discardableResult
+func _forEachFieldWithMetadata(
+    of type: Any.Type,
+    options: _EachFieldOptions = [],
+    body: (
+        UnsafePointer<CChar>,
+        Int,
+        Any.Type,
+        _EachFieldMetadata
+    ) -> Bool
+) -> Bool {
+    if _isClassType(type) != options.contains(.classType) {
+        return false
+    }
+
+    let numChildren = _getRecursiveChildCount(type)
+    for i in 0..<numChildren {
+        let offset = _getChildOffset(type, index: i)
+
+        var field = _FieldReflectionMetadata()
+        let childType = _getChildMetadata(type, index: i, fieldMetadata: &field)
+        defer { field.freeFunc?(field.name) }
+        let metadata = _EachFieldMetadata(
+            kind: _MetadataKind(childType),
+            isStrong: field.isStrong,
+            isVar: field.isVar
+        )
+
+        if let name = field.name {
+            if !body(name, offset, childType, metadata) {
+                return false
+            }
+        } else {
+            if !body("", offset, childType, metadata) {
                 return false
             }
         }

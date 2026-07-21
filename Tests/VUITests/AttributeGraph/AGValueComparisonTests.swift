@@ -182,6 +182,96 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testLayoutComparisonProjectsActiveEnumPayloads() {
+        let firstLongString = String(repeating: "a", count: 64)
+        let secondLongString = Array(repeating: "a", count: 64).joined()
+
+        for rawValue: UInt32 in [2, 0x102] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(1, .end),
+                    IndirectComparisonPayload.node(1, .end),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(1, .end),
+                    IndirectComparisonPayload.node(2, .end),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    StringComparisonPayload.value(firstLongString),
+                    StringComparisonPayload.value(secondLongString),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    Optional(firstLongString),
+                    Optional(secondLongString),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    LargeComparisonPayload.value(1, 2, 3, 5),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(1, .end),
+                    IndirectComparisonPayload.node(1, .end),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    StringComparisonPayload.value(firstLongString),
+                    StringComparisonPayload.value(secondLongString),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    Optional(firstLongString),
+                    Optional(secondLongString),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    LargeComparisonPayload.value(1, 2, 3, 4),
+                    LargeComparisonPayload.value(1, 2, 3, 5),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testTypedNodeStorageOwnsAndReleasesReferenceValues() {
         var first: ComparisonReference? = ComparisonReference(1)
         weak let weakFirst = first
@@ -246,6 +336,19 @@ final class AGValueComparisonTests: XCTestCase {
 private enum ComparisonPayload {
     case empty
     case payload(UInt64)
+}
+
+private indirect enum IndirectComparisonPayload {
+    case node(Int, IndirectComparisonPayload)
+    case end
+}
+
+private enum StringComparisonPayload {
+    case value(String)
+}
+
+private enum LargeComparisonPayload {
+    case value(UInt64, UInt64, UInt64, UInt64)
 }
 
 private final class ComparisonReference {

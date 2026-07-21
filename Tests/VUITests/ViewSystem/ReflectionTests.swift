@@ -73,6 +73,21 @@ final class ReflectionTests: XCTestCase {
         XCTAssertTrue(completed)
         assertNames(names, equal: ["value"])
     }
+
+    func testMetadataTraversalPreservesReferenceStorageFlags() {
+        var metadata: [_EachFieldMetadata] = []
+        let completed = _forEachFieldWithMetadata(
+            of: ReflectionReferencePayload.self
+        ) { _, _, _, fieldMetadata in
+            metadata.append(fieldMetadata)
+            return true
+        }
+
+        XCTAssertTrue(completed)
+        XCTAssertEqual(metadata.map(\.isStrong), [true, false, false])
+        XCTAssertEqual(metadata.map(\.isVar), [true, true, true])
+        XCTAssertEqual(metadata.map(\.kind), [.class, .optional, .class])
+    }
 }
 
 private struct ReflectionPayload {
@@ -82,4 +97,10 @@ private struct ReflectionPayload {
 
 private final class ReflectionObject {
     var value: Int = 0
+}
+
+private struct ReflectionReferencePayload {
+    var strong: ReflectionObject
+    weak var weak: ReflectionObject?
+    unowned var unowned: ReflectionObject
 }
