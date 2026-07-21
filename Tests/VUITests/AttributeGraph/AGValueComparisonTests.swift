@@ -293,6 +293,39 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testRecursiveEnumComparisonUsesPublishedLayoutResult() {
+        for rawValue: UInt32 in [2, 0x102, 0x202, 0x302] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(1, .node(2, .end)),
+                    IndirectComparisonPayload.node(1, .node(2, .end)),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(
+                        1,
+                        .node(2, .node(3, .end))
+                    ),
+                    IndirectComparisonPayload.node(
+                        1,
+                        .node(2, .node(3, .end))
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    IndirectComparisonPayload.node(1, .node(2, .end)),
+                    IndirectComparisonPayload.node(1, .node(3, .end)),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testLayoutComparisonProjectsOutOfLineExistentialPayloads() {
         let reference = ComparisonReference(1)
         let alias = reference
