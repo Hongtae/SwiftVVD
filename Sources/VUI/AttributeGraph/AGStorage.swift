@@ -1471,6 +1471,15 @@ extension _AGGraph {
 
     @inline(__always)
     private func finishNodeEvaluation(index: Int) {
+        if _AGGraph.currentUpdateContext?.isCancelled == true {
+            // A cancelled body may still publish a cached value, but its
+            // evaluation is not final. Preserve input-change state and force
+            // the next pull to retry the body before downstream work resumes.
+            slots[index].node!.needsEvaluation = true
+            slots[index].node!.forceEvaluation = true
+            slots[index].node!.isEvaluating = false
+            return
+        }
         slots[index].node!.needsEvaluation = false
         slots[index].node!.forceEvaluation = false
         slots[index].node!.inputsChanged = false
