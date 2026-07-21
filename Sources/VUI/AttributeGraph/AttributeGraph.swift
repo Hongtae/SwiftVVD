@@ -214,8 +214,16 @@ func _AGGraphAnyInputsChanged() -> Bool {
     _AGGraph._currentStatefulInputsChanged()
 }
 
+func _AGGraphCancelUpdate() {
+    _AGGraph.cancelCurrentUpdate()
+}
+
+func _AGGraphCancelUpdateIfNeeded() -> Bool {
+    _AGGraph.cancelCurrentUpdateIfNeeded()
+}
+
 func _AGGraphUpdateWasCancelled() -> Bool {
-    false
+    _AGGraph.currentUpdateWasCancelled()
 }
 
 func _AGGraphGetAttributeGraph(_ attribute: AGAttribute) -> AGGraphRef {

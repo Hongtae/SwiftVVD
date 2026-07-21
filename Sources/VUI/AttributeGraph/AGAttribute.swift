@@ -9,10 +9,6 @@ import Foundation
 
 // MARK: - Core Node Types
 
-#if DEBUG
-private final class AGAttributeInvalidOwner {}
-#endif
-
 /// The raw identifier for an AG node: an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomStringConvertible, Sendable {
     private static let invalidRawValue = UInt32.max
@@ -28,59 +24,9 @@ struct AGAttribute: Hashable, CustomStringConvertible, Sendable {
     /// The generation seed of the slot when this strong handle was created.
     /// This catches stale strong handles when a removed slot is reused for a new node.
     private let _seedAtCreation: UInt32
-    var _debugSeedAtCreation: UInt32 { _seedAtCreation }
-    func _debugValidate() {
-        guard !isInvalid else {
-            fatalError("Invalid AGAttribute sentinel cannot be used as a graph node.")
-        }
-        guard let graph = _AGGraph.current else {
-            fatalError("AGAttribute(\(rawValue)) accessed outside an active _AGGraph context.")
-        }
-        if _owningGraphID != ObjectIdentifier(graph) {
-            fatalError(
-                "AGAttribute(\(rawValue)) accessed from a different _AGGraph than the one it was created in " +
-                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
-                "Use the owning graph's cachedValue(for:) for cross-graph reads."
-            )
-        }
-        guard graph._isValid(index: rawValue, seed: _seedAtCreation) else {
-            let state = graph._debugSlotStateDescription(at: rawValue)
-            fatalError(
-                "AGAttribute(\(rawValue)) is stale or invalid in its owning _AGGraph " +
-                "(createdSeed=\(_seedAtCreation), \(state))."
-            )
-        }
-    }
-    init(rawValue: UInt32, owningGraph: ObjectIdentifier, seed: UInt32) {
-        self.rawValue = rawValue
-        self._owningGraphID = owningGraph
-        self._seedAtCreation = seed
-    }
+#endif
 
-    private init(uncheckedRawValue: UInt32) {
-        self.rawValue = uncheckedRawValue
-        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
-        self._seedAtCreation = 0
-    }
-
-    // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
-    // (e.g. _AGChangeSet) partition by _AGGraph so this operator never runs across
-    // graphs. The assert below is a tripwire if that invariant is ever broken.
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        if lhs.isInvalid || rhs.isInvalid {
-            return lhs.rawValue == rhs.rawValue
-        }
-        assert(lhs._owningGraphID == rhs._owningGraphID,
-               "Comparing AGAttributes from different graphs.")
-        return lhs.rawValue == rhs.rawValue
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(rawValue)
-    }
-#else
-    func _debugValidate() {}
-
+#if !DEBUG
     private init(uncheckedRawValue: UInt32) {
         self.rawValue = uncheckedRawValue
     }
@@ -217,17 +163,6 @@ struct AGWeakAttribute: Hashable, CustomStringConvertible, Sendable {
 
 #if DEBUG
     private let _owningGraphID: ObjectIdentifier
-    init(identifier: UInt32, seed: UInt32, owningGraph: ObjectIdentifier) {
-        self.identifier = identifier
-        self.seed = seed
-        self._owningGraphID = owningGraph
-    }
-
-    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
-        self.identifier = uncheckedIdentifier
-        self.seed = seed
-        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
-    }
 #else
     init(identifier: UInt32, seed: UInt32) {
         self.identifier = identifier
@@ -346,10 +281,6 @@ struct AGWeakAttribute: Hashable, CustomStringConvertible, Sendable {
 @dynamicMemberLookup
 struct Attribute<Value>: Hashable, CustomStringConvertible, @unchecked Sendable {
     var identifier: AGAttribute
-
-    fileprivate func _debugValidate() {
-        identifier._debugValidate()
-    }
 
     init(identifier: AGAttribute) {
         self.identifier = identifier
@@ -816,3 +747,92 @@ struct OptionalAttribute<Value>: Hashable, CustomStringConvertible {
 
     var description: String { base.description }
 }
+
+#if DEBUG
+private final class AGAttributeInvalidOwner {}
+
+extension AGAttribute {
+    var _debugSeedAtCreation: UInt32 { _seedAtCreation }
+
+    func _debugValidate() {
+        guard !isInvalid else {
+            fatalError("Invalid AGAttribute sentinel cannot be used as a graph node.")
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError("AGAttribute(\(rawValue)) accessed outside an active _AGGraph context.")
+        }
+        if _owningGraphID != ObjectIdentifier(graph) {
+            fatalError(
+                "AGAttribute(\(rawValue)) accessed from a different _AGGraph than the one it was created in " +
+                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
+                "Use the owning graph's cachedValue(for:) for cross-graph reads."
+            )
+        }
+        guard graph._isValid(index: rawValue, seed: _seedAtCreation) else {
+            let state = graph._debugSlotStateDescription(at: rawValue)
+            fatalError(
+                "AGAttribute(\(rawValue)) is stale or invalid in its owning _AGGraph " +
+                "(createdSeed=\(_seedAtCreation), \(state))."
+            )
+        }
+    }
+
+    init(rawValue: UInt32, owningGraph: ObjectIdentifier, seed: UInt32) {
+        self.rawValue = rawValue
+        self._owningGraphID = owningGraph
+        self._seedAtCreation = seed
+    }
+
+    private init(uncheckedRawValue: UInt32) {
+        self.rawValue = uncheckedRawValue
+        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
+        self._seedAtCreation = 0
+    }
+
+    // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
+    // (e.g. _AGChangeSet) partition by _AGGraph so this operator never runs across
+    // graphs. The assert below is a tripwire if that invariant is ever broken.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        if lhs.isInvalid || rhs.isInvalid {
+            return lhs.rawValue == rhs.rawValue
+        }
+        assert(
+            lhs._owningGraphID == rhs._owningGraphID,
+            "Comparing AGAttributes from different graphs."
+        )
+        return lhs.rawValue == rhs.rawValue
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(rawValue)
+    }
+}
+
+extension AGWeakAttribute {
+    init(identifier: UInt32, seed: UInt32, owningGraph: ObjectIdentifier) {
+        self.identifier = identifier
+        self.seed = seed
+        self._owningGraphID = owningGraph
+    }
+
+    private init(uncheckedIdentifier: UInt32, seed: UInt32) {
+        self.identifier = uncheckedIdentifier
+        self.seed = seed
+        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
+    }
+}
+
+extension Attribute {
+    fileprivate func _debugValidate() {
+        identifier._debugValidate()
+    }
+}
+#else
+extension AGAttribute {
+    func _debugValidate() {}
+}
+
+extension Attribute {
+    fileprivate func _debugValidate() {}
+}
+#endif

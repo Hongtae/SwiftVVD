@@ -9,6 +9,15 @@ import Foundation
 import Synchronization
 import VVD
 
+final class _AGUpdateContext {
+    let predecessor: _AGUpdateContext?
+    var isCancelled = false
+
+    init(predecessor: _AGUpdateContext?) {
+        self.predecessor = predecessor
+    }
+}
+
 // Single-threaded design: no internal synchronization.
 // The caller is responsible for ensuring that all operations on a given
 // _AGGraph instance occur on a single thread (or equivalent serial context).
@@ -289,6 +298,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     private static let changeSetStorage = _AGThreadLocal<ChangeSet?>(nil)
     private static let currentlyEvaluatingNodeStorage = _AGThreadLocal<AGAttribute?>(nil)
     private static let currentlyUpdatingGraphsStorage = _AGThreadLocal<Set<ObjectIdentifier>?>(nil)
+    private static let currentUpdateContextStorage = _AGThreadLocal<_AGUpdateContext?>(nil)
 
     static var changeSet: ChangeSet? {
         changeSetStorage.value
@@ -300,6 +310,10 @@ final class _AGGraph: Equatable, @unchecked Sendable {
 
     static var currentlyUpdatingGraphs: Set<ObjectIdentifier>? {
         currentlyUpdatingGraphsStorage.value
+    }
+
+    static var currentUpdateContext: _AGUpdateContext? {
+        currentUpdateContextStorage.value
     }
 
     init() {}
@@ -353,6 +367,41 @@ extension _AGGraph {
         try currentlyUpdatingGraphsStorage.withValue(graphs) {
             try body()
         }
+    }
+
+    static func withCurrentUpdateContext<R>(
+        _ context: _AGUpdateContext,
+        _ body: () throws -> R
+    ) rethrows -> R {
+        try currentUpdateContextStorage.withValue(context) {
+            try body()
+        }
+    }
+
+    static func cancelCurrentUpdate() {
+        guard var context = currentUpdateContext else {
+            fatalError("cancelCurrentUpdate called outside of an attribute update.")
+        }
+        while true {
+            context.isCancelled = true
+            guard let predecessor = context.predecessor else { break }
+            context = predecessor
+        }
+    }
+
+    static func currentUpdateWasCancelled() -> Bool {
+        guard let context = currentUpdateContext else {
+            fatalError("currentUpdateWasCancelled called outside of an attribute update.")
+        }
+        return context.isCancelled
+    }
+
+    static func cancelCurrentUpdateIfNeeded() -> Bool {
+        guard let context = currentUpdateContext else {
+            fatalError("cancelCurrentUpdateIfNeeded called outside of an attribute update.")
+        }
+        // Automatic deadline cancellation is not configured by this graph.
+        return context.isCancelled
     }
 
 }

@@ -1110,21 +1110,26 @@ extension _AGGraph {
     private func updateNodeIfNeeded(_ rootID: AGAttribute) {
         let traversal = beginUpdateTraversal()
         let workList = _AGUpdateWorkList(root: rootID)
+        let context = _AGUpdateContext(
+            predecessor: _AGGraph.currentUpdateContext
+        )
 
-        while let frame = workList.popLast() {
-            switch nextUpdateAction(
-                for: frame,
-                traversal: traversal,
-                workList: workList
-            ) {
-            case .none:
-                continue
-            case .evaluate(let id, let index):
-                evaluateNodeForUpdate(id)
-                completeUpdateTraversal(index: index, traversal: traversal)
-            case .finish(let id, let index):
-                finishEvaluationWithoutUpdating(id)
-                completeUpdateTraversal(index: index, traversal: traversal)
+        _AGGraph.withCurrentUpdateContext(context) {
+            while !context.isCancelled, let frame = workList.popLast() {
+                switch nextUpdateAction(
+                    for: frame,
+                    traversal: traversal,
+                    workList: workList
+                ) {
+                case .none:
+                    continue
+                case .evaluate(let id, let index):
+                    evaluateNodeForUpdate(id)
+                    completeUpdateTraversal(index: index, traversal: traversal)
+                case .finish(let id, let index):
+                    finishEvaluationWithoutUpdating(id)
+                    completeUpdateTraversal(index: index, traversal: traversal)
+                }
             }
         }
     }

@@ -1,0 +1,143 @@
+import XCTest
+@testable import VUI
+
+final class AGUpdateCancellationTests: XCTestCase {
+    func testOrdinaryStatefulUpdateIsNotCancelled() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        let recorder = AGCancellationRecorder()
+
+        context.withCurrent {
+            let source = graph.makeInput(value: 7)
+            let output = graph.makeStatefulRule(
+                AGCancelingRule(source: source, recorder: recorder)
+            )
+
+            XCTAssertEqual(output.value, 7)
+        }
+
+        XCTAssertEqual(recorder.beforeCancellation, [false])
+        XCTAssertEqual(recorder.afterCancellation, [false])
+        XCTAssertEqual(recorder.cancelIfNeeded, [false])
+    }
+
+    func testCancellationStateIsVisibleOnlyDuringTheCurrentUpdate() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        let recorder = AGCancellationRecorder()
+
+        context.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let output = graph.makeStatefulRule(
+                AGCancelingRule(source: source, recorder: recorder)
+            )
+
+            recorder.shouldCancel = true
+            XCTAssertEqual(output.value, 1)
+
+            source.setValue(2)
+            XCTAssertEqual(output.value, 2)
+        }
+
+        XCTAssertEqual(recorder.beforeCancellation, [false, false])
+        XCTAssertEqual(recorder.afterCancellation, [true, false])
+        XCTAssertEqual(recorder.cancelIfNeeded, [true, false])
+    }
+
+    func testEstablishedChildCancellationDefersParentPublicationUntilRetry() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        let recorder = AGCancellationRecorder()
+
+        context.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let child = graph.makeStatefulRule(
+                AGCancelingRule(source: source, recorder: recorder)
+            )
+            let parent = graph.makeRule {
+                recorder.parentEvaluationCount += 1
+                return child.value * 10
+            }
+
+            XCTAssertEqual(parent.value, 10)
+            XCTAssertEqual(recorder.parentEvaluationCount, 1)
+
+            recorder.shouldCancel = true
+            source.setValue(2)
+
+            XCTAssertEqual(parent.value, 10)
+            XCTAssertEqual(recorder.parentEvaluationCount, 1)
+            XCTAssertEqual(child.value, 2)
+
+            XCTAssertEqual(parent.value, 20)
+            XCTAssertEqual(recorder.parentEvaluationCount, 2)
+        }
+
+        XCTAssertEqual(recorder.afterCancellation, [false, true])
+    }
+
+    func testNestedChildCancellationPropagatesToTheOuterUpdateContext() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        let recorder = AGCancellationRecorder()
+
+        context.withCurrent {
+            let source = graph.makeInput(value: 3)
+            let child = graph.makeStatefulRule(
+                AGCancelingRule(source: source, recorder: recorder)
+            )
+            let parent = graph.makeStatefulRule(
+                AGNestedCancellationParentRule(
+                    child: child,
+                    recorder: recorder
+                )
+            )
+
+            recorder.shouldCancel = true
+            XCTAssertEqual(parent.value, 30)
+        }
+
+        XCTAssertEqual(recorder.outerCancellation, [true])
+    }
+}
+
+private final class AGCancellationRecorder {
+    var shouldCancel = false
+    var beforeCancellation: [Bool] = []
+    var afterCancellation: [Bool] = []
+    var cancelIfNeeded: [Bool] = []
+    var outerCancellation: [Bool] = []
+    var parentEvaluationCount = 0
+}
+
+private struct AGCancelingRule: StatefulRule {
+    typealias Value = Int
+
+    var source: Attribute<Int>
+    var recorder: AGCancellationRecorder
+
+    mutating func updateValue() {
+        let newValue = source.value
+        recorder.beforeCancellation.append(updateWasCancelled)
+        if recorder.shouldCancel {
+            recorder.shouldCancel = false
+            _AGGraphCancelUpdate()
+        }
+        recorder.afterCancellation.append(updateWasCancelled)
+        recorder.cancelIfNeeded.append(_AGGraphCancelUpdateIfNeeded())
+        value = newValue
+    }
+}
+
+private struct AGNestedCancellationParentRule: StatefulRule {
+    typealias Value = Int
+
+    var child: Attribute<Int>
+    var recorder: AGCancellationRecorder
+
+    mutating func updateValue() {
+        let childValue = child.value
+        recorder.outerCancellation.append(updateWasCancelled)
+        value = childValue * 10
+    }
+}
