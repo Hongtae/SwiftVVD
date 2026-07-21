@@ -99,8 +99,9 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     }
 
     struct Node {
-        var value: Any?
-        var valuesEqual: (Any, Any) -> Bool
+        var value: (any _AnyAGValueStorage)?
+        var makeValueStorage: (Any) -> any _AnyAGValueStorage
+        var valuesEqual: (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool
         var flags: AGAttributeFlags = []
         var transaction: Transaction? = nil
         var kind: NodeKind
@@ -354,18 +355,6 @@ extension _AGGraph {
         }
     }
 
-    static func compareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOptions) -> Bool {
-        _ = options
-        if let lhs = lhs as? String,
-           let rhs = rhs as? String {
-            return lhs == rhs
-        }
-        return withUnsafeBytes(of: lhs) { lhsBytes in
-            withUnsafeBytes(of: rhs) { rhsBytes in
-                lhsBytes.elementsEqual(rhsBytes)
-            }
-        }
-    }
 }
 
 #if DEBUG

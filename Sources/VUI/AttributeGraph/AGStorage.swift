@@ -37,14 +37,44 @@ private enum _AGUpdateAction {
 }
 
 extension _AGGraph {
-    private static func valueComparator<Value>(for type: Value.Type) -> (Any, Any) -> Bool {
-        { lhs, rhs in
-            guard let lhs = lhs as? Value,
-                  let rhs = rhs as? Value else {
+    private static func valueStorageFactory<Value>(
+        for type: Value.Type
+    ) -> (Any) -> any _AnyAGValueStorage {
+        { value in
+            guard let value = value as? Value else {
+                fatalError("Attribute value type changed after node creation.")
+            }
+            return _AGValueStorage(value)
+        }
+    }
+
+    private static func valueComparator<Value>(
+        for type: Value.Type,
+        mode: AGComparisonMode = AGComparisonMode(rawValue: 3)
+    ) -> (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool {
+        let options = AGComparisonOptions(mode: mode)
+        return { lhs, rhs in
+            guard let lhs = lhs as? _AGValueStorage<Value>,
+                  let rhs = rhs as? _AGValueStorage<Value> else {
                 return false
             }
-            return compareValues(lhs, rhs, options: AGComparisonOptions(rawValue: 3))
+            return compareStoredValues(lhs.pointer, rhs.pointer, options: options)
         }
+    }
+
+    private func makeValueStorage<Value>(
+        _ value: Value,
+        for id: AGAttribute
+    ) -> any _AnyAGValueStorage {
+        let expectedType = attributeInfos[id.rawValue]?.valueType
+        if let expectedType,
+           ObjectIdentifier(expectedType) == ObjectIdentifier(Value.self) {
+            return _AGValueStorage(value)
+        }
+        guard let node = slots[Int(id.rawValue)].node else {
+            fatalError("makeValueStorage called on AGAttribute @\(id.rawValue) that does not exist.")
+        }
+        return node.makeValueStorage(value)
     }
 
     @discardableResult
@@ -53,8 +83,9 @@ extension _AGGraph {
         guard let node = slots[index].node else {
             fatalError("publishComputedValue called on AGAttribute @\(id.rawValue) that does not exist.")
         }
-        let changed = node.value.map { !node.valuesEqual($0, value) } ?? true
-        slots[index].node!.value = value
+        let newValue = makeValueStorage(value, for: id)
+        let changed = node.value.map { !node.valuesEqual($0, newValue) } ?? true
+        slots[index].node!.value = newValue
         if changed {
             slots[index].node!.valueVersion &+= 1
         }
@@ -243,7 +274,7 @@ extension _AGGraph {
     static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
         guard let graph = _AGGraph.current,
               let nodeID = _AGGraph.currentlyEvaluatingNode else { return nil }
-        return graph.slots[Int(nodeID.rawValue)].node?.value as? V
+        return graph.slots[Int(nodeID.rawValue)].node?.value?.anyValue as? V
     }
 
     /// Reports whether the current StatefulRule evaluation was caused by an
@@ -326,8 +357,12 @@ extension _AGGraph {
             update: { _, _ in }
         )
         slots[Int(index)].node = Node(
-            value: value,
-            valuesEqual: Self.valueComparator(for: Value.self),
+            value: _AGValueStorage(value),
+            makeValueStorage: Self.valueStorageFactory(for: Value.self),
+            valuesEqual: Self.valueComparator(
+                for: Value.self,
+                mode: _External.comparisonMode
+            ),
             kind: .input,
             needsEvaluation: false
         )
@@ -348,7 +383,11 @@ extension _AGGraph {
         )
         slots[Int(index)].node = Node(
             value: nil,
-            valuesEqual: Self.valueComparator(for: Value.self),
+            makeValueStorage: Self.valueStorageFactory(for: Value.self),
+            valuesEqual: Self.valueComparator(
+                for: Value.self,
+                mode: _External.comparisonMode
+            ),
             kind: .input,
             needsEvaluation: false
         )
@@ -364,6 +403,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
             kind: .rule(rule, isSideEffect: false)
         )
@@ -443,8 +483,12 @@ extension _AGGraph {
         let index = allocateSlot()
         let box = _RuleBox(rule)
         slots[Int(index)].node = Node(
-            value: initialValue,
-            valuesEqual: Self.valueComparator(for: R.Value.self),
+            value: initialValue.map(_AGValueStorage.init),
+            makeValueStorage: Self.valueStorageFactory(for: R.Value.self),
+            valuesEqual: Self.valueComparator(
+                for: R.Value.self,
+                mode: R.comparisonMode
+            ),
             kind: .ruleBody(box),
             forceEvaluation: initialValue != nil
         )
@@ -468,8 +512,12 @@ extension _AGGraph {
             update: update
         )
         slots[Int(index)].node = Node(
-            value: value,
-            valuesEqual: Self.valueComparator(for: Value.self),
+            value: value.map(_AGValueStorage.init),
+            makeValueStorage: Self.valueStorageFactory(for: Value.self),
+            valuesEqual: Self.valueComparator(
+                for: Value.self,
+                mode: Body.comparisonMode
+            ),
             kind: .lowLevelBody(box),
             forceEvaluation: value != nil
         )
@@ -565,8 +613,12 @@ extension _AGGraph {
         let index = allocateSlot()
         let box = _StatefulBox(rule)
         slots[Int(index)].node = Node(
-            value: initialValue,
-            valuesEqual: Self.valueComparator(for: R.Value.self),
+            value: initialValue.map(_AGValueStorage.init),
+            makeValueStorage: Self.valueStorageFactory(for: R.Value.self),
+            valuesEqual: Self.valueComparator(
+                for: R.Value.self,
+                mode: R.comparisonMode
+            ),
             kind: .stateful(box),
             forceEvaluation: initialValue != nil
         )
@@ -616,6 +668,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
             kind: .rule(rule, isSideEffect: true)
         )
@@ -690,7 +743,7 @@ extension _AGGraph {
         guard let cached = node.value else {
             fatalError("cachedValue: node @\(id.rawValue) has no cached value; source graph must evaluate first.")
         }
-        return cached
+        return cached.anyValue
     }
 
     func transaction(for id: AGAttribute) -> Transaction? {
@@ -776,6 +829,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
             kind: .crossGraphRef(
                 sourceAttr: source.identifier,
@@ -933,7 +987,7 @@ extension _AGGraph {
         guard let value = slots[Int(id.rawValue)].node?.value else {
             fatalError("AGAttribute @\(id.rawValue) has no value after evaluation.")
         }
-        return value
+        return value.anyValue
     }
 
     @discardableResult
@@ -943,11 +997,12 @@ extension _AGGraph {
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
-        if let oldValue = slots[index].node!.value as? Value,
-           _AGGraph.compareValues(oldValue, newValue, options: AGComparisonOptions(rawValue: 3)) {
+        let storedValue = makeValueStorage(newValue, for: attribute.identifier)
+        if let oldValue = slots[index].node!.value,
+           slots[index].node!.valuesEqual(oldValue, storedValue) {
             return false
         }
-        slots[index].node!.value = newValue
+        slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
         Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
@@ -978,11 +1033,12 @@ extension _AGGraph {
         guard let node = slots[index].node else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
+        let storedValue = makeValueStorage(newValue, for: attribute.identifier)
         if let oldValue = node.value,
-           node.valuesEqual(oldValue, newValue) {
+           node.valuesEqual(oldValue, storedValue) {
             return false
         }
-        slots[index].node!.value = newValue
+        slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
         Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
@@ -1676,7 +1732,8 @@ extension _AGGraph {
         // needsEvaluation: false because default value is already stored. Evaluation is triggered
         // only after setIndirectTarget is called (which calls markNeedsEvaluation).
         slots[Int(index)].node = Node(
-            value: defaultValue,
+            value: _AGValueStorage(defaultValue),
+            makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
             kind: .indirect(target: nil, defaultValue: defaultValue),
             needsEvaluation: false
@@ -1692,6 +1749,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
             kind: .indirect(target: source.identifier, defaultValue: nil)
         )
@@ -1781,6 +1839,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: U.self),
             valuesEqual: Self.valueComparator(for: U.self),
             kind: .keyPath(parent: parent.identifier, kp: keyPath)
         )
@@ -1809,6 +1868,7 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: Self.valueStorageFactory(for: U.self),
             valuesEqual: Self.valueComparator(for: U.self),
             kind: .offset(
                 parent: parent.identifier,
@@ -1843,6 +1903,9 @@ extension _AGGraph {
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
+            makeValueStorage: { _ in
+                fatalError("Raw offset attributes do not store readable values.")
+            },
             valuesEqual: { _, _ in false },
             kind: .rawOffset(parent: parent, byteOffset: byteOffset)
         )
@@ -2011,7 +2074,7 @@ extension _AGGraph {
             seedBeforeRemoval: seedBeforeRemoval,
             seedAfterRemoval: seedBeforeRemoval &+ 1,
             kindDescription: debugDescription(for: node.kind),
-            valueTypeDescription: debugValueTypeDescription(for: node.value),
+            valueTypeDescription: debugValueTypeDescription(for: node.value?.anyValue),
             inputs: node.inputs,
             outputs: node.outputs,
             staticInputs: node.staticInputs,
