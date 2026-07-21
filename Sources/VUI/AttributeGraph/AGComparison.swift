@@ -29,8 +29,17 @@ private func _isOpaqueExistentialContainer(
     _ type: Any.Type,
     kind: _MetadataKind
 ) -> Bool {
-    kind == .existential
-        && _AGGraph.valueSize(of: type) >= 4 * MemoryLayout<UInt>.size
+    guard kind == .existential,
+          _AGGraph.valueSize(of: type) >= 4 * MemoryLayout<UInt>.size else {
+        return false
+    }
+    let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+    let flags = metadata.load(
+        fromByteOffset: MemoryLayout<UInt>.size,
+        as: UInt32.self
+    )
+    // The high metadata flag is set for non-class-constrained existentials.
+    return flags & (UInt32(1) << 31) != 0
 }
 
 protocol _AnyAGValueStorage: AnyObject {

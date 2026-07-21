@@ -457,6 +457,110 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testProtocolCompositionUsesItsDeclaredContainerRepresentation() {
+        let reference = ComparisonReference(1)
+        let alias = reference
+        let other = ComparisonReference(1)
+
+        for rawValue: UInt32 in [2, 0x102] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    ProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    EquatableProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    EquatableProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ProtocolCompositionPayload(value: reference),
+                    ProtocolCompositionPayload(value: alias),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ProtocolCompositionPayload(value: reference),
+                    ProtocolCompositionPayload(value: other),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    ProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    EquatableProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    EquatableProtocolCompositionPayload(
+                        value: LargeExistentialValue(a: 1, b: 2, c: 3, d: 4)
+                    ),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [2, 3, 0x102, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ThreeWitnessClassCompositionPayload(value: reference),
+                    ThreeWitnessClassCompositionPayload(value: alias),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ThreeWitnessClassCompositionPayload(value: reference),
+                    ThreeWitnessClassCompositionPayload(value: other),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    FourWitnessClassCompositionPayload(value: reference),
+                    FourWitnessClassCompositionPayload(value: alias),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    FourWitnessClassCompositionPayload(value: reference),
+                    FourWitnessClassCompositionPayload(value: other),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testTypedNodeStorageOwnsAndReleasesReferenceValues() {
         var first: ComparisonReference? = ComparisonReference(1)
         weak let weakFirst = first
@@ -536,7 +640,17 @@ private enum LargeComparisonPayload {
     case value(UInt64, UInt64, UInt64, UInt64)
 }
 
-private final class ComparisonReference {
+private protocol ComparisonMarkerA {}
+private protocol ComparisonMarkerB {}
+private protocol ComparisonMarkerC {}
+private protocol ComparisonClassMarker: AnyObject {}
+
+private final class ComparisonReference:
+    ComparisonMarkerA,
+    ComparisonMarkerB,
+    ComparisonMarkerC,
+    ComparisonClassMarker
+{
     var value: Int
 
     init(_ value: Int) {
@@ -560,6 +674,23 @@ private struct ExistentialComparisonPayload {
     var value: any Equatable
 }
 
+private struct ProtocolCompositionPayload {
+    var value: any ComparisonMarkerA & ComparisonMarkerB
+}
+
+private struct EquatableProtocolCompositionPayload {
+    var value: any Equatable & ComparisonMarkerA & ComparisonMarkerB
+}
+
+private struct ThreeWitnessClassCompositionPayload {
+    var value: any ComparisonClassMarker & ComparisonMarkerA & ComparisonMarkerB
+}
+
+private struct FourWitnessClassCompositionPayload {
+    var value: any ComparisonClassMarker & ComparisonMarkerA & ComparisonMarkerB
+        & ComparisonMarkerC
+}
+
 private struct AnyExistentialComparisonPayload {
     var value: Any
 }
@@ -568,7 +699,11 @@ private struct AnyObjectComparisonPayload {
     var value: AnyObject
 }
 
-private struct LargeExistentialValue: Equatable {
+private struct LargeExistentialValue:
+    ComparisonMarkerA,
+    ComparisonMarkerB,
+    Equatable
+{
     var a: UInt64
     var b: UInt64
     var c: UInt64
