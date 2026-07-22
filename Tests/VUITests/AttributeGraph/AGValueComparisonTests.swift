@@ -727,6 +727,113 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testSpecialExistentialsUseTheirDeclaredRepresentation() {
+        let sharedError: any Error = ComparisonError(code: 7)
+        let sharedMarkedError: any Error & ComparisonErrorMarker =
+            MarkedComparisonError(code: 7)
+        let sharedReference = DerivedComparisonReference(7)
+        let distinctReference = DerivedComparisonReference(7)
+
+        for rawValue: UInt32 in [2, 0x102, 0x202, 0x302] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ErrorComparisonPayload(value: sharedError),
+                    ErrorComparisonPayload(value: sharedError),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ErrorComparisonPayload(value: ComparisonError(code: 7)),
+                    ErrorComparisonPayload(value: ComparisonError(code: 7)),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ErrorComparisonPayload(value: sharedError),
+                    ErrorComparisonPayload(value: sharedError),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ErrorComparisonPayload(value: ComparisonError(code: 7)),
+                    ErrorComparisonPayload(value: ComparisonError(code: 7)),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [2, 0x102, 0x202, 0x302] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ErrorCompositionComparisonPayload(
+                        value: sharedMarkedError
+                    ),
+                    ErrorCompositionComparisonPayload(
+                        value: sharedMarkedError
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    ErrorCompositionComparisonPayload(
+                        value: MarkedComparisonError(code: 7)
+                    ),
+                    ErrorCompositionComparisonPayload(
+                        value: MarkedComparisonError(code: 7)
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    ErrorCompositionComparisonPayload(
+                        value: MarkedComparisonError(code: 7)
+                    ),
+                    ErrorCompositionComparisonPayload(
+                        value: MarkedComparisonError(code: 8)
+                    ),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [2, 3, 0x102, 0x103, 0x202, 0x302] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    SuperclassExistentialComparisonPayload(
+                        value: sharedReference
+                    ),
+                    SuperclassExistentialComparisonPayload(
+                        value: sharedReference
+                    ),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    SuperclassExistentialComparisonPayload(
+                        value: sharedReference
+                    ),
+                    SuperclassExistentialComparisonPayload(
+                        value: distinctReference
+                    ),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testTypedNodeStorageOwnsAndReleasesReferenceValues() {
         var first: ComparisonReference? = ComparisonReference(1)
         weak let weakFirst = first
@@ -888,6 +995,43 @@ private struct ClassParameterizedComparisonPayload {
 
 private struct MetatypeParameterizedComparisonPayload {
     var value: any ParameterizedComparisonProtocol<Int>.Type
+}
+
+private struct ComparisonError: Error {
+    var code: Int
+}
+
+private struct ErrorComparisonPayload {
+    var value: any Error
+}
+
+private protocol ComparisonErrorMarker {}
+
+private struct MarkedComparisonError: Error, ComparisonErrorMarker {
+    var code: Int
+}
+
+private struct ErrorCompositionComparisonPayload {
+    var value: any Error & ComparisonErrorMarker
+}
+
+private class ComparisonBaseReference {
+    var value: Int
+
+    init(_ value: Int) {
+        self.value = value
+    }
+}
+
+private protocol DerivedComparisonMarker: AnyObject {}
+
+private final class DerivedComparisonReference:
+    ComparisonBaseReference,
+    DerivedComparisonMarker
+{}
+
+private struct SuperclassExistentialComparisonPayload {
+    var value: any ComparisonBaseReference & DerivedComparisonMarker
 }
 
 private struct ParameterizedInlineComparisonValue:

@@ -78,7 +78,7 @@ extension _AGGraph {
     }
 
     @discardableResult
-    private func publishComputedValue<Value>(_ value: Value, for id: AGAttribute) -> Bool {
+    func publishComputedValue<Value>(_ value: Value, for id: AGAttribute) -> Bool {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else {
             fatalError("publishComputedValue called on AGAttribute @\(id.rawValue) that does not exist.")
@@ -401,11 +401,12 @@ extension _AGGraph {
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
+        let box = _RuleClosureBox(rule: rule, isSideEffect: false)
         slots[Int(index)].node = Node(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
-            kind: .rule(rule, isSideEffect: false)
+            kind: .rule(box)
         )
         registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -666,11 +667,12 @@ extension _AGGraph {
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
+        let box = _RuleClosureBox(rule: rule, isSideEffect: true)
         slots[Int(index)].node = Node(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
-            kind: .rule(rule, isSideEffect: true)
+            kind: .rule(box)
         )
         registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -1338,8 +1340,8 @@ extension _AGGraph {
         case .ruleBody(let box):
             evaluateRuleBodyNode(id, index: index, box: box)
 
-        case .rule(let rule, _):
-            evaluateRuleNode(id, index: index, rule: rule)
+        case .rule(let box):
+            evaluateRuleNode(id, index: index, box: box)
 
         case .indirect(let target, let defaultValue):
             evaluateIndirectNode(
@@ -1436,7 +1438,7 @@ extension _AGGraph {
         box: any _AnyRuleBox
     ) {
         clearInputs(for: id)
-        publishComputedValue(box.callUpdate(), for: id)
+        box.publishValue(to: self, for: id)
         finishNodeEvaluation(index: index)
     }
 
@@ -1444,10 +1446,10 @@ extension _AGGraph {
     private func evaluateRuleNode(
         _ id: AGAttribute,
         index: Int,
-        rule: () -> Any
+        box: any _AnyRuleClosureBox
     ) {
         clearInputs(for: id)
-        publishComputedValue(rule(), for: id)
+        box.publishValue(to: self, for: id)
         finishNodeEvaluation(index: index)
     }
 
@@ -2004,8 +2006,8 @@ extension _AGGraph {
             return "@\(id.rawValue)(offset: @\(parent.rawValue) + \(byteOffset))"
         case .rawOffset(let parent, let byteOffset):
             return "@\(id.rawValue)(rawOffset: @\(parent.rawValue) + \(byteOffset))"
-        case .rule(_, let isSideEffect):
-            return "@\(id.rawValue)(\(isSideEffect ? "sideEffect" : "rule"))"
+        case .rule(let box):
+            return "@\(id.rawValue)(\(box.isSideEffect ? "sideEffect" : "rule"))"
         case .ruleBody:
             return "@\(id.rawValue)(ruleBody)"
         case .stateful:
@@ -2108,8 +2110,8 @@ extension _AGGraph {
         switch kind {
         case .input:
             return "input"
-        case .rule(_, let isSideEffect):
-            return isSideEffect ? "sideEffectRule" : "rule"
+        case .rule(let box):
+            return box.isSideEffect ? "sideEffectRule" : "rule"
         case .ruleBody(let box):
             return "ruleBody(\(String(describing: type(of: box))))"
         case .stateful(let box):

@@ -25,19 +25,38 @@ private extension _MetadataKind {
     }
 }
 
+private func _existentialFlags(
+    _ type: Any.Type,
+    kind: _MetadataKind
+) -> UInt32? {
+    guard kind == .existential else { return nil }
+    let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+    return metadata.load(
+        fromByteOffset: MemoryLayout<UInt>.size,
+        as: UInt32.self
+    )
+}
+
+private func _isErrorExistentialContainer(
+    _ type: Any.Type,
+    kind: _MetadataKind
+) -> Bool {
+    guard let flags = _existentialFlags(type, kind: kind) else {
+        return false
+    }
+    let specialProtocolMask = UInt32(0x3f) << 24
+    let errorProtocol = UInt32(1) << 24
+    return flags & specialProtocolMask == errorProtocol
+}
+
 private func _isOpaqueExistentialContainer(
     _ type: Any.Type,
     kind: _MetadataKind
 ) -> Bool {
-    guard kind == .existential,
+    guard let flags = _existentialFlags(type, kind: kind),
           _AGGraph.valueSize(of: type) >= 4 * MemoryLayout<UInt>.size else {
         return false
     }
-    let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
-    let flags = metadata.load(
-        fromByteOffset: MemoryLayout<UInt>.size,
-        as: UInt32.self
-    )
     // The high metadata flag is set for non-class-constrained existentials.
     return flags & (UInt32(1) << 31) != 0
 }
@@ -162,6 +181,11 @@ extension _AGGraph {
             // Class storage is the reference itself. Instance fields belong to
             // the referenced object and do not participate in value equality.
             return compareRawValues(lhs, rhs, type: type)
+        }
+        if _isErrorExistentialContainer(type, kind: kind) {
+            // Boxed error values do not provide an equality path to layout
+            // comparison modes, including when both boxes are identical.
+            return false
         }
         if _isOpaqueExistentialContainer(type, kind: kind) {
             return compareOpaqueExistentialValues(

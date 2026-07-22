@@ -51,7 +51,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         //           -> markNeedsEvaluation(callbackRule) [isSideEffect]
         //             -> evaluateNode(callbackRule)       immediately
         //               -> endedCallback() fires here, inside setValue call stack
-        case rule(() -> Any, isSideEffect: Bool)
+        case rule(any _AnyRuleClosureBox)
 
         // A typed Rule body retained by the node. Unlike the closure form, the
         // body can be mutated after a dependent subtree has been constructed.
@@ -102,7 +102,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         case indirect(target: AGAttribute?, defaultValue: Any?)
 
         var isSideEffect: Bool {
-            if case .rule(_, let se) = self { return se }
+            if case .rule(let box) = self { return box.isSideEffect }
             return false
         }
     }

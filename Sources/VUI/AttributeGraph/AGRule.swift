@@ -138,7 +138,7 @@ protocol _AnyAttributeBodyBox: AnyObject {
 }
 
 protocol _AnyRuleBox: _AnyAttributeBodyBox {
-    func callUpdate() -> Any
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
 }
 
 final class _RuleBox<R: Rule>: _AnyRuleBox {
@@ -154,8 +154,8 @@ final class _RuleBox<R: Rule>: _AnyRuleBox {
         storage.deallocate()
     }
 
-    func callUpdate() -> Any {
-        storage.pointee.value
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute) {
+        graph.publishComputedValue(storage.pointee.value, for: attribute)
     }
 
     func mutateRule(_ body: (inout R) -> Void) {
@@ -181,6 +181,25 @@ final class _RuleBox<R: Rule>: _AnyRuleBox {
 
     func visitBody<Visitor: AttributeBodyVisitor>(_ visitor: inout Visitor) {
         visitor.visit(body: UnsafePointer(storage))
+    }
+}
+
+protocol _AnyRuleClosureBox: AnyObject {
+    var isSideEffect: Bool { get }
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
+}
+
+final class _RuleClosureBox<Value>: _AnyRuleClosureBox {
+    private let rule: () -> Value
+    let isSideEffect: Bool
+
+    init(rule: @escaping () -> Value, isSideEffect: Bool) {
+        self.rule = rule
+        self.isSideEffect = isSideEffect
+    }
+
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute) {
+        graph.publishComputedValue(rule(), for: attribute)
     }
 }
 

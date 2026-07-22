@@ -50,6 +50,43 @@ private final class PhasePublicationRecorder {
     }
 }
 
+private struct PhaseAnimatorBodyRoot: View {
+    var trigger: Int
+    var recorder: PhasePublicationRecorder
+
+    var body: some View {
+        PhaseAnimator(
+            [0, 1, 2],
+            trigger: trigger,
+            content: { phase in
+                recorder.record(phase)
+                return PhaseSizedView(width: CGFloat(phase))
+            },
+            animation: { _ in nil }
+        )
+    }
+}
+
+private struct PhaseAnimatorVisualBodyRoot: View {
+    var trigger: Int
+    var recorder: PhasePublicationRecorder
+
+    var body: some View {
+        Circle()
+            .fill(Color.purple)
+            .frame(width: 86, height: 86)
+            .phaseAnimator([0, 1, 2], trigger: trigger) { content, phase in
+                recorder.record(phase)
+                return content
+                    .scaleEffect(phase == 1 ? 1.35 : 0.82)
+                    .offset(y: phase == 2 ? 34 : -8)
+                    .opacity(phase == 2 ? 0.30 : 1.0)
+            } animation: { _ in
+                .linear(duration: 1.0)
+            }
+    }
+}
+
 private struct TransactionSizedPhaseView: View, TestPrimitiveView {
     typealias Body = Never
 
@@ -200,6 +237,104 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             viewGraph.flushTransactions()
             XCTAssertEqual(compactedPhases(recorder.phases), [1, 2, 0])
             XCTAssertEqual(try currentSize(), CGSize(width: 0, height: 19))
+        }
+    }
+
+    func testEventDrivenTriggerPropagatesThroughDefaultBodyRule() throws {
+        try withPhaseAnimatorHost { viewGraph, graph in
+            let recorder = PhasePublicationRecorder()
+            func root(trigger: Int) -> PhaseAnimatorBodyRoot {
+                PhaseAnimatorBodyRoot(trigger: trigger, recorder: recorder)
+            }
+
+            let source: Attribute<PhaseAnimatorBodyRoot>
+            let outputs: _ViewOutputs
+            (source, outputs) = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let source = graph.makeInput(value: root(trigger: 0))
+                let outputs = PhaseAnimatorBodyRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph)
+                )
+                return (source, outputs)
+            }
+
+            func currentSize() throws -> CGSize {
+                let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+                return layout.sizeThatFits(.unspecified)
+            }
+
+            XCTAssertEqual(try currentSize(), CGSize(width: 0, height: 19))
+            viewGraph.updateOutputs(at: Time(seconds: 0))
+            recorder.removeAll()
+
+            source.setValue(root(trigger: 1))
+            XCTAssertEqual(try currentSize(), CGSize(width: 1, height: 19))
+            XCTAssertEqual(compactedPhases(recorder.phases), [1])
+
+            viewGraph.flushTransactions()
+            _ = try currentSize()
+
+            XCTAssertEqual(compactedPhases(recorder.phases), [1, 2, 0])
+            XCTAssertEqual(try currentSize(), CGSize(width: 0, height: 19))
+        }
+    }
+
+    func testEventDrivenVisualModifiersAnimateThroughDefaultBodyRule() throws {
+        try withPhaseAnimatorHost { viewGraph, graph in
+            let recorder = PhasePublicationRecorder()
+            let time = graph.makeInput(value: Time(seconds: 0))
+            func root(trigger: Int) -> PhaseAnimatorVisualBodyRoot {
+                PhaseAnimatorVisualBodyRoot(
+                    trigger: trigger,
+                    recorder: recorder
+                )
+            }
+
+            var inputs = makeViewInputs(
+                graph: graph,
+                time: time,
+                size: graph.makeInput(value: ViewSize(width: 86, height: 86))
+            )
+            inputs.preferences.keys.add(DisplayList.Key.self)
+            let source: Attribute<PhaseAnimatorVisualBodyRoot>
+            let outputs: _ViewOutputs
+            (source, outputs) = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let source = graph.makeInput(value: root(trigger: 0))
+                let outputs = PhaseAnimatorVisualBodyRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: inputs
+                )
+                return (source, outputs)
+            }
+            let displayID = try XCTUnwrap(
+                outputs.preferences.value(for: DisplayList.Key.self)
+            )
+            let displayList = Attribute<DisplayList>(displayID)
+
+            _ = displayList.value
+            viewGraph.updateOutputs(at: Time(seconds: 0))
+            recorder.removeAll()
+
+            source.setValue(root(trigger: 1))
+            viewGraph.data.rootSubgraph.update()
+            let triggered = displayList.value
+
+            XCTAssertEqual(compactedPhases(recorder.phases), [1])
+            XCTAssertFalse(viewGraph.nextUpdate.views.time.seconds.isInfinite)
+
+            time.setValue(Time(seconds: 0.5))
+            viewGraph.data.rootSubgraph.update()
+            _ = displayList.value
+
+            time.setValue(Time(seconds: 0.6))
+            viewGraph.data.rootSubgraph.update()
+            let midpoint = displayList.value
+
+            XCTAssertNotEqual(
+                triggered.interpolationBounds,
+                midpoint.interpolationBounds
+            )
+            XCTAssertEqual(compactedPhases(recorder.phases), [1])
         }
     }
 
@@ -6950,10 +7085,15 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    private func makeViewInputs(graph: _AGGraph, transaction: Transaction = Transaction()) -> _ViewInputs {
+    private func makeViewInputs(
+        graph: _AGGraph,
+        transaction: Transaction = Transaction(),
+        time: Attribute<Time>? = nil,
+        size: Attribute<ViewSize>? = nil
+    ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
-            time: graph.makeInput(value: Time(seconds: 0)),
+            time: time ?? graph.makeInput(value: Time(seconds: 0)),
             phase: graph.makeInput(value: Phase()),
             environment: environment,
             transaction: graph.makeInput(value: transaction)
@@ -6968,7 +7108,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             transform: graph.makeInput(value: ViewTransform()),
             position: graph.makeInput(value: CGPoint.zero),
             containerPosition: graph.makeInput(value: CGPoint.zero),
-            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            size: size ?? graph.makeInput(value: ViewSize(width: 0, height: 0)),
             safeAreaInsets: OptionalAttribute(),
             containerSize: OptionalAttribute(),
             stackOrientation: nil
