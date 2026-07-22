@@ -106,7 +106,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+        XCTAssertEqual(Update.queuedActionReasons, [nil])
         XCTAssertEqual(events, [])
 
         Update.end()
@@ -185,7 +185,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             host.continueTransaction(invalidating: weakInput)
         }
 
-        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+        XCTAssertEqual(Update.queuedActionReasons, [nil])
         XCTAssertFalse(host.hasPendingTransactions)
 
         Update.end()
@@ -247,7 +247,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         }
         Transaction.ThreadStorage.currentBox = previousBox
 
-        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+        XCTAssertEqual(Update.queuedActionReasons, [nil])
 
         Update.end()
 

@@ -78,7 +78,7 @@ private enum _BlurEffectSupport {
         result.recordInterpolationBounds(source.interpolationBounds)
         for effect in source.effects {
             result.appendEffect(
-                effect.effect,
+                effect,
                 contents: displayList(
                     effect.contents,
                     applyingBlur: radius,

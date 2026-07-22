@@ -23,18 +23,19 @@ enum _GeometryEffectSupport {
             fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
         }
 
-        let sizeAttr = inputs.size
-        let positionAttr = inputs.position
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let sizeAttr = cachedEnvironment.animatedCGSize(for: inputs)
+        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
         let parentTransformAttr = inputs.transform
-        // The view input transform drives child layout/render traversal. The
-        // display-list rewrite below keeps already-produced drawing commands in
-        // the same projected coordinate space.
         let effectAttr: Attribute<ProjectionTransform> = graph.makeRule {
-            effectValue(modifier._attribute.value, sizeAttr.value.value)
+            effectValue(modifier._attribute.value, sizeAttr.value)
         }
         let transformAttr: Attribute<ViewTransform> = graph.makeRule {
             var transform = parentTransformAttr.value
-            transform.appendProjectionTransform(effectAttr.value, inverse: false)
+            transform.appendPosition(positionAttr.value)
+            transform.appendProjectionTransform(effectAttr.value, inverse: true)
             return transform
         }
 
@@ -99,7 +100,7 @@ enum _GeometryEffectSupport {
         result.recordInterpolationBounds(transformedBounds)
         for effect in source.effects {
             result.appendEffect(
-                effect.effect,
+                effect,
                 contents: projectedDisplayList(
                     effect.contents,
                     applying: transform,

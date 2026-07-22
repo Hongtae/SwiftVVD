@@ -70,7 +70,7 @@ private enum _BlendModeEffectSupport {
         result.recordInterpolationBounds(source.interpolationBounds)
         for effect in source.effects {
             result.appendEffect(
-                effect.effect,
+                effect,
                 contents: displayList(
                     effect.contents,
                     applyingBlendMode: blendMode

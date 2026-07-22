@@ -3023,8 +3023,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                             transition: transition
                         )
                     }
+                    var carrier = source
+                    carrier.effect = .mask(mask, sourceOptions)
                     contents.appendEffect(
-                        .mask(mask, sourceOptions),
+                        carrier,
                         contents: interpolatedContents(
                             from: source.contents,
                             to: target.contents,
@@ -3040,9 +3042,9 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     to: targetMask
                 ) {
                     var sourceBranch = DisplayList()
-                    sourceBranch.appendEffect(source.effect, contents: source.contents)
+                    sourceBranch.appendEffect(source, contents: source.contents)
                     var targetBranch = DisplayList()
-                    targetBranch.appendEffect(target.effect, contents: target.contents)
+                    targetBranch.appendEffect(target, contents: target.contents)
                     contents.append(contentsOf: sourceBranch)
                     contents.append(contentsOf: targetBranch)
                     continue
@@ -3051,12 +3053,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
             guard source.effect.hasSameSurface(as: target.effect) else {
                 let fallback = progress >= 1 ? target : source
-                contents.appendEffect(fallback.effect, contents: fallback.contents)
+                contents.appendEffect(fallback, contents: fallback.contents)
                 continue
             }
 
             contents.appendEffect(
-                source.effect,
+                source,
                 contents: interpolatedContents(
                     from: source.contents,
                     to: target.contents,
@@ -3072,7 +3074,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         into contents: inout DisplayList
     ) {
         for effectItem in effectItems {
-            contents.appendEffect(effectItem.effect, contents: effectItem.contents)
+            contents.appendEffect(effectItem, contents: effectItem.contents)
         }
     }
 

@@ -781,7 +781,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var committed = ScrollPrefetchState(deadline: 77)
             committed.edges = .vertical
+            Update.begin()
             committed.commit(to: stateAttribute.asWeak())
+            XCTAssertEqual(Update.queuedActionReasons, [.scrollPrefetch])
+            XCTAssertEqual(stateAttribute.value.id, first.id)
+            Update.end()
 
             let current = stateAttribute.value
             XCTAssertEqual(current.id, committed.id)

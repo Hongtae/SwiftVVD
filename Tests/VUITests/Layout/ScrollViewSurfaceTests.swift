@@ -2528,7 +2528,11 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertTrue(calls.isEmpty)
 
             phaseValues.setValue([ScrollPhaseState(phase: .interacting)])
+            Update.begin()
             _ = dispatcher.value
+            XCTAssertEqual(Update.queuedActionReasons, [.scrollChanged])
+            XCTAssertTrue(calls.isEmpty)
+            Update.end()
             XCTAssertEqual(calls.count, 1)
             XCTAssertEqual(calls[0].0, .idle)
             XCTAssertEqual(calls[0].1, .interacting)

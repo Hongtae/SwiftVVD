@@ -5,18 +5,18 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import Foundation
 import Synchronization
+import VVD
 
-// Global update scheduler used to batch graph/event side effects and drain them
-// after the outermost update pass.
+// Thread-local update scheduler used to batch graph and event side effects and
+// drain them after the outermost update pass on the current update lane.
 enum Update {
     private struct Action {
-        let reason: UInt32?
+        let reason: CustomEventTrace.ActionEventType.Reason?
         let thunk: () -> Void
         let id: UInt32
 
-        init(reason: UInt32?, thunk: @escaping () -> Void) {
+        init(reason: CustomEventTrace.ActionEventType.Reason?, thunk: @escaping () -> Void) {
             self.reason = reason
             self.thunk = thunk
             self.id = Self.nextID()
@@ -35,67 +35,98 @@ enum Update {
     }
 
     private final class State: @unchecked Sendable {
-        let lock = NSRecursiveLock()
         var lockDepth = 0
-        var owner: Thread?
         var depth = 0
         var dispatchDepth = 0
         var actions: [Action] = []
     }
 
-    private static let state = State()
+    private final class ThreadStateKey: @unchecked Sendable {}
+
+    private static let threadStateKey = ThreadStateKey()
+
+    private static var threadStateKeyPointer: UnsafeRawPointer {
+        UnsafeRawPointer(Unmanaged.passUnretained(threadStateKey).toOpaque())
+    }
+
+    private static var currentState: State? {
+        guard let pointer = ThreadLocalStorage.get(threadStateKeyPointer) else {
+            return nil
+        }
+        return Unmanaged<State>.fromOpaque(pointer).takeUnretainedValue()
+    }
+
+    private static func makeState() -> State {
+        precondition(currentState == nil)
+        let state = State()
+        ThreadLocalStorage.set(
+            threadStateKeyPointer,
+            Unmanaged.passRetained(state).toOpaque()
+        )
+        return state
+    }
 
     private static var isOwner: Bool {
-        state.owner === Thread.current
+        currentState?.lockDepth ?? 0 > 0
     }
 
     private static func lock() {
-        state.lock.lock()
-        if state.lockDepth == 0 {
-            state.owner = Thread.current
-        }
+        let state = currentState ?? makeState()
         state.lockDepth += 1
     }
 
     private static func unlock() {
+        guard let state = currentState else {
+            preconditionFailure("Update.unlock() called without a matching Update.lock().")
+        }
         precondition(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
         state.lockDepth -= 1
         if state.lockDepth == 0 {
-            state.owner = nil
+            precondition(state.depth == 0, "Update state released while an update is active.")
+            precondition(state.actions.isEmpty, "Update state released with queued actions.")
+            guard let pointer = ThreadLocalStorage.get(threadStateKeyPointer) else {
+                preconditionFailure("Update thread state disappeared before final unlock.")
+            }
+            ThreadLocalStorage.set(threadStateKeyPointer, nil)
+            Unmanaged<State>.fromOpaque(pointer).release()
         }
-        state.lock.unlock()
     }
 
-    static func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+    static func locked<Result>(_ body: () throws -> Result) rethrows -> Result {
         lock()
         defer { unlock() }
         return try body()
     }
 
     static var threadIsUpdating: Bool {
-        isOwner && state.dispatchDepth < state.depth
+        guard let state = currentState else { return false }
+        return isOwner && state.dispatchDepth < state.depth
     }
 
     static var isActive: Bool {
-        state.depth > 0
+        currentState?.depth ?? 0 > 0
     }
 
     static var canDispatch: Bool {
-        isOwner && state.depth == 1 && !state.actions.isEmpty
+        guard let state = currentState else { return false }
+        return isOwner && state.depth == 1 && !state.actions.isEmpty
     }
 
-    static var queuedActionReasons: [UInt32?] {
+    static var queuedActionReasons: [CustomEventTrace.ActionEventType.Reason?] {
         lock()
         defer { unlock() }
-        return state.actions.map(\.reason)
+        return currentState!.actions.map(\.reason)
     }
 
     static func begin() {
         lock()
-        state.depth += 1
+        currentState!.depth += 1
     }
 
     static func end() {
+        guard let state = currentState else {
+            preconditionFailure("Update.end() called without a matching Update.begin().")
+        }
         precondition(state.depth > 0, "Update.end() called without a matching Update.begin().")
         if state.depth == 1 {
             dispatchActions()
@@ -111,19 +142,23 @@ enum Update {
     }
 
     @discardableResult
-    static func enqueueAction(reason: UInt32? = nil, _ action: @escaping () -> Void) -> UInt32 {
+    static func enqueueAction(
+        reason: CustomEventTrace.ActionEventType.Reason? = nil,
+        _ action: @escaping () -> Void
+    ) -> UInt32 {
         begin()
         defer { end() }
         let queuedAction = Action(reason: reason, thunk: action)
-        state.actions.append(queuedAction)
+        currentState!.actions.append(queuedAction)
         return queuedAction.id
     }
 
     static func dispatchImmediately<Result>(
-        reason: UInt32? = nil,
+        reason: CustomEventTrace.ActionEventType.Reason? = nil,
         _ body: () throws -> Result
     ) rethrows -> Result {
         begin()
+        let state = currentState!
         let previousDispatchDepth = state.dispatchDepth
         state.dispatchDepth = state.depth
         _ = Action.nextID()
@@ -135,6 +170,7 @@ enum Update {
     }
 
     static func dispatchActions() {
+        guard let state = currentState else { return }
         guard state.depth == 1 else { return }
         while canDispatch {
             let actions = state.actions

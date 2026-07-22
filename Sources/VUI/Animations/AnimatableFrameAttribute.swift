@@ -452,8 +452,7 @@ extension CachedEnvironment {
         }
 
         let environment = environment
-        let disabled = inputs.base.options.contains(.animationsDisabled) ||
-            inputs[LayoutPlacementAnimationsDisabledInput.self]
+        let disabled = inputs.base.options.contains(.animationsDisabled)
         let frame: Attribute<ViewFrame>
         if inputs.supportsVFD {
             frame = graph.makeStatefulRule(

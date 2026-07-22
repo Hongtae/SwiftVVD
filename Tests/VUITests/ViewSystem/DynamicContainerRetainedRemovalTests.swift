@@ -2,6 +2,29 @@ import XCTest
 @testable import VUI
 
 final class DynamicContainerRetainedRemovalTests: XCTestCase {
+    func testDynamicContainerMaterializationUsesCapturedParentWithoutRuleOwnership() throws {
+        // ASSERTIONS dynamicContainerMaterializationParentObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            let parentSubgraph = AGSubgraph()
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let source = graph.makeInput(value: makeTransitionList(inputs: inputs))
+            let info = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(graph: graph, base: inputs),
+                    parentSubgraph: parentSubgraph
+                )
+            )
+
+            XCTAssertNil(info.subgraphOrNil)
+            let item = try XCTUnwrap(info.value.activeItems.first)
+            XCTAssertTrue(item.subgraph.parent === parentSubgraph)
+        }
+    }
+
     func testDynamicContainerRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1017,6 +1040,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertTrue(inserted.needsTransitions)
             XCTAssertEqual(inserted.phase, 0)
             XCTAssertFalse(inserted.transitionPhaseSetters.isEmpty)
+            let removed = try XCTUnwrap(updated.activeAndRemovedItems.last)
+            XCTAssertEqual(inserted.precedingViewCount, 0)
+            XCTAssertEqual(
+                removed.precedingViewCount,
+                inserted.viewCount
+            )
         }
     }
 
@@ -3124,6 +3153,50 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS dynamicLayoutRetainedViewIndexObserved
+    func testRetainedItemsReceiveViewIndexesAfterTheActivePrefix() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        ref.withCurrent {
+            var info = DynamicContainer.Info()
+            let activeA = makeDisplayMapItem(
+                id: "active-a",
+                viewCount: 2,
+                zIndex: 0,
+                phase: 1
+            )
+            let activeB = makeDisplayMapItem(
+                id: "active-b",
+                viewCount: 1,
+                zIndex: 0,
+                phase: 1
+            )
+            let removed = makeDisplayMapItem(
+                id: "removed",
+                viewCount: 3,
+                zIndex: 0,
+                phase: 2
+            )
+            let unused = makeDisplayMapItem(
+                id: "unused",
+                viewCount: 2,
+                zIndex: 0,
+                phase: 3
+            )
+
+            info.replaceItems(
+                active: [activeA, activeB],
+                removed: [removed],
+                unused: [unused]
+            )
+
+            XCTAssertEqual(activeA.precedingViewCount, 0)
+            XCTAssertEqual(activeB.precedingViewCount, 2)
+            XCTAssertEqual(removed.precedingViewCount, 3)
+            XCTAssertEqual(unused.precedingViewCount, 6)
+        }
+    }
+
     func testRetainedRemovalDisplaysRemovedItemsBelowActiveReplacements() throws {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -3474,13 +3547,14 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     private func makeDisplayMapItem(
         id: String,
+        viewCount: Int = 1,
         zIndex: Double,
         phase: UInt8
     ) -> DynamicContainer.ItemInfo {
         DynamicContainer.ItemInfo(
             subgraph: AGSubgraph(),
             uniqueId: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
-            viewCount: 1,
+            viewCount: viewCount,
             outputs: _ViewOutputs(),
             layoutAttributes: [],
             preferenceOutputs: [],

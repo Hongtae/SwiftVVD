@@ -763,8 +763,8 @@ class WindowController: WindowDelegate,
         // Pending parity: propagate renderCtx.contentsScale to draw calls.
 
         var redraw = false
-        self.updateView(tick: tick, delta: delta, date: date,
-                        contentSize: contentSize, redraw: &redraw, withGC)
+        self._updateView(tick: tick, delta: delta, date: date,
+                         contentSize: contentSize, redraw: &redraw, withGC)
 
         if redraw || shouldDrawFrame {
             let clearColor = configuration.backgroundColor
@@ -803,6 +803,21 @@ class WindowController: WindowDelegate,
         graph.actionOutbox.removeAll()
         actions.forEach { $0() }
         return true
+    }
+
+    private func _updateView(tick: UInt64, delta: Double, date: Date,
+                             contentSize: CGSize, redraw: inout Bool,
+                             _ withGC: WindowContext.WithGraphicsContext) {
+        Update.begin()
+        defer { Update.end() }
+        updateView(
+            tick: tick,
+            delta: delta,
+            date: date,
+            contentSize: contentSize,
+            redraw: &redraw,
+            withGC
+        )
     }
 
     func updateView(tick: UInt64, delta: Double, date: Date,
@@ -1067,14 +1082,14 @@ class WindowController: WindowDelegate,
         // Overlay presentation children: update after self.
         for entry in self.presentationChildren.withLock({ $0 }) {
             guard entry.isOverlay, entry.initiated else { continue }
-            entry.controller.updateView(tick: tick, delta: delta, date: date,
-                                        contentSize: contentSize, redraw: &redraw, withGC)
+            entry.controller._updateView(tick: tick, delta: delta, date: date,
+                                         contentSize: contentSize, redraw: &redraw, withGC)
         }
         // Overlay modal child (at most one): update last.
         if let entry = self.modalChildren.withLock({ $0.first }),
            entry.isOverlay, entry.initiated {
-            entry.controller.updateView(tick: tick, delta: delta, date: date,
-                                        contentSize: contentSize, redraw: &redraw, withGC)
+            entry.controller._updateView(tick: tick, delta: delta, date: date,
+                                         contentSize: contentSize, redraw: &redraw, withGC)
         }
     }
 

@@ -89,8 +89,8 @@ private struct LayoutChildGeometry: Rule, AsyncAttribute {
 }
 
 /// Resolves a stable dynamic-container identity to the current flattened child
-/// geometry. A removed or not-yet-published child uses the canonical zero
-/// geometry until the container publishes a matching view index.
+/// geometry. Once published, the last geometry remains stable while the item is
+/// retained outside the active layout prefix.
 private struct DynamicLayoutViewChildGeometry: StatefulRule, AsyncAttribute {
     typealias Value = ViewGeometry
 
@@ -101,10 +101,12 @@ private struct DynamicLayoutViewChildGeometry: StatefulRule, AsyncAttribute {
     mutating func updateValue() {
         let info = containerInfo.value
         let currentGeometries = geometries.value
-        let geometry = info.viewIndex(id: id).flatMap { index in
-            currentGeometries.indices.contains(index) ? currentGeometries[index] : nil
-        } ?? .zero
-        _AGGraph.setStatefulOutput(geometry)
+        if let index = info.viewIndex(id: id),
+           currentGeometries.indices.contains(index) {
+            _AGGraph.setStatefulOutput(currentGeometries[index])
+        } else if _AGGraph.currentStatefulOutput(ViewGeometry.self) == nil {
+            _AGGraph.setStatefulOutput(ViewGeometry.zero)
+        }
     }
 }
 
@@ -542,6 +544,11 @@ enum DynamicContainer {
             let oldRemovedCount = removedCount
             let oldUnusedCount = unusedCount
             let newItems = activeItems + removedItems + unusedItems
+            var precedingViewCount = 0
+            for item in newItems {
+                item.precedingViewCount = precedingViewCount
+                precedingViewCount += item.viewCount
+            }
             let newIdentity = newItems.map { ItemIdentity(item: $0) }
             items = newItems
             removedCount = removedItems.count
@@ -661,10 +668,6 @@ struct LayoutPlacementTransactionInput: ViewInput {
     }
 }
 
-struct LayoutPlacementAnimationsDisabledInput: ViewInput {
-    static var defaultValue: Bool { false }
-}
-
 /// Keeps a phase-3 retained-unused item cached after its later animated removal
 /// listener completes. Cache-owned lazy hosts use this to preserve source state
 /// across same-identity removal/reinsertion windows.
@@ -730,6 +733,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
     typealias Value = DynamicContainer.Info
     var viewListAttr: Attribute<any ViewList>
     var inputs: _ViewInputs
+    var parentSubgraph: AGSubgraph? = AGSubgraph.current
     var info = DynamicContainer.Info()
     var retainedElements: [_ViewList_ID.Canonical: _ViewList_SubgraphRelease] = [:]
     var hasValue = false
@@ -1003,7 +1007,11 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         capturedInputs: _ViewInputs,
         graph: _AGGraph
     ) -> DynamicContainer.ItemInfo? {
-        let subgraph = AGSubgraph()
+        // Rule evaluation does not inherit the materialization scope. Re-enter
+        // the parent captured when the container rule was installed.
+        let subgraph = AGSubgraph.withCurrent(parentSubgraph) {
+            AGSubgraph()
+        }
         let release = sublist.elements.retain()
         var baseInputs = capturedInputs
         baseInputs.copyCaches()
@@ -1591,7 +1599,8 @@ extension Layout {
             let containerInfoAttr: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
                 DynamicContainerInfo(
                     viewListAttr: viewListAttr,
-                    inputs: dynamicInputs
+                    inputs: dynamicInputs,
+                    parentSubgraph: AGSubgraph.current
                 )
             )
             geometryContext.containerInfo = containerInfoAttr

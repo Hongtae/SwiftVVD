@@ -508,7 +508,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                     }
                 transaction.animation = animation
                 transaction.addAnimationLogicalListener(listener)
-                Update.enqueueAction(reason: 0x11) {
+                Update.enqueueAction {
                     listener.fireNoAnimationFallback()
                 }
             } else {

@@ -131,7 +131,7 @@ extension ViewGraphRootValueUpdater {
             return
         }
 
-        Update.withLock {
+        Update.locked {
             let currentValues = owner.valuesNeedingUpdate
             guard !values.subtracting(currentValues).isEmpty else {
                 return
@@ -276,7 +276,7 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
             state.insert(.hiddenForReuse)
         }
 
-        Update.withLock {
+        Update.locked {
             Update.begin()
             defer { Update.end() }
             removedState = state
@@ -588,7 +588,7 @@ class ViewGraph: ViewGraphHost {
         }
 
         if shouldDeferPreferenceBridgeUpdate {
-            Update.enqueueAction(reason: 0x11, deferredUpdate)
+            Update.enqueueAction(deferredUpdate)
         } else {
             setPreferenceBridge(to: bridge, isInvalidating: false)
         }

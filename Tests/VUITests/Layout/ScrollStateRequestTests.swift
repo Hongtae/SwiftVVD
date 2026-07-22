@@ -607,7 +607,7 @@ final class ScrollStateRequestTests: XCTestCase {
             Update.begin()
             _ = ruleAttr.value
 
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
 
             Update.end()
 
@@ -654,7 +654,7 @@ final class ScrollStateRequestTests: XCTestCase {
             Update.begin()
             _ = ruleAttr.value
 
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
 
             Update.end()
 
@@ -708,7 +708,7 @@ final class ScrollStateRequestTests: XCTestCase {
             Update.begin()
             _ = ruleAttr.value
 
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
 
             Update.end()
 
@@ -766,7 +766,7 @@ final class ScrollStateRequestTests: XCTestCase {
             Update.begin()
             _ = ruleAttr.value
 
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
 
             Update.end()
 

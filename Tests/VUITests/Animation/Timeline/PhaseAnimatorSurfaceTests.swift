@@ -50,6 +50,49 @@ private final class PhasePublicationRecorder {
     }
 }
 
+private final class PhaseTriggerActionRecorder {
+    var keyframeAction: (() -> Void)?
+    var phaseAction: (() -> Void)?
+    var phases: [Int] = []
+}
+
+private struct StateDrivenPhaseAnimatorVisualRoot: View {
+    @State private var keyframeTrigger = 0
+    @State private var phaseTrigger = 0
+
+    var recorder: PhaseTriggerActionRecorder
+
+    var body: some View {
+        recorder.keyframeAction = {
+            keyframeTrigger += 1
+        }
+        recorder.phaseAction = {
+            phaseTrigger += 1
+        }
+        return VStack {
+            Circle()
+                .fill(Color.purple)
+                .frame(width: 86, height: 86)
+                .phaseAnimator([0, 1, 2], trigger: phaseTrigger) { content, phase in
+                    recorder.phases.append(phase)
+                    return content
+                        .scaleEffect(phase == 1 ? 1.35 : 0.82)
+                        .offset(y: phase == 2 ? 34 : -8)
+                        .opacity(phase == 2 ? 0.30 : 1.0)
+                } animation: { phase in
+                    switch phase {
+                    case 0:
+                        .easeOut(duration: 0.35)
+                    case 1:
+                        .spring(duration: 0.8, bounce: 0.35)
+                    default:
+                        .easeInOut(duration: 0.55)
+                    }
+                }
+            }
+        }
+}
+
 private struct PhaseAnimatorBodyRoot: View {
     var trigger: Int
     var recorder: PhasePublicationRecorder
@@ -100,6 +143,33 @@ private struct TransactionSizedPhaseView: View, TestPrimitiveView {
             return LayoutComputer.fixed(CGSize(width: width, height: 29))
         }
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+}
+
+private func firstPhaseItemBounds(in displayList: DisplayList) -> CGRect? {
+    if let bounds = displayList.itemRecords.compactMap(\.bounds).first {
+        return bounds
+    }
+    for effect in displayList.effects {
+        if let bounds = firstPhaseItemBounds(in: effect.contents) {
+            return bounds
+        }
+    }
+    return nil
+}
+
+private struct PhaseAnimatorSourceVisitor: AttributeBodyVisitor {
+    var source: AGAttribute?
+
+    mutating func visit<Body: _AttributeBody>(body: UnsafePointer<Body>) {
+        guard let sourceValue = Mirror(reflecting: body.pointee).children.first(where: {
+            $0.label == "_source"
+        })?.value else {
+            return
+        }
+        source = Mirror(reflecting: sourceValue).children.first(where: {
+            $0.label == "identifier"
+        })?.value as? AGAttribute
     }
 }
 
@@ -338,6 +408,195 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
+    func testSecondStateActionTriggersVisualPhaseAnimator() throws {
+        let rendererHost = TestViewRendererHost()
+        let recorder = PhaseTriggerActionRecorder()
+        let content = StateDrivenPhaseAnimatorVisualRoot(recorder: recorder)
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        func sample(at seconds: Double) throws -> DisplayList {
+            let time = Time(seconds: seconds)
+            rendererHost.currentTimestamp = time
+            viewGraph.updateOutputs(at: time)
+            return try viewGraph.data.withCurrent {
+                try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                    let layout = try XCTUnwrap(viewGraph.rootLayoutComputer).value
+                    let proposalSize = CGSize(width: 240, height: 220)
+                    layout.place(
+                        at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
+                        anchor: .center,
+                        proposal: ProposedViewSize(proposalSize)
+                    )
+                    viewGraph.data.rootSubgraph.update()
+                    return try XCTUnwrap(viewGraph.rootDisplayList?.value)
+                }
+            }
+        }
+
+        let initial = try sample(at: 0)
+        recorder.phases.removeAll()
+        try XCTUnwrap(recorder.phaseAction)()
+
+        var samples: [(Double, CGRect?)] = []
+        for step in 0...40 {
+            let seconds = Double(step) / 20.0
+            samples.append((seconds, firstPhaseItemBounds(in: try sample(at: seconds))))
+        }
+        print("PHASE_BOUNDS", firstPhaseItemBounds(in: initial) as Any, samples)
+        XCTAssertEqual(compactedPhases(recorder.phases).first, 1)
+    }
+
+    @MainActor
+    func testSecondStateActionTriggersVisualPhaseAnimatorInOverlayPresentation() throws {
+        let recorder = PhaseTriggerActionRecorder()
+        let content = StateDrivenPhaseAnimatorVisualRoot(recorder: recorder)
+        let parent = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(EmptyView.self)
+            )
+        )
+        let child = parent.viewGraph.data.withCurrent {
+            let sourceGraph = parent.viewGraph.data.graph
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(
+                value: AnyView(SheetContent(content: AnyView(content)))
+            )
+            return ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: sourceGraph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(StateDrivenPhaseAnimatorVisualRoot.self)
+                ),
+                parentController: parent,
+                usesPlatformWindow: false
+            )
+        }
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Display-list animation sampling should not request graphics resources.")
+        }
+
+        func dumpScaleNodes(_ stage: String) {
+            child.viewGraph.data.withCurrent {
+                let graph = child.viewGraph.data.graph
+                for (rawID, info) in graph.attributeInfos.sorted(by: { $0.key < $1.key }) {
+                    guard let body = info.body,
+                          String(describing: body.bodyType).contains("AnimatableAttribute<_ScaleEffect>") else {
+                        continue
+                    }
+                    let node = graph.slots[Int(rawID)].node
+                    var visitor = PhaseAnimatorSourceVisitor()
+                    graph.visitBody(
+                        AGAttribute(rawValue: rawID),
+                        visitor: &visitor
+                    )
+                    let sourceID = visitor.source?.rawValue
+                    let sourceNode = sourceID.flatMap { graph.slots[Int($0)].node }
+                    var subgraph = graph.nodeSubgraphs[rawID]?.value
+                    var ancestry: [String] = []
+                    while let current = subgraph {
+                        ancestry.append(String(describing: ObjectIdentifier(current)))
+                        subgraph = current.parent
+                    }
+                    print(
+                        "PRESENTED_SCALE_NODE",
+                        stage,
+                        rawID,
+                        node?.flags.rawValue as Any,
+                        node?.needsEvaluation as Any,
+                        node?.valueVersion as Any,
+                        node?.transaction?.effectiveAnimation as Any,
+                        "source=\(sourceID as Any)",
+                        "sourceValue=\(sourceNode?.value?.anyValue as Any)",
+                        "sourceDirty=\(sourceNode?.needsEvaluation as Any)",
+                        "sourceVersion=\(sourceNode?.valueVersion as Any)",
+                        "sourceInputs=\(sourceNode?.inputs as Any)",
+                        ancestry,
+                        "root=\(ObjectIdentifier(child.viewGraph.data.rootSubgraph))"
+                    )
+                }
+            }
+        }
+
+        func update(at seconds: Double, tick: UInt64) throws -> (DisplayList, Bool) {
+            var redraw = false
+            child.updateView(
+                tick: tick,
+                delta: seconds - child.animationTimestamp.seconds,
+                date: child.date.addingTimeInterval(seconds),
+                contentSize: CGSize(width: 680, height: 430),
+                redraw: &redraw,
+                withGC
+            )
+            let displayList = try child.viewGraph.data.withCurrent {
+                try XCTUnwrap(child.viewGraph.rootDisplayList?.value)
+            }
+            return (displayList, redraw)
+        }
+
+        let initial = try update(at: 0, tick: 0)
+        for settleTick in 1...4 {
+            guard child.viewGraph.hasPendingTransactions ||
+                    child.viewGraph.data.graph.inbox.hasPendingWork else {
+                break
+            }
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            _ = try update(at: 0, tick: UInt64(settleTick))
+        }
+        print(
+            "PRESENTED_PENDING initial",
+            child.viewGraph.hasPendingTransactions,
+            child.viewGraph.needsTransaction,
+            child.viewGraph.data.graph.inbox.hasPendingWork,
+            child.viewGraph.hasScheduledViewUpdate,
+            Update.queuedActionReasons
+        )
+        dumpScaleNodes("initial")
+        recorder.phases.removeAll()
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        print(
+            "PRESENTED_PENDING action",
+            child.viewGraph.hasPendingTransactions,
+            child.viewGraph.needsTransaction,
+            child.viewGraph.data.graph.inbox.hasPendingWork,
+            child.viewGraph.hasScheduledViewUpdate,
+            Update.queuedActionReasons
+        )
+        dumpScaleNodes("action")
+
+        var samples: [(Double, CGRect?, Bool)] = []
+        for step in 0...40 {
+            let seconds = Double(step) / 20.0
+            let sample = try update(at: seconds, tick: UInt64(step + 1))
+            if step < 3 {
+                print(
+                    "PRESENTED_PENDING sample-\(step)",
+                    child.viewGraph.hasPendingTransactions,
+                    child.viewGraph.needsTransaction,
+                    child.viewGraph.data.graph.inbox.hasPendingWork,
+                    child.viewGraph.hasScheduledViewUpdate,
+                    Update.queuedActionReasons
+                )
+                dumpScaleNodes("sample-\(step)")
+            }
+            samples.append((seconds, firstPhaseItemBounds(in: sample.0), sample.1))
+        }
+        print(
+            "PRESENTED_PHASE_BOUNDS",
+            firstPhaseItemBounds(in: initial.0) as Any,
+            samples,
+            compactedPhases(recorder.phases)
+        )
+        XCTAssertEqual(compactedPhases(recorder.phases).first, 1)
+    }
+
     func testChildValueStorageLabelsMatchObservedProjectionShape() {
         typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
 
@@ -545,7 +804,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             XCTAssertEqual(phaseChangeTransactionSeed.value, 31)
             XCTAssertEqual(selected[PhaseAnimatorTransactionWidthKey.self], 64)
             XCTAssertNotNil(selected.animation)
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
 
             Update.end()
         }
@@ -780,7 +1039,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 child.phaseChangeTransaction.animationLogicalListener is Container.CompletionListener
             )
             XCTAssertNil(completion.value)
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             XCTAssertFalse(viewGraph.hasPendingTransactions)
 
             Update.end()

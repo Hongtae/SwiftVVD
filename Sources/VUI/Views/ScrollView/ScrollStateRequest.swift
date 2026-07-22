@@ -504,7 +504,7 @@ struct ScrollStateEnqueueRequests: StatefulRule {
 
         let scrollable = scrollable
         let requestStore = requestStore
-        Update.enqueueAction(reason: 0x11) {
+        Update.enqueueAction {
             for var request in newRequests {
                 request.updateScrollable(scrollable)
                 _ = Transaction.withScopedThreadTransaction(request.transaction) {

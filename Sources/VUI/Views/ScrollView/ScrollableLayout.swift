@@ -2402,7 +2402,11 @@ public struct _ScrollableLayoutView<Data, Layout>: View
         )
         let geometryContext = dynamicInputs[ScrollableLayoutItemGeometryContextKey.self]
         let containerInfo: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
-            DynamicContainerInfo(viewListAttr: viewListAttr, inputs: dynamicInputs)
+            DynamicContainerInfo(
+                viewListAttr: viewListAttr,
+                inputs: dynamicInputs,
+                parentSubgraph: AGSubgraph.current
+            )
         )
         geometryContext?.containerInfo = containerInfo
         let layoutComputer: Attribute<LayoutComputer> = graph.makeRule(

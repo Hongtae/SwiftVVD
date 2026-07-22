@@ -79,7 +79,7 @@ private enum _ShadowEffectSupport {
         result.recordInterpolationBounds(source.interpolationBounds)
         for effect in source.effects {
             result.appendEffect(
-                effect.effect,
+                effect,
                 contents: displayList(
                     effect.contents,
                     applying: style

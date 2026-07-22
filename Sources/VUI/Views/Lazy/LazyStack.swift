@@ -131,7 +131,7 @@ struct ScrollPrefetchState: ViewInput {
             style: .deferred,
             mayDeferUpdate: false
         )
-        Update.enqueueAction(reason: 0x09) { [weak host] in
+        Update.enqueueAction(reason: .scrollPrefetch) { [weak host] in
             host?.flushTransactions()
         }
     }
@@ -1939,7 +1939,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
                 mayDeferUpdate: false
             )
         } else {
-            Update.enqueueAction(reason: 0x11) { [weak viewGraph] in
+            Update.enqueueAction { [weak viewGraph] in
                 viewGraph?.continueTransaction(invalidating: target)
             }
         }

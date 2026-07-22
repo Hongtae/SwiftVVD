@@ -312,7 +312,7 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
             if cycleDetector.dispatch(label: provider.debugDescription) {
                 let action = provider.makeAction(oldOutput: oldOutput, newOutput: newOutput)
                 let graph = viewGraph.value
-                Update.enqueueAction(reason: 0x11) {
+                Update.enqueueAction(reason: .scrollChanged) {
                     _ = graph
                     action()
                 }

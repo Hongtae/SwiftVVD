@@ -68,12 +68,15 @@ final class AGSubgraphRef: @unchecked Sendable {
         }
     }
 
-    init() {
+    init(parent explicitParent: AGSubgraphRef? = AGSubgraphRef.current) {
         guard let graph = _AGGraph.current else {
             fatalError("AGSubgraph must be created within an active _AGGraph context.")
         }
         self.graph = graph
-        if let parent = AGSubgraphRef.current {
+        if let parent = explicitParent {
+            guard parent.graph === graph else {
+                fatalError("AGSubgraph parent must belong to the active _AGGraph.")
+            }
             parent.children.append(self)
             self.parent = parent
         }

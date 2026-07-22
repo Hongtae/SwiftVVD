@@ -57,6 +57,55 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
+    func testCrossGraphRootEvaluatesAppearanceEffectDuringTransactionalUpdate() {
+        let sourceGraph = _AGGraph()
+        let sourceContext = _AGGraphContext(graph: sourceGraph)
+        let rendererHost = TestViewRendererHost()
+        var appearCount = 0
+
+        let viewGraph = sourceContext.withCurrent {
+            let content = sourceGraph.makeInput(
+                value: AnyView(
+                    EmptyView().onAppear {
+                        appearCount += 1
+                    }
+                )
+            )
+            return ViewGraph(
+                crossGraphContentAttr: content,
+                sourceGraph: sourceGraph,
+                rendererHost: rendererHost,
+                requestedOutputs: []
+            )
+        }
+        rendererHost.storage = viewGraph
+
+        viewGraph.updateOutputs(at: Time(seconds: 0))
+
+        XCTAssertEqual(appearCount, 1)
+    }
+
+    func testDynamicLayoutItemEvaluatesAppearanceEffectDuringTransactionalUpdate() {
+        let rendererHost = TestViewRendererHost()
+        var appearCount = 0
+        let content = VStack {
+            EmptyView().onAppear {
+                appearCount += 1
+            }
+        }
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.updateOutputs(at: Time(seconds: 0))
+
+        XCTAssertEqual(appearCount, 1)
+    }
+
     func testAppearanceEffectStoresCurrentAttributeDuringUpdate() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -315,7 +364,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                 Update.begin()
                 AppearanceEffect.willRemove(attribute: effect.identifier)
 
-                XCTAssertEqual(Update.queuedActionReasons, [0x02])
+                XCTAssertEqual(Update.queuedActionReasons, [.onDisappear])
                 XCTAssertEqual(events, ["appear"])
 
                 Update.end()
@@ -374,7 +423,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                 Update.begin()
                 _ = effect.value
 
-                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+                XCTAssertEqual(Update.queuedActionReasons, [nil, nil])
                 XCTAssertEqual(events, [])
 
                 Update.end()
@@ -411,7 +460,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                 Update.begin()
                 _ = effect.value
 
-                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+                XCTAssertEqual(Update.queuedActionReasons, [nil, nil])
                 XCTAssertEqual(events, [])
 
                 Update.end()
@@ -444,7 +493,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                 _ = effect.value
 
                 XCTAssertEqual(events, [])
-                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+                XCTAssertEqual(Update.queuedActionReasons, [nil, nil])
 
                 host.removedState = []
                 Update.end()

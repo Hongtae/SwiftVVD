@@ -1330,6 +1330,64 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS dynamicLayoutRetainedGeometryPreservationObserved
+    @MainActor
+    func testAnimationLabRetainedChildKeepsLastPublishedGeometryDuringRemoval() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingReinsertedAnimationLabChildRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingReinsertedAnimationLabChildRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Retained geometry test should not request graphics resources.")
+        }
+        let startDate = controller.date
+        var redraw = false
+        var tick: UInt64 = 0
+
+        func update(time: Double) {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+        }
+
+        func childGeometry() throws -> (CGPoint, CGSize) {
+            try controller.viewGraph.data.withCurrent {
+                let position = try XCTUnwrap(probe.text.insertionPosition)
+                let size = try XCTUnwrap(probe.text.insertionSize)
+                return (position.value, size.value.value)
+            }
+        }
+
+        update(time: 0)
+        let initial = try childGeometry()
+
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        for time in [0.001, 1.0, 2.5] {
+            update(time: time)
+            let retained = try childGeometry()
+            XCTAssertEqual(retained.0.x, initial.0.x, accuracy: 0.001)
+            XCTAssertEqual(retained.0.y, initial.0.y, accuracy: 0.001)
+            XCTAssertEqual(retained.1.width, initial.1.width, accuracy: 0.001)
+            XCTAssertEqual(retained.1.height, initial.1.height, accuracy: 0.001)
+        }
+    }
+
     @MainActor
     func testAnimationLabRemovalTitleSamplesIntermediateVerticalPosition() throws {
         let counter = LayoutSchedulingCounter()
@@ -1697,7 +1755,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
         var frames: [(time: Double, text: CGRect, background: CGRect)] = []
-        for sampleTime in [10.3, 10.7, 11.2, 12.2, 15.3] {
+        for sampleTime in [10.2, 10.3, 10.7, 11.2, 12.2, 15.3] {
             update(time: sampleTime)
             let list = try displayList(in: controller)
             let text = try XCTUnwrap(
@@ -1716,6 +1774,19 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             frames.append((sampleTime, text, background))
         }
+        let activationFrame = try XCTUnwrap(frames.first)
+        XCTAssertEqual(activationFrame.text.origin.x, insertedText.origin.x, accuracy: 0.001)
+        XCTAssertEqual(activationFrame.text.origin.y, insertedText.origin.y, accuracy: 0.001)
+        XCTAssertEqual(
+            activationFrame.background.origin.x,
+            insertedBackground.origin.x,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            activationFrame.background.origin.y,
+            insertedBackground.origin.y,
+            accuracy: 0.001
+        )
 
         for sample in frames {
             let containingBounds = sample.background.insetBy(dx: -1, dy: -1)

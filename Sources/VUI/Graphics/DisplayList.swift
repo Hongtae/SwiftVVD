@@ -477,6 +477,11 @@ struct DisplayList: Equatable, CustomStringConvertible {
     struct EffectItem {
         var effect: Effect
         var contents: DisplayList
+        var frame: CGRect
+        var identity: _DisplayList_Identity
+        var version: Version
+        var opacity: Float
+        var styleChain: StyleChain
     }
 
     // Style commands are captured by each item when it is recorded. Keeping the chain on the
@@ -1685,7 +1690,15 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
         var effectItem: EffectItem? {
             guard case let .effect(effect, contents) = value else { return nil }
-            return EffectItem(effect: effect, contents: contents)
+            return EffectItem(
+                effect: effect,
+                contents: contents,
+                frame: frame,
+                identity: identity,
+                version: version,
+                opacity: opacity,
+                styleChain: styleChain
+            )
         }
 
         func callAsFunction(_ context: GraphicsContext) {
@@ -2295,6 +2308,23 @@ struct DisplayList: Equatable, CustomStringConvertible {
             version: version
         ))
         recordInterpolationBounds(frame ?? contents.interpolationBounds)
+    }
+
+    mutating func appendEffect(
+        _ item: EffectItem,
+        contents: DisplayList
+    ) {
+        var copied = Item(
+            effect: item.effect,
+            contents: contents,
+            frame: item.frame,
+            identity: item.identity,
+            version: item.version,
+            opacity: item.opacity
+        )
+        copied.styleChain = item.styleChain
+        appendRecordedItem(copied)
+        recordInterpolationBounds(item.frame)
     }
 
     mutating func appendAnimationStyle(

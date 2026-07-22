@@ -180,25 +180,6 @@ private struct GlobalTransaction {
     }
 }
 
-enum CustomEventTrace {
-    enum InstantiationEventType: Int8, Hashable {
-        case assign
-        case instantiateBegin
-        case instantiateEnd
-        case uninstantiateBegin
-        case uninstantiateEnd
-        case recordNamedProperty
-
-        enum Kind: Int8, Hashable {
-            case graph
-            case app
-            case view
-            case gesture
-            case widget
-        }
-    }
-}
-
 class GraphHost: CustomReflectable {
     private static let maxTransactionUpdatePassCount = 8
 
@@ -480,7 +461,7 @@ class GraphHost: CustomReflectable {
         if immediately {
             invalidateOldRoot()
         } else {
-            Update.enqueueAction(reason: 0x11, invalidateOldRoot)
+            Update.enqueueAction(invalidateOldRoot)
         }
     }
 
@@ -725,7 +706,7 @@ class GraphHost: CustomReflectable {
         guard let host = updatingMutationHost else {
             let transaction = Transaction.current
             let id = Transaction.id
-            Update.enqueueAction(reason: 0x11) { [self] in
+            Update.enqueueAction { [self] in
                 asyncTransaction(
                     transaction,
                     id: id,
@@ -751,7 +732,7 @@ class GraphHost: CustomReflectable {
 
     func continueTransaction<M>(_ mutation: M) where M: GraphMutation {
         guard let host = updatingMutationHost else {
-            Update.enqueueAction(reason: 0x11) { [self] in
+            Update.enqueueAction { [self] in
                 asyncTransaction(
                     Transaction(),
                     id: Transaction.id,

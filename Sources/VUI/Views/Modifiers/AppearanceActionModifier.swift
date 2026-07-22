@@ -142,7 +142,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     private mutating func remove() {
         guard isAppeared else { return }
         if let disappear {
-            Update.enqueueAction(reason: 0x02, disappear)
+            Update.enqueueAction(reason: .onDisappear, disappear)
         }
         isAppeared = false
         isRemoved = true
@@ -166,7 +166,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
             }
         }
 
-        Update.enqueueAction(reason: 0x11, action)
+        Update.enqueueAction(action)
     }
 
     static func willRemove(attribute: AGAttribute) {

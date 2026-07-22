@@ -152,6 +152,29 @@ final class MatchedGeometryScope: PropertyKey {
         let source = soleSource ?? activeSource ?? deferredSource
         guard let source else { return nil }
 
+        return makeSourceInfo(
+            source,
+            clearsRemoval: soleSource == nil && activeSource == nil
+        )
+    }
+
+    func sourceInfo(
+        frameIndex: Int,
+        matching attribute: AGAttribute
+    ) -> MatchedGeometrySourceInfo? {
+        guard frames.indices.contains(frameIndex),
+              let source = frames[frameIndex].views.first(where: {
+                  $0.attribute == attribute
+              }) else {
+            return nil
+        }
+        return makeSourceInfo(source, clearsRemoval: false)
+    }
+
+    private func makeSourceInfo(
+        _ source: ViewRegistration,
+        clearsRemoval: Bool
+    ) -> MatchedGeometrySourceInfo {
         let args = source.args.value
         let size = source.size.value
         var points = [CGPoint(
@@ -166,7 +189,7 @@ final class MatchedGeometryScope: PropertyKey {
         )
         let transaction = source.transaction.value
         var phase = source.phase.value
-        if soleSource == nil, activeSource == nil {
+        if clearsRemoval {
             // A replacement source can exist before its parent layout has
             // assigned target geometry. Keep the retained source authoritative
             // during that gap instead of retargeting the shared frame to the
@@ -243,7 +266,7 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
     var frameIndex: Int
     var helper: AnimatableAttributeHelper<ViewFrame>
     var environment: Attribute<EnvironmentValues>
-    var lastSourceAttribute = AnyOptionalAttribute()
+    var lastSourceAttribute = AGWeakAttribute.invalid
 
     init(
         scope: MatchedGeometryScope,
@@ -265,8 +288,27 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
 
     mutating func updateValue() {
         guard let info = scope?.sourceInfo(frameIndex: frameIndex) else {
+            if helper.isAnimating,
+               let lastSource = lastSourceAttribute.attribute,
+               let retained = scope?.sourceInfo(
+                   frameIndex: frameIndex,
+                   matching: lastSource
+               ),
+               !retained.phase.isBeingRemoved {
+                var value = (value: retained.frame, changed: false)
+                helper.update(
+                    value: &value,
+                    environment: environment,
+                    advancesDelayedSecondSample: true
+                )
+                _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+                    frame: value.value,
+                    source: AnyOptionalAttribute()
+                ))
+                return
+            }
             helper.finishAndClearAnimatorState()
-            lastSourceAttribute = AnyOptionalAttribute()
+            lastSourceAttribute = .invalid
             _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
                 frame: nil,
                 source: AnyOptionalAttribute()
@@ -284,7 +326,7 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
         let stored: MatchedGeometrySharedValue? = _AGGraph.currentStatefulOutput()
         let previous = stored?.frame
         let source = AnyOptionalAttribute(info.sourceAttribute)
-        lastSourceAttribute = source
+        lastSourceAttribute = AGWeakAttribute(info.sourceAttribute)
 
         if update.didReset || previous == nil {
             helper.finishAndClearAnimatorState()
@@ -654,7 +696,6 @@ public struct _MatchedGeometryEffect<ID: Hashable>: MultiViewModifier, Primitive
         var bodyInputs = matchedInputs
         bodyInputs.containerPosition = bodyContainerPosition
         bodyInputs.requestsLayoutComputer = true
-        bodyInputs[LayoutPlacementAnimationsDisabledInput.self] = true
         let outputs = body(_Graph(), bodyInputs)
         graph.setIndirectTarget(
             childLayoutComputer,

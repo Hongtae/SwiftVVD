@@ -1248,7 +1248,7 @@ extension PreferencesOutputs {
                 return
             }
 
-            Update.enqueueAction(reason: 0x11) { [weak host] in
+            Update.enqueueAction { [weak host] in
                 guard let host else {
                     return
                 }

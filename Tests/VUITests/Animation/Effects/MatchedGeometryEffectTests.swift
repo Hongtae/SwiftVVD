@@ -21,6 +21,18 @@ private final class MatchedGeometryPlacementCapture: @unchecked Sendable {
     var proposal: ProposedViewSize?
 }
 
+private struct MatchedGeometryAnimatedFrameCaptureEntry {
+    var frame: AGAttribute
+    var targetPosition: AGAttribute
+    var targetSize: AGAttribute
+    var transaction: AGAttribute
+    var phase: AGAttribute
+}
+
+private final class MatchedGeometryAnimatedFrameCapture: @unchecked Sendable {
+    var entries: [AGAttribute: MatchedGeometryAnimatedFrameCaptureEntry] = [:]
+}
+
 private final class SecondaryLayerPlacementCapture: @unchecked Sendable {
     var count = 0
     var position: CGPoint?
@@ -62,7 +74,6 @@ private final class LayoutPlacementStateCapture: @unchecked Sendable {
     var position: Attribute<CGPoint>?
     var size: Attribute<ViewSize>?
     var transform: Attribute<ViewTransform>?
-    var animationsDisabled = false
 }
 
 private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
@@ -79,8 +90,6 @@ private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
         view._attribute.value.capture.position = inputs.position
         view._attribute.value.capture.size = inputs.size
         view._attribute.value.capture.transform = inputs.transform
-        view._attribute.value.capture.animationsDisabled =
-            inputs[LayoutPlacementAnimationsDisabledInput.self]
         guard let graph = _AGGraph.current else {
             fatalError("LayoutPlacementStateProbe called outside an active graph.")
         }
@@ -97,12 +106,25 @@ private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
 private struct MatchedGeometryTextDisplayProbe: View, TestPrimitiveView {
     typealias Body = Never
 
+    var animatedFrameCapture: MatchedGeometryAnimatedFrameCapture? = nil
+
     static func _makeView(
         view: _GraphValue<Self>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("MatchedGeometryTextDisplayProbe called outside an active graph.")
+        }
+        if let capture = view._attribute.value.animatedFrameCapture,
+           let frame = inputs.base.cachedEnvironment.value.animatedFrame {
+            capture.entries[frame.animatedFrame.identifier] =
+                MatchedGeometryAnimatedFrameCaptureEntry(
+                    frame: frame.animatedFrame.identifier,
+                    targetPosition: frame.position.identifier,
+                    targetSize: frame.size.identifier,
+                    transaction: frame.transaction.identifier,
+                    phase: frame.viewPhase.identifier
+                )
         }
         let displayList: Attribute<DisplayList> = graph.makeRule {
             var list = DisplayList()
@@ -185,35 +207,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
         rendererHost.storage = viewGraph
 
         XCTAssertTrue(capture.hasScope)
-    }
-
-    // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testOverlayPropagatesMatchedPlacementAnimationPolicy() {
-        let graph = _AGGraph()
-        _AGGraph.withCurrent(graph) {
-            var inputs = makeViewInputs(graph: graph)
-            inputs[LayoutPlacementAnimationsDisabledInput.self] = true
-            let capture = LayoutPlacementStateCapture()
-            let modifier = graph.makeInput(value: _OverlayModifier(
-                overlay: LayoutPlacementStateProbe(capture: capture),
-                alignment: .center
-            ))
-
-            _ = _OverlayModifier<LayoutPlacementStateProbe>._makeView(
-                modifier: _GraphValue(_attribute: modifier),
-                inputs: inputs
-            ) { _, _ in
-                _ViewOutputs(
-                    layoutComputer: OptionalAttribute(
-                        graph.makeInput(value: LayoutComputer.fixed(
-                            CGSize(width: 100, height: 60)
-                        ))
-                    )
-                )
-            }
-
-            XCTAssertTrue(capture.animationsDisabled)
-        }
     }
 
     func testOverlayDefersSecondaryPlacementUntilParentPlacement() throws {
@@ -601,7 +594,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
+    // ASSERTIONS matchedGeometryBodyInputAnimationPolicyObserved
     func testSourceRegistrationUsesTargetGeometryDuringLayoutAnimation() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -647,7 +640,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 isSource: true
             ))
             let capture = MatchedGeometryTransformCapture()
-            var disablesNestedPlacementAnimations = false
+            var forcesAnimationsDisabled = false
             _ = _MatchedGeometryEffect<String>._makeView(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: inputs
@@ -660,9 +653,9 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 let cachedFrame = childInputs.base.cachedEnvironment.value.animatedFrame
                 capture.cachedFramePosition = cachedFrame?.position
                 capture.cachedAnimatedPosition = cachedFrame?._animatedPosition
-                disablesNestedPlacementAnimations = childInputs[
-                    LayoutPlacementAnimationsDisabledInput.self
-                ]
+                forcesAnimationsDisabled = childInputs.base.options.contains(
+                    .animationsDisabled
+                )
                 return _ViewOutputs(
                     layoutComputer: OptionalAttribute(
                         graph.makeInput(value: LayoutComputer.fixed(
@@ -697,7 +690,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 try XCTUnwrap(capture.containerPosition).identifier
             )
             XCTAssertTrue(capture.requestsLayoutComputer)
-            XCTAssertTrue(disablesNestedPlacementAnimations)
+            XCTAssertFalse(forcesAnimationsDisabled)
         }
     }
 
@@ -920,46 +913,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
             XCTAssertEqual(
                 try XCTUnwrap(capture.position).value,
                 CGPoint(x: -20, y: -10)
-            )
-        }
-    }
-
-    // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testDisabledNestedLayoutPlacementUpdatesWithoutSecondaryAnimation() throws {
-        let graph = _AGGraph()
-        try _AGGraph.withCurrent(graph) {
-            let capture = LayoutPlacementStateCapture()
-            let root = HStack {
-                LayoutPlacementStateProbe(capture: capture)
-            }
-            let source = graph.makeInput(value: root)
-            var inputs = makeViewInputs(graph: graph)
-            let parentPosition = graph.makeInput(value: CGPoint.zero)
-            inputs.position = parentPosition
-            inputs.size = graph.makeInput(value: ViewSize(width: 40, height: 20))
-            inputs[LayoutPlacementAnimationsDisabledInput.self] = true
-            let outputs = type(of: root)._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: inputs
-            )
-            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            let position = try XCTUnwrap(capture.position)
-            _ = layout.sizeThatFits(.unspecified)
-            let initialPosition = position.value
-
-            Transaction.withScopedThreadTransaction(
-                Transaction(animation: .linear(duration: 1.0))
-            ) {
-                parentPosition.setValue(
-                    CGPoint(
-                        x: initialPosition.x + 100,
-                        y: initialPosition.y + 50
-                    )
-                )
-            }
-            XCTAssertEqual(
-                position.value,
-                CGPoint(x: initialPosition.x + 100, y: initialPosition.y + 50)
             )
         }
     }
@@ -1336,8 +1289,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
 
         func matchedFrames() throws -> [CGRect] {
             try displayList().items.compactMap {
-                guard case .effect(.identity, _) = $0.value else { return nil }
-                return $0.frame
+                guard case let .effect(.identity, contents) = $0.value else {
+                    return nil
+                }
+                return contents.interpolationBounds
             }
         }
 
@@ -1363,7 +1318,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 guard case let .effect(.identity, contents) = $0.value else {
                     return nil
                 }
-                return ($0.frame, contents)
+                guard let frame = contents.interpolationBounds else {
+                    return nil
+                }
+                return (frame, contents)
             }
             XCTAssertEqual(matchedItems.count, 2, file: file, line: line)
             guard matchedItems.count == 2 else { return }
@@ -1459,6 +1417,394 @@ final class MatchedGeometryEffectTests: XCTestCase {
         let reverseEndFrames = try matchedFrames()
         XCTAssertEqual(reverseEndFrames.count, 1)
         assertFrameEqual(try XCTUnwrap(reverseEndFrames.first), initialFrame)
+    }
+
+    // ASSERTIONS matchedGeometryNonSourceReplacementObserved
+    @MainActor
+    func testNonSourceReplacementKeepsRetainedPresentationFrameAtActivation() throws {
+        let probe = MatchedGeometryNonSourceRuntimeProbe()
+        let controller = WindowController(
+            content: MatchedGeometryNonSourceRuntimeRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MatchedGeometryNonSourceRuntimeRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) {
+            var redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(time),
+                contentSize: CGSize(width: 700, height: 500),
+                redraw: &redraw,
+                withGC
+            )
+            tick &+= 1
+        }
+
+        func matchedPresentations() throws -> [(frame: CGRect, contentBounds: CGRect)] {
+            try controller.viewGraph.data.withCurrent {
+                try XCTUnwrap(controller.viewGraph.rootDisplayList?.value).items.compactMap {
+                    guard case let .effect(.identity, contents) = $0.value,
+                          let contentBounds = contents.interpolationBounds else {
+                        return nil
+                    }
+                    return ($0.frame, contentBounds)
+                }
+            }
+        }
+
+        func effectiveFrame(
+            _ presentation: (frame: CGRect, contentBounds: CGRect)
+        ) -> CGRect {
+            CGRect(
+                origin: CGPoint(
+                    x: presentation.contentBounds.origin.x + presentation.frame.origin.x,
+                    y: presentation.contentBounds.origin.y + presentation.frame.origin.y
+                ),
+                size: presentation.frame.size
+            )
+        }
+
+        update(0)
+        let initialPresentation = try XCTUnwrap(matchedPresentations().first)
+        let initial = effectiveFrame(initialPresentation)
+
+        try XCTUnwrap(probe.toggleSource)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        update(1.3)
+        XCTAssertEqual(
+            effectiveFrame(try XCTUnwrap(matchedPresentations().first)),
+            initial
+        )
+
+        try XCTUnwrap(probe.toggleLayout)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        update(1.3)
+        let activation = try matchedPresentations()
+        XCTAssertEqual(activation.count, 2)
+        let retained = try XCTUnwrap(activation.first {
+            abs($0.frame.width - initial.width) < 0.001
+        })
+        let effectiveRetained = effectiveFrame(retained)
+        XCTAssertEqual(effectiveRetained.origin.x, initial.origin.x, accuracy: 0.001)
+        XCTAssertEqual(effectiveRetained.origin.y, initial.origin.y, accuracy: 0.001)
+    }
+
+    // ASSERTIONS matchedGeometryMidflightNoSourceAnimatorObserved
+    @MainActor
+    func testMidflightSourceFlagKeepsExistingMatchedSpringInFlight() throws {
+        func run(togglesSource: Bool) throws -> [CGRect] {
+            let probe = MatchedGeometryNonSourceRuntimeProbe()
+            let controller = WindowController(
+                content: MatchedGeometryNonSourceRuntimeRoot(probe: probe),
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(MatchedGeometryNonSourceRuntimeRoot.self)
+                )
+            )
+            let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+            var tick: UInt64 = 0
+
+            func update(_ time: Double) {
+                var redraw = false
+                controller.updateView(
+                    tick: tick,
+                    delta: time - controller.animationTimestamp.seconds,
+                    date: controller.date.addingTimeInterval(time),
+                    contentSize: CGSize(width: 700, height: 500),
+                    redraw: &redraw,
+                    withGC
+                )
+                tick &+= 1
+            }
+
+            func effectiveFrame() throws -> CGRect {
+                try controller.viewGraph.data.withCurrent {
+                    let list = try XCTUnwrap(controller.viewGraph.rootDisplayList?.value)
+                    let presentations: [(frame: CGRect, contentBounds: CGRect)] = list.items.compactMap {
+                        guard case let .effect(.identity, contents) = $0.value,
+                              let contentBounds = contents.interpolationBounds else {
+                            return nil
+                        }
+                        return (frame: $0.frame, contentBounds: contentBounds)
+                    }
+                    let frames = presentations.map { presentation in
+                        CGRect(
+                            origin: CGPoint(
+                                x: presentation.contentBounds.origin.x + presentation.frame.origin.x,
+                                y: presentation.contentBounds.origin.y + presentation.frame.origin.y
+                            ),
+                            size: presentation.frame.size
+                        )
+                    }
+                    return try XCTUnwrap(frames.max { $0.minX < $1.minX })
+                }
+            }
+
+            update(0)
+            let initial = try effectiveFrame()
+            try XCTUnwrap(probe.toggleLayout)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+            update(0)
+            update(0.001)
+            update(0.45)
+            var frames = [try effectiveFrame()]
+            XCTAssertGreaterThan(frames[0].minX, initial.minX)
+
+            if togglesSource {
+                try XCTUnwrap(probe.toggleSource)()
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+            }
+            update(0.45)
+            frames.append(try effectiveFrame())
+            for time in [0.75, 1.0, 1.5, 2.1] {
+                update(time)
+                frames.append(try effectiveFrame())
+            }
+            return frames
+        }
+
+        let baseline = try run(togglesSource: false)
+        let sourceFlag = try run(togglesSource: true)
+        XCTAssertEqual(sourceFlag.count, baseline.count)
+        for (flagged, unmodified) in zip(sourceFlag, baseline) {
+            XCTAssertEqual(flagged.minX, unmodified.minX, accuracy: 0.001)
+            XCTAssertEqual(flagged.minY, unmodified.minY, accuracy: 0.001)
+            XCTAssertEqual(flagged.width, unmodified.width, accuracy: 0.001)
+            XCTAssertEqual(flagged.height, unmodified.height, accuracy: 0.001)
+        }
+    }
+
+    // ASSERTIONS matchedGeometryMidflightSourceSelectionPhaseObserved
+    func testNoSourceAnimatorStopsWhenLastSourceRegistrationBeginsRemoval() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let graph = viewGraph.data.graph
+        try viewGraph.data.withCurrent {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.makeRootMatchedGeometryScope()
+            let scope = try XCTUnwrap(
+                inputs.base.customInputs.value(forKey: MatchedGeometryScope.self)
+            )
+            let key = AnyHashable(MatchedGeometryKeyForTest(
+                id: "hero",
+                namespace: Namespace().wrappedValue
+            ))
+
+            func makeRegistration(
+                owner: AGAttribute,
+                args: Attribute<MatchedGeometryArguments>,
+                phase: Attribute<Phase>,
+                transaction: Attribute<Transaction>,
+                position: CGPoint,
+                size: CGSize
+            ) -> MatchedGeometryScope.ViewRegistration {
+                var transform = ViewTransform()
+                transform.appendPosition(position)
+                return MatchedGeometryScope.ViewRegistration(
+                    attribute: owner,
+                    args: args,
+                    transaction: transaction,
+                    phase: phase,
+                    placement: OptionalAttribute(),
+                    size: graph.makeInput(value: ViewSize(size)),
+                    position: graph.makeInput(value: position),
+                    transform: graph.makeInput(value: transform)
+                )
+            }
+
+            let firstOwner = graph.makeInput(value: true)
+            let firstArgs: Attribute<MatchedGeometryArguments> = graph.makeInput(value: (
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            ))
+            let firstPhase = graph.makeInput(value: Phase())
+            let firstTransaction = graph.makeInput(value: Transaction())
+            var firstIndex: Int?
+            _ = scope.frame(
+                index: &firstIndex,
+                for: key,
+                view: makeRegistration(
+                    owner: firstOwner.identifier,
+                    args: firstArgs,
+                    phase: firstPhase,
+                    transaction: firstTransaction,
+                    position: CGPoint(x: 79, y: 137),
+                    size: CGSize(width: 110, height: 78)
+                )
+            )
+            let frameIndex = try XCTUnwrap(firstIndex)
+            let sharedFrame = try XCTUnwrap(scope.frames[frameIndex].sharedFrame)
+            XCTAssertNotNil(sharedFrame.value.frame)
+
+            var removed = Phase()
+            removed.isBeingRemoved = true
+            firstPhase.setValue(removed)
+
+            let secondOwner = graph.makeInput(value: true)
+            let secondArgs: Attribute<MatchedGeometryArguments> = graph.makeInput(value: (
+                properties: .frame,
+                anchor: .center,
+                isSource: true
+            ))
+            let secondPhase = graph.makeInput(value: Phase())
+            let secondTransaction = graph.makeInput(
+                value: Transaction(animation: .spring(duration: 2.0, bounce: 0.25))
+            )
+            var secondIndex: Int?
+            _ = scope.frame(
+                index: &secondIndex,
+                for: key,
+                view: makeRegistration(
+                    owner: secondOwner.identifier,
+                    args: secondArgs,
+                    phase: secondPhase,
+                    transaction: secondTransaction,
+                    position: CGPoint(x: 426, y: 137),
+                    size: CGSize(width: 230, height: 130)
+                )
+            )
+            XCTAssertEqual(secondIndex, firstIndex)
+            XCTAssertNotNil(sharedFrame.value.frame)
+
+            inputs.base.time.setValue(Time(seconds: 0.45))
+            XCTAssertNotNil(sharedFrame.value.frame)
+
+            secondArgs.setValue((properties: .frame, anchor: .center, isSource: false))
+            XCTAssertNotNil(
+                sharedFrame.value.frame,
+                "an active last-source registration keeps the in-flight animator alive"
+            )
+
+            firstArgs.setValue((properties: .frame, anchor: .center, isSource: false))
+            firstPhase.setValue(Phase())
+            secondPhase.setValue(removed)
+            XCTAssertNil(
+                sharedFrame.value.frame,
+                "a retained-removal last source must not carry the shared animator"
+            )
+        }
+    }
+
+    // ASSERTIONS matchedGeometryMidflightRetainedRegistrationReinsertObserved
+    // ASSERTIONS matchedGeometryMidflightIncomingFrameAnimationObserved
+    @MainActor
+    func testMidflightSourceThenReverseSeparatesRetainedAndReinsertedPresentations() throws {
+        let probe = MatchedGeometryNonSourceRuntimeProbe()
+        let controller = WindowController(
+            content: MatchedGeometryNonSourceRuntimeRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MatchedGeometryNonSourceRuntimeRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) {
+            var redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(time),
+                contentSize: CGSize(width: 700, height: 500),
+                redraw: &redraw,
+                withGC
+            )
+            tick &+= 1
+        }
+
+        struct FrameSnapshot: CustomStringConvertible {
+            var id: AGAttribute
+            var frame: ViewFrame
+            var target: ViewFrame
+            var hasAnimation: Bool
+            var isBeingRemoved: Bool
+
+            var description: String {
+                "id=\(id) frame=\(frame) target=\(target) animation=\(hasAnimation) removed=\(isBeingRemoved)"
+            }
+        }
+
+        func animatedFrames() -> [FrameSnapshot] {
+            controller.viewGraph.data.withCurrent {
+                let graph = controller.viewGraph.data.graph
+                return probe.animatedFrameCapture.entries.values.compactMap { entry in
+                    guard
+                        let frame = graph.weakAttributeIfValid(for: entry.frame),
+                        let position = graph.weakAttributeIfValid(for: entry.targetPosition),
+                        let size = graph.weakAttributeIfValid(for: entry.targetSize),
+                        let transaction = graph.weakAttributeIfValid(for: entry.transaction),
+                        let phase = graph.weakAttributeIfValid(for: entry.phase)
+                    else {
+                        return nil
+                    }
+                    return FrameSnapshot(
+                        id: entry.frame,
+                        frame: Attribute<ViewFrame>(frame.toStrong()).value,
+                        target: ViewFrame(
+                            origin: Attribute<CGPoint>(position.toStrong()).value,
+                            size: Attribute<ViewSize>(size.toStrong()).value
+                        ),
+                        hasAnimation: Attribute<Transaction>(transaction.toStrong()).value.animation != nil,
+                        isBeingRemoved: Attribute<Phase>(phase.toStrong()).value.isBeingRemoved
+                    )
+                }
+            }
+        }
+
+        update(0)
+        try XCTUnwrap(probe.toggleLayout)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        update(0)
+        update(0.001)
+        update(0.10)
+        update(0.20)
+        update(0.30)
+        update(0.45)
+
+        try XCTUnwrap(probe.toggleSource)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        update(0.45)
+
+        try XCTUnwrap(probe.toggleLayout)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        update(0.45)
+
+        let activation = animatedFrames()
+        XCTAssertEqual(activation.count, 2, "\(activation)")
+        let activationOrigin = try XCTUnwrap(activation.first).frame.origin
+        for snapshot in activation {
+            XCTAssertEqual(snapshot.frame.origin.x, activationOrigin.x, accuracy: 0.001, "\(activation)")
+            XCTAssertEqual(snapshot.frame.origin.y, activationOrigin.y, accuracy: 0.001, "\(activation)")
+            XCTAssertTrue(snapshot.hasAnimation, "\(activation)")
+        }
+        XCTAssertEqual(Set(activation.map(\.target.origin.x)).count, 2, "\(activation)")
+        XCTAssertLessThan(try XCTUnwrap(activation.map(\.target.origin.x).min()), activationOrigin.x)
+        XCTAssertGreaterThan(try XCTUnwrap(activation.map(\.target.origin.x).max()), activationOrigin.x)
+
+        update(0.46)
+        update(0.47)
+        update(0.55)
+        update(0.75)
+        let separated = animatedFrames()
+        XCTAssertEqual(separated.count, 2)
+        let horizontalSpan = try XCTUnwrap(separated.map(\.frame.origin.x).max())
+            - XCTUnwrap(separated.map(\.frame.origin.x).min())
+        XCTAssertGreaterThan(horizontalSpan, 20, "\(separated)")
+        XCTAssertLessThan(try XCTUnwrap(separated.map(\.frame.origin.x).min()), activationOrigin.x)
+        XCTAssertGreaterThan(try XCTUnwrap(separated.map(\.frame.origin.x).max()), activationOrigin.x)
     }
 
     private func recursiveTextFrames(in list: DisplayList) -> [CGRect] {
@@ -1621,6 +1967,67 @@ private struct MatchedGeometryReplacementRoot: View {
 
 private final class MatchedGeometryTextRuntimeProbe {
     var toggle: (() -> Void)?
+}
+
+private final class MatchedGeometryNonSourceRuntimeProbe {
+    var toggleSource: (() -> Void)?
+    var toggleLayout: (() -> Void)?
+    let animatedFrameCapture = MatchedGeometryAnimatedFrameCapture()
+}
+
+private struct MatchedGeometryNonSourceRuntimeRoot: View {
+    let probe: MatchedGeometryNonSourceRuntimeProbe
+
+    @Namespace private var namespace
+    @State private var expanded = false
+    @State private var alternateSource = false
+
+    var body: some View {
+        probe.toggleSource = {
+            withAnimation(.easeInOut(duration: 1.2)) {
+                alternateSource.toggle()
+            }
+        }
+        probe.toggleLayout = {
+            withAnimation(.spring(duration: 2.0, bounce: 0.25)) {
+                expanded.toggle()
+            }
+        }
+        return ZStack {
+            if expanded {
+                HStack {
+                    Spacer()
+                    card
+                        .frame(width: 230, height: 130)
+                }
+                .padding(24)
+            } else {
+                HStack {
+                    card
+                        .frame(width: 110, height: 78)
+                    Spacer()
+                }
+                .padding(24)
+            }
+        }
+        .frame(width: 560, height: 210)
+    }
+
+    private var card: some View {
+        RoundedRectangle(cornerRadius: expanded ? 30 : 12)
+            .fill(Color.indigo)
+            .overlay {
+                MatchedGeometryTextDisplayProbe(
+                    animatedFrameCapture: probe.animatedFrameCapture
+                )
+            }
+            .matchedGeometryEffect(
+                id: "matched-card",
+                in: namespace,
+                properties: .frame,
+                isSource: !alternateSource
+            )
+    }
 }
 
 private struct MatchedGeometryTextRuntimeRoot: View {

@@ -401,7 +401,7 @@ final class PreferenceBridgeTests: XCTestCase {
                 )
                 transformed = outputs.value(for: AppendingPreferenceKey.self)
                 XCTAssertEqual(Attribute<String>(transformed).value, "")
-                XCTAssertEqual(Update.queuedActionReasons, [0x11])
+                XCTAssertEqual(Update.queuedActionReasons, [nil])
                 Update.end()
             }
 
@@ -455,7 +455,7 @@ final class PreferenceBridgeTests: XCTestCase {
                 )
                 transformed = outputs.value(for: AppendingPreferenceKey.self)
                 XCTAssertEqual(Attribute<String>(transformed).value, "")
-                XCTAssertEqual(Update.queuedActionReasons, [0x11])
+                XCTAssertEqual(Update.queuedActionReasons, [nil])
                 Update.end()
             }
 
@@ -502,7 +502,7 @@ final class PreferenceBridgeTests: XCTestCase {
             )
             transformed = outputs.value(for: SecondaryPreferenceKey.self)
             XCTAssertEqual(Attribute<Int>(transformed).value, 0)
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             Update.end()
             XCTAssertTrue(host.hasPendingTransactions)
         }
@@ -525,7 +525,7 @@ final class PreferenceBridgeTests: XCTestCase {
             transform.setValue({ (value: inout Int) in
                 value += 2
             })
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             Update.end()
             XCTAssertTrue(host.hasPendingTransactions)
         }
@@ -559,7 +559,7 @@ final class PreferenceBridgeTests: XCTestCase {
             )
             transformed = outputs.value(for: ArrayPreferenceKey.self)
             XCTAssertEqual(Attribute<[Int]>(transformed).value, [])
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             Update.end()
             XCTAssertTrue(host.hasPendingTransactions)
         }
@@ -574,7 +574,7 @@ final class PreferenceBridgeTests: XCTestCase {
             transform.setValue({ (value: inout [Int]) in
                 value = value.map { $0 }
             })
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             Update.end()
             XCTAssertTrue(host.hasPendingTransactions)
         }
@@ -834,7 +834,7 @@ final class PreferenceBridgeTests: XCTestCase {
                 }
             }, id: nil)
             XCTAssertNil(viewGraph.preferenceBridge)
-            XCTAssertEqual(Update.queuedActionReasons, [0x11])
+            XCTAssertEqual(Update.queuedActionReasons, [nil])
             XCTAssertFalse(deferredUpdateCalled)
             Update.end()
 
