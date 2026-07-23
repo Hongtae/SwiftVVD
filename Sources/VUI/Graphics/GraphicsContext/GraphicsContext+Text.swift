@@ -326,6 +326,47 @@ extension GraphicsContext {
             var height: CGFloat { ascender - descender }
         }
 
+        struct GlyphAtom {
+            var scalar: UnicodeScalar
+            var bounds: CGRect
+        }
+
+        func glyphAtoms(in size: CGSize) -> [GlyphAtom] {
+            let width = max(size.width, 0) * scaleFactor
+            let height = max(size.height, 0) * scaleFactor
+            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
+            let lines = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            let scale = 1 / scaleFactor
+            var atoms: [GlyphAtom] = []
+            var lineOriginY: CGFloat = 0
+
+            for line in lines {
+                let fallbackAdvance = line.width > 0 || line.glyphs.isEmpty
+                    ? CGFloat.zero
+                    : width / CGFloat(line.glyphs.count)
+                var glyphOriginX: CGFloat = 0
+                for glyph in line.glyphs {
+                    let advance = glyph.advance.width > 0
+                        ? glyph.advance.width
+                        : fallbackAdvance
+                    atoms.append(GlyphAtom(
+                        scalar: glyph.scalar,
+                        bounds: CGRect(
+                            x: glyphOriginX * scale,
+                            y: lineOriginY * scale,
+                            width: advance * scale,
+                            height: line.height * scale
+                        )
+                    ))
+                    let kerning = glyphOriginX > 0 ? glyph.kerning.x : 0
+                    glyphOriginX += advance + kerning
+                }
+                lineOriginY += line.height
+            }
+            return atoms
+        }
+
         final class Drawing {
             fileprivate struct Vertex {
                 var position: CGPoint

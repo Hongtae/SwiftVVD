@@ -252,6 +252,31 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertTrue(drawingGroupOptions.allowsPackedDrawable)
     }
 
+    func testDynamicTextAnimationUsesDefaultOnlyForDynamicStyles() {
+        for style in [ContentTransition.Style.sessionWidget, .animatedWidget] {
+            var state = ContentTransition.State(style: style)
+            state.applyDynamicTextAnimation(in: Transaction(animation: .easeIn))
+            XCTAssertEqual(state.animation, .default)
+        }
+
+        var defaultStyle = ContentTransition.State(style: .default)
+        defaultStyle.applyDynamicTextAnimation(in: Transaction(animation: .easeIn))
+        XCTAssertNil(defaultStyle.animation)
+
+        var disabledTransaction = Transaction(animation: .easeIn)
+        disabledTransaction.disablesAnimations = true
+        var disabled = ContentTransition.State(style: .animatedWidget)
+        disabled.applyDynamicTextAnimation(in: disabledTransaction)
+        XCTAssertNil(disabled.animation)
+
+        var existing = ContentTransition.State(
+            style: .animatedWidget,
+            animation: .linear(duration: 0.25)
+        )
+        existing.applyDynamicTextAnimation(in: Transaction(animation: .easeIn))
+        XCTAssertEqual(existing.animation, .linear(duration: 0.25))
+    }
+
     func testContentTransitionEffectRendererSurface() throws {
         var state = ContentTransition.State(
             transition: .opacity,
@@ -476,30 +501,126 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     }
 
     func testContentTransitionRBTransitionCarrierSurface() {
-        for transition in [
-            ContentTransition.identity,
-            ContentTransition.opacity,
-            ContentTransition.interpolate,
-            ContentTransition.numericText(),
-            ContentTransition.numericText(countsDown: true),
-            ContentTransition.numericText(value: 12.5),
-        ] {
+        let namedRows: [(ContentTransition, Int32, Bool)] = [
+            (ContentTransition.defaultTransition, ContentTransition.Method.binary.method, true),
+            (.identity, ContentTransition.Method.none.method, false),
+            (.opacity, ContentTransition.Method.none.method, true),
+            (.interpolate, ContentTransition.Method.diff.method, true),
+        ]
+        for (transition, method, hasOpacity) in namedRows {
             let rbTransition = transition.rbTransition
-            XCTAssertEqual(rbTransition.method, ContentTransition.Method.diff.method)
+            XCTAssertEqual(rbTransition.method, method)
             XCTAssertEqual(rbTransition.maxChanges, UInt32.max)
             XCTAssertFalse(rbTransition.isReplaceable)
             XCTAssertEqual(rbTransition.addRemoveDuration, 0.1254902, accuracy: 0.000001)
             XCTAssertNil(rbTransition.animation)
-            XCTAssertEqual(rbTransition.effects.count, 1)
-            XCTAssertEqual(rbTransition.effects[0].type, ContentTransition.EffectType.opacity.type)
-            XCTAssertEqual(rbTransition.effects[0].beginTime, 0)
-            XCTAssertEqual(rbTransition.effects[0].duration, 0)
-            XCTAssertEqual(rbTransition.effects[0].events, 3)
-            XCTAssertEqual(rbTransition.effects[0].flags, 0)
-            XCTAssertEqual(rbTransition.effects[0].animationIndex, 0)
-            XCTAssertEqual(rbTransition.effects[0].insertAnimationIndex, 0)
-            XCTAssertEqual(rbTransition.effects[0].removeAnimationIndex, 0)
+            XCTAssertEqual(rbTransition.effects.count, hasOpacity ? 1 : 0)
+            if let effect = rbTransition.effects.first {
+                XCTAssertEqual(effect.type, ContentTransition.EffectType.opacity.type)
+                XCTAssertEqual(effect.beginTime, 0)
+                XCTAssertEqual(effect.duration, 0)
+                XCTAssertEqual(effect.events, 3)
+                XCTAssertEqual(effect.flags, 0)
+                XCTAssertEqual(effect.animationIndex, 0)
+                XCTAssertEqual(effect.insertAnimationIndex, 0)
+                XCTAssertEqual(effect.removeAnimationIndex, 0)
+            }
         }
+
+        let text = ContentTransition.text.rbTransition
+        XCTAssertEqual(text.method, ContentTransition.Method.none.method)
+        XCTAssertEqual(text.effects.count, 1)
+        XCTAssertEqual(
+            text.effects[0].type,
+            ContentTransition.EffectType.opacity.type
+        )
+        // ASSERTIONS contentTransitionTextFadeRuntimeObserved
+
+        for (transition, expectedOffset, expectedFlags) in [
+            (ContentTransition.numericText(), Float(0.59375), UInt32(1)),
+            (ContentTransition.numericText(countsDown: true), Float(-0.59375), UInt32(1)),
+            (ContentTransition.numericText(value: 12.5), Float(0.59375), UInt32(3)),
+        ] {
+            let rbTransition = transition.rbTransition
+            XCTAssertEqual(rbTransition.method, ContentTransition.Method.prefixAndSuffix.method)
+            XCTAssertEqual(rbTransition.maxChanges, UInt32.max)
+            XCTAssertFalse(rbTransition.isReplaceable)
+            XCTAssertEqual(rbTransition.addRemoveDuration, 0.1254902, accuracy: 0.000001)
+            XCTAssertEqual(rbTransition.effects.map(\.type), [11, 1, 16, 15, 2])
+            XCTAssertEqual(rbTransition.effects.map(\.events), [3, 3, 3, 3, 3])
+            XCTAssertEqual(rbTransition.effects.map(\.flags), [0, 0, 0, expectedFlags, 0])
+            XCTAssertEqual(rbTransition.effects[0].beginTime, Float(38) / 255, accuracy: 0.000001)
+            XCTAssertEqual(rbTransition.effects[0].duration, Float(204) / 255, accuracy: 0.000001)
+            for effect in rbTransition.effects.dropFirst() {
+                XCTAssertEqual(effect.beginTime, 0)
+                XCTAssertEqual(effect.duration, 1)
+            }
+            XCTAssertEqual(rbTransition.effects[2].argumentValue(atIndex: 0), 0)
+            XCTAssertEqual(rbTransition.effects[2].argumentValue(atIndex: 1), 0.25)
+            XCTAssertEqual(rbTransition.effects[3].argumentValue(atIndex: 0), 0)
+            XCTAssertEqual(rbTransition.effects[3].argumentValue(atIndex: 1), expectedOffset)
+            XCTAssertEqual(rbTransition.effects[3].animationIndex, 1)
+            XCTAssertEqual(rbTransition.effects[4].argumentValue(atIndex: 0), 0.3984375)
+
+            let expectedAnimation = RBAnimation()
+            expectedAnimation.addSpringDuration(
+                0.5,
+                mass: 1,
+                stiffness: 344,
+                damping: 37,
+                initialVelocity: 0
+            )
+            expectedAnimation.addSpringDuration(
+                0.8,
+                mass: 2,
+                stiffness: 470,
+                damping: 34,
+                initialVelocity: 0
+            )
+            XCTAssertEqual(rbTransition.animation, expectedAnimation)
+        }
+
+        XCTAssertNil(ContentTransition.identity.numericValue)
+        XCTAssertNil(ContentTransition.opacity.numericValue)
+        XCTAssertNil(ContentTransition.interpolate.numericValue)
+        XCTAssertNil(ContentTransition.numericText().numericValue)
+        XCTAssertNil(ContentTransition.numericText(countsDown: true).numericValue)
+        XCTAssertEqual(ContentTransition.numericText(value: 0).numericValue, 0)
+        XCTAssertEqual(ContentTransition.numericText(value: 12.5).numericValue, 12.5)
+        XCTAssertTrue(ContentTransition.numericText(value: .nan).numericValue?.isNaN == true)
+
+        func numericResults(
+            _ transition: ContentTransition,
+            isFlipped: Bool
+        ) throws -> RBTransitionEffectResults {
+            let rbTransition = transition.rbTransition
+            var table = RBAnimationTable()
+            let animationIndex = table.internAnimation(rbTransition.animation)
+            let context = RBTransitionAnimationContext(
+                animationTable: table,
+                operation: RBAnimationSequencer.OperationAnimationRecord(
+                    animationIndex: animationIndex,
+                    delay: 0
+                ),
+                time: 0.2,
+                isFlipped: isFlipped
+            )
+            return try XCTUnwrap(rbTransition.effectResults(
+                at: 0.2,
+                event: 1,
+                bounds: CGRect(x: 0, y: 0, width: 20, height: 40),
+                animationContext: context
+            ))
+        }
+
+        XCTAssertEqual(
+            try numericResults(.numericText(value: 0), isFlipped: true),
+            try numericResults(.numericText(countsDown: true), isFlipped: false)
+        )
+        XCTAssertEqual(
+            try numericResults(.numericText(value: 17), isFlipped: false),
+            try numericResults(.numericText(), isFlipped: false)
+        )
 
         let effect = ContentTransition.Effect(
             type: ContentTransition.EffectType(type: 3, arg0: .float(0.5), arg1: .int(7)),
@@ -526,13 +647,13 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         XCTAssertFalse(copied?.effects.first === rbTransition.effects.first)
 
         let animatedA = RBTransition()
-        animatedA.animation = .linear(duration: 0.5)
+        animatedA.animation = Animation.linear(duration: 0.5).rbAnimation
         let animatedB = RBTransition()
-        animatedB.animation = .linear(duration: 0.5)
+        animatedB.animation = Animation.linear(duration: 0.5).rbAnimation
         let animatedDifferentCurve = RBTransition()
-        animatedDifferentCurve.animation = .easeInOut(duration: 0.5)
+        animatedDifferentCurve.animation = Animation.easeInOut(duration: 0.5).rbAnimation
         let animatedDifferentDuration = RBTransition()
-        animatedDifferentDuration.animation = .linear(duration: 1.0)
+        animatedDifferentDuration.animation = Animation.linear(duration: 1.0).rbAnimation
         let unanimated = RBTransition()
 
         XCTAssertEqual(animatedA, animatedB)

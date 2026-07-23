@@ -11,6 +11,7 @@ struct RBTransitionAnimationContext {
     var animationTable: RBAnimationTable
     var operation: RBAnimationSequencer.OperationAnimationRecord
     var time: Float
+    var isFlipped: Bool = false
 
     func progress(sequence: UInt32, event: UInt32) -> Float {
         let sampled = animationTable.evaluate(
@@ -296,6 +297,7 @@ final class RBTransitionEffect: NSObject, NSCopying {
         progress: Float,
         event: UInt32,
         transition: RBTransition,
+        isFlipped: Bool = false,
         usesAddRemoveDurationFallback: Bool = false,
         animationContext: RBTransitionAnimationContext? = nil
     ) -> Bool {
@@ -318,13 +320,25 @@ final class RBTransitionEffect: NSObject, NSCopying {
         case ContentTransition.EffectType.opacity.type:
             results.alpha *= min(max(effectProgress, 0), 1)
         case ContentTransition.EffectType.scale(1).type:
-            applyScale(to: &results, bounds: bounds, progress: effectProgress, event: event)
+            applyScale(
+                to: &results,
+                bounds: bounds,
+                progress: effectProgress,
+                event: event,
+                isFlipped: isFlipped
+            )
         case ContentTransition.EffectType.translation(.zero).type:
             let vector = CGSize(
                 width: CGFloat(argumentValue(atIndex: 0)),
                 height: CGFloat(argumentValue(atIndex: 1))
             )
-            applyTranslation(vector, to: &results, progress: effectProgress, event: event)
+            applyTranslation(
+                vector,
+                to: &results,
+                progress: effectProgress,
+                event: event,
+                isFlipped: isFlipped
+            )
         case ContentTransition.EffectType.blur(radius: 0).type:
             applyBlur(
                 CGFloat(argumentValue(atIndex: 0)),
@@ -336,7 +350,13 @@ final class RBTransitionEffect: NSObject, NSCopying {
                 width: bounds.width * CGFloat(argumentValue(atIndex: 0)),
                 height: bounds.height * CGFloat(argumentValue(atIndex: 1))
             )
-            applyTranslation(vector, to: &results, progress: effectProgress, event: event)
+            applyTranslation(
+                vector,
+                to: &results,
+                progress: effectProgress,
+                event: event,
+                isFlipped: isFlipped
+            )
         case ContentTransition.EffectType.relativeBlur(scale: .zero).type:
             let radius = bounds.width * CGFloat(argumentValue(atIndex: 0)) +
                 bounds.height * CGFloat(argumentValue(atIndex: 1))
@@ -363,10 +383,12 @@ final class RBTransitionEffect: NSObject, NSCopying {
         to results: inout RBTransitionEffectResults,
         bounds: CGRect,
         progress: Float,
-        event: UInt32
+        event: UInt32,
+        isFlipped: Bool
     ) {
         var baseScale = CGFloat(argumentValue(atIndex: 0))
-        if shouldInvertDirection(for: event), baseScale.magnitude > .ulpOfOne {
+        if shouldInvertDirection(for: event, isFlipped: isFlipped),
+           baseScale.magnitude > .ulpOfOne {
             baseScale = 1 / baseScale
         }
 
@@ -391,9 +413,13 @@ final class RBTransitionEffect: NSObject, NSCopying {
         _ vector: CGSize,
         to results: inout RBTransitionEffectResults,
         progress: Float,
-        event: UInt32
+        event: UInt32,
+        isFlipped: Bool
     ) {
-        let sign: CGFloat = shouldInvertDirection(for: event) ? -1 : 1
+        let sign: CGFloat = shouldInvertDirection(
+            for: event,
+            isFlipped: isFlipped
+        ) ? -1 : 1
         let scale = CGFloat(1 - progress)
         let transform = CGAffineTransform(
             translationX: vector.width * sign * scale,
@@ -427,8 +453,10 @@ final class RBTransitionEffect: NSObject, NSCopying {
         }
     }
 
-    private func shouldInvertDirection(for event: UInt32) -> Bool {
-        event & 2 != 0 && flags & 1 != 0
+    private func shouldInvertDirection(for event: UInt32, isFlipped: Bool) -> Bool {
+        let automaticFlip = isFlipped && flags & 2 != 0
+        let removalFlip = event & 2 != 0 && flags & 1 != 0
+        return automaticFlip != removalFlip
     }
 
     private func resolvedDirection(
@@ -501,7 +529,7 @@ final class RBTransition: NSObject, NSCopying {
         get { Float(addRemoveDurationByte) / 255 }
         set { addRemoveDurationByte = Self.timingByte(newValue) }
     }
-    var animation: Animation?
+    var animation: RBAnimation?
     private(set) var effects: [RBTransitionEffect]
     private var addRemoveDurationByte: UInt8
 
@@ -520,7 +548,7 @@ final class RBTransition: NSObject, NSCopying {
         maxChanges: UInt32,
         isReplaceable: Bool,
         addRemoveDurationByte: UInt8,
-        animation: Animation?,
+        animation: RBAnimation?,
         effects: [RBTransitionEffect]
     ) {
         self.method = method
@@ -580,6 +608,7 @@ final class RBTransition: NSObject, NSCopying {
         at progress: Float,
         event: UInt32,
         bounds: CGRect,
+        isFlipped: Bool = false,
         usesAddRemoveDurationFallback: Bool = false,
         animationContext: RBTransitionAnimationContext? = nil
     ) -> RBTransitionEffectResults? {
@@ -592,6 +621,7 @@ final class RBTransition: NSObject, NSCopying {
                 progress: progress,
                 event: event,
                 transition: self,
+                isFlipped: isFlipped || animationContext?.isFlipped == true,
                 usesAddRemoveDurationFallback: usesAddRemoveDurationFallback,
                 animationContext: animationContext
             ) else {
@@ -629,7 +659,7 @@ final class RBTransition: NSObject, NSCopying {
             maxChanges: maxChanges,
             isReplaceable: isReplaceable,
             addRemoveDurationByte: addRemoveDurationByte,
-            animation: animation,
+            animation: animation?.copy() as? RBAnimation,
             effects: effects.map { $0.copy() as! RBTransitionEffect }
         )
     }

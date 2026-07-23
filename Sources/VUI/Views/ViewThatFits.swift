@@ -94,6 +94,11 @@ private final class SizeFittingState {
 
         func setSelected(_ selected: Bool) {
             guard isSelected != selected else { return }
+            if selected {
+                subgraph.didReinsert()
+            } else {
+                subgraph.willRemove()
+            }
             isSelected = selected
             selectedInput.setValue(selected)
         }

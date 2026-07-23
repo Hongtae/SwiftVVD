@@ -53,6 +53,7 @@ final class AGSubgraphRef: @unchecked Sendable {
     private var secondaryAncestors: [WeakAncestor] = []
     private(set) var isValid: Bool = true
     private(set) var isInserted: Bool = true
+    private var invalidationPending = false
     weak let graph: AGGraphRef?
 
     private static let currentStorage = _AGThreadLocal<AGSubgraphRef?>(nil)
@@ -96,8 +97,24 @@ final class AGSubgraphRef: @unchecked Sendable {
         }
         guard isValid else { return }
 
+        graph.requestSubgraphInvalidation(self)
+    }
+
+    func _beginInvalidation() -> Bool {
+        guard isValid else { return false }
+        isValid = false
+        invalidationPending = true
+        for child in children {
+            _ = child._beginInvalidation()
+        }
+        return true
+    }
+
+    func _finishInvalidation() {
+        guard invalidationPending else { return }
+
         children.forEach {
-            $0.invalidate()
+            $0._finishInvalidation()
             if $0.parent === self {
                 $0.parent = nil
             }
@@ -106,10 +123,11 @@ final class AGSubgraphRef: @unchecked Sendable {
         children.removeAll()
 
         nodes.forEach {
-            graph.removeNode($0)
+            graph?.removeNode($0)
         }
         nodes.removeAll()
         isValid = false
+        invalidationPending = false
     }
 
     func removeFromParent() {

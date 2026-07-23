@@ -1,5 +1,5 @@
 import XCTest
-import VVD
+@testable import VVD
 @testable import VUI
 
 private final class ProbeTexture: Texture {
@@ -17,6 +17,29 @@ private final class ProbeTexture: Texture {
     func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
         nil
     }
+}
+
+private final class NumericTransitionTestTypeface: Typeface {
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
+        .texture(TextureFont.GlyphData(
+            texture: nil,
+            offset: .zero,
+            advance: CGSize(width: 10, height: 0),
+            frame: .zero,
+            ascender: 8,
+            descender: -2
+        ))
+    }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint { .zero }
+    func hasGlyph(for: UnicodeScalar) -> Bool { true }
+    var lineHeight: CGFloat { 10 }
+    var ascender: CGFloat { 8 }
+    var descender: CGFloat { -2 }
+    var identifier: String { "numeric-transition-test" }
+    func isEqual(to other: any Typeface) -> Bool { self === (other as AnyObject) }
+    func hashIdentity(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+    func purgeResources(reason: ResourcePurgeReason) {}
 }
 
 private enum InterpolatableContentProbeLog {
@@ -90,14 +113,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         list.appendDebugItem(bounds: CGRect(x: 1, y: 2, width: 3, height: 4)) { _ in }
         var contents = DisplayList.InterpolatorLayer.Contents(
             displayList: list,
-            origin: CGPoint(x: 5, y: 7)
+            origin: CGPoint(x: 5, y: 7),
+            numericValue: 12.5
         )
 
         XCTAssertTrue(contents.list.hasSameInterpolationSurface(as: list))
         XCTAssertEqual(contents.origin, CGPoint(x: 5, y: 7))
         XCTAssertNil(contents.rbList)
         XCTAssertTrue(contents.nextTime.seconds.isInfinite)
-        XCTAssertNil(contents.numericValue)
+        XCTAssertEqual(contents.numericValue, 12.5)
 
         let renderer = DisplayList.GraphicsRenderer()
         let first = contents.preparedList(using: renderer, at: .zero)
@@ -108,7 +132,9 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
 
         XCTAssertTrue(first.hasSameInterpolationSurface(as: list))
+        XCTAssertEqual(first.numericValue, 12.5)
         XCTAssertTrue(second.hasSameInterpolationSurface(as: list))
+        XCTAssertEqual(second.numericValue, 12.5)
         XCTAssertTrue((firstContents as AnyObject?) === (contents.rbList as AnyObject?))
         XCTAssertTrue(contents.nextTime.seconds.isInfinite)
     }
@@ -3735,7 +3761,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testRBDisplayListInterpolatorKeepsTextCrossFadeCenteredOnLiveTarget() throws {
+    func testRBDisplayListInterpolatorKeepsTextCrossFadeAtBothEndpointBounds() throws {
         var source = DisplayList()
         source.appendTextItem(
             foreground: .color(.red),
@@ -3753,10 +3779,110 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
 
         let midpoint = interpolator.copyContents(withProgress: 0.5)
+        let item = try XCTUnwrap(midpoint.items.first)
         let record = try XCTUnwrap(midpoint.itemRecords.first)
 
         XCTAssertEqual(record.effectKind, .crossFade)
-        XCTAssertEqual(record.bounds, CGRect(x: 100, y: 50, width: 50, height: 10))
+        XCTAssertEqual(record.bounds, CGRect(x: 0, y: 0, width: 150, height: 60))
+        XCTAssertEqual(
+            interpolator.boundingRect(withProgress: 0),
+            CGRect(x: 0, y: 0, width: 150, height: 60)
+        )
+        XCTAssertEqual(
+            interpolator.boundingRect(withProgress: 0.5),
+            CGRect(x: 0, y: 0, width: 150, height: 60)
+        )
+        XCTAssertEqual(
+            interpolator.boundingRect(withProgress: 1),
+            CGRect(x: 0, y: 0, width: 150, height: 60)
+        )
+        guard case let .content(content) = item.value,
+              case let .crossFade(crossFade) = content.value else {
+            return XCTFail("text transition should preserve both endpoint branches")
+        }
+        XCTAssertEqual(crossFade.source?.sourceBounds, CGRect(x: 0, y: 0, width: 30, height: 10))
+        XCTAssertEqual(crossFade.source?.outputBounds, CGRect(x: 0, y: 0, width: 30, height: 10))
+        XCTAssertEqual(crossFade.target?.sourceBounds, CGRect(x: 100, y: 50, width: 50, height: 10))
+        XCTAssertEqual(crossFade.target?.outputBounds, CGRect(x: 100, y: 50, width: 50, height: 10))
+    }
+
+    func testWholeListOpacityRetargetKeepsPriorPresentationAsUnscaledFadeBranch() throws {
+        var compact = DisplayList()
+        compact.appendTextItem(
+            foreground: .color(.blue),
+            bounds: CGRect(x: 65, y: 10, width: 84, height: 24)
+        ) { _ in }
+        var expanded = DisplayList()
+        expanded.appendTextItem(
+            foreground: .color(.purple),
+            bounds: CGRect(x: 0, y: 4.5, width: 214, height: 35)
+        ) { _ in }
+
+        let forward = RBDisplayListInterpolator(
+            from: compact,
+            to: expanded,
+            options: [.transition: ContentTransition.text.rbTransition]
+        )
+        let forwardPresentation = forward.copyContents(withProgress: 0.25)
+        let retarget = RBDisplayListInterpolator(
+            from: forwardPresentation,
+            to: compact,
+            options: [.transition: ContentTransition.text.rbTransition]
+        )
+        let retargetPresentation = retarget.copyContents(withProgress: 0.5)
+
+        let outerItem = try XCTUnwrap(retargetPresentation.items.first)
+        guard case let .content(outerContent) = outerItem.value,
+              case let .crossFade(outerFade) = outerContent.value,
+              let sourceBranch = outerFade.source,
+              let targetBranch = outerFade.target else {
+            return XCTFail("retarget should preserve the prior presentation as one fade branch")
+        }
+        XCTAssertEqual(sourceBranch.sourceBounds, forwardPresentation.interpolationBounds)
+        XCTAssertEqual(sourceBranch.outputBounds, forwardPresentation.interpolationBounds)
+        XCTAssertEqual(targetBranch.sourceBounds, compact.interpolationBounds)
+        XCTAssertEqual(targetBranch.outputBounds, compact.interpolationBounds)
+
+        let innerItem = try XCTUnwrap(sourceBranch.contents.items.first)
+        guard case let .content(innerContent) = innerItem.value,
+              case .crossFade = innerContent.value else {
+            return XCTFail("the prior endpoint cross-fade should remain nested without scaling")
+        }
+    }
+
+    func testNumericTextTransitionKeepsCommonPrefixAndSuffixAsPairedGlyphAtoms() throws {
+        let source = try makeNumericTextDisplayList("1234", numericValue: 1234)
+        let target = try makeNumericTextDisplayList("1254", numericValue: 1254)
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.numericText().rbTransition]
+        )
+
+        let contents = interpolator.copyContents(withProgress: 0.2)
+
+        XCTAssertEqual(contents.items.count, 5)
+        XCTAssertEqual(contents.itemRecords.map(\.kind), Array(repeating: .effect, count: 5))
+    }
+
+    func testNumericTextTransitionSequencesInsertedGlyphsFromLeadingEdge() throws {
+        let source = try makeNumericTextDisplayList("0", numericValue: 0)
+        let target = try makeNumericTextDisplayList("11", numericValue: 11)
+        let interpolator = RBDisplayListInterpolator(
+            from: source,
+            to: target,
+            options: [.transition: ContentTransition.numericText().rbTransition]
+        )
+
+        XCTAssertEqual(
+            interpolator.activeDuration,
+            0.8 + Double(38.0 / 255.0 * 204.0 / 255.0),
+            accuracy: 0.000_001
+        )
+
+        let contents = interpolator.copyContents(withProgress: 0.2)
+        XCTAssertEqual(contents.items.count, 3)
+        XCTAssertEqual(contents.itemRecords.map(\.kind), Array(repeating: .effect, count: 3))
     }
 
     func testRBDisplayListInterpolatorKeepsDebugCountMismatchOnFallbackBounds() {
@@ -4175,6 +4301,29 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(unary.maxDuration.isInfinite)
         XCTAssertEqual(unary.layer.removedCount, 0)
         XCTAssertFalse(unary.supportsVariableFrameDuration)
+
+        let shapeStyle = _ShapeStyle_InterpolatorGroup()
+        let shapeStyleBase: DisplayList.InterpolatorGroup = shapeStyle
+        XCTAssertTrue(shapeStyleBase === shapeStyle)
+        XCTAssertEqual(
+            Mirror(reflecting: shapeStyle).children.compactMap(\.label),
+            ["layers", "contentsScale", "rasterizationOptions", "serial", "cursor"]
+        )
+        let shapeStyleLayer = _ShapeStyle_InterpolatorGroup.Layer(
+            id: .unstyled,
+            serial: 0,
+            style: nil,
+            state: DisplayList.InterpolatorLayer(),
+            isRemoved: false
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: shapeStyleLayer).children.compactMap(\.label),
+            ["id", "serial", "style", "state", "isRemoved"]
+        )
+        _ = _ShapeStyle_LayerID.styled(.foreground, 0)
+        _ = _ShapeStyle_LayerID.customStyle(0)
+        _ = _ShapeStyle_LayerID.named(nil)
+        _ = _ShapeStyle_LayerID.unstyled
     }
 
     func testDisplayListInterpolationBoundsSurface() {
@@ -4402,7 +4551,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         func transitionWithAnimationIndex(_ index: UInt, animation: Animation?) -> RBTransition {
             let transition = RBTransition()
             transition.method = ContentTransition.Method.diff.method
-            transition.animation = animation
+            transition.animation = animation?.rbAnimation
             let effect = RBTransitionEffect()
             effect.type = ContentTransition.EffectType.opacity.type
             effect.events = 3
@@ -4972,6 +5121,20 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         secondaryTableAnimation.addDelay(10)
         XCTAssertEqual(
             animationTable.animation(at: pairedIndex, sequence: 1)?.activeDuration,
+            4
+        )
+
+        let secondaryOnlyIndex = animationTable.internAnimation(
+            nil,
+            secondary: secondaryTableAnimation
+        )
+        XCTAssertNotEqual(secondaryOnlyIndex, animationTable.defaultAnimationIndex)
+        XCTAssertEqual(
+            animationTable.animation(at: secondaryOnlyIndex, sequence: 0)?.activeDuration,
+            4
+        )
+        XCTAssertEqual(
+            animationTable.animation(at: secondaryOnlyIndex, sequence: 1)?.activeDuration,
             4
         )
 
@@ -5640,7 +5803,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(unary.rasterizationOptions.isAccelerated)
         XCTAssertEqual(unary.layer.contents.displayList.debugItems.count, 2)
         XCTAssertEqual(unary.layer.removedCount, 1)
-        XCTAssertEqual(unary.layer.removed.first?.rbTransition.method, ContentTransition.Method.diff.method)
+        XCTAssertEqual(unary.layer.removed.first?.rbTransition.method, ContentTransition.Method.none.method)
         XCTAssertEqual(unary.layer.removed.first?.rbTransition.effects.first?.type, ContentTransition.EffectType.opacity.type)
         XCTAssertEqual(unary.layer.currentTime.seconds, 2)
         XCTAssertEqual(unary.layer.removed.first?.startTime.seconds, 2)
@@ -5757,6 +5920,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         unary.setCurrentContents(
             contentSeed: DisplayList.Seed(decodedValue: 11),
             target: target,
+            transition: .numericText(value: 12.5),
             time: Time(seconds: 3.5),
             supportsVFD: true,
             rasterizationOptions: rasterizationOptions
@@ -5766,9 +5930,49 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(unary.supportsVariableFrameDuration)
         XCTAssertEqual(unary.rasterizationOptions, rasterizationOptions)
         XCTAssertEqual(unary.layer.contents.version?.value, 11)
+        XCTAssertEqual(unary.layer.contents.numericValue, 12.5)
         XCTAssertEqual(unary.layer.contents.displayList.debugItems.count, 2)
         XCTAssertEqual(unary.layer.currentTime.seconds, 3.5)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 3.5)
+    }
+
+    func testUnaryInterpolatorGroupRetainsNumericValuesForBothTransitionEndpoints() throws {
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        let source = makeDisplayList(debugItemCount: 1)
+        let target = makeDisplayList(debugItemCount: 2)
+
+        unary.setCurrentContents(
+            contentSeed: DisplayList.Seed(decodedValue: 1),
+            target: source,
+            transition: .numericText(value: 17),
+            time: .zero,
+            supportsVFD: false,
+            rasterizationOptions: RasterizationOptions()
+        )
+
+        _ = unary.update(
+            contentSeed: DisplayList.Seed(decodedValue: 2),
+            current: source,
+            target: target,
+            state: ContentTransition.State(
+                transition: .numericText(value: 0),
+                animation: .linear(duration: 1)
+            ),
+            animatesSize: false,
+            defersRender: false,
+            supportsVFD: false
+        )
+
+        XCTAssertEqual(try XCTUnwrap(unary.layer.removed.first).contents.numericValue, 17)
+        XCTAssertEqual(unary.layer.contents.numericValue, 0)
+        XCTAssertEqual(
+            try XCTUnwrap(unary.layer.removed.first?.interpolator).from.numericValue,
+            17
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(unary.layer.removed.first?.interpolator).to.numericValue,
+            0
+        )
     }
 
     func testInterpolatorLayerOnlyRetainsWhenTransitionStateIsSupplied() {
@@ -5993,84 +6197,6 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
-    func testTextTransitionRenderFrameUsesIdealWidthWhileUnconstrainedWidthExpands() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 55, height: 17),
-            targetSize: CGSize(width: 70, height: 17),
-            idealSize: CGSize(width: 70, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: CGRect(x: 100, y: 40, width: 50, height: 17)
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 92.5, y: 40, width: 70, height: 17))
-    }
-
-    func testTextTransitionRenderFrameKeepsFixedConstrainedWidth() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 100, height: 17),
-            targetSize: CGSize(width: 100, height: 17),
-            idealSize: CGSize(width: 180, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: CGRect(x: 100, y: 40, width: 100, height: 17)
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 100, y: 40, width: 100, height: 17))
-    }
-
-    func testTextTransitionRenderFrameKeepsIdealWidthNearExpansionEndpoint() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 34, height: 17),
-            targetSize: CGSize(width: 34.5, height: 17),
-            idealSize: CGSize(width: 34.5, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: CGRect(x: 100, y: 40, width: 31, height: 17)
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 99.75, y: 40, width: 34.5, height: 17))
-    }
-
-    func testTextTransitionRenderFrameKeepsIdealWidthDuringContractionUndershoot() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 30.5, height: 17),
-            targetSize: CGSize(width: 31, height: 17),
-            idealSize: CGSize(width: 31, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: CGRect(x: 100, y: 40, width: 35, height: 17)
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 99.75, y: 40, width: 31, height: 17))
-    }
-
-    func testTextTransitionRenderFrameUsesIdealWidthWhileUnconstrainedTargetReappears() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 70, height: 17),
-            targetSize: CGSize(width: 98, height: 17),
-            idealSize: CGSize(width: 98, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: nil
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 86, y: 40, width: 98, height: 17))
-    }
-
-    func testTextTransitionRenderFrameAllowsOnePixelOfTargetRounding() {
-        let frame = _textTransitionRenderFrame(
-            position: CGPoint(x: 100, y: 40),
-            viewSize: CGSize(width: 70, height: 17),
-            targetSize: CGSize(width: 97.5, height: 17),
-            idealSize: CGSize(width: 98, height: 17),
-            pixelLength: 0.5,
-            activeSourceBounds: nil
-        )
-
-        XCTAssertEqual(frame, CGRect(x: 86, y: 40, width: 98, height: 17))
-    }
-
     func testInterpolatedDisplayListIdentityTransitionSyncsCurrentWithoutRemoval() throws {
         let graph = _AGGraph()
         InterpolatableContentProbeLog.reset()
@@ -6225,6 +6351,14 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         text.modifyTransition(state: &protectedState, to: ResolvedStyledText(version: 2))
         XCTAssertEqual(protectedState.transition, .interpolate)
 
+        var fixedNumericState = ContentTransition.State(transition: .numericText())
+        text.modifyTransition(state: &fixedNumericState, to: ResolvedStyledText(version: 2))
+        XCTAssertEqual(fixedNumericState.transition, .numericText())
+
+        var automaticNumericState = ContentTransition.State(transition: .numericText(value: 17))
+        text.modifyTransition(state: &automaticNumericState, to: ResolvedStyledText(version: 2))
+        XCTAssertEqual(automaticNumericState.transition, .numericText(value: 17))
+
         let environment = EnvironmentValues()
         XCTAssertEqual(Text(verbatim: "A")._resolveTransitionText(in: environment), "A")
         XCTAssertEqual((Text(verbatim: "A") + Text(verbatim: "B"))._resolveTransitionText(in: environment), "AB")
@@ -6253,6 +6387,36 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertNotEqual(outputID.rawValue, displayList.identifier.rawValue)
             let output = Attribute<DisplayList>(outputID).value
             XCTAssertEqual(output.debugItems.count, sourceList.debugItems.count)
+        }
+    }
+
+    func testApplyInterpolatorGroupUsesPresentationListOutsideContentTransition() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let logicalList = makeDisplayList(debugItemCount: 1)
+            let presentationList = makeDisplayList(debugItemCount: 3)
+            let displayList = graph.makeInput(value: logicalList)
+            let presentationDisplayList = graph.makeInput(value: presentationList)
+            let content = graph.makeInput(value: ProbeInterpolatableContent(value: 0))
+            let inputs = makeViewInputs(graph: graph)
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                DisplayList.InterpolatorGroup(),
+                content: content,
+                inputs: inputs,
+                presentationDisplayList: presentationDisplayList,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID).value
+            XCTAssertTrue(output.effects.isEmpty)
+            XCTAssertEqual(output.debugItems.count, presentationList.debugItems.count)
+            XCTAssertEqual(output.interpolationBounds, presentationList.interpolationBounds)
         }
     }
 
@@ -6674,6 +6838,30 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             textureTransform: textureTransform,
             scaleFactor: scaleFactor
         )
+    }
+
+    private func makeNumericTextDisplayList(
+        _ text: String,
+        numericValue: Float
+    ) throws -> DisplayList {
+        let face = NumericTransitionTestTypeface()
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], text)],
+            scaleFactor: 1
+        )
+        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let view = StyledTextContentView(text: styledText, renderer: nil)
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 20)
+        var list = DisplayList()
+        list.appendTextItem(
+            view,
+            size: bounds.size,
+            foreground: .color(.white),
+            bounds: bounds,
+            seed: DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+        )
+        list.numericValue = numericValue
+        return list
     }
 
     private func makeViewInputs(

@@ -34,44 +34,6 @@ extension Attribute where Value: Animatable {
     }
 }
 
-private extension _AGGraph {
-    func transactionForAttributeOrKeyPathParent(_ id: AGAttribute) -> Transaction? {
-        var visited: Set<UInt32> = []
-        var pending: [(attribute: AGAttribute, depth: Int)] = [(id, 0)]
-        pending.reserveCapacity(64)
-
-        while let current = pending.popLast() {
-            let id = current.attribute
-            guard visited.insert(id.rawValue).inserted else {
-                continue
-            }
-            if let transaction = transaction(for: id) {
-                return transaction
-            }
-
-            // Push inputs first so the key-path parent remains the next item
-            // visited, matching the previous parent-first depth-first search.
-            if current.depth < 32 {
-                let index = Int(id.rawValue)
-                if slots.indices.contains(index),
-                   let node = slots[index].node {
-                    let inputs = Array(node.inputs.union(node.staticInputs))
-                    for input in inputs.reversed() {
-                        pending.append((
-                            AGAttribute(rawValue: input),
-                            current.depth + 1
-                        ))
-                    }
-                }
-            }
-            if let parent = parent(of: id) {
-                pending.append((parent, current.depth))
-            }
-        }
-        return nil
-    }
-}
-
 private func isSourceDefinedCustomAnimationBox(_ box: AnimationBoxBase) -> Bool {
     !box.duration.isFinite && box.preservesRetargetedCompletionDeadlines
 }
@@ -292,20 +254,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
     }
 
     mutating func updateValue() {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("AnimatableAttribute.updateValue called outside an active _AGGraph context.")
         }
 
         var updateValue = (value: _source.value, changed: false)
-        let sourceID = _source.identifier
-        // Keep transaction lookup lazy. The helper owns the model-data changed
-        // gate and only resolves the source transaction for a real retarget.
         let updateInputs = helper.beginUpdate(
             value: &updateValue,
             defaultAnimation: nil,
-            transactionForChangedTarget: {
-                graph.transactionForAttributeOrKeyPathParent(sourceID)
-            }
+            transactionForChangedTarget: { nil }
         )
         let target = updateInputs.target
         if updateInputs.didReset {

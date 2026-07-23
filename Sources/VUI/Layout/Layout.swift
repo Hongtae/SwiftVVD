@@ -297,9 +297,10 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, Cu
 
 /// Dynamic container storage used by DynamicContainerInfo.
 enum DynamicContainer {
-    final class TransitionRemovalListener: @unchecked Sendable {
+    final class TransitionRemovalListener: AnimationListener, @unchecked Sendable {
         private struct State {
             var seedValue: UInt32 = 0
+            var animationCount = 0
             var completionInstalled = false
             var completed = false
             var completionPublished = false
@@ -324,6 +325,35 @@ enum DynamicContainer {
 
         func readSeed() {
             _ = seed.value
+        }
+
+        override func animationWasAdded() {
+            state.withLock { state in
+                state.animationCount += 1
+            }
+        }
+
+        override func animationWasRemoved() -> [() -> Void] {
+            let shouldComplete = state.withLock { state in
+                guard state.animationCount > 0 else {
+                    return false
+                }
+                state.animationCount -= 1
+                return state.animationCount == 0 && !state.completed
+            }
+            guard shouldComplete else {
+                return []
+            }
+            return [{ [weak self] in
+                self?.complete()
+            }]
+        }
+
+        func beginTrackingAnimations() {
+            animationWasAdded()
+            Update.enqueueAction { [weak self] in
+                self?.animationWasRemoved().forEach { $0() }
+            }
         }
 
         func installCompletion(into transaction: inout Transaction) -> AnimationCompletionObserver? {
@@ -622,6 +652,62 @@ enum DynamicContainer {
     }
 }
 
+private struct DynamicViewPhase: Rule, AsyncAttribute {
+    var containerInfo: Attribute<DynamicContainer.Info>
+    var phase: Attribute<_GraphInputs.Phase>
+    var uniqueId: _ViewList_ID.Canonical
+
+    var value: _GraphInputs.Phase {
+        var value = phase.value
+        guard let item = containerInfo.value.item(for: uniqueId) else {
+            return value
+        }
+        value.rawValue &+= item.resetSeed &<< 1
+        if item.phase == 2 {
+            value.isBeingRemoved = true
+        }
+        return value
+    }
+}
+
+private struct DynamicTransaction: StatefulRule, AsyncAttribute {
+    typealias Value = Transaction
+
+    var containerInfo: Attribute<DynamicContainer.Info>
+    var transaction: Attribute<Transaction>
+    var uniqueId: _ViewList_ID.Canonical
+    var wasRemoved = false
+
+    mutating func updateValue() {
+        guard let item = containerInfo.value.item(for: uniqueId),
+              item.phase != 3 else {
+            _AGGraph.setStatefulOutput(Transaction())
+            return
+        }
+
+        var value = transaction.value
+        let previouslyRemoved = wasRemoved
+        wasRemoved = false
+
+        switch item.phase {
+        case 0:
+            value.animation = nil
+            value.disablesAnimations = true
+        case 1:
+            break
+        case 2:
+            if !previouslyRemoved, let listener = item.listener {
+                value.addAnimationListener(listener)
+            }
+            wasRemoved = true
+        default:
+            _AGGraph.setStatefulOutput(Transaction())
+            return
+        }
+        _AGGraph.setStatefulOutput(value)
+    }
+}
+
 /// Controls retained-removal lifecycle ordering for layout-owned dynamic items.
 /// Lazy layout hosts send removal lifecycle callbacks before final invalidation
 /// so retained animation listeners can drain after disappearance.
@@ -737,15 +823,38 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
     var info = DynamicContainer.Info()
     var retainedElements: [_ViewList_ID.Canonical: _ViewList_SubgraphRelease] = [:]
     var hasValue = false
+    var lastResetSeed: UInt32 = 0
+    var needsPhaseUpdate = false
 
     mutating func updateValue() {
         guard let graph = _AGGraph.current else {
             fatalError("DynamicContainerInfo.updateValue called outside AG context.")
         }
+        guard let currentAttribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError("DynamicContainerInfo.updateValue requires a current rule attribute.")
+        }
+        let containerInfoAttr = Attribute<DynamicContainer.Info>(currentAttribute)
         if let geometryContext = inputs[DynamicLayoutViewGeometryContextInput.self],
-           geometryContext.containerInfo == nil,
-           let currentAttribute = _AGGraph.currentRuleContextAttribute {
-            geometryContext.containerInfo = Attribute<DynamicContainer.Info>(currentAttribute)
+           geometryContext.containerInfo == nil {
+            geometryContext.containerInfo = containerInfoAttr
+        }
+
+        let resetSeed = inputs.base.phase.value.resetSeed
+        let disableTransitions: Bool
+        if resetSeed != lastResetSeed {
+            lastResetSeed = resetSeed
+            disableTransitions = true
+        } else {
+            disableTransitions = inputs.base.options.contains(.animationsDisabled)
+        }
+
+        var promotedItems = Set<ObjectIdentifier>()
+        if needsPhaseUpdate {
+            for item in info.items where item.phase == 0 {
+                item.phase = 1
+                promotedItems.insert(ObjectIdentifier(item))
+            }
+            needsPhaseUpdate = false
         }
 
         let capturedInputs = inputs
@@ -756,7 +865,6 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         var liveIDs = Set<_ViewList_ID.Canonical>()
         var orderedItems: [DynamicContainer.ItemInfo] = []
         var precedingViewCount = 0
-        var needsInsertionPhaseUpdate = false
 
         _ = _applySublists(in: currentList, from: &from, listAttribute: viewListAttr) { sublist in
             for offset in 0..<sublist.count {
@@ -778,9 +886,16 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     existing.viewCount == viewCount && existing.needsTransitions == needsTransitions ? existing : nil
                 }
                 let transition = needsTransitions ? sublist.traits[TransitionTraitKey.self] : nil
-                let insertionTransaction = reusableItem == nil && hasValue
+                let insertionTransaction = reusableItem == nil && hasValue && !disableTransitions
                     ? transition?.positiveInsertionTransaction(from: listTransaction)
                     : nil
+                if insertionTransaction != nil {
+                    guard let weakAttribute = graph.weakAttributeIfValid(for: currentAttribute) else {
+                        fatalError("DynamicContainerInfo insertion requires a live rule attribute.")
+                    }
+                    GraphHost.currentHost.continueTransaction(invalidating: weakAttribute)
+                    needsPhaseUpdate = true
+                }
                 let item: DynamicContainer.ItemInfo?
                 if let reusableItem {
                     item = reusableItem
@@ -794,6 +909,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                         initialTransitionPhase: insertionTransaction == nil ? .identity : .willAppear,
                         placementTransaction: listTransaction,
                         capturedInputs: capturedInputs,
+                        containerInfo: containerInfoAttr,
                         graph: graph
                     )
                 }
@@ -808,13 +924,14 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     }
                     if insertionTransaction != nil {
                         item.phase = 0
-                        needsInsertionPhaseUpdate = true
                     } else if item.phase != 1 {
                         item.listener = nil
                         item.removalLifecycleStarted = false
                         item.retainAfterRemovalCompletion = false
-                        item.setTransitionPhase(.identity, transaction: listTransaction)
                         item.phase = 1
+                        item.setTransitionPhase(.identity, transaction: listTransaction)
+                    } else if promotedItems.contains(ObjectIdentifier(item)) {
+                        item.setTransitionPhase(.identity, transaction: listTransaction)
                     }
                     item.precedingViewCount = precedingViewCount
                     precedingViewCount += item.viewCount
@@ -827,6 +944,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         let retention = retainedInactiveItems(
             excluding: liveIDs,
             transaction: listTransaction,
+            disableTransitions: disableTransitions,
             graph: graph
         )
         info.replaceItems(
@@ -836,17 +954,12 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         )
         hasValue = true
         _AGGraph.setStatefulOutput(info)
-        if needsInsertionPhaseUpdate,
-           let currentAttribute = _AGGraph.currentRuleContextAttribute {
-            graph.inbox.enqueue {
-                graph.invalidateAttribute(currentAttribute)
-            }
-        }
     }
 
     private mutating func retainedInactiveItems(
         excluding liveIDs: Set<_ViewList_ID.Canonical>,
         transaction: Transaction,
+        disableTransitions: Bool,
         graph: _AGGraph
     ) -> (removed: [DynamicContainer.ItemInfo], unused: [DynamicContainer.ItemInfo]) {
         var removedItems: [DynamicContainer.ItemInfo] = []
@@ -856,6 +969,9 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         func positiveRemovalTransition(
             for item: DynamicContainer.ItemInfo
         ) -> (transaction: Transaction, completionSeed: Attribute<UInt32>)? {
+            guard !disableTransitions else {
+                return nil
+            }
             let transitionTransaction = item.transitionTransactions?(.didDisappear, transaction)
                 .first { candidate in
                     guard let animation = candidate.effectiveAnimation else { return false }
@@ -926,9 +1042,9 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     item.listener = listener
                     item.ignoredRetainedUnusedRemovalObserver = nil
                     item.retainAfterRemovalCompletion = retainCompletedUnusedRemovals
+                    listener.beginTrackingAnimations()
 
-                    var removalTransaction = transition.transaction
-                    _ = listener.installCompletion(into: &removalTransaction)
+                    let removalTransaction = transition.transaction
                     item.phase = 2
                     item.removalLifecycleStarted = true
                     item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
@@ -971,9 +1087,9 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                 inbox: graph.inbox
             )
             item.listener = listener
+            listener.beginTrackingAnimations()
 
-            var removalTransaction = transition.transaction
-            _ = listener.installCompletion(into: &removalTransaction)
+            let removalTransaction = transition.transaction
             item.phase = 2
             item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
             listener.readSeed()
@@ -1005,6 +1121,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         initialTransitionPhase: TransitionPhase,
         placementTransaction: Transaction,
         capturedInputs: _ViewInputs,
+        containerInfo: Attribute<DynamicContainer.Info>,
         graph: _AGGraph
     ) -> DynamicContainer.ItemInfo? {
         // Rule evaluation does not inherit the materialization scope. Re-enter
@@ -1045,6 +1162,20 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     makeView in
                     var childInputs = elementInputs
                     childInputs.copyCaches()
+                    childInputs.base.transaction = graph.makeStatefulRule(
+                        DynamicTransaction(
+                            containerInfo: containerInfo,
+                            transaction: childInputs.base.transaction,
+                            uniqueId: uniqueId
+                        )
+                    )
+                    childInputs.base.phase = graph.makeRule(
+                        DynamicViewPhase(
+                            containerInfo: containerInfo,
+                            phase: childInputs.base.phase,
+                            uniqueId: uniqueId
+                        )
+                    )
                     childInputs[DynamicContainerTransitionPhaseInput.self] =
                         OptionalAttribute(viewPhase)
                     childInputs[LayoutPlacementTransactionInput.self] =

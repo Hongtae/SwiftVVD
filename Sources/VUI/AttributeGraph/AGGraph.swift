@@ -268,6 +268,11 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     var pendingSideEffectEvaluations: [UInt32] = []
     var pendingSideEffectEvaluationSet: Set<UInt32> = []
 
+    // Subgraph destruction requested by a rule is delayed until the outer
+    // graph update has finished. This keeps values in the active update stack
+    // alive while their dependencies reconcile ownership.
+    var pendingSubgraphInvalidations: [AGSubgraphRef] = []
+
     // Monotonic marker used by markNeedsEvaluation's iterative graph walk.
     // A nested invalidation starts only after the current walk has finished.
     var invalidationTraversal: UInt64 = 0

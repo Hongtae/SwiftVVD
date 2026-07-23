@@ -673,6 +673,7 @@ final class ResolvedStyledText: InterpolatableContent {
     func modifyTransition(state: inout ContentTransition.State, to target: ResolvedStyledText) {
         guard !state.options.contains(.animatesDifferentContent) else { return }
         guard requiresTransition(to: target) else { return }
+        guard !state.transition.isNumericText else { return }
         state.transition = .text
     }
 }

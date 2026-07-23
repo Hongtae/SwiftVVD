@@ -705,6 +705,31 @@ extension _AGGraph {
         }
     }
 
+    func requestSubgraphInvalidation(_ subgraph: AGSubgraphRef) {
+        guard subgraph._beginInvalidation() else {
+            return
+        }
+        if isUpdatingOnCurrentThread {
+            pendingSubgraphInvalidations.append(subgraph)
+        } else {
+            subgraph._finishInvalidation()
+        }
+    }
+
+    @discardableResult
+    private func drainPendingSubgraphInvalidations() -> Bool {
+        var didInvalidate = false
+        while !pendingSubgraphInvalidations.isEmpty {
+            let pending = pendingSubgraphInvalidations
+            pendingSubgraphInvalidations.removeAll(keepingCapacity: true)
+            for subgraph in pending {
+                subgraph._finishInvalidation()
+                didInvalidate = true
+            }
+        }
+        return didInvalidate
+    }
+
     private func evaluateSideEffectIfNeeded(_ id: AGAttribute) {
         withGraphUpdateCounterIfNeeded {
             evaluateNodeForUpdate(id)
@@ -1229,20 +1254,38 @@ extension _AGGraph {
 
     func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
         assert(_AGGraph.current === self)
+        withGraphUpdateCounterIfNeeded {
+            while updateSubgraphBody(subgraph, flags: flags) {}
+        }
+    }
+
+    @discardableResult
+    private func updateSubgraphBody(
+        _ subgraph: AGSubgraph,
+        flags: UInt32
+    ) -> Bool {
+        guard subgraph.isValid else {
+            return false
+        }
         inbox.drain()
+        var visitedDirtyNode = false
         for node in subgraph.nodes {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                 continue
             }
-            let nodeFlags = slots[Int(liveNode.rawValue)].node?.flags.rawValue ?? 0
-            guard nodeFlags & flags != 0 else {
+            guard let liveStorage = slots[Int(liveNode.rawValue)].node,
+                  liveStorage.flags.rawValue & flags != 0,
+                  liveStorage.needsEvaluation else {
                 continue
             }
+            visitedDirtyNode = true
             _ = value(for: liveNode)
         }
         for child in subgraph.children {
-            updateSubgraph(child, flags: flags)
+            visitedDirtyNode =
+                updateSubgraphBody(child, flags: flags) || visitedDirtyNode
         }
+        return visitedDirtyNode
     }
 
     func willRemoveSubgraph(_ subgraph: AGSubgraph) {
@@ -1283,11 +1326,15 @@ extension _AGGraph {
         }
         updateCounter &+= 1
         activeGraphs.insert(graphID)
-        return _AGGraph.withCurrentlyUpdatingGraphs(activeGraphs) {
+        let result = _AGGraph.withCurrentlyUpdatingGraphs(activeGraphs) {
             let result = body()
             drainPendingSideEffectEvaluations()
             return result
         }
+        if drainPendingSubgraphInvalidations() {
+            drainActionOutbox()
+        }
+        return result
     }
 
     private var isUpdatingOnCurrentThread: Bool {

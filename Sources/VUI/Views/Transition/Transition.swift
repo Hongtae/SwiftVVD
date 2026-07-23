@@ -668,16 +668,13 @@ public struct AsymmetricTransition<Insertion, Removal>: Transition
         self.removal = removal
     }
 
-    @ViewBuilder
     public func body(content: Content, phase: TransitionPhase) -> some View {
-        switch phase {
-        case .willAppear:
-            insertion.apply(content: content, phase: phase)
-        case .identity:
-            content
-        case .didDisappear:
-            removal.apply(content: content, phase: phase)
-        }
+        let insertionPhase: TransitionPhase = phase == .didDisappear ? .identity : phase
+        let removalPhase: TransitionPhase = phase == .willAppear ? .identity : phase
+        return removal.apply(
+            content: insertion.apply(content: content, phase: insertionPhase),
+            phase: removalPhase
+        )
     }
 
     public static var properties: TransitionProperties {

@@ -32,6 +32,11 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var bounds: CGRect
     }
 
+    private struct TextAtomInterpolationInput {
+        var scalar: UnicodeScalar
+        var input: ItemInterpolationInput
+    }
+
     private struct ItemInterpolationOperation {
         private enum Kind {
             case paired(source: ItemInterpolationInput, target: ItemInterpolationInput)
@@ -39,6 +44,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             case inserted(ItemInterpolationInput)
             case wholeRemoved(items: [DisplayList.Item], bounds: CGRect)
             case wholeInserted(items: [DisplayList.Item], bounds: CGRect)
+            case endpointCrossFade(
+                sourceItems: [DisplayList.Item],
+                sourceBounds: CGRect,
+                targetItems: [DisplayList.Item],
+                targetBounds: CGRect
+            )
             case fallback(
                 sourceItems: [DisplayList.Item],
                 sourceBounds: CGRect,
@@ -77,6 +88,20 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             Self(kind: .wholeInserted(items: items, bounds: bounds))
         }
 
+        static func endpointCrossFade(
+            sourceItems: [DisplayList.Item],
+            sourceBounds: CGRect,
+            targetItems: [DisplayList.Item],
+            targetBounds: CGRect
+        ) -> Self {
+            Self(kind: .endpointCrossFade(
+                sourceItems: sourceItems,
+                sourceBounds: sourceBounds,
+                targetItems: targetItems,
+                targetBounds: targetBounds
+            ))
+        }
+
         static func fallback(
             sourceItems: [DisplayList.Item],
             sourceBounds: CGRect,
@@ -97,12 +122,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 return 0
             case .inserted, .wholeInserted:
                 return 1
-            case .paired, .fallback:
+            case .paired, .endpointCrossFade, .fallback:
                 return 2
             }
         }
 
-        private var center: CGPoint? {
+        var center: CGPoint? {
             let bounds: CGRect
             switch kind {
             case let .paired(_, target), let .inserted(target):
@@ -111,11 +136,41 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 bounds = source.bounds
             case let .wholeRemoved(_, value), let .wholeInserted(_, value):
                 bounds = value
+            case let .endpointCrossFade(_, _, _, targetBounds):
+                bounds = targetBounds
             case let .fallback(_, _, _, targetBounds):
                 bounds = targetBounds
             }
             guard !bounds.isNull else { return nil }
             return CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+
+        var transitionEvent: UInt32? {
+            switch kind {
+            case .removed, .wholeRemoved:
+                return 2
+            case .inserted, .wholeInserted:
+                return 1
+            case .paired, .endpointCrossFade, .fallback:
+                return nil
+            }
+        }
+
+        mutating func addSequenceDelay(
+            _ maximumDelay: Float,
+            minimumCoordinate: CGFloat,
+            coordinateRange: CGFloat
+        ) {
+            guard let center,
+                  transitionEvent != nil,
+                  coordinateRange > .ulpOfOne else {
+                return
+            }
+            let fraction = min(
+                max((center.x - minimumCoordinate) / coordinateRange, 0),
+                1
+            )
+            animation.delay += maximumDelay * Float(fraction)
         }
 
         mutating func resolveAnimation(
@@ -167,12 +222,15 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             let resolvedAnimationIndex = itemAnimation.map {
                 table.internAnimation($0)
             }
-            // Transition animations are not universal secondary sequences. Their ownership
-            // depends on the concrete operation family, so this plan resolves only the
-            // operation's default or item-style animation.
+            let transitionAnimationIndex = table.internAnimation(
+                itemAnimation,
+                secondary: transition?.animation
+            )
             animation = RBAnimationSequencer.operationAnimationRecord(
                 operationLowNibble: animatedOperationType,
-                resolvedAnimationIndex: resolvedAnimationIndex,
+                resolvedAnimationIndex: transition?.animation == nil
+                    ? resolvedAnimationIndex
+                    : transitionAnimationIndex,
                 defaultAnimationIndex: defaultAnimationIndex,
                 operationDelay: 0,
                 sequencerDelay: sequencerDelay
@@ -188,12 +246,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
         func transitionAnimationContext(
             at time: Float,
-            table: RBAnimationTable
+            table: RBAnimationTable,
+            isFlipped: Bool
         ) -> RBTransitionAnimationContext {
             RBTransitionAnimationContext(
                 animationTable: table,
                 operation: animation,
-                time: time
+                time: time,
+                isFlipped: isFlipped
             )
         }
 
@@ -250,6 +310,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 // reporting the non-empty side's geometry even when an event filter or
                 // zero-alpha transition suppresses every rendered pixel.
                 return bounds
+            case let .endpointCrossFade(_, sourceBounds, _, targetBounds):
+                return sourceBounds.union(targetBounds)
             case let .fallback(_, sourceBounds, _, targetBounds):
                 return RBDisplayListInterpolator.interpolatedBounds(
                     from: sourceBounds,
@@ -449,6 +511,24 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     return
                 }
                 appendTransitionedItems(items, bounds: bounds, results: results, into: &contents)
+            case let .endpointCrossFade(
+                sourceItems,
+                sourceBounds,
+                targetItems,
+                targetBounds
+            ):
+                let outputBounds = sourceBounds.union(targetBounds)
+                contents.appendCrossFadeItem(
+                    sourceItems: sourceItems,
+                    sourceBounds: sourceBounds,
+                    sourceOutputBounds: sourceBounds,
+                    targetItems: targetItems,
+                    targetBounds: targetBounds,
+                    targetOutputBounds: targetBounds,
+                    bounds: outputBounds,
+                    sourceFraction: Float(progress),
+                    targetFraction: Float(progress)
+                )
             case let .fallback(sourceItems, sourceBounds, targetItems, targetBounds):
                 let outputBounds = reportedBounds(at: progress, transition: transition) ?? .zero
                 contents.appendCrossFadeItem(
@@ -820,7 +900,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                         transition: transition,
                         animationContext: operation.transitionAnimationContext(
                             at: time,
-                            table: plan.animationTable
+                            table: plan.animationTable,
+                            isFlipped: transitionDirectionIsFlipped
                         )
                     )
                 )
@@ -880,7 +961,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     transition: transition,
                     animationContext: operation.transitionAnimationContext(
                         at: time,
-                        table: plan.animationTable
+                        table: plan.animationTable,
+                        isFlipped: transitionDirectionIsFlipped
                     ),
                     into: &contents
                 )
@@ -3706,14 +3788,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var animationTable = RBAnimationTable(defaultAnimationIndex: 0)
         let defaultAnimationIndex = animationTable.internAnimation(checkedAnimationOption())
         animationTable.defaultAnimationIndex = defaultAnimationIndex
-        guard var operations = Self.itemInterpolationOperations(
-            fromItems: from.renderItems,
-            fromCommands: from.itemCommands,
-            toItems: to.renderItems,
-            toCommands: to.itemCommands,
-            allowsCountMismatch: true,
-            allowsWholeListOperations: Self.allowsWholeListOperations(from: from, to: to)
-        ) else {
+        guard var operations =
+            numericTextOperations() ??
+            textPresentationOpacityCrossFadeOperations() ??
+            Self.itemInterpolationOperations(
+                fromItems: from.renderItems,
+                fromCommands: from.itemCommands,
+                toItems: to.renderItems,
+                toCommands: to.itemCommands,
+                allowsCountMismatch: true,
+                allowsWholeListOperations: Self.allowsWholeListOperations(from: from, to: to)
+            ) else {
             return nil
         }
         for index in operations.indices {
@@ -3724,10 +3809,183 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 transition: transition
             )
         }
+        applyTransitionSequenceDelay(to: &operations)
         return ItemOperationPlan(
             operations: operations,
             animationTable: animationTable
         )
+    }
+
+    private func textPresentationOpacityCrossFadeOperations() -> [ItemInterpolationOperation]? {
+        guard let transition,
+              transition.method == ContentTransition.Method.none.method,
+              !transition.effects.isEmpty,
+              Self.usesWholeListOpacityEventRouting(transition),
+              !from.renderItems.isEmpty,
+              !to.renderItems.isEmpty,
+              Self.containsOnlyTextPresentationItems(from.renderItems),
+              Self.containsOnlyTextPresentationItems(to.renderItems),
+              let sourceInputs = Self.itemInterpolationInputs(
+                items: from.renderItems,
+                commands: from.itemCommands
+              ),
+              let targetInputs = Self.itemInterpolationInputs(
+                items: to.renderItems,
+                commands: to.itemCommands
+              ),
+              let sourceBounds = Self.unionBounds(of: sourceInputs),
+              let targetBounds = Self.unionBounds(of: targetInputs) else {
+            return nil
+        }
+        return [
+            .endpointCrossFade(
+                sourceItems: from.renderItems,
+                sourceBounds: sourceBounds,
+                targetItems: to.renderItems,
+                targetBounds: targetBounds
+            ),
+        ]
+    }
+
+    private static func containsOnlyTextPresentationItems(
+        _ items: [DisplayList.Item]
+    ) -> Bool {
+        !items.isEmpty && items.allSatisfy { item in
+            if case .text = item.command {
+                return true
+            }
+            guard case let .content(content) = item.value else {
+                return false
+            }
+            switch content.value {
+            case let .crossFade(crossFade):
+                let branches = [crossFade.source, crossFade.target].compactMap { $0 }
+                return !branches.isEmpty && branches.allSatisfy {
+                    containsOnlyTextPresentationItems($0.contents.items)
+                }
+            default:
+                return false
+            }
+        }
+    }
+
+    private func numericTextOperations() -> [ItemInterpolationOperation]? {
+        guard transition?.method == ContentTransition.Method.prefixAndSuffix.method,
+              from.renderItems.count == 1,
+              to.renderItems.count == 1,
+              let source = Self.textAtomInputs(
+                item: from.renderItems[0],
+                command: from.itemCommands[0]
+              ), let target = Self.textAtomInputs(
+                item: to.renderItems[0],
+                command: to.itemCommands[0]
+              ), !source.isEmpty, !target.isEmpty else {
+            return nil
+        }
+
+        var prefixCount = 0
+        while prefixCount < source.count,
+              prefixCount < target.count,
+              source[prefixCount].scalar == target[prefixCount].scalar {
+            prefixCount += 1
+        }
+
+        var suffixCount = 0
+        while suffixCount < source.count - prefixCount,
+              suffixCount < target.count - prefixCount,
+              source[source.count - suffixCount - 1].scalar ==
+                target[target.count - suffixCount - 1].scalar {
+            suffixCount += 1
+        }
+
+        var operations: [ItemInterpolationOperation] = []
+        operations.reserveCapacity(source.count + target.count)
+        for index in 0..<prefixCount {
+            operations.append(.paired(
+                source: source[index].input,
+                target: target[index].input
+            ))
+        }
+        for index in prefixCount..<(source.count - suffixCount) {
+            operations.append(.removed(source[index].input))
+        }
+        for index in prefixCount..<(target.count - suffixCount) {
+            operations.append(.inserted(target[index].input))
+        }
+        if suffixCount > 0 {
+            for offset in 0..<suffixCount {
+                let sourceIndex = source.count - suffixCount + offset
+                let targetIndex = target.count - suffixCount + offset
+                operations.append(.paired(
+                    source: source[sourceIndex].input,
+                    target: target[targetIndex].input
+                ))
+            }
+        }
+        return operations
+    }
+
+    private static func textAtomInputs(
+        item: DisplayList.Item,
+        command: DisplayList.ItemCommand
+    ) -> [TextAtomInterpolationInput]? {
+        guard case let .text(record, _) = command,
+              case let .content(content) = item.value,
+              case let .text(text) = content.value,
+              let atoms = text.glyphAtoms() else {
+            return nil
+        }
+
+        return atoms.map { atom in
+            let command = DisplayList.ItemCommand.text(record, bounds: atom.bounds)
+            var atomItem = DisplayList.Item(
+                command: command,
+                identity: item.identity,
+                version: item.version
+            ) { context in
+                var context = context
+                context.clip(to: Path(atom.bounds))
+                item(context)
+            }
+            atomItem.styleChain = item.styleChain
+            return TextAtomInterpolationInput(
+                scalar: atom.scalar,
+                input: ItemInterpolationInput(
+                    item: atomItem,
+                    command: command,
+                    bounds: atom.bounds
+                )
+            )
+        }
+    }
+
+    private func applyTransitionSequenceDelay(
+        to operations: inout [ItemInterpolationOperation]
+    ) {
+        guard let transition,
+              let sequence = transition.effects.first(where: {
+                $0.sequenceDirection(event: 1, isFlipped: transitionDirectionIsFlipped) != nil
+              }), sequence.sequenceDirection(
+                event: 1,
+                isFlipped: transitionDirectionIsFlipped
+              ) == 0 else {
+            return
+        }
+        let centers: [CGFloat] = operations.compactMap { operation -> CGFloat? in
+            guard operation.transitionEvent != nil else { return nil }
+            return operation.center?.x
+        }
+        guard let minimum = centers.min(), let maximum = centers.max() else {
+            return
+        }
+        let maximumDelay = sequence.beginTime * sequence.duration
+        for index in operations.indices {
+            operations[index].addSequenceDelay(
+                maximumDelay,
+                minimumCoordinate: minimum,
+                coordinateRange: maximum - minimum
+            )
+        }
     }
 
     // Style identity is independent of the animation UUID. The outermost target style is
@@ -3858,6 +4116,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private var hasChangedDisplayLists: Bool {
         !from.hasSameInterpolationSurface(as: to)
+    }
+
+    private var transitionDirectionIsFlipped: Bool {
+        guard let source = from.numericValue,
+              let target = to.numericValue else {
+            return false
+        }
+        return target < source
     }
 
     private var isImmediateWholeListInsertion: Bool {

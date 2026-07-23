@@ -975,6 +975,93 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(graph.cachedRuleEntries.count, 1)
         }
     }
+
+    func testSubgraphInvalidationDefersNodeDestructionUntilGraphUpdateCompletes() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = DeferredSubgraphInvalidationRecorder()
+
+        ref.withCurrent {
+            let subgraph = AGSubgraph()
+            let source = AGSubgraph.withCurrent(subgraph) {
+                graph.makeInput(value: 42)
+            }
+            let output = graph.makeStatefulRule(
+                DeferredSubgraphInvalidationRule(
+                    graph: graph,
+                    subgraph: subgraph,
+                    source: source,
+                    recorder: recorder
+                )
+            )
+
+            XCTAssertEqual(output.value, 42)
+            XCTAssertFalse(subgraph.isValid)
+            XCTAssertEqual(recorder.nodeWasPresentAfterInvalidation, [true])
+            XCTAssertFalse(graph.hasNode(source.identifier))
+        }
+    }
+
+    func testSubgraphUpdateDrainsPendingInvalidationAfterTraversal() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = DeferredSubgraphInvalidationRecorder()
+
+        ref.withCurrent {
+            let root = AGSubgraph()
+            let child = AGSubgraph(parent: root)
+            let output = AGSubgraph.withCurrent(child) {
+                graph.makeStatefulRule(
+                    DeferredSubgraphInvalidationRule(
+                        graph: graph,
+                        subgraph: child,
+                        source: graph.makeInput(value: 42),
+                        recorder: recorder
+                    )
+                )
+            }
+            output.identifier.setFlags(.transactional, mask: .transactional)
+
+            root.update(flags: AGAttributeFlags.transactional.rawValue)
+
+            XCTAssertEqual(recorder.nodeWasPresentAfterInvalidation, [true])
+            XCTAssertFalse(child.isValid)
+            XCTAssertFalse(graph.hasNode(output.identifier))
+        }
+    }
+
+    func testSubgraphUpdateRevisitsEarlierNodeInvalidatedLaterInTraversal() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = SubgraphUpdateValueRecorder()
+
+        ref.withCurrent {
+            let subgraph = AGSubgraph()
+            let source = AGSubgraph.withCurrent(subgraph) {
+                graph.makeInput(value: 1)
+            }
+            let output = AGSubgraph.withCurrent(subgraph) {
+                graph.makeStatefulRule(
+                    SubgraphUpdateRecordingRule(
+                        source: source,
+                        recorder: recorder
+                    )
+                )
+            }
+            let mutator = AGSubgraph.withCurrent(subgraph) {
+                graph.makeStatefulRule(
+                    SubgraphUpdateSourceMutationRule(source: source)
+                )
+            }
+            output.identifier.setFlags(.transactional, mask: .transactional)
+            mutator.identifier.setFlags(.transactional, mask: .transactional)
+
+            subgraph.update(flags: AGAttributeFlags.transactional.rawValue)
+
+            XCTAssertEqual(recorder.values, [1, 2])
+            XCTAssertEqual(output.value, 2)
+        }
+    }
 }
 
 private final class AGGraphContextToken {}
@@ -1008,6 +1095,55 @@ private struct CachedDoublingRule: Rule, Hashable {
 
     var value: Int {
         source.value * 2
+    }
+}
+
+private final class DeferredSubgraphInvalidationRecorder {
+    var nodeWasPresentAfterInvalidation: [Bool] = []
+}
+
+private struct DeferredSubgraphInvalidationRule: StatefulRule {
+    typealias Value = Int
+
+    var graph: _AGGraph
+    var subgraph: AGSubgraph
+    var source: Attribute<Int>
+    var recorder: DeferredSubgraphInvalidationRecorder
+
+    mutating func updateValue() {
+        subgraph.invalidate()
+        recorder.nodeWasPresentAfterInvalidation.append(
+            graph.hasNode(source.identifier)
+        )
+        value = source.value
+    }
+}
+
+private final class SubgraphUpdateValueRecorder {
+    var values: [Int] = []
+}
+
+private struct SubgraphUpdateRecordingRule: StatefulRule {
+    typealias Value = Int
+
+    var source: Attribute<Int>
+    var recorder: SubgraphUpdateValueRecorder
+
+    mutating func updateValue() {
+        let value = source.value
+        recorder.values.append(value)
+        self.value = value
+    }
+}
+
+private struct SubgraphUpdateSourceMutationRule: StatefulRule {
+    typealias Value = Void
+
+    var source: Attribute<Int>
+
+    mutating func updateValue() {
+        source.setValue(2)
+        value = ()
     }
 }
 

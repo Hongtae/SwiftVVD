@@ -369,6 +369,7 @@ final class RBAnimation: NSObject, NSCopying {
     private var ignoredModifiers: [Modifier]
     private var ignoredCurveInstalls: [IgnoredCurveInstall]
     private var curve: Curve?
+    private var additionalSpringCurves: [Curve]
 
     override init() {
         self.pendingModifiers = []
@@ -376,6 +377,7 @@ final class RBAnimation: NSObject, NSCopying {
         self.ignoredModifiers = []
         self.ignoredCurveInstalls = []
         self.curve = nil
+        self.additionalSpringCurves = []
         super.init()
     }
 
@@ -384,13 +386,15 @@ final class RBAnimation: NSObject, NSCopying {
         curveModifiers: [Modifier],
         ignoredModifiers: [Modifier],
         ignoredCurveInstalls: [IgnoredCurveInstall],
-        curve: Curve?
+        curve: Curve?,
+        additionalSpringCurves: [Curve]
     ) {
         self.pendingModifiers = pendingModifiers
         self.curveModifiers = curveModifiers
         self.ignoredModifiers = ignoredModifiers
         self.ignoredCurveInstalls = ignoredCurveInstalls
         self.curve = curve
+        self.additionalSpringCurves = additionalSpringCurves
         super.init()
     }
 
@@ -472,13 +476,18 @@ final class RBAnimation: NSObject, NSCopying {
         damping: Double,
         initialVelocity: Double
     ) {
-        installCurve(.spring(
+        let spring = Curve.spring(
             duration: duration,
             mass: mass,
             stiffness: stiffness,
             damping: damping,
             initialVelocity: initialVelocity
-        ))
+        )
+        if curve == nil {
+            installCurve(spring)
+        } else {
+            additionalSpringCurves.append(spring)
+        }
     }
 
     func removeAll() {
@@ -487,6 +496,7 @@ final class RBAnimation: NSObject, NSCopying {
         ignoredModifiers.removeAll()
         ignoredCurveInstalls.removeAll()
         curve = nil
+        additionalSpringCurves.removeAll()
     }
 
     func copy(with zone: NSZone? = nil) -> Any {
@@ -495,7 +505,8 @@ final class RBAnimation: NSObject, NSCopying {
             curveModifiers: curveModifiers,
             ignoredModifiers: ignoredModifiers,
             ignoredCurveInstalls: ignoredCurveInstalls,
-            curve: curve
+            curve: curve,
+            additionalSpringCurves: additionalSpringCurves
         )
     }
 
@@ -507,7 +518,8 @@ final class RBAnimation: NSObject, NSCopying {
             curveModifiers == other.curveModifiers &&
             ignoredModifiers == other.ignoredModifiers &&
             ignoredCurveInstalls == other.ignoredCurveInstalls &&
-            curve == other.curve
+            curve == other.curve &&
+            additionalSpringCurves == other.additionalSpringCurves
     }
 
     override var hash: Int {
@@ -517,15 +529,39 @@ final class RBAnimation: NSObject, NSCopying {
         hasher.combine(ignoredModifiers)
         hasher.combine(ignoredCurveInstalls)
         hasher.combine(curve)
+        hasher.combine(additionalSpringCurves)
         return hasher.finalize()
     }
 
     var hasStoredTerms: Bool {
         curve != nil ||
+            !additionalSpringCurves.isEmpty ||
             !pendingModifiers.isEmpty ||
             !curveModifiers.isEmpty ||
             !ignoredModifiers.isEmpty ||
             !ignoredCurveInstalls.isEmpty
+    }
+
+    var sequenceAnimations: [RBAnimation] {
+        guard let curve else { return [] }
+        let primary = RBAnimation(
+            pendingModifiers: pendingModifiers,
+            curveModifiers: curveModifiers,
+            ignoredModifiers: ignoredModifiers,
+            ignoredCurveInstalls: ignoredCurveInstalls,
+            curve: curve,
+            additionalSpringCurves: []
+        )
+        return [primary] + additionalSpringCurves.map { curve in
+            RBAnimation(
+                pendingModifiers: [],
+                curveModifiers: [],
+                ignoredModifiers: [],
+                ignoredCurveInstalls: [],
+                curve: curve,
+                additionalSpringCurves: []
+            )
+        }
     }
 
     private func appendModifier(_ modifier: Modifier) {
@@ -668,12 +704,12 @@ struct RBAnimationTable {
             return -1
         }
 
-        return internAnimationSequences([animation])
+        return internAnimationSequences(animation.sequenceAnimations)
     }
 
-    /// Interns an item animation followed by the transition animation. When no
-    /// item animation is present, the current default entry supplies the
-    /// primary sequences before the transition sequence is appended.
+    /// Interns an item animation followed by the transition animation. A single
+    /// usable input is interned directly; the default index is used only when
+    /// neither input carries animation terms.
     @discardableResult
     mutating func internAnimation(
         _ primary: RBAnimation?,
@@ -681,9 +717,9 @@ struct RBAnimationTable {
     ) -> Int32 {
         if let primary {
             guard primary.hasStoredTerms else { return -1 }
-            var animations = [primary]
+            var animations = primary.sequenceAnimations
             if let secondary, secondary.hasStoredTerms {
-                animations.append(secondary)
+                animations.append(contentsOf: secondary.sequenceAnimations)
             }
             return internAnimationSequences(animations)
         }
@@ -691,9 +727,7 @@ struct RBAnimationTable {
         guard let secondary, secondary.hasStoredTerms else {
             return defaultAnimationIndex
         }
-        var animations = animationSequences(at: defaultAnimationIndex)
-        animations.append(secondary)
-        return internAnimationSequences(animations)
+        return internAnimationSequences(secondary.sequenceAnimations)
     }
 
     private mutating func internAnimationSequences(

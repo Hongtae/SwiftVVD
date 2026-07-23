@@ -215,7 +215,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         }
     }
 
-    func testAppearanceEffectDoesNotAppearWhilePhaseIsBeingRemoved() {
+    func testAppearanceEffectIgnoresRemovalBitChangesWithoutSubgraphRemoval() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
 
@@ -251,7 +251,7 @@ final class AppearanceActionModifierTests: XCTestCase {
             removedPhase.isBeingRemoved = true
             phase.setValue(removedPhase)
 
-            XCTAssertEqual(events, ["appear", "disappear"])
+            XCTAssertEqual(events, ["appear"])
         }
     }
 

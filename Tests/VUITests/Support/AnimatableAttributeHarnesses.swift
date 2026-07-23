@@ -8,6 +8,7 @@ final class AnimatableAttributeHarness {
     private var source: Attribute<_OpacityEffect>!
     private var time: Attribute<Time>!
     private var phase: Attribute<Phase>!
+    private var transaction: Attribute<Transaction>!
     private var animated: Attribute<_OpacityEffect>!
 
     init(initialValue: _OpacityEffect) {
@@ -25,7 +26,7 @@ final class AnimatableAttributeHarness {
             source = graph.makeInput(value: initialValue)
             time = graph.makeInput(value: Time(seconds: 0))
             phase = graph.makeInput(value: Phase())
-            let transaction = graph.makeInput(value: Transaction())
+            transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
                 time: time,
@@ -55,13 +56,16 @@ final class AnimatableAttributeHarness {
 
     func setSource(_ value: _OpacityEffect, transaction: Transaction) {
         viewGraph.data.withCurrent {
+            self.transaction.setValue(transaction)
             source.setValue(value, transaction: transaction)
         }
     }
 
     func setSourceUsingCurrentTransaction(_ value: _OpacityEffect) {
         viewGraph.data.withCurrent {
-            source.setValue(value, transaction: Transaction.current)
+            let transaction = Transaction.current
+            self.transaction.setValue(transaction)
+            source.setValue(value, transaction: transaction)
         }
     }
 
@@ -70,6 +74,7 @@ final class AnimatableAttributeHarness {
             let binding = Binding<_OpacityEffect>(
                 get: { self.source.value },
                 set: { newValue, transaction in
+                    self.transaction.setValue(transaction)
                     self.source.setValue(newValue, transaction: transaction)
                 }
             )
@@ -82,6 +87,7 @@ final class AnimatableAttributeHarness {
             let binding = Binding<_OpacityEffect>(
                 get: { self.source.value },
                 set: { newValue, transaction in
+                    self.transaction.setValue(transaction)
                     self.source.setValue(newValue, transaction: transaction)
                 }
             )
@@ -94,6 +100,7 @@ final class AnimatableAttributeHarness {
             let binding = Binding<[_OpacityEffect]>(
                 get: { [self.source.value] },
                 set: { newValue, transaction in
+                    self.transaction.setValue(transaction)
                     self.source.setValue(newValue[0], transaction: transaction)
                 }
             )
@@ -106,6 +113,7 @@ final class AnimatableAttributeHarness {
             let binding = Binding<[_OpacityEffect]>(
                 get: { [self.source.value] },
                 set: { newValue, transaction in
+                    self.transaction.setValue(transaction)
                     self.source.setValue(newValue[0], transaction: transaction)
                 }
             )
@@ -167,6 +175,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
     private var source: Attribute<Value>!
     private var time: Attribute<Time>!
     private var phase: Attribute<Phase>!
+    private var transaction: Attribute<Transaction>!
     private var animated: Attribute<Value>!
 
     init(initialValue: Value) {
@@ -184,7 +193,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
             source = graph.makeInput(value: initialValue)
             time = graph.makeInput(value: Time(seconds: 0))
             phase = graph.makeInput(value: Phase())
-            let transaction = graph.makeInput(value: Transaction())
+            transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
                 time: time,
@@ -210,6 +219,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
 
     func setSource(_ value: Value, transaction: Transaction) {
         viewGraph.data.withCurrent {
+            self.transaction.setValue(transaction)
             source.setValue(value, transaction: transaction)
         }
     }
@@ -253,6 +263,8 @@ final class DualAnimatableAttributeHarness {
     private var secondSource: Attribute<_OpacityEffect>!
     private var firstTime: Attribute<Time>!
     private var secondTime: Attribute<Time>!
+    private var firstTransaction: Attribute<Transaction>!
+    private var secondTransaction: Attribute<Transaction>!
     private var firstAnimated: Attribute<_OpacityEffect>!
     private var secondAnimated: Attribute<_OpacityEffect>!
 
@@ -272,9 +284,12 @@ final class DualAnimatableAttributeHarness {
             secondSource = graph.makeInput(value: secondInitialValue)
             firstTime = graph.makeInput(value: Time(seconds: 0))
             secondTime = graph.makeInput(value: Time(seconds: 0))
-            func makeInputs(time: Attribute<Time>) -> _GraphInputs {
+            func makeInputs(
+                time: Attribute<Time>,
+                transaction: inout Attribute<Transaction>!
+            ) -> _GraphInputs {
                 let phase = graph.makeInput(value: Phase())
-                let transaction = graph.makeInput(value: Transaction())
+                transaction = graph.makeInput(value: Transaction())
                 let environment = graph.makeInput(value: EnvironmentValues())
                 return _GraphInputs(
                     time: time,
@@ -284,10 +299,16 @@ final class DualAnimatableAttributeHarness {
                 )
             }
             var firstGraphValue = _GraphValue<_OpacityEffect>(_attribute: firstSource)
-            _OpacityEffect._makeAnimatable(value: &firstGraphValue, inputs: makeInputs(time: firstTime))
+            _OpacityEffect._makeAnimatable(
+                value: &firstGraphValue,
+                inputs: makeInputs(time: firstTime, transaction: &firstTransaction)
+            )
             firstAnimated = firstGraphValue._attribute
             var secondGraphValue = _GraphValue<_OpacityEffect>(_attribute: secondSource)
-            _OpacityEffect._makeAnimatable(value: &secondGraphValue, inputs: makeInputs(time: secondTime))
+            _OpacityEffect._makeAnimatable(
+                value: &secondGraphValue,
+                inputs: makeInputs(time: secondTime, transaction: &secondTransaction)
+            )
             secondAnimated = secondGraphValue._attribute
         }
     }
@@ -306,12 +327,14 @@ final class DualAnimatableAttributeHarness {
 
     func setFirst(_ value: _OpacityEffect, transaction: Transaction) {
         viewGraph.data.withCurrent {
+            firstTransaction.setValue(transaction)
             firstSource.setValue(value, transaction: transaction)
         }
     }
 
     func setSecond(_ value: _OpacityEffect, transaction: Transaction) {
         viewGraph.data.withCurrent {
+            secondTransaction.setValue(transaction)
             secondSource.setValue(value, transaction: transaction)
         }
     }

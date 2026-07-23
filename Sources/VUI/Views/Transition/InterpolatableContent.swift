@@ -84,6 +84,7 @@ extension DisplayList {
             init(
                 displayList: DisplayList = DisplayList(),
                 origin: CGPoint = .zero,
+                numericValue: Float? = nil,
                 animation: InterpolatorAnimation? = nil,
                 contentsScale: Float = 1,
                 version: DisplayList.Version? = nil
@@ -92,7 +93,7 @@ extension DisplayList {
                 self.origin = origin
                 self.rbList = nil
                 self.nextTime = .infinity
-                self.numericValue = nil
+                self.numericValue = numericValue
                 self.animation = animation
                 self.contentsScale = contentsScale
                 self.version = version
@@ -107,7 +108,8 @@ extension DisplayList {
                     return local.list
                 }
 
-                let prepared = renderer.sample(list: list, at: time)
+                var prepared = renderer.sample(list: list, at: time)
+                prepared.numericValue = numericValue
                 nextTime = renderer.nextTime
                 let contents = DisplayList.LocalContents(list: prepared)
                 rbList = contents
@@ -154,9 +156,11 @@ extension DisplayList {
             origin: CGPoint,
             version: DisplayList.Version? = nil,
             state: ContentTransition.State? = nil,
-            animation: Animation? = nil
+            animation: Animation? = nil,
+            numericValue: Float? = nil
         ) {
             guard !contents.matches(list: list, origin: origin, version: version) else {
+                contents.numericValue = numericValue
                 return
             }
 
@@ -178,6 +182,7 @@ extension DisplayList {
             contents = Contents(
                 displayList: list,
                 origin: origin,
+                numericValue: numericValue,
                 animation: animation.map { InterpolatorAnimation(animation: $0) },
                 contentsScale: contents.contentsScale,
                 version: version
@@ -382,6 +387,7 @@ extension DisplayList {
         func setCurrentContents(
             contentSeed: DisplayList.Seed,
             target: DisplayList,
+            transition: ContentTransition,
             time: Time,
             supportsVFD: Bool,
             rasterizationOptions: RasterizationOptions
@@ -459,6 +465,7 @@ extension DisplayList {
         override func setCurrentContents(
             contentSeed: DisplayList.Seed,
             target: DisplayList,
+            transition: ContentTransition,
             time: Time,
             supportsVFD: Bool,
             rasterizationOptions: RasterizationOptions
@@ -469,7 +476,8 @@ extension DisplayList {
             layer.setDisplayList(
                 target,
                 origin: .zero,
-                version: DisplayList.Version(value: Int(contentSeed.value))
+                version: DisplayList.Version(value: Int(contentSeed.value)),
+                numericValue: transition.numericValue
             )
             layer.updateInterpolators(
                 contentsScale: layer.contents.contentsScale,
@@ -497,14 +505,16 @@ extension DisplayList {
             layer.setDisplayList(
                 current,
                 origin: .zero,
-                version: DisplayList.Version(value: Int(previousContentSeed.value))
+                version: DisplayList.Version(value: Int(previousContentSeed.value)),
+                numericValue: layer.contents.numericValue
             )
             layer.setDisplayList(
                 target,
                 origin: .zero,
                 version: DisplayList.Version(value: Int(contentSeed.value)),
                 state: state,
-                animation: state.animation
+                animation: state.animation,
+                numericValue: state.transition.numericValue
             )
             layer.updateInterpolators(
                 contentsScale: 1,
@@ -553,6 +563,179 @@ extension DisplayList {
     }
 }
 
+enum _ShapeStyle_LayerID: Equatable {
+    case styled(_ShapeStyle_Name, UInt16)
+    case customStyle(UInt32)
+    case named(String?)
+    case unstyled
+}
+
+final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
+    struct Layer {
+        var id: _ShapeStyle_LayerID
+        var serial: UInt32
+        var style: _ShapeStyle_Pack.Style?
+        var state: DisplayList.InterpolatorLayer
+        var isRemoved: Bool
+    }
+
+    private(set) var layers: [Layer] = []
+    private(set) var contentsScale: Float = 1
+    private(set) var rasterizationOptions = RasterizationOptions()
+    private(set) var serial: UInt32 = 0
+    private(set) var cursor: Int32 = 0
+
+    override var hasActiveInterpolators: Bool {
+        layers.contains { $0.state.removedCount > 0 }
+    }
+
+    override var activeSourceBounds: CGRect? {
+        layers.lazy.compactMap {
+            $0.state.removed.first?.interpolator?.from.interpolationBounds
+        }.first
+    }
+
+    override func discardActiveInterpolators() {
+        for index in layers.indices {
+            layers[index].state.remove(prefix: layers[index].state.removedCount)
+        }
+    }
+
+    override func nextUpdate(after time: Time) -> Time {
+        layers.reduce(.infinity) { result, layer in
+            let candidate = layer.state.removedCount == 0
+                ? layer.state.currentTime
+                : layer.state.nextUpdateTime
+            return min(result, candidate)
+        }
+    }
+
+    override func updateTime(_ time: Time) {
+        for index in layers.indices {
+            layers[index].state.updateInterpolators(
+                contentsScale: contentsScale,
+                maxDuration: maxDuration,
+                time: time
+            )
+        }
+        scheduleNextUpdate(after: time)
+    }
+
+    override func setCurrentContents(
+        contentSeed: DisplayList.Seed,
+        target: DisplayList,
+        transition: ContentTransition,
+        time: Time,
+        supportsVFD: Bool,
+        rasterizationOptions: RasterizationOptions
+    ) {
+        let index = currentLayerIndex()
+        self.rasterizationOptions = rasterizationOptions
+        layers[index].state.setDisplayList(
+            target,
+            origin: .zero,
+            version: DisplayList.Version(value: Int(contentSeed.value)),
+            numericValue: transition.numericValue
+        )
+        layers[index].state.updateInterpolators(
+            contentsScale: contentsScale,
+            maxDuration: maxDuration,
+            time: time
+        )
+        scheduleNextUpdate(after: time)
+    }
+
+    override func update(
+        contentSeed: DisplayList.Seed,
+        current: DisplayList,
+        target: DisplayList,
+        state: ContentTransition.State,
+        time: Time = .zero,
+        animatesSize: Bool,
+        defersRender: Bool,
+        supportsVFD: Bool
+    ) -> DisplayList {
+        let index = currentLayerIndex()
+        rasterizationOptions = state.rasterizationOptions
+        let previousVersion = layers[index].state.contents.version ?? DisplayList.Version()
+        let previousNumericValue = layers[index].state.contents.numericValue
+
+        layers[index].state.setDisplayList(
+            current,
+            origin: .zero,
+            version: previousVersion,
+            numericValue: previousNumericValue
+        )
+        layers[index].state.setDisplayList(
+            target,
+            origin: .zero,
+            version: DisplayList.Version(value: Int(contentSeed.value)),
+            state: state,
+            animation: state.animation,
+            numericValue: state.transition.numericValue
+        )
+        layers[index].state.updateInterpolators(
+            contentsScale: contentsScale,
+            maxDuration: maxDuration,
+            time: time
+        )
+        scheduleNextUpdate(after: time)
+
+        _ = super.update(
+            contentSeed: contentSeed,
+            current: current,
+            target: target,
+            state: state,
+            time: time,
+            animatesSize: animatesSize,
+            defersRender: defersRender,
+            supportsVFD: supportsVFD
+        )
+        return apply(to: target)
+    }
+
+    override func apply(to list: DisplayList) -> DisplayList {
+        var output = DisplayList()
+        var replacedCurrent = false
+        for index in layers.indices {
+            replacedCurrent = layers[index].state.updateOutput(
+                list: &output,
+                frame: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(value: Int(serial)),
+                rasterizationOptions: rasterizationOptions
+            ) || replacedCurrent
+        }
+        return replacedCurrent ? output : list
+    }
+
+    private func currentLayerIndex() -> Int {
+        if layers.isEmpty {
+            layers.append(
+                Layer(
+                    id: .unstyled,
+                    serial: serial,
+                    style: nil,
+                    state: DisplayList.InterpolatorLayer(),
+                    isRemoved: false
+                )
+            )
+        }
+        cursor = 0
+        return 0
+    }
+
+    private func scheduleNextUpdate(after time: Time) {
+        let nextTime = nextUpdate(after: time)
+        guard time < nextTime,
+              nextTime.seconds.isFinite,
+              let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
+            return
+        }
+        viewGraph.nextUpdate.views.at(nextTime)
+    }
+}
+
 private extension DisplayList {
     var isEmptyForInterpolation: Bool {
         items.isEmpty && debugItems.isEmpty && effects.isEmpty && interpolationBounds == nil
@@ -584,6 +767,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
     var phase: Attribute<Phase>
     var transaction: Attribute<Transaction>
     var position: Attribute<CGPoint>
+    var presentationDisplayList: OptionalAttribute<DisplayList>
     var size: Attribute<ViewSize>
     var pixelLength: Attribute<CGFloat>
     var animatesSize: Bool
@@ -604,6 +788,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         phase: Attribute<Phase>,
         transaction: Attribute<Transaction>,
         position: Attribute<CGPoint>,
+        presentationDisplayList: OptionalAttribute<DisplayList>,
         size: Attribute<ViewSize>,
         pixelLength: Attribute<CGFloat>,
         animatesSize: Bool,
@@ -618,6 +803,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         self.phase = phase
         self.transaction = transaction
         self.position = position
+        self.presentationDisplayList = presentationDisplayList
         self.size = size
         self.pixelLength = pixelLength
         self.animatesSize = animatesSize
@@ -635,6 +821,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         _ = phase.value
         _ = position.value
         _ = pixelLength.value
+        let currentPresentationList = presentationDisplayList.value ?? targetList
 
         var state = currentEnvironment.contentTransitionState
         var transition = currentTransaction.disablesContentTransitions
@@ -690,7 +877,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
             contentSeed = DisplayList.Seed(decodedValue: contentSeed.value &+ 1)
         }
 
-        let output: DisplayList
+        var output: DisplayList
         if appliesTransition {
             output = group.update(
                 contentSeed: contentSeed,
@@ -706,12 +893,15 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
             group.setCurrentContents(
                 contentSeed: contentSeed,
                 target: targetList,
+                transition: state.transition,
                 time: currentTime,
                 supportsVFD: supportsVFD,
                 rasterizationOptions: state.rasterizationOptions
             )
             group.updateTime(currentTime)
-            output = group.apply(to: targetList)
+            output = group.hasActiveInterpolators
+                ? group.apply(to: targetList)
+                : currentPresentationList
         }
         previousContent = targetContent
         previousSize = currentSize
@@ -725,6 +915,7 @@ extension _ViewOutputs {
         _ group: DisplayList.InterpolatorGroup,
         content: Attribute<Content>,
         inputs: _ViewInputs,
+        presentationDisplayList: Attribute<DisplayList>? = nil,
         animatesSize: Bool,
         defersRender: Bool
     ) {
@@ -749,6 +940,7 @@ extension _ViewOutputs {
                 phase: inputs.base.phase,
                 transaction: inputs.base.transaction,
                 position: inputs.position,
+                presentationDisplayList: OptionalAttribute(presentationDisplayList),
                 size: inputs.size,
                 pixelLength: pixelLength,
                 animatesSize: animatesSize,

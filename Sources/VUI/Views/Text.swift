@@ -57,34 +57,23 @@ final class _TextDisplayListContentState {
     }
 }
 
-func _textTransitionRenderFrame(
-    position: CGPoint,
-    viewSize: CGSize,
-    targetSize: CGSize,
-    idealSize: CGSize,
-    pixelLength: CGFloat,
-    activeSourceBounds: CGRect?
-) -> CGRect {
-    var renderSize = viewSize
-    let targetAccommodatesIdealWidth =
-        targetSize.width + max(pixelLength, 0) >= idealSize.width
-    if targetAccommodatesIdealWidth, viewSize.width < idealSize.width {
-        renderSize.width = idealSize.width
-    }
-    if let activeSourceBounds {
-        let sourceWidth = activeSourceBounds.width
-        let isExpanding = idealSize.width > sourceWidth && viewSize.width > sourceWidth
-        let isContracting = idealSize.width < sourceWidth && viewSize.width < sourceWidth
-        if isExpanding || isContracting {
-            renderSize.width = max(viewSize.width, idealSize.width)
+private extension DisplayList {
+    func translatedTextPresentation(x: CGFloat, y: CGFloat) -> DisplayList {
+        guard x != 0 || y != 0 else {
+            return self
         }
+
+        let transform = CGAffineTransform(translationX: x, y: y)
+        var result = DisplayList()
+        for item in items {
+            result.appendTransformedItem(item, affineTransform: transform)
+        }
+        for item in debugItems {
+            result.appendTransformedDebugItem(item, affineTransform: transform)
+        }
+        result.numericValue = numericValue
+        return result
     }
-    return CGRect(
-        x: position.x + (viewSize.width - renderSize.width) * 0.5,
-        y: position.y,
-        width: renderSize.width,
-        height: renderSize.height
-    )
 }
 
 // TextAlignment: horizontal alignment for multi-line text.
@@ -1652,25 +1641,23 @@ extension Text: View {
         let environmentAttr = cachedEnvironmentAttr.value.environment
         let timeAttr = inputs.base.time
         let inbox = graph.inbox
-        let positionAttr: Attribute<CGPoint>
-        let sizeAttr: Attribute<ViewSize>
+        let targetPositionAttr = inputs.position
+        let animatedPositionAttr: Attribute<CGPoint>
+        let animatedSizeAttr: Attribute<ViewSize>
         let targetSizeAttr: Attribute<ViewSize>
-        let pixelLengthAttr: Attribute<CGFloat>?
         if inputs.needsGeometry {
             var cachedEnvironment = cachedEnvironmentAttr.value
-            positionAttr = cachedEnvironment.animatedPosition(for: inputs)
-            sizeAttr = cachedEnvironment.animatedSize(for: inputs)
+            animatedPositionAttr = cachedEnvironment.animatedPosition(for: inputs)
+            animatedSizeAttr = cachedEnvironment.animatedSize(for: inputs)
             guard let animatedFrame = cachedEnvironment.animatedFrame else {
                 fatalError("Text geometry animation requires an animated frame.")
             }
             targetSizeAttr = animatedFrame.size
-            pixelLengthAttr = animatedFrame.pixelLength
             cachedEnvironmentAttr.value = cachedEnvironment
         } else {
-            positionAttr = inputs.position
-            sizeAttr = inputs.size
+            animatedPositionAttr = inputs.position
+            animatedSizeAttr = inputs.size
             targetSizeAttr = inputs.size
-            pixelLengthAttr = nil
         }
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
@@ -1833,7 +1820,7 @@ extension Text: View {
             )
             displayedStyledTextAttr = graph.makeStatefulRule(
                 SizeFittingTextFilter(
-                    size: sizeAttr,
+                    size: animatedSizeAttr,
                     text: resolvedStyledTextAttr,
                     environment: environmentAttr,
                     isArchived: archiveOptions.isArchived,
@@ -1898,13 +1885,12 @@ extension Text: View {
             }
         }
 
-        let interpolatorGroup = DisplayList.UnaryInterpolatorGroup()
+        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let text = view._attribute.value // Dependency: text modifiers/colors
             let environment = cachedEnvironmentAttr.value.environment.value
-            let viewSize = sizeAttr.value.value
             let targetSize = targetSizeAttr.value.value
-            let position = positionAttr.value
+            let targetPosition = targetPositionAttr.value
             let styledText = displayedStyledTextAttr.value
             let resolved = styledText.resolvedText
             let debugLayout = debugLayoutAttr.value
@@ -1914,18 +1900,7 @@ extension Text: View {
             var list = DisplayList()
 
             if let resolved = resolved {
-                let idealSize = renderer?.sizeThatFits(
-                    proposal: .unspecified,
-                    text: TextProxy(resolved)
-                ) ?? resolved.measure()
-                var frame = _textTransitionRenderFrame(
-                    position: position,
-                    viewSize: viewSize,
-                    targetSize: targetSize,
-                    idealSize: idealSize,
-                    pixelLength: pixelLengthAttr?.value ?? environment.animationPixelLength,
-                    activeSourceBounds: interpolatorGroup.activeSourceBounds
-                )
+                var frame = CGRect(origin: targetPosition, size: targetSize)
                 let measuredSize = renderer?.sizeThatFits(
                     proposal: ProposedViewSize(frame.size),
                     text: TextProxy(resolved)
@@ -1965,10 +1940,21 @@ extension Text: View {
                 )
             }
             if debugLayout {
-                appendDebugOverlay(to: &list, frame: CGRect(origin: position, size: viewSize),
-                                   category: .primitiveView)
+                appendDebugOverlay(
+                    to: &list,
+                    frame: CGRect(origin: targetPosition, size: targetSize),
+                    category: .primitiveView
+                )
             }
             return list
+        }
+        let presentationDlAttr: Attribute<DisplayList> = graph.makeRule {
+            let targetPosition = targetPositionAttr.value
+            let presentationPosition = animatedPositionAttr.value
+            return dlAttr.value.translatedTextPresentation(
+                x: presentationPosition.x - targetPosition.x,
+                y: presentationPosition.y - targetPosition.y
+            )
         }
 
         var outputs = _ViewOutputs()
@@ -1984,6 +1970,7 @@ extension Text: View {
             interpolatorGroup,
             content: displayedStyledTextAttr,
             inputs: interpolatorInputs,
+            presentationDisplayList: presentationDlAttr,
             animatesSize: false,
             defersRender: false
         )

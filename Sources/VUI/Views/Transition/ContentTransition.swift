@@ -254,9 +254,12 @@ public struct ContentTransition: Equatable, Sendable {
         }
 
         mutating func applyDynamicTextAnimation(in transaction: Transaction) {
-            if animation == nil {
-                animation = transaction.effectiveAnimation
+            guard animation == nil,
+                  !transaction.disablesAnimations,
+                  style == .sessionWidget || style == .animatedWidget else {
+                return
             }
+            animation = .default
         }
 
         var rasterizationOptions: RasterizationOptions {
@@ -292,13 +295,98 @@ public struct ContentTransition: Equatable, Sendable {
 
         func makeRBTransition() -> RBTransition {
             let transition = RBTransition()
+
+            switch name {
+            case .default:
+                transition.method = Method.binary.method
+                transition.addEffect(Self.opacityEffect())
+            case .identity:
+                transition.method = Method.none.method
+            case .opacity:
+                transition.method = Method.none.method
+                transition.addEffect(Self.opacityEffect())
+            case .diff:
+                transition.method = Method.diff.method
+                transition.addEffect(Self.opacityEffect())
+            case .text:
+                transition.method = Method.none.method
+                transition.addEffect(Self.opacityEffect())
+            case .fadeIfDifferent:
+                transition.addEffect(Self.opacityEffect())
+            case let .numericText(configuration):
+                transition.method = Method.prefixAndSuffix.method
+                transition.animation = Self.numericAnimation()
+
+                let sequence = RBTransitionEffect()
+                sequence.type = SequenceDirection.leading.effectType
+                sequence.beginTime = Float(38) / 255
+                sequence.duration = Float(204) / 255
+                sequence.events = 3
+                transition.addEffect(sequence)
+
+                let opacity = Self.opacityEffect()
+                opacity.duration = 1
+                transition.addEffect(opacity)
+
+                let blur = RBTransitionEffect()
+                blur.type = EffectType.relativeBlur(scale: .zero).type
+                blur.setArgumentValue(0.25, atIndex: 1)
+                blur.duration = 1
+                blur.events = 3
+                transition.addEffect(blur)
+
+                let translation = RBTransitionEffect()
+                translation.type = EffectType.translation(scale: .zero).type
+                let offset: Float
+                switch configuration.direction {
+                case let .fixed(downwards):
+                    offset = downwards ? -0.59375 : 0.59375
+                    translation.flags = 1
+                case .automatic:
+                    offset = 0.59375
+                    translation.flags = 3
+                }
+                translation.setArgumentValue(offset, atIndex: 1)
+                translation.events = 3
+                translation.animationIndex = 1
+                transition.addEffect(translation)
+
+                let scale = RBTransitionEffect()
+                scale.type = EffectType.scale(0.3984375).type
+                scale.setArgumentValue(0.3984375, atIndex: 0)
+                scale.duration = 1
+                scale.events = 3
+                transition.addEffect(scale)
+            }
+            return transition
+        }
+
+        private static func opacityEffect() -> RBTransitionEffect {
             let effect = RBTransitionEffect()
-            effect.type = ContentTransition.EffectType.opacity.type
+            effect.type = EffectType.opacity.type
             effect.beginTime = 0
             effect.duration = 0
             effect.events = 3
-            transition.addEffect(effect)
-            return transition
+            return effect
+        }
+
+        private static func numericAnimation() -> RBAnimation {
+            let animation = RBAnimation()
+            animation.addSpringDuration(
+                0.5,
+                mass: 1,
+                stiffness: 344,
+                damping: 37,
+                initialVelocity: 0
+            )
+            animation.addSpringDuration(
+                0.8,
+                mass: 2,
+                stiffness: 470,
+                damping: 34,
+                initialVelocity: 0
+            )
+            return animation
         }
     }
 
@@ -440,6 +528,23 @@ public struct ContentTransition: Equatable, Sendable {
             return nil
         }
         return configuration
+    }
+
+    var numericValue: Float? {
+        guard case let .named(named) = storage,
+              case let .numericText(configuration) = named.name,
+              case let .automatic(value) = configuration.direction else {
+            return nil
+        }
+        return value
+    }
+
+    var isNumericText: Bool {
+        guard case let .named(named) = storage,
+              case .numericText = named.name else {
+            return false
+        }
+        return true
     }
 
     var rbTransition: RBTransition {

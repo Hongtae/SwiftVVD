@@ -1171,6 +1171,21 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 return view.text.resolvedText?.makeDrawing(in: size)
             }
 
+            func glyphAtoms() -> [GraphicsContext.ResolvedText.GlyphAtom]? {
+                guard view.renderer == nil,
+                      let resolvedText = view.text.resolvedText else {
+                    return nil
+                }
+                return resolvedText.glyphAtoms(in: size).map { atom in
+                    var atom = atom
+                    atom.bounds = atom.bounds
+                        .offsetBy(dx: frame.minX, dy: frame.minY)
+                        .applying(transform)
+                        .standardized
+                    return atom
+                }
+            }
+
             func draw(in context: GraphicsContext) {
                 guard let resolvedText = view.text.resolvedText else { return }
                 var context = context
@@ -1723,6 +1738,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
     private var activeStyleChain = StyleChain()
     // Backend-local bounds used by display-list interpolation before exact private command storage exists.
     var interpolationBounds: CGRect?
+    // Numeric metadata consumed by content-transition matching and direction selection.
+    var numericValue: Float? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.items == rhs.items
@@ -2892,6 +2909,29 @@ struct DisplayList: Equatable, CustomStringConvertible {
     static func effect(_ effect: Effect, contents: DisplayList) -> DisplayList {
         var list = DisplayList()
         list.appendEffect(effect, contents: contents)
+        return list
+    }
+
+    static func flattened(
+        _ contents: DisplayList,
+        origin: CGPoint,
+        options: RasterizationOptions
+    ) -> DisplayList {
+        let content = Content(
+            flattened: contents,
+            origin: origin,
+            options: options
+        )
+        let bounds = content.command.bounds
+        var list = DisplayList()
+        list.appendRecordedItem(Item(
+            content: content,
+            frame: bounds ?? .zero,
+            identity: .none,
+            version: Version()
+        ))
+        list.recordInterpolationBounds(bounds)
+        list.numericValue = contents.numericValue
         return list
     }
 
