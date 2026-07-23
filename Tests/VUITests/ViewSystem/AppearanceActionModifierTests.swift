@@ -85,13 +85,19 @@ final class AppearanceActionModifierTests: XCTestCase {
         XCTAssertEqual(appearCount, 1)
     }
 
-    func testDynamicLayoutItemEvaluatesAppearanceEffectDuringTransactionalUpdate() {
+    func testDynamicLayoutOmitsLayoutEmptyAppearanceAndUpdatesMaterializedControl() throws {
         let rendererHost = TestViewRendererHost()
-        var appearCount = 0
+        var emptyAppearCount = 0
+        var controlAppearCount = 0
         let content = VStack {
             EmptyView().onAppear {
-                appearCount += 1
+                emptyAppearCount += 1
             }
+            Color.clear
+                .frame(width: 1, height: 1)
+                .onAppear {
+                    controlAppearCount += 1
+                }
         }
         let viewGraph = ViewGraph(
             rootViewType: type(of: content),
@@ -101,9 +107,19 @@ final class AppearanceActionModifierTests: XCTestCase {
         )
         rendererHost.storage = viewGraph
 
+        try viewGraph.data.withCurrent {
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let rootLayoutComputer = try XCTUnwrap(viewGraph.rootLayoutComputer)
+                _ = rootLayoutComputer.value.sizeThatFits(.unspecified)
+            }
+        }
+        XCTAssertEqual(emptyAppearCount, 0)
+        XCTAssertEqual(controlAppearCount, 0)
+
         viewGraph.updateOutputs(at: Time(seconds: 0))
 
-        XCTAssertEqual(appearCount, 1)
+        XCTAssertEqual(emptyAppearCount, 0)
+        XCTAssertEqual(controlAppearCount, 1)
     }
 
     func testAppearanceEffectStoresCurrentAttributeDuringUpdate() {
