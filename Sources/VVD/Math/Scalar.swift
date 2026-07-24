@@ -2,7 +2,7 @@
 //  File: Scalar.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -91,3 +91,10 @@ public typealias Double3x3 = (Double3, Double3, Double3)
 public typealias Half4x4 = (Half4, Half4, Half4, Half4)
 public typealias Float4x4 = (Float4, Float4, Float4, Float4)
 public typealias Double4x4 = (Double4, Double4, Double4, Double4)
+
+public typealias SIMD2x2<Scalar: SIMDScalar> =
+    (SIMD2<Scalar>, SIMD2<Scalar>)
+public typealias SIMD3x3<Scalar: SIMDScalar> =
+    (SIMD3<Scalar>, SIMD3<Scalar>, SIMD3<Scalar>)
+public typealias SIMD4x4<Scalar: SIMDScalar> =
+    (SIMD4<Scalar>, SIMD4<Scalar>, SIMD4<Scalar>, SIMD4<Scalar>)

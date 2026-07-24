@@ -2,7 +2,7 @@
 //  File: Vector4.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct Vector4: Vector, Hashable, Sendable {
@@ -166,5 +166,44 @@ public extension Vector4 {
         self.y = Scalar(v.1)
         self.z = Scalar(v.2)
         self.w = Scalar(v.3)
+    }
+}
+
+public extension Vector4 {
+    var simdHalf4: SIMD4<Float16> {
+        get { SIMD4<Float16>(Float16(self.x), Float16(self.y), Float16(self.z), Float16(self.w)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+            self.z = Scalar(v.z)
+            self.w = Scalar(v.w)
+        }
+    }
+
+    var simdFloat4: SIMD4<Float32> {
+        get { SIMD4<Float32>(Float32(self.x), Float32(self.y), Float32(self.z), Float32(self.w)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+            self.z = Scalar(v.z)
+            self.w = Scalar(v.w)
+        }
+    }
+
+    var simdDouble4: SIMD4<Float64> {
+        get { SIMD4<Float64>(Float64(self.x), Float64(self.y), Float64(self.z), Float64(self.w)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+            self.z = Scalar(v.z)
+            self.w = Scalar(v.w)
+        }
+    }
+
+    init<S: SIMDScalar & BinaryFloatingPoint>(_ v: SIMD4<S>) {
+        self.x = Scalar(v.x)
+        self.y = Scalar(v.y)
+        self.z = Scalar(v.z)
+        self.w = Scalar(v.w)
     }
 }

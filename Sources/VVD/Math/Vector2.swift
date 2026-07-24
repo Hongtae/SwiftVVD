@@ -2,7 +2,7 @@
 //  File: Vector2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -148,5 +148,36 @@ public extension Vector2 {
     init(_ v: Double2) {
         self.x = Scalar(v.0)
         self.y = Scalar(v.1)
+    }
+}
+
+public extension Vector2 {
+    var simdHalf2: SIMD2<Float16> {
+        get { SIMD2<Float16>(Float16(self.x), Float16(self.y)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+        }
+    }
+
+    var simdFloat2: SIMD2<Float32> {
+        get { SIMD2<Float32>(Float32(self.x), Float32(self.y)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+        }
+    }
+
+    var simdDouble2: SIMD2<Float64> {
+        get { SIMD2<Float64>(Float64(self.x), Float64(self.y)) }
+        set(v) {
+            self.x = Scalar(v.x)
+            self.y = Scalar(v.y)
+        }
+    }
+
+    init<S: SIMDScalar & BinaryFloatingPoint>(_ v: SIMD2<S>) {
+        self.x = Scalar(v.x)
+        self.y = Scalar(v.y)
     }
 }

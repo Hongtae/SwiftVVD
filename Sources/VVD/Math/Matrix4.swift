@@ -2,7 +2,7 @@
 //  File: Matrix4.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct Matrix4: Matrix, Hashable, Sendable {
@@ -356,6 +356,42 @@ public extension Matrix4 {
     }
 
     init(_ m: Double4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
+}
+
+public extension Matrix4 {
+    var simdHalf4x4: SIMD4x4<Float16> {
+        get { (self.row1.simdHalf4, self.row2.simdHalf4, self.row3.simdHalf4, self.row4.simdHalf4) }
+        set(v) {
+            self.row1.simdHalf4 = v.0
+            self.row2.simdHalf4 = v.1
+            self.row3.simdHalf4 = v.2
+            self.row4.simdHalf4 = v.3
+        }
+    }
+
+    var simdFloat4x4: SIMD4x4<Float32> {
+        get { (self.row1.simdFloat4, self.row2.simdFloat4, self.row3.simdFloat4, self.row4.simdFloat4) }
+        set(v) {
+            self.row1.simdFloat4 = v.0
+            self.row2.simdFloat4 = v.1
+            self.row3.simdFloat4 = v.2
+            self.row4.simdFloat4 = v.3
+        }
+    }
+
+    var simdDouble4x4: SIMD4x4<Float64> {
+        get { (self.row1.simdDouble4, self.row2.simdDouble4, self.row3.simdDouble4, self.row4.simdDouble4) }
+        set(v) {
+            self.row1.simdDouble4 = v.0
+            self.row2.simdDouble4 = v.1
+            self.row3.simdDouble4 = v.2
+            self.row4.simdDouble4 = v.3
+        }
+    }
+
+    init<S: SIMDScalar & BinaryFloatingPoint>(_ m: SIMD4x4<S>) {
         self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
     }
 }

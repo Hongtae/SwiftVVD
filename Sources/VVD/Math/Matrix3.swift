@@ -2,7 +2,7 @@
 //  File: Matrix3.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct Matrix3: Matrix, Hashable, Sendable {
@@ -267,6 +267,39 @@ public extension Matrix3 {
     }
 
     init(_ m: Double3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
+}
+
+public extension Matrix3 {
+    var simdHalf3x3: SIMD3x3<Float16> {
+        get { (self.row1.simdHalf3, self.row2.simdHalf3, self.row3.simdHalf3) }
+        set(v) {
+            self.row1.simdHalf3 = v.0
+            self.row2.simdHalf3 = v.1
+            self.row3.simdHalf3 = v.2
+        }
+    }
+
+    var simdFloat3x3: SIMD3x3<Float32> {
+        get { (self.row1.simdFloat3, self.row2.simdFloat3, self.row3.simdFloat3) }
+        set(v) {
+            self.row1.simdFloat3 = v.0
+            self.row2.simdFloat3 = v.1
+            self.row3.simdFloat3 = v.2
+        }
+    }
+
+    var simdDouble3x3: SIMD3x3<Float64> {
+        get { (self.row1.simdDouble3, self.row2.simdDouble3, self.row3.simdDouble3) }
+        set(v) {
+            self.row1.simdDouble3 = v.0
+            self.row2.simdDouble3 = v.1
+            self.row3.simdDouble3 = v.2
+        }
+    }
+
+    init<S: SIMDScalar & BinaryFloatingPoint>(_ m: SIMD3x3<S>) {
         self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
     }
 }

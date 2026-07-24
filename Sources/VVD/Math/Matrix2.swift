@@ -2,7 +2,7 @@
 //  File: Matrix2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct Matrix2: Matrix, Hashable, Sendable {
@@ -187,6 +187,36 @@ public extension Matrix2 {
     }
 
     init(_ m: Double2x2) {
+        self.init(row1: Vector2(m.0), row2: Vector2(m.1))
+    }
+}
+
+public extension Matrix2 {
+    var simdHalf2x2: SIMD2x2<Float16> {
+        get { (self.row1.simdHalf2, self.row2.simdHalf2) }
+        set(v) {
+            self.row1.simdHalf2 = v.0
+            self.row2.simdHalf2 = v.1
+        }
+    }
+
+    var simdFloat2x2: SIMD2x2<Float32> {
+        get { (self.row1.simdFloat2, self.row2.simdFloat2) }
+        set(v) {
+            self.row1.simdFloat2 = v.0
+            self.row2.simdFloat2 = v.1
+        }
+    }
+
+    var simdDouble2x2: SIMD2x2<Float64> {
+        get { (self.row1.simdDouble2, self.row2.simdDouble2) }
+        set(v) {
+            self.row1.simdDouble2 = v.0
+            self.row2.simdDouble2 = v.1
+        }
+    }
+
+    init<S: SIMDScalar & BinaryFloatingPoint>(_ m: SIMD2x2<S>) {
         self.init(row1: Vector2(m.0), row2: Vector2(m.1))
     }
 }
