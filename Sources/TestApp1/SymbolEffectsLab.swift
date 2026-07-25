@@ -63,7 +63,8 @@ struct SymbolEffectsLabSheet: View {
 
                 if drawTransitionVisible {
                     Image(systemName: "draw")
-                        .frame(width: 48, height: 48)
+                        .font(.system(size: 40))
+                        .frame(width: 56, height: 56)
                         .foregroundStyle(Color.blue)
                         .transition(.symbolEffect(.drawOn.individually))
                 }
@@ -93,7 +94,7 @@ struct SymbolEffectsLabSheet: View {
                 .multilineTextAlignment(.center)
         }
         .padding(20)
-        .frame(width: 720, height: 540)
+        .frame(width: 760, height: 560)
     }
 
     private func symbol<Effect: DiscreteSymbolEffect & SymbolEffect>(
@@ -103,7 +104,8 @@ struct SymbolEffectsLabSheet: View {
     ) -> some View {
         VStack(spacing: 4) {
             Image(systemName: "photo.fill")
-                .frame(width: 48, height: 48)
+                .font(.system(size: 40))
+                .frame(width: 56, height: 56)
                 .foregroundStyle(Color.blue, Color.orange)
                 .symbolEffect(effect, options: .nonRepeating, value: value)
             Text(label)
@@ -118,7 +120,8 @@ struct SymbolEffectsLabSheet: View {
     ) -> some View {
         VStack(spacing: 4) {
             Image(systemName: "draw")
-                .frame(width: 48, height: 48)
+                .font(.system(size: 40))
+                .frame(width: 56, height: 56)
                 .foregroundStyle(Color.blue)
                 .symbolEffect(effect, options: .speed(0.25), isActive: drawHidden)
             Text(label)
@@ -132,7 +135,8 @@ struct SymbolEffectsLabSheet: View {
     ) -> some View {
         VStack(spacing: 4) {
             Image(systemName: replacementUsesDraw ? "draw" : "photo.fill")
-                .frame(width: 48, height: 48)
+                .font(.system(size: 40))
+                .frame(width: 56, height: 56)
                 .foregroundStyle(Color.blue, Color.orange)
                 .contentTransition(.symbolEffect(effect))
             Text(label)
