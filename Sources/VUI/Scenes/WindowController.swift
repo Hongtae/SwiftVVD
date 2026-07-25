@@ -538,7 +538,19 @@ class WindowController: WindowDelegate,
     var currentTimestamp: Time = Time(
         seconds: Date.now.timeIntervalSince(WindowController.eventTimestampOrigin)
     )
-    private static let animationTimeScaleStorage = Mutex<Double>(1.0)
+    // Temporary process-wide diagnostic input until animation timing is
+    // exposed through the view/environment configuration path.
+    private static let animationTimeScaleStorage = Mutex<Double>({
+        guard let rawValue = ProcessInfo.processInfo.environment[
+            "VUI_ANIMATION_TIME_SCALE"
+        ],
+        let value = Double(rawValue),
+        value.isFinite,
+        value >= 0 else {
+            return 1.0
+        }
+        return value
+    }())
     static var animationTimeScale: Double {
         get { animationTimeScaleStorage.withLock { $0 } }
         set {
