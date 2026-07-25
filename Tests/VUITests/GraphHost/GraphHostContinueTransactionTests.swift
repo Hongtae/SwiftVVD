@@ -53,6 +53,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
                 ContinueRecordingGraphMutation {
                     XCTAssertTrue(parent.isUpdating)
                     XCTAssertFalse(child.isUpdating)
+                    XCTAssertTrue(_AGGraph.current === child.graph)
                     events.append("parent")
                 }
             )
@@ -64,6 +65,107 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["parent"])
         XCTAssertFalse(parent.needsTransaction)
         XCTAssertFalse(parent.needsTransaction)
+    }
+
+    func testContinueTransactionSettingChildAttributeUsesChildGraphWhenParentIsUpdating() {
+        let parent = GraphHost()
+        let child = ChildGraphHost(parent: parent)
+        var parentAttribute: Attribute<Int>!
+        var childAttribute: Attribute<Int>!
+        var childWeakAttribute: WeakAttribute<Int>!
+
+        parent.data.withCurrent {
+            parentAttribute = parent.graph.makeInput(value: 11)
+        }
+        child.data.withCurrent {
+            childAttribute = child.graph.makeInput(value: 21)
+            childWeakAttribute = childAttribute.asWeak()
+        }
+
+        XCTAssertEqual(parentAttribute.identifier.rawValue, childAttribute.identifier.rawValue)
+
+        parent.runTransaction(nil, do: {
+            child.continueTransaction(setting: childWeakAttribute, to: 22)
+            XCTAssertTrue(parent.needsTransaction)
+            XCTAssertFalse(child.needsTransaction)
+        }, id: nil)
+
+        parent.data.withCurrent {
+            XCTAssertEqual(parentAttribute.value, 11)
+        }
+        child.data.withCurrent {
+            XCTAssertEqual(childAttribute.value, 22)
+        }
+    }
+
+    func testContinueTransactionInvalidatingChildAttributeUsesChildGraphWhenParentIsUpdating() {
+        let parent = GraphHost()
+        let child = ChildGraphHost(parent: parent)
+        var parentInput: Attribute<Int>!
+        var childInput: Attribute<Int>!
+        var childOutput: Attribute<Int>!
+        var childWeakInput: AGWeakAttribute!
+        var childEvaluations = 0
+
+        parent.data.withCurrent {
+            parentInput = parent.graph.makeInput(value: 7)
+        }
+        child.data.withCurrent {
+            childInput = child.graph.makeInput(value: 3)
+            childOutput = child.graph.makeRule {
+                childEvaluations += 1
+                return childInput.value * 2
+            }
+            childWeakInput = childInput.asWeak().base
+            XCTAssertEqual(childOutput.value, 6)
+        }
+
+        XCTAssertEqual(parentInput.identifier.rawValue, childInput.identifier.rawValue)
+
+        parent.runTransaction(nil, do: {
+            child.continueTransaction(invalidating: childWeakInput)
+            XCTAssertEqual(childEvaluations, 1)
+        }, id: nil)
+
+        parent.data.withCurrent {
+            XCTAssertEqual(parentInput.value, 7)
+        }
+        child.data.withCurrent {
+            XCTAssertEqual(childOutput.value, 6)
+            XCTAssertEqual(childEvaluations, 2)
+        }
+    }
+
+    func testContinueTransactionInvalidatingCarriesTheActiveHostTransaction() throws {
+        let host = GraphHost()
+        var input: Attribute<Int>!
+        var output: Attribute<Int>!
+        var weakInput: AGWeakAttribute!
+
+        host.data.withCurrent {
+            input = host.graph.makeInput(value: 3)
+            output = host.graph.makeRule {
+                input.value * 2
+            }
+            weakInput = input.asWeak().base
+            XCTAssertEqual(output.value, 6)
+            XCTAssertNil(host.graph.transaction(for: output.identifier))
+        }
+
+        var transaction = Transaction()
+        transaction[ContinueTransactionKey.self] = 57
+        host.runTransaction(transaction, do: {
+            XCTAssertTrue(Transaction.current.isEmpty)
+            host.continueTransaction(invalidating: weakInput)
+        }, id: nil)
+
+        try host.data.withCurrent {
+            let propagated = try XCTUnwrap(
+                host.graph.transaction(for: output.identifier)
+            )
+            XCTAssertEqual(propagated[ContinueTransactionKey.self], 57)
+            XCTAssertEqual(output.value, 6)
+        }
     }
 
     func testContinueTransactionWithoutUpdatingHostUsesUpdateActionFallback() {

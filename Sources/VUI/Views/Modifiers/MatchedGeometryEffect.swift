@@ -52,8 +52,6 @@ final class MatchedGeometryScope: PropertyKey {
         var key: AnyHashable
         var views: [ViewRegistration] = []
         var sharedFrame: Attribute<MatchedGeometrySharedValue>?
-        var sourcePhase: Attribute<Phase>?
-        var sourceTransaction: Attribute<Transaction>?
 
         init(key: AnyHashable) {
             self.key = key
@@ -215,34 +213,18 @@ final class MatchedGeometryScope: PropertyKey {
             fatalError("MatchedGeometryScope lost its owning graph.")
         }
 
-        let attributes = AGSubgraph.withCurrent(rootSubgraph) { () -> (
-            Attribute<Phase>,
-            Attribute<Transaction>,
-            Attribute<MatchedGeometrySharedValue>
-        ) in
-            let sourcePhase: Attribute<Phase> = graph.makeRule { [weak self] in
-                self?.sourceInfo(frameIndex: index)?.phase ?? self?.inputs.base.phase.value ?? Phase()
-            }
-            let sourceTransaction: Attribute<Transaction> = graph.makeRule { [weak self] in
-                self?.sourceInfo(frameIndex: index)?.transaction ??
-                    self?.inputs.base.transaction.value ?? Transaction()
-            }
-            let sharedFrame: Attribute<MatchedGeometrySharedValue> = graph.makeStatefulRule(
+        let sharedFrame = AGSubgraph.withCurrent(rootSubgraph) {
+            graph.makeStatefulRule(
                 MatchedGeometrySharedFrame(
                     scope: self,
                     frameIndex: index,
-                    phase: sourcePhase,
-                    transaction: sourceTransaction,
                     time: inputs.base.time,
                     environment: inputs.base.cachedEnvironment.value.environment
                 )
             )
-            return (sourcePhase, sourceTransaction, sharedFrame)
         }
-        frame.sourcePhase = attributes.0
-        frame.sourceTransaction = attributes.1
-        frame.sharedFrame = attributes.2
-        return attributes.2
+        frame.sharedFrame = sharedFrame
+        return sharedFrame
     }
 
     private func invalidateSharedFrame(_ frame: Frame) {
@@ -262,125 +244,182 @@ struct MatchedGeometrySourceInfo {
 private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, AsyncAttribute {
     typealias Value = MatchedGeometrySharedValue
 
+    var time: Attribute<Time>
+    var environment: Attribute<EnvironmentValues>
     weak var scope: MatchedGeometryScope?
     var frameIndex: Int
-    var helper: AnimatableAttributeHelper<ViewFrame>
-    var environment: Attribute<EnvironmentValues>
+    var listeners: [AnimationListener] = []
+    var animatorState: AnimatorState<ViewFrame>?
+    var resetSeed: UInt32 = 0
     var lastSourceAttribute = AGWeakAttribute.invalid
 
     init(
         scope: MatchedGeometryScope,
         frameIndex: Int,
-        phase: Attribute<Phase>,
-        transaction: Attribute<Transaction>,
         time: Attribute<Time>,
         environment: Attribute<EnvironmentValues>
     ) {
+        self.time = time
+        self.environment = environment
         self.scope = scope
         self.frameIndex = frameIndex
-        self.helper = AnimatableAttributeHelper(
-            _phase: phase,
-            _time: time,
-            _transaction: transaction
-        )
-        self.environment = environment
     }
 
     mutating func updateValue() {
+        let stored: MatchedGeometrySharedValue? = _AGGraph.currentStatefulOutput()
+        let previousPresentation = stored?.frame
+        let previousSource = lastSourceAttribute.attribute.flatMap {
+            scope?.sourceInfo(frameIndex: frameIndex, matching: $0)
+        }
+
+        if let previousSource,
+           previousSource.phase.resetSeed != resetSeed {
+            reset()
+        }
+
         guard let info = scope?.sourceInfo(frameIndex: frameIndex) else {
-            if helper.isAnimating,
-               let lastSource = lastSourceAttribute.attribute,
-               let retained = scope?.sourceInfo(
-                   frameIndex: frameIndex,
-                   matching: lastSource
-               ),
-               !retained.phase.isBeingRemoved {
-                var value = (value: retained.frame, changed: false)
-                helper.update(
-                    value: &value,
-                    environment: environment,
-                    advancesDelayedSecondSample: true
-                )
-                _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-                    frame: value.value,
-                    source: AnyOptionalAttribute()
-                ))
+            guard animatorState != nil,
+                  let previousSource,
+                  !previousSource.phase.isBeingRemoved else {
+                reset()
+                publish(frame: nil, source: nil)
                 return
             }
-            helper.finishAndClearAnimatorState()
-            lastSourceAttribute = .invalid
-            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-                frame: nil,
-                source: AnyOptionalAttribute()
-            ))
+            var value = previousSource.frame
+            sampleAnimation(target: &value)
+            publish(frame: value, source: nil)
             return
         }
-        var value = (value: info.frame, changed: false)
-        let update = helper.beginStandaloneUpdate(
-            value: &value,
-            defaultAnimation: nil,
-            transactionForChangedTarget: {
-                info.transaction
+
+        let source = info.sourceAttribute
+        guard lastSourceAttribute.attribute != nil,
+              let previousPresentation,
+              let previousSource else {
+            finishAnimation()
+            resetSeed = info.phase.resetSeed
+            lastSourceAttribute = AGWeakAttribute(info.sourceAttribute)
+            publish(frame: info.frame, source: source)
+            return
+        }
+
+        if previousSource.frame != info.frame {
+            guard let animation = info.transaction.effectiveAnimation else {
+                finishAnimation()
+                resetSeed = info.phase.resetSeed
+                lastSourceAttribute = AGWeakAttribute(info.sourceAttribute)
+                publish(frame: info.frame, source: source)
+                return
             }
-        )
-        let stored: MatchedGeometrySharedValue? = _AGGraph.currentStatefulOutput()
-        let previous = stored?.frame
-        let source = AnyOptionalAttribute(info.sourceAttribute)
+            retargetAnimation(
+                animation: animation,
+                start: previousPresentation,
+                previousTarget: previousSource.frame,
+                target: info.frame,
+                transaction: info.transaction
+            )
+            addAnimationListener(from: info.transaction)
+        }
+
+        resetSeed = info.phase.resetSeed
         lastSourceAttribute = AGWeakAttribute(info.sourceAttribute)
 
-        if update.didReset || previous == nil {
-            helper.finishAndClearAnimatorState()
-            helper.commitTarget(update.target)
-            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-                frame: update.target,
-                source: source
-            ))
+        guard animatorState != nil else {
+            publish(frame: info.frame, source: source)
             return
         }
-
-        if let branch = update.targetAnimationBranch {
-            switch branch {
-            case .animated(let animation, let transaction, let time):
-                helper.retargetStandaloneAnimation(
-                    animation: animation,
-                    start: previous ?? update.target,
-                    target: update.target,
-                    transaction: transaction,
-                    time: time,
-                    environment: environment
-                )
-                value.value = update.target
-            case .noAnimation:
-                helper.finishAndClearAnimatorState()
-                helper.commitTarget(update.target)
-                _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-                    frame: update.target,
-                    source: source
-                ))
-                return
-            }
-        }
-
-        guard helper.isAnimating else {
-            _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-                frame: previous ?? update.target,
-                source: source
-            ))
-            return
-        }
-        helper.update(
-            value: &value,
-            environment: environment,
-            advancesDelayedSecondSample: true
+        var value = info.frame
+        sampleAnimation(target: &value)
+        publish(
+            frame: value,
+            source: animatorState == nil ? source : nil
         )
-        _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
-            frame: value.value,
-            source: helper.isAnimating ? AnyOptionalAttribute() : source
-        ))
     }
 
     mutating func destroy() {
-        helper.finishAndClearAnimatorState()
+        reset()
+    }
+
+    private mutating func retargetAnimation(
+        animation: Animation,
+        start: ViewFrame,
+        previousTarget: ViewFrame,
+        target: ViewFrame,
+        transaction: Transaction
+    ) {
+        let currentTime = time.value
+        if let animatorState {
+            var interval = target.animatableData
+            interval -= previousTarget.animatableData
+            _ = animatorState.combine(
+                newAnimation: animation,
+                newInterval: interval,
+                at: currentTime,
+                in: transaction,
+                environment: environment
+            )
+        } else {
+            var interval = target.animatableData
+            interval -= start.animatableData
+            animatorState = AnimatorState(
+                animation: animation,
+                interval: interval,
+                at: currentTime,
+                in: transaction
+            )
+        }
+    }
+
+    private mutating func sampleAnimation(target: inout ViewFrame) {
+        guard let animatorState else {
+            return
+        }
+        let continues = animatorState.update(
+            value: &target,
+            at: time.value,
+            environment: environment,
+            advancesDelayedSecondSample: true
+        )
+        if continues {
+            animatorState.nextUpdate()
+        } else {
+            self.animatorState = nil
+            removeAnimationListeners()
+        }
+    }
+
+    private func publish(
+        frame: ViewFrame?,
+        source: AGAttribute?
+    ) {
+        _AGGraph.setStatefulOutput(MatchedGeometrySharedValue(
+            frame: frame,
+            source: AnyOptionalAttribute(source)
+        ))
+    }
+
+    private mutating func addAnimationListener(from transaction: Transaction) {
+        guard let listener = transaction.animationListener else {
+            return
+        }
+        listeners.append(listener)
+        listener.animationWasAdded()
+    }
+
+    private mutating func removeAnimationListeners() {
+        let actions = listeners.flatMap { $0.animationWasRemoved() }
+        listeners.removeAll()
+        enqueueAnimationCompletionActions(actions)
+    }
+
+    private mutating func finishAnimation() {
+        removeAnimationListeners()
+        animatorState = nil
+    }
+
+    private mutating func reset() {
+        finishAnimation()
+        resetSeed = 0
+        lastSourceAttribute = .invalid
     }
 }
 

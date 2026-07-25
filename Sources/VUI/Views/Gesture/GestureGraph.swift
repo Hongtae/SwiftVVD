@@ -758,7 +758,8 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     private func hitTestCandidateResponders(
         at location: CGPoint
     ) -> [any AnyGestureResponder] {
-        let root = gestureGraphRuntimeState(self).ownedRootResponder
+        let root = (eventBindingManager.rootResponder as? MultiViewResponder)
+            ?? gestureGraphRuntimeState(self).ownedRootResponder
         return root.respondersContaining(point: location)
             .compactMap { $0 as? any AnyGestureResponder }
             .filter { $0.mask.contains(.gesture) }

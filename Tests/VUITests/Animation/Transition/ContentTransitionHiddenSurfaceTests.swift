@@ -1439,6 +1439,31 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         )
     }
 
+    func testFilteredTransitionBodyWrapsApplyModifierWithPushPopTransaction() {
+        let transition = FilteredTransition(
+            transition: ScaleTransition(0.72),
+            filter: { transaction, phase in
+                if !phase.isIdentity {
+                    transaction.animation = .linear(duration: 0.8)
+                }
+            }
+        )
+        let body = transition.body(
+            content: PlaceholderContentView<
+                FilteredTransition<ScaleTransition>
+            >(),
+            phase: .willAppear
+        )
+        let bodyType = String(reflecting: type(of: body))
+
+        XCTAssertTrue(
+            bodyType.contains(
+                "ModifiedContent<VUI.PlaceholderContentView<VUI.FilteredTransition<VUI.ScaleTransition>>, VUI._PushPopTransactionModifier<VUI.ApplyTransitionModifier<VUI.ScaleTransition>>>"
+            ),
+            bodyType
+        )
+    }
+
     func testRetainedRemovalTransactionResolverPreservesFilterOwnership() {
         let plain = Transaction()
         let outer = Transaction(animation: .linear(duration: 0.25))

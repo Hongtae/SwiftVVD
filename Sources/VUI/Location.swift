@@ -166,11 +166,10 @@ private struct ProjectedLocation<P: Projection>: _Location {
 class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
     struct BeginUpdate: GraphMutation {
         weak var location: StoredLocationBase<Value>?
-        var value: Value
         var transaction: Transaction
 
         func apply() {
-            location?.beginUpdate(value, transaction: transaction)
+            location?.beginUpdate(transaction: transaction)
         }
 
         mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
@@ -180,20 +179,33 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
                   location === nextLocation else {
                 return false
             }
-            value = mutation.value
+            location.removeCombinedSavedValue()
             transaction = mutation.transaction
             return true
         }
     }
 
-    private var value: Value
+    private struct Data {
+        var currentValue: Value
+        var savedValue: [Value] = []
+    }
+
+    private var data: Data
     private var readValueHandler: (() -> Value)?
     private var commitValueHandler: ((Value, Transaction) -> Void)?
 
     private(set) var wasRead: Bool = false
 
+    var isValid: Bool {
+        true
+    }
+
+    var isUpdating: Bool {
+        fatalError("StoredLocationBase.isUpdating must be implemented by a concrete location.")
+    }
+
     var updateValue: Value {
-        value
+        data.savedValue.first ?? data.currentValue
     }
 
     init(
@@ -201,7 +213,7 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
         readValue: (() -> Value)? = nil,
         onCommit: ((Value, Transaction) -> Void)? = nil
     ) {
-        self.value = value
+        self.data = Data(currentValue: value)
         self.readValueHandler = readValue
         self.commitValueHandler = onCommit
         super.init()
@@ -211,21 +223,30 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
         wasRead = true
         if let readValueHandler {
             let value = readValueHandler()
-            self.value = value
+            data.currentValue = value
             return value
         }
-        return value
+        return data.currentValue
     }
 
     override func setValue(_ value: Value, transaction: Transaction) {
-        guard !_stateValuesAreKnownEqual(self.value, value) else { return }
+        guard !isUpdating else {
+            print("Modifying state during view update, this will cause undefined behavior.")
+            return
+        }
+        guard isValid else {
+            data.currentValue = value
+            return
+        }
+        guard !_stateValuesAreKnownEqual(data.currentValue, value) else { return }
         let setValue = { (scopedTransaction: Transaction) in
-            self.value = value
+            self.data.savedValue.append(self.data.currentValue)
+            self.data.currentValue = value
             Transaction.ThreadStorage.markMutation(for: scopedTransaction)
             self.commit(
                 transaction: scopedTransaction,
                 id: Transaction.id,
-                mutation: BeginUpdate(location: self, value: value, transaction: scopedTransaction)
+                mutation: BeginUpdate(location: self, transaction: scopedTransaction)
             )
             self.notifyChange()
         }
@@ -262,16 +283,25 @@ class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
         id: Transaction.ID,
         mutation: BeginUpdate
     ) {
-        mutation.apply()
+        fatalError("StoredLocationBase.commit must be implemented by a concrete location.")
     }
 
     func notifyObservers() {
+        fatalError("StoredLocationBase.notifyObservers must be implemented by a concrete location.")
     }
 
-    private func beginUpdate(_ value: Value, transaction: Transaction) {
-        self.value = value
-        commitValue(value, transaction: transaction)
+    private func beginUpdate(transaction: Transaction) {
+        if !data.savedValue.isEmpty {
+            data.savedValue.removeFirst()
+        }
+        commitValue(updateValue, transaction: transaction)
         notifyObservers()
+    }
+
+    private func removeCombinedSavedValue() {
+        if !data.savedValue.isEmpty {
+            data.savedValue.removeLast()
+        }
     }
 
     fileprivate func commitValue(_ value: Value, transaction: Transaction) {
@@ -304,6 +334,14 @@ final class StoredLocation<Value>: StoredLocationBase<Value>, @unchecked Sendabl
         self.host = host
         self.signal = signal
         super.init(initialValue: value, readValue: readValue, onCommit: onCommit)
+    }
+
+    override var isValid: Bool {
+        host?.data.isValid == true
+    }
+
+    override var isUpdating: Bool {
+        host?.isUpdatingGraph == true
     }
 
     override func commit(
@@ -384,6 +422,10 @@ final class ObservableLocation<Value>: StoredLocationBase<Value>, TransactionHos
 
     convenience init(initialValue value: Value) {
         self.init(value, onValueUpdated: { _ in })
+    }
+
+    override var isUpdating: Bool {
+        GraphHost.isUpdating
     }
 
     override func commit(

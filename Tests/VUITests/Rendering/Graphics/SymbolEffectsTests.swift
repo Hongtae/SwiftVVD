@@ -1210,7 +1210,7 @@ final class SymbolEffectsTests: XCTestCase {
         }
     }
 
-    func testDrawTransitionPreservesWillAppearUntilSymbolResourceResolves() throws {
+    func testDrawTransitionPreservesIdentityTransactionUntilSymbolResourceResolves() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
@@ -1232,21 +1232,33 @@ final class SymbolEffectsTests: XCTestCase {
             )
             let environment = graph.makeInput(value: effects)
             let time = graph.makeInput(value: Time(seconds: 0))
+            var willAppearTransaction = Transaction()
+            willAppearTransaction.disablesAnimations = true
+            let transaction = graph.makeInput(value: willAppearTransaction)
             let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
                 ImageViewChild(
                     resolvedImage: resolved,
                     environment: environment,
-                    transaction: graph.makeInput(value: Transaction()),
+                    transaction: transaction,
                     time: time
                 )
             )
 
             XCTAssertNil(child.value.symbolDrawProgresses)
+            var identityTransaction = Transaction(
+                animation: .linear(duration: 5)
+            )
+            identityTransaction.disablesAnimations = false
+            transaction.setValue(identityTransaction)
             effects.symbolEffects[0].effect.trigger = .transition(.identity)
-            environment.setValue(effects)
+            environment.setValue(effects, transaction: identityTransaction)
             XCTAssertNil(child.value.symbolDrawProgresses)
 
-            resolved.setValue(GraphicsContext.ResolvedImage(symbol: symbol))
+            transaction.setValue(willAppearTransaction)
+            resolved.setValue(
+                GraphicsContext.ResolvedImage(symbol: symbol),
+                transaction: willAppearTransaction
+            )
             XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
             XCTAssertTrue(child.value.isSymbolEffectActive)
 
@@ -1260,7 +1272,7 @@ final class SymbolEffectsTests: XCTestCase {
         }
     }
 
-    func testDrawTransitionCompletionWaitsForRendererOwnedDuration() throws {
+    func testDrawTransitionUsesConsumerTransactionForRendererOwnedCompletion() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
@@ -1285,11 +1297,12 @@ final class SymbolEffectsTests: XCTestCase {
                 effectSource.value
             }
             let time = graph.makeInput(value: Time(seconds: 1))
+            let transaction = graph.makeInput(value: Transaction())
             let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
                 ImageViewChild(
                     resolvedImage: resolved,
                     environment: environment,
-                    transaction: graph.makeInput(value: Transaction()),
+                    transaction: transaction,
                     time: time
                 )
             )
@@ -1309,11 +1322,17 @@ final class SymbolEffectsTests: XCTestCase {
             ) {
                 completions.append("logical")
             }
+            transaction.setValue(removal)
             effects.symbolEffects[0].effect.trigger = .transition(.didDisappear)
-            effectSource.setValue(effects, transaction: removal)
-            // A frame-time invalidation can overwrite the consumer node's own
-            // transaction before it evaluates. The effect environment must
-            // remain the authoritative removal-transaction source.
+            var environmentTransaction = Transaction(
+                animation: .linear(duration: 0.01)
+            )
+            environmentTransaction.animationListener = nil
+            environmentTransaction.animationLogicalListener = nil
+            effectSource.setValue(
+                effects,
+                transaction: environmentTransaction
+            )
             let drawStart = 1.001
             time.setValue(Time(seconds: drawStart))
 

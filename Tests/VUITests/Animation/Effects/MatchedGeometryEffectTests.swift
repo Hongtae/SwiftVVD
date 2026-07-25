@@ -1,4 +1,10 @@
 import XCTest
+import class VVD.AudioDeviceContext
+import protocol VVD.CommandBuffer
+import enum VVD.GraphicsAPI
+import class VVD.GraphicsDeviceContext
+import class VVD.TextureFont
+import func VVD.makeGraphicsDeviceContext
 @testable import VUI
 
 private final class MatchedGeometryRootScopeCapture: @unchecked Sendable {
@@ -107,6 +113,7 @@ private struct MatchedGeometryTextDisplayProbe: View, TestPrimitiveView {
     typealias Body = Never
 
     var animatedFrameCapture: MatchedGeometryAnimatedFrameCapture? = nil
+    var foreground: Color = .white
 
     static func _makeView(
         view: _GraphValue<Self>,
@@ -129,7 +136,7 @@ private struct MatchedGeometryTextDisplayProbe: View, TestPrimitiveView {
         let displayList: Attribute<DisplayList> = graph.makeRule {
             var list = DisplayList()
             list.appendTextItem(
-                foreground: .color(.white),
+                foreground: .color(view._attribute.value.foreground),
                 bounds: CGRect(
                     origin: inputs.position.value,
                     size: inputs.size.value.value
@@ -1126,134 +1133,78 @@ final class MatchedGeometryEffectTests: XCTestCase {
     }
 
     // ASSERTIONS matchedGeometryReplacementCompletionRuntimeObserved
+    @MainActor
     func testPublicReplacementPreservesReplacementThenOriginalCompletionOrder() throws {
         let recorder = AnimationCompletionRecorder()
-        let rendererHost = TestViewRendererHost()
-        let viewGraph = ViewGraph(
-            rootViewType: EmptyView.self,
-            content: EmptyView(),
-            rendererHost: rendererHost,
-            requestedOutputs: []
+        let probe = MatchedGeometryReplacementRuntimeProbe()
+        let controller = WindowController(
+            content: MatchedGeometryReplacementRuntimeRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MatchedGeometryReplacementRuntimeRoot.self)
+            )
         )
-        rendererHost.storage = viewGraph
-        let namespace = Namespace().wrappedValue
-        var source: Attribute<MatchedGeometryReplacementRoot>!
-        var inputs: _ViewInputs!
-        var layout: Attribute<LayoutComputer>!
-        var display: Attribute<DisplayList>!
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        var tick: UInt64 = 0
 
-        func root(stage: Int) -> MatchedGeometryReplacementRoot {
-            MatchedGeometryReplacementRoot(stage: stage, namespace: namespace)
+        func update(_ time: Double) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(time),
+                contentSize: CGSize(width: 340, height: 230),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
         }
 
-        try viewGraph.data.withCurrent {
-            let graph = viewGraph.data.graph
-            inputs = makeViewInputs(graph: graph)
-            inputs.requestsLayoutComputer = true
-            inputs.makeRootMatchedGeometryScope()
-            inputs.preferences.keys.add(DisplayList.Key.self)
-            source = graph.makeInput(value: root(stage: 0))
-            let outputs = MatchedGeometryReplacementRoot._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: inputs
-            )
-            layout = try XCTUnwrap(outputs._layoutComputer.attribute)
-            display = try XCTUnwrap(
-                outputs.preferences.reducedValue(
-                    for: DisplayList.Key.self,
-                    in: graph
-                )
-            )
+        update(0)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.20))
+        update(0)
 
-            func finishTransactionBody() {
-                Transaction.dispatchPendingListeners().forEach { $0() }
-                flushCompletionActions(in: graph)
-            }
+        try XCTUnwrap(probe.setStage)(
+            1,
+            completionTransaction(
+                animation: .linear(duration: 1.0),
+                label: "first",
+                recorder: recorder
+            )
+        )
+        update(0)
+        XCTAssertEqual(recorder.events, [])
 
-            func sample() {
-                let size = layout.value.sizeThatFits(.unspecified)
-                layout.value.place(
-                    at: .zero,
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(size)
-                )
-                _ = display.value
-                graph.inbox.drain()
-                let refreshedSize = layout.value.sizeThatFits(.unspecified)
-                layout.value.place(
-                    at: .zero,
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(refreshedSize)
-                )
-                _ = display.value
-            }
+        update(0.25)
+        try XCTUnwrap(probe.setStage)(
+            2,
+            completionTransaction(
+                animation: .linear(duration: 0.4),
+                label: "replacement",
+                recorder: recorder
+            )
+        )
+        update(0.25)
+        XCTAssertEqual(recorder.events, [])
 
-            sample()
+        update(0.70)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "replacement removed",
+                "replacement logical",
+            ]
+        )
 
-            source.setValue(
-                root(stage: 1),
-                transaction: completionTransaction(
-                    animation: .linear(duration: 1.0),
-                    label: "first",
-                    recorder: recorder
-                )
-            )
-            sample()
-            let scope = try XCTUnwrap(
-                inputs.base.customInputs.value(forKey: MatchedGeometryScope.self)
-            )
-            let matchedFrame = try XCTUnwrap(scope.frames.first)
-            let sourceViews = matchedFrame.views.filter { $0.args.value.isSource }
-            XCTAssertEqual(sourceViews.count, 2)
-            XCTAssertEqual(
-                sourceViews.filter { $0.phase.value.isBeingRemoved }.count,
-                1
-            )
-            XCTAssertEqual(
-                sourceViews.filter { !$0.phase.value.isBeingRemoved }.count,
-                1
-            )
-            finishTransactionBody()
-            XCTAssertEqual(recorder.events, [])
-
-            inputs.base.time.setValue(Time(seconds: 0.25))
-            sample()
-            source.setValue(
-                root(stage: 2),
-                transaction: completionTransaction(
-                    animation: .linear(duration: 0.4),
-                    label: "replacement",
-                    recorder: recorder
-                )
-            )
-            sample()
-            finishTransactionBody()
-            XCTAssertEqual(recorder.events, [])
-
-            inputs.base.time.setValue(Time(seconds: 0.70))
-            sample()
-            flushCompletionActions(in: graph)
-            XCTAssertEqual(
-                recorder.events,
-                [
-                    "replacement removed",
-                    "replacement logical",
-                ]
-            )
-
-            inputs.base.time.setValue(Time(seconds: 1.05))
-            sample()
-            flushCompletionActions(in: graph)
-            XCTAssertEqual(
-                recorder.events,
-                [
-                    "replacement removed",
-                    "replacement logical",
-                    "first removed",
-                    "first logical",
-                ]
-            )
-        }
+        update(1.05)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "replacement removed",
+                "replacement logical",
+                "first removed",
+                "first logical",
+            ]
+        )
     }
 
     // ASSERTIONS matchedGeometryDisplayListCanonicalizationObserved
@@ -1270,13 +1221,12 @@ final class MatchedGeometryEffectTests: XCTestCase {
         let withGC: WindowContext.WithGraphicsContext = { _, _ in }
 
         func update(_ time: Double, tick: UInt64) {
-            var redraw = false
-            controller.updateView(
+            controller.updateFrame(
                 tick: tick,
                 delta: time - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(time),
                 contentSize: CGSize(width: 700, height: 500),
-                redraw: &redraw,
+                shouldDrawFrame: false,
                 withGC
             )
         }
@@ -1362,6 +1312,45 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
         }
 
+        func textColors(in list: DisplayList) -> [Color] {
+            list.items.reduce(into: []) { colors, item in
+                switch item.value {
+                case let .content(content):
+                    if case let .text(record, _) = content.command,
+                       case let .color(color)? = record.foreground {
+                        colors.append(color)
+                    }
+                    switch content.value {
+                    case let .style(style):
+                        colors.append(contentsOf: textColors(in: style.contents))
+                    case let .crossFade(crossFade):
+                        if let source = crossFade.source {
+                            colors.append(contentsOf: textColors(in: source.contents))
+                        }
+                        if let target = crossFade.target {
+                            colors.append(contentsOf: textColors(in: target.contents))
+                        }
+                    case let .flattened(contents, _, _):
+                        colors.append(contentsOf: textColors(in: contents))
+                    case let .drawing(contents, _, _):
+                        if let local = contents as? DisplayList.LocalContents {
+                            colors.append(contentsOf: textColors(in: local.list))
+                        }
+                    case .backend, .color, .shape, .image, .text:
+                        break
+                    }
+                case let .effect(_, contents):
+                    colors.append(contentsOf: textColors(in: contents))
+                case let .states(states):
+                    for (_, contents) in states {
+                        colors.append(contentsOf: textColors(in: contents))
+                    }
+                case .empty:
+                    break
+                }
+            }
+        }
+
         var tick: UInt64 = 0
         func sample(_ time: Double) {
             update(time, tick: tick)
@@ -1378,16 +1367,39 @@ final class MatchedGeometryEffectTests: XCTestCase {
         try XCTUnwrap(probe.toggle)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         sample(0)
+        var sampledForwardMidFrame: CGRect?
+        var sampledForwardFirstColors: [Color]?
+        var sampledForwardMidColors: [Color]?
         for frame in 1...240 {
             let time = Double(frame) / 60.0
             sample(time)
+            if frame == 1 {
+                sampledForwardFirstColors = textColors(in: try displayList())
+            }
             if frame == 30 {
-                assertSharedPresentation(try displayList())
+                let list = try displayList()
+                assertSharedPresentation(list)
+                sampledForwardMidColors = textColors(in: list)
+                sampledForwardMidFrame = try XCTUnwrap(matchedFrames().first)
             }
         }
         let forwardFrames = try matchedFrames()
         let forwardFrame = try XCTUnwrap(forwardFrames.first)
+        let forwardMidFrame = try XCTUnwrap(sampledForwardMidFrame)
         XCTAssertEqual(forwardFrames.count, 1)
+        XCTAssertGreaterThan(forwardMidFrame.minX, initialFrame.minX)
+        XCTAssertLessThan(forwardMidFrame.minX, forwardFrame.minX)
+        XCTAssertGreaterThan(forwardMidFrame.width, initialFrame.width)
+        XCTAssertLessThan(forwardMidFrame.width, forwardFrame.width)
+        XCTAssertGreaterThan(forwardMidFrame.height, initialFrame.height)
+        XCTAssertLessThan(forwardMidFrame.height, forwardFrame.height)
+        for colors in [
+            try XCTUnwrap(sampledForwardFirstColors),
+            try XCTUnwrap(sampledForwardMidColors),
+        ] {
+            XCTAssertTrue(colors.contains(.red), "\(colors)")
+            XCTAssertTrue(colors.contains(.green), "\(colors)")
+        }
         XCTAssertGreaterThan(forwardFrame.minX, initialFrame.minX)
         XCTAssertGreaterThan(forwardFrame.width, initialFrame.width)
         XCTAssertGreaterThan(forwardFrame.height, initialFrame.height)
@@ -1419,6 +1431,317 @@ final class MatchedGeometryEffectTests: XCTestCase {
         assertFrameEqual(try XCTUnwrap(reverseEndFrames.first), initialFrame)
     }
 
+    @MainActor
+    func testResolvedTextReplacementKeepsSourceAndDestinationDuringFirstToggle() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = MatchedGeometryAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = MatchedGeometryTextRuntimeProbe()
+        let controller = WindowController(
+            content: MatchedGeometryResolvedTextRuntimeRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MatchedGeometryResolvedTextRuntimeRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 700, height: 500),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 700, height: 500),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        let renderer = DisplayList.GraphicsRenderer()
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 700, height: 500),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try controller.viewGraph.data.withCurrent {
+                try XCTUnwrap(controller.viewGraph.rootDisplayList?.value)
+            }
+        }
+
+        func renderedTextPixelCounts(
+            _ list: DisplayList
+        ) throws -> (source: Int, destination: Int) {
+            let commandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
+            let context = try XCTUnwrap(GraphicsContext(
+                sceneResources: controller.sceneResources,
+                environment: controller.environment,
+                viewport: CGRect(x: 0, y: 0, width: 700, height: 500),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: 700, height: 500),
+                commandBuffer: commandBuffer
+            ))
+            context.clear(with: .clear)
+            renderer.render(
+                list: list,
+                at: controller.animationTimestamp,
+                in: context
+            )
+            try waitForCompletion(commandBuffer)
+
+            let staging = try XCTUnwrap(
+                deviceContext.makeCPUAccessible(texture: context.backdrop)
+            )
+            let pointer = try XCTUnwrap(staging.contents())
+            let bytes = UnsafeRawBufferPointer(
+                start: pointer,
+                count: 700 * 500 * 4
+            )
+            var source = 0
+            var destination = 0
+            for index in 0..<(700 * 500) {
+                let red = Int(bytes[index * 4])
+                let green = Int(bytes[index * 4 + 1])
+                let blue = Int(bytes[index * 4 + 2])
+                if red > green + 24, red > blue + 24 {
+                    source += 1
+                }
+                if green > red + 24, green > blue + 24 {
+                    destination += 1
+                }
+            }
+            return (source, destination)
+        }
+
+        func animationEffects(
+            in list: DisplayList,
+            path: String = ""
+        ) -> [String] {
+            list.items.enumerated().reduce(into: []) { records, entry in
+                let itemPath = "\(path)/\(entry.offset)"
+                switch entry.element.value {
+                case let .effect(effect, contents):
+                    if case let .animation(animation) = effect,
+                       let opacity = animation as? DisplayList.OpacityAnimation {
+                        records.append(
+                            "\(itemPath) id=\(entry.element.identity) " +
+                            "version=\(entry.element.version.value) " +
+                            "opacity=\(opacity.from.opacity)->\(opacity.to.opacity)"
+                        )
+                    }
+                    records.append(contentsOf: animationEffects(
+                        in: contents,
+                        path: itemPath
+                    ))
+                case let .content(content):
+                    switch content.value {
+                    case let .style(style):
+                        records.append(contentsOf: animationEffects(
+                            in: style.contents,
+                            path: itemPath
+                        ))
+                    case let .crossFade(crossFade):
+                        if let source = crossFade.source {
+                            records.append(contentsOf: animationEffects(
+                                in: source.contents,
+                                path: itemPath + "/source"
+                            ))
+                        }
+                        if let target = crossFade.target {
+                            records.append(contentsOf: animationEffects(
+                                in: target.contents,
+                                path: itemPath + "/target"
+                            ))
+                        }
+                    case let .flattened(contents, _, _):
+                        records.append(contentsOf: animationEffects(
+                            in: contents,
+                            path: itemPath
+                        ))
+                    case let .drawing(contents, _, _):
+                        if let local = contents as? DisplayList.LocalContents {
+                            records.append(contentsOf: animationEffects(
+                                in: local.list,
+                                path: itemPath
+                            ))
+                        }
+                    case .backend, .color, .shape, .image, .text:
+                        break
+                    }
+                case let .states(states):
+                    if let contents = states.last?.1 {
+                        records.append(contentsOf: animationEffects(
+                            in: contents,
+                            path: itemPath
+                        ))
+                    }
+                case .empty:
+                    break
+                }
+            }
+        }
+
+        func renderLeaves(
+            in list: DisplayList,
+            path: String = ""
+        ) -> [String] {
+            list.items.enumerated().reduce(into: []) { records, entry in
+                let itemPath = "\(path)/\(entry.offset)"
+                switch entry.element.value {
+                case let .effect(_, contents):
+                    records.append(contentsOf: renderLeaves(
+                        in: contents,
+                        path: itemPath + "/effect"
+                    ))
+                case let .content(content):
+                    switch content.value {
+                    case .shape:
+                        records.append("\(itemPath):shape")
+                    case let .text(text):
+                        records.append(
+                            "\(itemPath):text=\(text.view.text.storage?.string ?? "?")"
+                        )
+                    case let .style(style):
+                        records.append(contentsOf: renderLeaves(
+                            in: style.contents,
+                            path: itemPath + "/style"
+                        ))
+                    case let .crossFade(crossFade):
+                        if let source = crossFade.source {
+                            records.append(contentsOf: renderLeaves(
+                                in: source.contents,
+                                path: itemPath + "/cross-source"
+                            ))
+                        }
+                        if let target = crossFade.target {
+                            records.append(contentsOf: renderLeaves(
+                                in: target.contents,
+                                path: itemPath + "/cross-target"
+                            ))
+                        }
+                    case let .flattened(contents, _, _):
+                        records.append(contentsOf: renderLeaves(
+                            in: contents,
+                            path: itemPath + "/flattened"
+                        ))
+                    case let .drawing(contents, _, _):
+                        if let local = contents as? DisplayList.LocalContents {
+                            records.append(contentsOf: renderLeaves(
+                                in: local.list,
+                                path: itemPath + "/drawing"
+                            ))
+                        }
+                    case .backend, .color, .image:
+                        break
+                    }
+                case let .states(states):
+                    if let contents = states.last?.1 {
+                        records.append(contentsOf: renderLeaves(
+                            in: contents,
+                            path: itemPath + "/state"
+                        ))
+                    }
+                case .empty:
+                    break
+                }
+            }
+        }
+
+        _ = try update(0)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.20))
+        let initial = try update(0)
+        XCTAssertEqual(
+            resolvedTextSamples(in: initial).map(\.string),
+            ["Source"]
+        )
+        print("MATCHED_TEXT_PIXELS initial=\(try renderedTextPixelCounts(initial))")
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(0)
+
+        var coexistence: (
+            samples: [MatchedGeometryResolvedTextSample],
+            pixels: (source: Int, destination: Int)
+        )?
+        for frame in 1...30 {
+            let list = try update(Double(frame) / 60.0)
+            let samples = resolvedTextSamples(in: list).filter {
+                $0.string == "Source" || $0.string == "Destination"
+            }
+            let pixels = try renderedTextPixelCounts(list)
+            if frame == 1 || frame.isMultiple(of: 5) {
+                print("MATCHED_TEXT_PIXELS frame=\(frame) pixels=\(pixels)")
+                print("MATCHED_TEXT_SAMPLES frame=\(frame) samples=\(samples)")
+                print("MATCHED_TEXT_EFFECTS frame=\(frame) \(animationEffects(in: list))")
+                print("MATCHED_TEXT_LEAVES frame=\(frame) \(renderLeaves(in: list))")
+            }
+            if samples.contains(where: { $0.string == "Source" && $0.opacity > 0 }) &&
+                samples.contains(where: { $0.string == "Destination" && $0.opacity > 0 }) &&
+                pixels.source > 0 &&
+                pixels.destination > 0 {
+                coexistence = (samples, pixels)
+                break
+            }
+        }
+
+        let coexisting = try XCTUnwrap(coexistence)
+        let samples = coexisting.samples
+        let source = try XCTUnwrap(samples.last { $0.string == "Source" })
+        let destination = try XCTUnwrap(samples.last { $0.string == "Destination" })
+        XCTAssertEqual(source.frame.midX, destination.frame.midX, accuracy: 2)
+        XCTAssertEqual(source.frame.midY, destination.frame.midY, accuracy: 2)
+        XCTAssertGreaterThan(coexisting.pixels.source, 0)
+        XCTAssertGreaterThan(coexisting.pixels.destination, 0)
+    }
+
+    private func waitForCompletion(_ commandBuffer: CommandBuffer) throws {
+        let condition = NSCondition()
+        var completed = false
+        commandBuffer.addCompletedHandler { _ in
+            condition.lock()
+            completed = true
+            condition.broadcast()
+            condition.unlock()
+        }
+        condition.lock()
+        defer { condition.unlock() }
+        XCTAssertTrue(commandBuffer.commit())
+        let timeout = Date(timeIntervalSinceNow: 5)
+        while !completed {
+            if !condition.wait(until: timeout) {
+                XCTFail("GPU command buffer timed out")
+                break
+            }
+        }
+    }
+
     // ASSERTIONS matchedGeometryNonSourceReplacementObserved
     @MainActor
     func testNonSourceReplacementKeepsRetainedPresentationFrameAtActivation() throws {
@@ -1434,13 +1757,12 @@ final class MatchedGeometryEffectTests: XCTestCase {
         var tick: UInt64 = 0
 
         func update(_ time: Double) {
-            var redraw = false
-            controller.updateView(
+            controller.updateFrame(
                 tick: tick,
                 delta: time - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(time),
                 contentSize: CGSize(width: 700, height: 500),
-                redraw: &redraw,
+                shouldDrawFrame: false,
                 withGC
             )
             tick &+= 1
@@ -1511,13 +1833,12 @@ final class MatchedGeometryEffectTests: XCTestCase {
             var tick: UInt64 = 0
 
             func update(_ time: Double) {
-                var redraw = false
-                controller.updateView(
+                controller.updateFrame(
                     tick: tick,
                     delta: time - controller.animationTimestamp.seconds,
                     date: controller.date.addingTimeInterval(time),
                     contentSize: CGSize(width: 700, height: 500),
-                    redraw: &redraw,
+                    shouldDrawFrame: false,
                     withGC
                 )
                 tick &+= 1
@@ -1713,13 +2034,12 @@ final class MatchedGeometryEffectTests: XCTestCase {
         var tick: UInt64 = 0
 
         func update(_ time: Double) {
-            var redraw = false
-            controller.updateView(
+            controller.updateFrame(
                 tick: tick,
                 delta: time - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(time),
                 contentSize: CGSize(width: 700, height: 500),
-                redraw: &redraw,
+                shouldDrawFrame: false,
                 withGC
             )
             tick &+= 1
@@ -1847,6 +2167,98 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
+    private func resolvedTextSamples(
+        in displayList: DisplayList,
+        inheritedOpacity: Double = 1
+    ) -> [MatchedGeometryResolvedTextSample] {
+        displayList.items.reduce(into: []) { samples, item in
+            let itemOpacity = inheritedOpacity * Double(item.opacity)
+            switch item.value {
+            case let .content(content):
+                if case let .text(text) = content.value,
+                   let string = text.view.text.storage?.string {
+                    samples.append(MatchedGeometryResolvedTextSample(
+                        string: string,
+                        frame: text.frame.applying(text.transform).standardized,
+                        opacity: itemOpacity
+                    ))
+                }
+                switch content.value {
+                case let .style(style):
+                    let styleOpacity: Double
+                    if case let .opacity(opacity) = style.style {
+                        styleOpacity = opacity
+                    } else {
+                        styleOpacity = 1
+                    }
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: style.contents,
+                        inheritedOpacity: itemOpacity * styleOpacity
+                    ))
+                case let .crossFade(crossFade):
+                    let sourceOpacity: Double
+                    let targetOpacity: Double
+                    if case let .effect(
+                        .crossFade(sourceFraction, targetFraction),
+                        _
+                    ) = crossFade.command {
+                        sourceOpacity = 1 - Double(sourceFraction)
+                        targetOpacity = Double(targetFraction)
+                    } else {
+                        sourceOpacity = 1
+                        targetOpacity = 1
+                    }
+                    if let source = crossFade.source {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: source.contents,
+                            inheritedOpacity: itemOpacity * sourceOpacity
+                        ))
+                    }
+                    if let target = crossFade.target {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: target.contents,
+                            inheritedOpacity: itemOpacity * targetOpacity
+                        ))
+                    }
+                case let .flattened(contents, _, _):
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: contents,
+                        inheritedOpacity: itemOpacity
+                    ))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: local.list,
+                            inheritedOpacity: itemOpacity
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let effectOpacity: Double
+                if case let .opacity(opacity) = effect {
+                    effectOpacity = Double(opacity)
+                } else {
+                    effectOpacity = 1
+                }
+                samples.append(contentsOf: resolvedTextSamples(
+                    in: contents,
+                    inheritedOpacity: itemOpacity * effectOpacity
+                ))
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: contents,
+                        inheritedOpacity: itemOpacity
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
     private func flushCompletionActions(in graph: _AGGraph) {
         while !graph.actionOutbox.isEmpty {
             let actions = graph.actionOutbox
@@ -1927,12 +2339,23 @@ private struct MatchedGeometryKeyForTest: Hashable {
     var namespace: Namespace.ID
 }
 
-private struct MatchedGeometryReplacementRoot: View {
-    var stage: Int
-    var namespace: Namespace.ID
+private final class MatchedGeometryReplacementRuntimeProbe {
+    var setStage: ((Int, Transaction) -> Void)?
+}
+
+private struct MatchedGeometryReplacementRuntimeRoot: View {
+    let probe: MatchedGeometryReplacementRuntimeProbe
+
+    @Namespace private var namespace
+    @State private var stage = 0
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        probe.setStage = { nextStage, transaction in
+            withTransaction(transaction) {
+                stage = nextStage
+            }
+        }
+        return ZStack(alignment: .topLeading) {
             if stage == 0 {
                 matchedBox(
                     size: CGSize(width: 40, height: 30),
@@ -2066,12 +2489,95 @@ private struct MatchedGeometryTextRuntimeRoot: View {
         RoundedRectangle(cornerRadius: expanded ? 30 : 12)
             .fill(Color.indigo)
             .overlay {
-                MatchedGeometryTextDisplayProbe()
+                MatchedGeometryTextDisplayProbe(
+                    foreground: expanded ? .green : .red
+                )
             }
             .matchedGeometryEffect(
                 id: "matched-card",
                 in: namespace,
                 properties: .frame
             )
+    }
+}
+
+private struct MatchedGeometryResolvedTextRuntimeRoot: View {
+    let probe: MatchedGeometryTextRuntimeProbe
+    let font: VUI.Font
+
+    @Namespace private var namespace
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.spring(duration: 2.0, bounce: 0.25)) {
+                expanded.toggle()
+            }
+        }
+        return ZStack {
+            if expanded {
+                HStack {
+                    Spacer()
+                    card
+                        .frame(width: 230, height: 130)
+                }
+                .padding(24)
+            } else {
+                HStack {
+                    card
+                        .frame(width: 110, height: 78)
+                    Spacer()
+                }
+                .padding(24)
+            }
+        }
+        .frame(width: 560, height: 210)
+    }
+
+    private var card: some View {
+        RoundedRectangle(cornerRadius: expanded ? 30 : 12)
+            .fill(Color.indigo)
+            .overlay {
+                Text(expanded ? "Destination" : "Source")
+                    .font(font)
+                    .foregroundColor(
+                        expanded
+                            ? Color(red: 0, green: 1, blue: 0)
+                            : Color(red: 1, green: 0, blue: 0)
+                    )
+            }
+            .matchedGeometryEffect(
+                id: "matched-card",
+                in: namespace,
+                properties: .frame
+            )
+    }
+}
+
+private struct MatchedGeometryResolvedTextSample {
+    var string: String
+    var frame: CGRect
+    var opacity: Double
+}
+
+private final class MatchedGeometryAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext?
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var appWindowsController: AppWindowsController? { nil }
+    private var resources: [URL: any DataProtocol] = [:]
+
+    init(graphicsDeviceContext: GraphicsDeviceContext) {
+        self.graphicsDeviceContext = graphicsDeviceContext
+    }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? {
+        resources[url]
+    }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+        resources[url] = data
+    }
+
+    func checkWindowActivities() {
     }
 }

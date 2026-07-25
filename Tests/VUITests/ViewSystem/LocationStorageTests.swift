@@ -8,7 +8,7 @@ final class LocationStorageTests: XCTestCase {
     }
 
     func testStoredLocationBaseUpdateMarksReadAndReturnsTrue() {
-        let location = StoredLocationBase<Int>(initialValue: 5)
+        let location = TestStoredLocation<Int>(initialValue: 5)
 
         XCTAssertFalse(location.wasRead)
 
@@ -17,6 +17,56 @@ final class LocationStorageTests: XCTestCase {
         XCTAssertEqual(update.0, 5)
         XCTAssertTrue(update.1)
         XCTAssertTrue(location.wasRead)
+    }
+
+    func testStoredLocationBaseRejectsWritesDuringGraphUpdate() {
+        let location = TestStoredLocation<Int>(initialValue: 5)
+        location.updating = true
+
+        location.setValue(7, transaction: Transaction())
+
+        XCTAssertEqual(location.getValue(), 5)
+    }
+
+    func testStoredLocationUsesHostGraphUpdateStateForWriteGate() {
+        let host = GraphHost()
+        let location = StoredLocation<Int>(
+            initialValue: 5,
+            host: host,
+            signal: nil
+        )
+        var observedStaticUpdateState = false
+
+        host.data.withCurrent {
+            let output = host.data.graph.makeRule {
+                observedStaticUpdateState = GraphHost.isUpdating
+                location.setValue(7, transaction: Transaction())
+                return 1
+            }
+            XCTAssertEqual(output.value, 1)
+        }
+
+        XCTAssertTrue(observedStaticUpdateState)
+        XCTAssertEqual(location.getValue(), 5)
+        XCTAssertFalse(host.hasPendingTransactions)
+    }
+
+    func testStoredLocationWithInvalidHostUpdatesCurrentValueWithoutQueuingCommit() {
+        let host = GraphHost()
+        var commits: [Int] = []
+        let location = StoredLocation<Int>(
+            initialValue: 1,
+            host: host,
+            signal: nil,
+            onCommit: { value, _ in commits.append(value) }
+        )
+        host.invalidate()
+
+        location.setValue(2, transaction: Transaction())
+
+        XCTAssertEqual(location.getValue(), 2)
+        XCTAssertTrue(commits.isEmpty)
+        XCTAssertFalse(host.hasPendingTransactions)
     }
 
     func testStoredLocationUpdateUsesSignalValidity() {
@@ -124,12 +174,12 @@ final class LocationStorageTests: XCTestCase {
     func testStoredLocationReadHookPreservesAttributeDependency() {
         let graph = _AGGraph()
         var derived: Attribute<Int>!
-        var location: StoredLocation<Int>!
+        var location: TestStoredLocation<Int>!
 
         _AGGraph.withCurrent(graph) {
             let sourceAttribute = graph.makeInput(value: 1)
             let inbox = graph.inbox
-            location = StoredLocation<Int>(
+            location = TestStoredLocation<Int>(
                 initialValue: 1,
                 readValue: {
                     if _AGGraph.current === graph {
@@ -224,7 +274,7 @@ final class LocationStorageTests: XCTestCase {
 
     func testStoredLocationWriteScopesCurrentTransactionAroundCommit() {
         var commits: [LocationCommitSnapshot] = []
-        let location = StoredLocation<Int>(
+        let location = TestStoredLocation<Int>(
             initialValue: 1,
             onCommit: { value, transaction in
                 commits.append(.init(
@@ -267,7 +317,7 @@ final class LocationStorageTests: XCTestCase {
 
     func testProjectedLocationWriteForwardsTransactionToBaseLocation() {
         var commits: [LocationProjectionCommit] = []
-        let location = StoredLocation<LocationProjectionPair>(
+        let location = TestStoredLocation<LocationProjectionPair>(
             initialValue: LocationProjectionPair(first: 1, second: 2),
             onCommit: { value, transaction in
                 commits.append(.init(
@@ -304,7 +354,7 @@ final class LocationStorageTests: XCTestCase {
 
     func testProjectedLocationWriteScopesCurrentTransactionAroundBaseLocation() {
         var commits: [LocationProjectionCommit] = []
-        let location = StoredLocation<LocationProjectionPair>(
+        let location = TestStoredLocation<LocationProjectionPair>(
             initialValue: LocationProjectionPair(first: 1, second: 2),
             onCommit: { value, transaction in
                 commits.append(.init(

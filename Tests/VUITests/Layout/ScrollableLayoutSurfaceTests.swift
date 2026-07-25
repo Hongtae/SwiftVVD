@@ -2908,7 +2908,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     func testScrollViewUpdateWarnsWithSwiftUIContentOffsetBindingReadMessage() throws {
         let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
-        let location = StoredLocationBase<CGPoint>(initialValue: .zero)
+        let location = TestStoredLocation<CGPoint>(initialValue: .zero)
 
         let output = try captureStandardOutput {
             try _AGGraph.withCurrent(graph) {

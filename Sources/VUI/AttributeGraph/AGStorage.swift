@@ -1281,7 +1281,7 @@ extension _AGGraph {
             visitedDirtyNode = true
             _ = value(for: liveNode)
         }
-        for child in subgraph.children {
+        for child in subgraph.children.reversed() {
             visitedDirtyNode =
                 updateSubgraphBody(child, flags: flags) || visitedDirtyNode
         }
@@ -1337,7 +1337,7 @@ extension _AGGraph {
         return result
     }
 
-    private var isUpdatingOnCurrentThread: Bool {
+    var isUpdatingOnCurrentThread: Bool {
         _AGGraph.currentlyUpdatingGraphs?.contains(ObjectIdentifier(self)) == true
     }
 

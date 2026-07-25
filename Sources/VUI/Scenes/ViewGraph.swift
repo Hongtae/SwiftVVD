@@ -339,20 +339,7 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         valuesNeedingUpdate = []
 
         data.withCurrent {
-            // Flush async invalidations before applying root-value changes.
-            var inboxTransaction: Transaction?
-            while data.graph.inbox.hasPendingWork {
-                let pendingTransaction = data.graph.inbox.nextTransaction
-                if let viewGraph = self as? ViewGraph {
-                    viewGraph.setCurrentUpdateTransaction(pendingTransaction)
-                    viewGraph.beginNextUpdate(at: time)
-                }
-                inboxTransaction = data.graph.inbox.drainOne()
-            }
             data.graph.drainActions()
-            if let viewGraph = self as? ViewGraph {
-                viewGraph.setCurrentUpdateTransaction(inboxTransaction)
-            }
 
             // Apply dirty root values through the host updater.
             if dirty.contains(.rootView)      { updateDelegate?.updateRootView() }
@@ -471,9 +458,6 @@ class ViewGraph: ViewGraphHost {
     private(set) var timeAttr: Attribute<Time>?
     private(set) var transactionAttr: Attribute<Transaction>?
     private(set) var phaseAttr: Attribute<_GraphInputs.Phase>?
-    private var currentUpdateTransaction = Transaction()
-    private var hasCurrentUpdateTransaction = false
-    private var transactionAttrNeedsClear = false
 
     // AG output attributes collected after V._makeView.
     private(set) var rootAnyViewContentInput: Attribute<AnyView>?
@@ -481,6 +465,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var rootFittedSize: Attribute<CGSize>?
     private(set) var rootDisplayList: Attribute<DisplayList>?
     private(set) var rootResourceList: Attribute<ResourceList>?
+    private(set) var rootViewResponders: Attribute<[ViewResponder]>?
 
     override var isValid: Bool { rootLayoutComputer != nil }
 
@@ -813,6 +798,7 @@ class ViewGraph: ViewGraphHost {
         super.init(data: GraphHost.Data())
         // Wire rendererHost before building the root view.
         self.rendererHost = rendererHost
+        featureBuffer.append(HitTestBindingFeature())
         for feature in features {
             featureBuffer.append(feature)
         }
@@ -827,6 +813,7 @@ class ViewGraph: ViewGraphHost {
         var rootSizeResult:  Attribute<CGSize>?            = nil
         var rootDLResult:    Attribute<DisplayList>?       = nil
         var rootRLResult:    Attribute<ResourceList>?      = nil
+        var rootRespondersResult: Attribute<[ViewResponder]>? = nil
 
         self.data.withCurrent {
             // Root construction inherits the host's root subgraph so every
@@ -837,7 +824,7 @@ class ViewGraph: ViewGraphHost {
 
             let timeAttr        = g.makeInput(value: time)
             let phaseAttr       = self.data._phase
-            let transactionAttr = g.makeInput(value: Transaction())
+            let transactionAttr = self.data._transaction
             let envAttr         = g.makeInput(value: initialEnvironment)
             let graphInputs = _GraphInputs(
                 time: timeAttr,
@@ -886,7 +873,10 @@ class ViewGraph: ViewGraphHost {
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
             let displayNodes  = outputs.preferences.values(for: DisplayList.Key.self)
             if !resourceNodes.isEmpty {
-                rootRLResult = g.makeRule {
+                // Resource requests carry the transaction that first produced
+                // them. Keep the root reduction eager so a later transaction
+                // cannot replace that ownership before the backend loads it.
+                rootRLResult = g.makeSideEffectRule {
                     var combined = ResourceList.Key.defaultValue
                     for nodeID in resourceNodes {
                         let list = Attribute<ResourceList>(nodeID).value
@@ -908,18 +898,13 @@ class ViewGraph: ViewGraphHost {
 
             let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
             if !responderNodes.isEmpty {
-                let rootRespondersAttr: Attribute<[ViewResponder]> = g.makeRule {
+                rootRespondersResult = g.makeRule {
                     var combined: [ViewResponder] = ViewRespondersKey.defaultValue
                     for nodeID in responderNodes {
                         let list = Attribute<[ViewResponder]>(nodeID).value
                         ViewRespondersKey.reduce(value: &combined) { list }
                     }
                     return combined
-                }
-                g.makeSideEffectRule { [weak self] in
-                    (self?.rendererHost as? WindowController)?
-                        .gestureGraph?
-                        .updateResponders(rootRespondersAttr.value)
                 }
             }
 
@@ -1002,27 +987,26 @@ class ViewGraph: ViewGraphHost {
         self.rootFittedSize     = rootSizeResult
         self.rootDisplayList    = rootDLResult
         self.rootResourceList   = rootRLResult
+        self.rootViewResponders = rootRespondersResult
     }
 
     /// Flushes queued graph transactions around host output evaluation.
     override func updateOutputs(at time: Time) {
-        beginNextUpdate(at: time)
         flushTransactions()
+        while data.graph.inbox.hasPendingWork {
+            let pendingTransaction = data.graph.inbox.nextTransaction
+            runTransaction(pendingTransaction, do: {
+                beginNextUpdate(at: time)
+                _ = data.graph.inbox.drainOne()
+                data.graph.drainActions()
+            }, id: nil)
+        }
         runTransaction(nil, do: {
+            beginNextUpdate(at: time)
             super.updateOutputs(at: time)
         }, id: nil)
         flushTransactions()
         updatePreferences()
-    }
-
-    func setCurrentUpdateTransaction(_ transaction: Transaction?) {
-        if let transaction, !transaction.isEmpty {
-            currentUpdateTransaction = transaction
-            hasCurrentUpdateTransaction = true
-        } else {
-            currentUpdateTransaction = Transaction()
-            hasCurrentUpdateTransaction = false
-        }
     }
 
     func beginNextUpdate(at time: Time) {
@@ -1035,21 +1019,18 @@ class ViewGraph: ViewGraphHost {
                 timeAttr.setValue(time)
                 nextUpdate = (NextUpdate(), NextUpdate())
             }
-            if let transactionAttr {
-                if hasCurrentUpdateTransaction {
-                    transactionAttr.setValue(currentUpdateTransaction)
-                    transactionAttrNeedsClear = true
-                } else if transactionAttrNeedsClear {
-                    transactionAttr.setValue(Transaction())
-                    transactionAttrNeedsClear = false
-                }
-            }
             data.updateSeed &+= 1
         }
     }
 
     // Returns the current display list from the AG graph.
     func displayList() -> DisplayList? { rootDisplayList?.value }
+
+    var responderNode: ResponderNode? {
+        data.withCurrent {
+            rootViewResponders?.value.first
+        }
+    }
 
     // Pending parity: route input events through GestureGraph.
     func sendEvents(_ events: [Any], rootNode: ResponderNode, at time: Time) {}

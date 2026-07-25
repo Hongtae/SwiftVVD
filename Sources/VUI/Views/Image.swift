@@ -307,8 +307,10 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         var activeVariableColor: ActiveVariableColor?
         var activeDraw: ActiveDraw?
         // Resource publication may arrive after willAppear has already advanced
-        // to identity. Preserve the hidden draw boundary across that gap.
+        // to identity. Preserve both the hidden boundary and the identity
+        // transaction across that gap.
         fileprivate var pendingDrawTransitionStart: DrawRequest?
+        fileprivate var pendingDrawTransitionTransaction: Transaction?
     }
 
     struct Value {
@@ -357,17 +359,24 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         let image = resolvedImage.value
         let now = time.value
         let environmentEffects = environment.value.symbolEffects
-        // Transition phase changes carry their transaction through the effect
-        // environment node. The inherited input transaction predates retained
-        // removal and therefore does not contain its completion listeners.
-        let transaction = _AGGraph.current?.transaction(for: environment.identifier) ??
-            transaction.value
-        let pendingDrawTransitionStart = updatePendingDrawTransitionStart(
+        let transaction = transaction.value
+        let pendingDrawTransition = updatePendingDrawTransition(
             effects: environmentEffects,
             hasResolvedImage: image != nil,
-            hasResolvedSymbol: image?.symbol != nil
+            hasResolvedSymbol: image?.symbol != nil,
+            transaction: transaction
         )
         let nextEffects = image?.symbol == nil ? [] : environmentEffects
+        let nextDrawRequest = drawRequest(in: nextEffects)
+        let matchingPendingDrawTransition:
+            (start: DrawRequest, transaction: Transaction?)?
+        if let pendingDrawTransition,
+           let nextDrawRequest,
+           pendingDrawTransition.start.matchesTransition(nextDrawRequest) {
+            matchingPendingDrawTransition = pendingDrawTransition
+        } else {
+            matchingPendingDrawTransition = nil
+        }
         let effectsChanged = !symbolEffectListsEqual(phase.effects, nextEffects)
         let previousVariablePresentation = variableColorPresentation(at: now)
         let previousDrawPresentation = drawPresentation(at: now)
@@ -440,10 +449,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                 }
             }
             if let symbol = image?.symbol {
-                let nextDrawRequest = drawRequest(in: nextEffects)
-                if let pendingDrawTransitionStart,
+                if let pendingDrawTransition = matchingPendingDrawTransition,
                    let nextDrawRequest,
-                   pendingDrawTransitionStart.matchesTransition(nextDrawRequest) {
+                   pendingDrawTransition.start.matchesTransition(nextDrawRequest) {
                     finishActiveDrawCompletionTokens()
                     let shouldAnimateFromHidden = nextDrawRequest.targetProgress >= 1
                     phase.activeDraw = drawAnimation(
@@ -455,7 +463,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                                 count: max(symbol.drawMotionGroupDurations.count, 1)
                             )
                             : nil,
-                        transaction: transaction,
+                        transaction: pendingDrawTransition.transaction ?? transaction,
                         at: now,
                         immediate: !shouldAnimateFromHidden
                     )
@@ -486,6 +494,15 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         if image?.symbol == nil || transaction.disablesAnimations {
             phase.activePulse = nil
             phase.activeVariableColor = nil
+        } else if let active = phase.activePulse,
+                  !active.finishesAfterEffectRemoval,
+                  !nextEffects.contains(where: { $0.id == active.id }) {
+            phase.activePulse = nil
+        }
+
+        let drawTransaction =
+            matchingPendingDrawTransition?.transaction ?? transaction
+        if image?.symbol == nil || drawTransaction.disablesAnimations {
             finishActiveDrawCompletionTokens()
             if let symbol = image?.symbol,
                let request = drawRequest(in: nextEffects) {
@@ -493,17 +510,13 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                     for: request,
                     symbol: symbol,
                     initialProgresses: nil,
-                    transaction: transaction,
+                    transaction: drawTransaction,
                     at: now,
                     immediate: true
                 )
             } else {
                 phase.activeDraw = nil
             }
-        } else if let active = phase.activePulse,
-                  !active.finishesAfterEffectRemoval,
-                  !nextEffects.contains(where: { $0.id == active.id }) {
-            phase.activePulse = nil
         }
 
         if let active = phase.activeVariableColor {
@@ -521,8 +534,8 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         let isActive = pulse.isActive || variableColor.isActive || draw.isActive
         let retainsDrawHidePosition = draw.isActive &&
             phase.activeDraw?.targetProgress == 0
-        let targetPosition = position?.value
-        let displaySize = size?.value
+        let targetPosition = image == nil ? nil : position?.value
+        let displaySize = image == nil ? nil : size?.value
         let displayPosition: CGPoint?
         if let targetPosition {
             // Draw-to-hidden keeps the symbol at its pre-update origin while
@@ -567,24 +580,37 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         ))
     }
 
-    private mutating func updatePendingDrawTransitionStart(
+    private mutating func updatePendingDrawTransition(
         effects: [IdentifiedSymbolEffect],
         hasResolvedImage: Bool,
-        hasResolvedSymbol: Bool
-    ) -> DrawRequest? {
+        hasResolvedSymbol: Bool,
+        transaction: Transaction
+    ) -> (start: DrawRequest, transaction: Transaction?)? {
         if hasResolvedImage {
-            defer { phase.pendingDrawTransitionStart = nil }
-            return hasResolvedSymbol ? phase.pendingDrawTransitionStart : nil
+            defer {
+                phase.pendingDrawTransitionStart = nil
+                phase.pendingDrawTransitionTransaction = nil
+            }
+            guard hasResolvedSymbol,
+                  let start = phase.pendingDrawTransitionStart else {
+                return nil
+            }
+            return (start, phase.pendingDrawTransitionTransaction)
         }
 
         guard let request = drawRequest(in: effects), request.isTransition else {
             phase.pendingDrawTransitionStart = nil
+            phase.pendingDrawTransitionTransaction = nil
             return nil
         }
         if request.targetProgress <= 0 {
             phase.pendingDrawTransitionStart = request
-        } else if phase.pendingDrawTransitionStart?.matchesTransition(request) != true {
+            phase.pendingDrawTransitionTransaction = nil
+        } else if phase.pendingDrawTransitionStart?.matchesTransition(request) == true {
+            phase.pendingDrawTransitionTransaction = transaction
+        } else {
             phase.pendingDrawTransitionStart = nil
+            phase.pendingDrawTransitionTransaction = nil
         }
         return nil
     }
@@ -1499,10 +1525,16 @@ extension Image: View {
 
             let contextualTransaction = _AGGraph.currentRuleContextAttribute
                 .flatMap { graph.transaction(for: $0) } ?? Transaction()
+            let sourceTransaction = graph.transaction(
+                for: view._attribute.identifier
+            ) ?? Transaction()
             let inheritedTransaction = inheritedTransactionAttr.value
-            let candidateTransaction = contextualTransaction.isEmpty
-                ? inheritedTransaction
+            let mutationTransaction = contextualTransaction.isEmpty
+                ? sourceTransaction
                 : contextualTransaction
+            let candidateTransaction = mutationTransaction.isEmpty
+                ? inheritedTransaction
+                : mutationTransaction
             let resourceTransaction = resourceResolutionState.transaction(
                 for: image,
                 candidate: candidateTransaction
@@ -1514,7 +1546,7 @@ extension Image: View {
             let renderEnvironment = environment.untrackedCopy()
             var list = ResourceList()
 
-            list.items.append { context in
+            list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
                 var context = context
                 context.environment = renderEnvironment
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
@@ -1541,7 +1573,7 @@ extension Image: View {
                         inbox.enqueue(transaction: resourceTransaction, publish)
                     }
                 } // withValue
-            }
+            })
 
             return list
         }
@@ -1566,6 +1598,11 @@ extension Image: View {
             // presentation state here would make framed images read their own
             // placement while the parent layout computer is still being built.
             let resolved = resolvedImageAttr.value
+            if resolved == nil {
+                // Establish the stateful effect environment before deferred
+                // resource publication promotes the image to its first frame.
+                _ = imageViewChildAttr.value
+            }
 
             return LayoutComputer(
                 sizeThatFits: { _ in resolved?.size ?? .zero }

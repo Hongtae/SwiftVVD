@@ -132,6 +132,54 @@ final class GraphInputsMergeTests: XCTestCase {
         }
     }
 
+    func testMergedTransactionPrioritizesStrongOtherValues() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var fallback = Transaction()
+            fallback.animation = nil
+            fallback.disablesAnimations = true
+            let fallbackAttribute = graph.makeInput(value: fallback)
+
+            var primary = Transaction(animation: .linear(duration: 1))
+            primary.disablesAnimations = false
+            let primaryAttribute = graph.makeInput(value: primary)
+
+            let merged: Attribute<Transaction> = graph.makeRule(
+                MergedTransaction(
+                    selfWeak: fallbackAttribute.asWeak().base,
+                    otherRaw: primaryAttribute.identifier.rawValue
+                )
+            )
+
+            XCTAssertNotNil(merged.value.animation)
+            XCTAssertFalse(merged.value.disablesAnimations)
+        }
+    }
+
+    func testMergedEnvironmentPrioritizesStrongOtherValues() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            var fallback = EnvironmentValues()
+            fallback.displayScale = 1
+            let fallbackAttribute = graph.makeInput(value: fallback)
+
+            var primary = EnvironmentValues()
+            primary.displayScale = 2
+            let primaryAttribute = graph.makeInput(value: primary)
+
+            let merged: Attribute<EnvironmentValues> = graph.makeRule(
+                MergedEnvironment(
+                    selfWeak: fallbackAttribute.asWeak().base,
+                    otherRaw: primaryAttribute.identifier.rawValue
+                )
+            )
+
+            XCTAssertEqual(merged.value.displayScale, 2)
+        }
+    }
+
     private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
             time: graph.makeInput(value: Time()),

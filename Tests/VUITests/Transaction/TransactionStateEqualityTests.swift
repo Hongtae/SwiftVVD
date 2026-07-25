@@ -272,7 +272,7 @@ final class TransactionStateEqualityTests: XCTestCase {
     }
 
     func testStoredLocationRawEqualWriteUsesNoMutationCompletionTiming() {
-        let location = StoredLocationBase<NonHashableEquatablePayload>(
+        let location = TestStoredLocation<NonHashableEquatablePayload>(
             initialValue: NonHashableEquatablePayload(value: 1)
         )
 
@@ -303,7 +303,7 @@ final class TransactionStateEqualityTests: XCTestCase {
     }
 
     func testStoredLocationSemanticEqualDifferentStorageUsesMutationFallbackTiming() {
-        let location = StoredLocationBase<SemanticEquatablePayload>(
+        let location = TestStoredLocation<SemanticEquatablePayload>(
             initialValue: SemanticEquatablePayload(value: 1, ignored: 10)
         )
 

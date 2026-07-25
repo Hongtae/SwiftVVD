@@ -48,6 +48,9 @@ func _stateValuesAreKnownEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
     public var wrappedValue: Value {
         get {
             if let _location {
+                if GraphHost.isUpdating {
+                    return _value
+                }
                 return _location.getValue()
             }
             return _value
@@ -88,69 +91,45 @@ extension State {
             fatalError("\(self)._makeProperty called outside an active _AGGraph context.")
         }
 
-        let inbox = graph.inbox
         // Capture the active AGSubgraph at wiring time so the state node is registered
         // to the correct subgraph (e.g. the one created by Optional._makeView).
         let wiringSubgraph = AGSubgraph.current
+        let host = GraphHost.currentHost
+        let signal: Attribute<Void> = AGSubgraph.withCurrent(wiringSubgraph) {
+            graph.makeInput(value: ())
+        }
         // Shared across all body evaluations for this @State field.
         let mountedLocation = MutableBox<AnyLocation<Value>?>(nil)
 
         assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
         buffer.properties.append(.init(type: Self.self, offset: fieldOffset))
         buffer.contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
-            guard let graph = _AGGraph.current else {
+            guard _AGGraph.current != nil else {
                 fatalError("\(Self.self)._makeProperty context closure called outside an active _AGGraph context.")
             }
             let currentState = ptr.assumingMemoryBound(to: State<Value>.self).pointee
+            _ = signal.value
 
             if let location = mountedLocation.value {
                 // Already mounted: restore the location on this view copy.
                 var s = currentState
+                s._value = location.update().0
                 s._location = location
                 ptr.assumingMemoryBound(to: State<Value>.self).pointee = s
                 return
             }
 
-            // First body evaluation: create the AG input node.
-            // Register it in the wiring-time subgraph so it is cleaned up correctly.
+            // First body evaluation: mount the location against the host and signal
+            // captured while the property buffer was wired.
             let initialValue = currentState._value
-            // Synchronous cache so wrappedValue.get works outside AG context
-            // (e.g. inside button action closures captured during body evaluation).
-            let cache = MutableBox<Value>(initialValue)
-            let attr: Attribute<Value> = AGSubgraph.withCurrent(wiringSubgraph) {
-                graph.makeInput(value: initialValue)
-            }
-            // Capture the owning graph so the getter can detect cross-graph calls.
-            // _AGGraph.current can differ from the graph that owns this attr.
-            // Accessing attr.value from the wrong graph would read against that graph's
-            // independent slot table.
-            let owningGraph = graph
             let location = StoredLocation<Value>(
                 initialValue: initialValue,
-                readValue: {
-                    // Read the AG node only when executing inside the same graph that
-                    // owns this attribute. Any other context (no AG or a different
-                    // graph) must fall back to the cache.
-                    if _AGGraph.current === owningGraph {
-                        let value = attr.value
-                        cache.value = value
-                        return value
-                    }
-                    // Outside AG context, or in a different graph, return cached value
-                    // without accessing the node.
-                    return cache.value
-                },
-                onCommit: { newValue, transaction in
-                    cache.value = newValue
-                    let box = UnsafeBox(newValue)
-                    let transactionBox = UnsafeBox(transaction)
-                    inbox.enqueue(transaction: transaction) {
-                        attr.setValue(box.value, transaction: transactionBox.value)
-                    }
-                }
+                host: host,
+                signal: signal.asWeak().base
             )
             mountedLocation.value = location
             var s = currentState
+            s._value = location.update().0
             s._location = location
             ptr.assumingMemoryBound(to: State<Value>.self).pointee = s
         }

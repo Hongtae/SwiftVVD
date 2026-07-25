@@ -906,7 +906,9 @@ class WindowController: WindowDelegate,
                         onViewLayoutUpdated()
                     }
                 }
-                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
+                drainedViewOutbox =
+                    drainActionOutbox(viewGraph.data.graph) ||
+                    drainedViewOutbox
             }
             return !layoutChangeSet.isEmpty
         }
@@ -921,7 +923,19 @@ class WindowController: WindowDelegate,
                 didLoadResources = true
                 withGC(false) { context in
                     for task in resourceList.items {
-                        task(context)
+                        if task.transaction.isEmpty {
+                            task(context)
+                        } else {
+                            // Resource publication can invalidate both intrinsic size and
+                            // presentation output, so sample both under its owning transaction.
+                            viewGraph.runTransaction(task.transaction, do: {
+                                task(context)
+                                _ = runRootLayoutPass(
+                                    notifiesLayoutUpdate: false,
+                                    samplesDisplayList: true
+                                )
+                            }, id: nil)
+                        }
                     }
                 }
             }
@@ -970,12 +984,11 @@ class WindowController: WindowDelegate,
             var lastViewInboxTransaction: Transaction?
             while viewGraph.data.graph.inbox.hasPendingWork {
                 let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
-                viewGraph.setCurrentUpdateTransaction(pendingTransaction)
-                viewGraph.beginNextUpdate(at: time)
-                viewGraph.data.withCurrent {
+                viewGraph.runTransaction(pendingTransaction, do: {
+                    viewGraph.beginNextUpdate(at: time)
                     lastViewInboxTransaction = viewGraph.data.graph.inbox.drainOne()
                     viewGraph.data.graph.drainActions()
-                }
+                }, id: nil)
                 drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 let currentRequiresPresentation =
                     lastViewInboxTransaction?.effectiveAnimation != nil ||
@@ -1005,8 +1018,18 @@ class WindowController: WindowDelegate,
                     }
                 }
             }
-            viewGraph.setCurrentUpdateTransaction(lastViewInboxTransaction)
+            viewGraph.flushTransactions {
+                if loadRootResourcesIfNeeded() {
+                    loadedResources = true
+                    _ = runRootLayoutPass(
+                        notifiesLayoutUpdate: false,
+                        samplesDisplayList: true
+                    )
+                }
+            }
             viewGraph.updateOutputs(at: time)
+            gestureGraph?.eventBindingManager.rootResponder =
+                viewGraph.responderNode
             drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
@@ -1016,12 +1039,13 @@ class WindowController: WindowDelegate,
                     var lastResourceTransaction: Transaction?
                     while viewGraph.data.graph.inbox.hasPendingWork {
                         let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
-                        viewGraph.setCurrentUpdateTransaction(pendingTransaction)
-                        viewGraph.beginNextUpdate(at: time)
-                        lastResourceTransaction = viewGraph.data.graph.inbox.drainOne()
-                        viewGraph.data.graph.drainActions()
+                        viewGraph.runTransaction(pendingTransaction, do: {
+                            viewGraph.beginNextUpdate(at: time)
+                            lastResourceTransaction = viewGraph.data.graph.inbox.drainOne()
+                            viewGraph.data.graph.drainActions()
+                        }, id: nil)
                     }
-                    viewGraph.setCurrentUpdateTransaction(lastResourceTransaction)
+                    _ = lastResourceTransaction
                     drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 }
             }

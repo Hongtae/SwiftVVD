@@ -144,8 +144,16 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
                 )
                 value.value = update.target
             case .noAnimation:
-                finishValue(update.target)
-                return
+                if helper.replaceUnelapsedStandaloneTargetWithoutAnimation(
+                    start: previousOutput ?? update.target,
+                    target: update.target,
+                    at: update.time
+                ) {
+                    value.value = update.target
+                } else {
+                    finishValue(update.target)
+                    return
+                }
             }
         }
 
@@ -255,8 +263,16 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
                 )
                 value.value = update.target
             case .noAnimation:
-                finishValue(update.target)
-                return
+                if helper.replaceUnelapsedStandaloneTargetWithoutAnimation(
+                    start: previousOutput ?? update.target,
+                    target: update.target,
+                    at: update.time
+                ) {
+                    value.value = update.target
+                } else {
+                    finishValue(update.target)
+                    return
+                }
             }
         }
 

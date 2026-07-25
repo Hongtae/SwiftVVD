@@ -552,7 +552,7 @@ extension _ViewListInputs {
 // updateValue() reads both (registering AG dependencies), merges, returns result.
 // When the weak ref is invalid (subgraph was deallocated), returns other's value unchanged.
 
-// Merges two EnvironmentValues by chaining their PropertyLists (self = higher priority).
+// Merges two EnvironmentValues with the strong input taking priority over the weak fallback.
 struct MergedEnvironment: Rule, AsyncAttribute {
     typealias Value = EnvironmentValues
     let selfWeak: AGWeakAttribute
@@ -564,13 +564,13 @@ struct MergedEnvironment: Rule, AsyncAttribute {
         let otherEnv = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherEnv.trackingCopy() }
         let selfEnv = Attribute<EnvironmentValues>(selfWeak.toStrong()).value
-        var mergedList = selfEnv._plist
-        mergedList.merge(otherEnv._plist)
+        var mergedList = otherEnv._plist
+        mergedList.merge(selfEnv._plist)
         return EnvironmentValues.tracking(mergedList)
     }
 }
 
-// Merges two Transactions by chaining their PropertyLists (self = higher priority).
+// Merges two Transactions with the strong input taking priority over the weak fallback.
 struct MergedTransaction: Rule, AsyncAttribute {
     typealias Value = Transaction
     let selfWeak: AGWeakAttribute
@@ -581,8 +581,9 @@ struct MergedTransaction: Rule, AsyncAttribute {
         let otherAttr = Attribute<Transaction>(AGAttribute(rawValue: otherRaw))
         let otherTx = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherTx }
-        var result = Attribute<Transaction>(selfWeak.toStrong()).value
-        result.plist.merge(otherTx.plist)
+        let selfTx = Attribute<Transaction>(selfWeak.toStrong()).value
+        var result = otherTx
+        result.plist.merge(selfTx.plist)
         return result
     }
 }

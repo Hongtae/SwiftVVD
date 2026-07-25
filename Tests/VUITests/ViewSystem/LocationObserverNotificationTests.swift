@@ -103,7 +103,7 @@ final class LocationObserverNotificationTests: XCTestCase {
         host.flushTransactions()
 
         XCTAssertEqual(committedValues, [2, 3])
-        XCTAssertEqual(visibleValuesDuringCommit, [2, 3])
+        XCTAssertEqual(visibleValuesDuringCommit, [3, 3])
         XCTAssertEqual(location.getValue(), 3)
     }
 

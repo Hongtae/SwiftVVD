@@ -1635,6 +1635,12 @@ extension Text: View {
         let resourceResolutionState = _TextResourceResolutionState()
         let inheritedTransactionAttr = inputs.base.transaction
         let displayListContentState = _TextDisplayListContentState()
+        // Resource resolution runs after graph construction. This indirection lets the
+        // resource pass initialize the unresolved interpolation surface before publishing
+        // the first drawable text payload.
+        let interpolatorPrimeAttr = graph.makeIndirectAttribute(
+            defaultValue: DisplayList()
+        )
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
@@ -1717,11 +1723,11 @@ extension Text: View {
                 for: currentVersion,
                 candidate: candidateTransaction
             )
-
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
             var list = ResourceList()
 
-            list.items.append { context in
+            list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
+                _ = interpolatorPrimeAttr.value
                 var context = context
                 context.environment = renderEnvironment
                 // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
@@ -1801,7 +1807,7 @@ extension Text: View {
                 } else {
                     inbox.enqueue(transaction: resourceTransaction, publish)
                 }
-            }
+            })
 
             return list
         }
@@ -1938,6 +1944,11 @@ extension Text: View {
                     seed: contentSeed,
                     environment: environment.untrackedCopy()
                 )
+            } else {
+                // Keep an interpolation endpoint without emitting a render command.
+                list.appendDebugItem(
+                    bounds: CGRect(origin: targetPosition, size: targetSize)
+                ) { _ in }
             }
             if debugLayout {
                 appendDebugOverlay(
@@ -1949,6 +1960,10 @@ extension Text: View {
             return list
         }
         let presentationDlAttr: Attribute<DisplayList> = graph.makeRule {
+            let displayedStyledText = displayedStyledTextAttr.value
+            guard displayedStyledText.resolvedText != nil else {
+                return dlAttr.value
+            }
             let targetPosition = targetPositionAttr.value
             let presentationPosition = animatedPositionAttr.value
             return dlAttr.value.translatedTextPresentation(
@@ -1970,10 +1985,18 @@ extension Text: View {
             interpolatorGroup,
             content: displayedStyledTextAttr,
             inputs: interpolatorInputs,
+            animatedPosition: animatedPositionAttr,
+            animatedSize: animatedSizeAttr,
             presentationDisplayList: presentationDlAttr,
             animatesSize: false,
             defersRender: false
         )
+        if let interpolated = outputs.preferences.reducedValue(
+            for: DisplayList.Key.self,
+            in: graph
+        ) {
+            graph.setIndirectTarget(interpolatorPrimeAttr, to: interpolated)
+        }
         if platformItemListShouldCollectStaticItemContributors(inputs) {
             // Plain Text under MenuStyleContext contributes a disabled platform item.
             let textAttr = view._attribute

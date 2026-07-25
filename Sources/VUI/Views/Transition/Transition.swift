@@ -871,11 +871,12 @@ struct FilteredTransition<Base: Transition>: Transition {
     var filter: (inout Transaction, TransitionPhase) -> Void
 
     func body(content: Content, phase: TransitionPhase) -> some View {
-        transition
-            .apply(content: content, phase: phase)
-            .transaction { transaction in
-                filter(&transaction, phase)
-            }
+        content.modifier(
+            ApplyTransitionModifier(transition: transition, phase: phase)
+                .transaction { transaction in
+                    filter(&transaction, phase)
+                }
+        )
     }
 
     static var properties: TransitionProperties {

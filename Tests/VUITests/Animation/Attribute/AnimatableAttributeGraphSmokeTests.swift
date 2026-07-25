@@ -577,6 +577,53 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
     }
 
+    func testAnimatableFrameAttributeSameTimePlainRefinementKeepsActiveAnimation() {
+        assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
+            supportsVFD: false
+        )
+    }
+
+    func testAnimatableFrameAttributeVFDSameTimePlainRefinementKeepsActiveAnimation() {
+        assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
+            supportsVFD: true
+        )
+    }
+
+    private func assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
+        supportsVFD: Bool
+    ) {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: CGPoint(x: 100, y: 171),
+            initialSize: ViewSize(width: 190, height: 150),
+            supportsVFD: supportsVFD
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 186),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .easeInOut(duration: 5))
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 180),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction()
+        )
+
+        XCTAssertEqual(harness.currentPosition().y, 171, accuracy: 0.001)
+        var midpoint = CGFloat.zero
+        for step in 1...330 {
+            harness.setTime(Double(step) / 60.0)
+            let position = harness.currentPosition().y
+            if step == 150 {
+                midpoint = position
+            }
+        }
+        XCTAssertGreaterThan(midpoint, 171)
+        XCTAssertLessThan(midpoint, 180)
+        XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
+    }
+
     func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
         assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
             supportsVFD: false

@@ -1543,6 +1543,20 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         animatorState?.addListeners(transaction: transaction)
     }
 
+    mutating func replaceUnelapsedStandaloneTargetWithoutAnimation(
+        start: AnimatedValue,
+        target: AnimatedValue,
+        at time: Time
+    ) -> Bool {
+        guard let animatorState,
+              !animatorState.hasElapsedSinceActivation(at: time) else {
+            return false
+        }
+        updatePreviousModelData(target.animatableData)
+        animatorState.updateInterval(animatableDelta(from: start, to: target))
+        return true
+    }
+
     func baseLayerGenerations() -> Set<UInt64> {
         animatorState?.baseLayerGenerations() ?? []
     }

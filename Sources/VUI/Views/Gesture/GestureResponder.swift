@@ -566,6 +566,49 @@ class ViewResponder: ResponderNode, CustomStringConvertible {
         .stop
     }
 
+    fileprivate func singlePointHitTest(
+        globalPoint: CGPoint,
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> (responder: ViewResponder, priority: Double)? {
+        guard hitTestPolicy(options: options) != .exclude else {
+            return nil
+        }
+        let result = containsGlobalPoints(
+            [globalPoint],
+            cacheKey: cacheKey,
+            options: options
+        )
+        guard result.mask[0] else {
+            return nil
+        }
+
+        var best: (responder: ViewResponder, priority: Double)?
+        for child in result.children.reversed() {
+            guard let candidate = child.singlePointHitTest(
+                globalPoint: globalPoint,
+                cacheKey: cacheKey,
+                options: options
+            ) else {
+                continue
+            }
+            if let currentBest = best {
+                if candidate.priority > currentBest.priority {
+                    best = candidate
+                }
+            } else {
+                best = candidate
+            }
+        }
+        if let best, best.priority > 0 {
+            return best
+        }
+        guard hitTestPolicy(options: options) == .include else {
+            return nil
+        }
+        return (self, result.priority)
+    }
+
     func addContentPath(
         to path: inout Path,
         kind: ContentShapeKinds,
@@ -844,6 +887,83 @@ class DefaultLayoutViewResponder: MultiViewResponder {
         }
         childViewSubgraph = nil
         super.resetGesture()
+    }
+}
+
+final class HitTestBindingResponder: DefaultLayoutViewResponder {
+    override func bindEvent(_ event: any EventType) -> ResponderNode? {
+        guard let event = event as? any HitTestableEventType else {
+            return super.bindEvent(event)
+        }
+        let options = event.customHitTestOptions ?? .platformDefault
+        guard options.contains(.disablePointCloudHitTesting) else {
+            return super.bindEvent(event)
+        }
+        let cacheKey = options.contains(.uncached)
+            ? nil
+            : ViewResponder.nextHitTestKey()
+        return singlePointHitTest(
+            globalPoint: event.hitTestLocation,
+            cacheKey: cacheKey,
+            options: options
+        )?.responder ?? super.bindEvent(event)
+    }
+}
+
+struct HitTestBindingFilter: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var children: Attribute<[ViewResponder]>
+    var responder: HitTestBindingResponder
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        let childrenChanged = _AGGraph.currentStatefulInputChanged(
+            children.identifier
+        )
+        if isInitialValue || childrenChanged {
+            responder.updateChildren((
+                value: children.value,
+                changed: true
+            ))
+        }
+        if isInitialValue {
+            _AGGraph.setStatefulOutput([responder])
+        }
+    }
+}
+
+struct HitTestBindingFeature: ViewGraphFeature {
+    func modifyViewOutputs(
+        outputs: inout _ViewOutputs,
+        inputs: _ViewInputs,
+        graph: ViewGraph
+    ) {
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
+            return
+        }
+        let responders: Attribute<[ViewResponder]>
+        if let attribute = outputs.preferences.value(
+            for: ViewRespondersKey.self
+        ) {
+            responders = Attribute(attribute)
+        } else {
+            responders = graph.intern(
+                ViewRespondersKey.defaultValue,
+                for: ViewRespondersKey.self,
+                id: .preferenceKeyDefault
+            )
+        }
+        let output = graph.data.graph.makeStatefulRule(
+            HitTestBindingFilter(
+                children: responders,
+                responder: HitTestBindingResponder(inputs: inputs)
+            )
+        )
+        outputs.preferences.setValue(
+            output.identifier,
+            for: ViewRespondersKey.self
+        )
     }
 }
 

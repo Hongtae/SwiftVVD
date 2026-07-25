@@ -2,6 +2,62 @@ import XCTest
 @testable import VUI
 
 final class GeometryEffectSurfaceTests: XCTestCase {
+    func testProjectedDisplayListPreservesMixedItemOrder() throws {
+        var source = DisplayList()
+        source.appendItem(
+            kind: .shapeFill,
+            bounds: CGRect(x: 10, y: 10, width: 8, height: 6)
+        ) { _ in }
+
+        var nested = DisplayList()
+        nested.appendItem(
+            kind: .text,
+            bounds: CGRect(x: 12, y: 11, width: 4, height: 3)
+        ) { _ in }
+        source.appendEffect(
+            .opacity(0.5),
+            contents: nested,
+            frame: CGRect(x: 12, y: 11, width: 4, height: 3)
+        )
+        source.appendItem(
+            kind: .shapeStroke,
+            bounds: CGRect(x: 11, y: 12, width: 6, height: 4)
+        ) { _ in }
+
+        let projected = _GeometryEffectSupport.projectedDisplayList(
+            source,
+            applying: ProjectionTransform(
+                CGAffineTransform(scaleX: 2, y: 2)
+            ),
+            at: CGPoint(x: 10, y: 10)
+        )
+
+        XCTAssertEqual(projected.items.count, 3)
+        guard projected.items.count == 3 else { return }
+        guard case .content = projected.items[0].value,
+              case let .effect(.opacity(opacity), contents) = projected.items[1].value,
+              case .content = projected.items[2].value else {
+            return XCTFail("Projection must retain content/effect/content order")
+        }
+        XCTAssertEqual(opacity, 0.5)
+        XCTAssertEqual(
+            projected.items[0].command.bounds,
+            CGRect(x: 10, y: 10, width: 16, height: 12)
+        )
+        XCTAssertEqual(
+            projected.items[1].frame,
+            CGRect(x: 14, y: 12, width: 8, height: 6)
+        )
+        XCTAssertEqual(
+            contents.itemCommands.first?.bounds,
+            CGRect(x: 14, y: 12, width: 8, height: 6)
+        )
+        XCTAssertEqual(
+            projected.items[2].command.bounds,
+            CGRect(x: 12, y: 14, width: 12, height: 8)
+        )
+    }
+
     func testIgnoredByLayoutForwardsEffectAndAnimatableData() {
         var ignored = ProbeGeometryEffect(x: 3).ignoredByLayout()
 

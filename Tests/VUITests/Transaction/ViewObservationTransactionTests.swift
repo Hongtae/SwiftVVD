@@ -475,17 +475,24 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
                 XCTAssertEqual(layoutAttr.value.sizeThatFits(.unspecified), CGSize(width: 10, height: 12))
 
-                withAnimation(.linear(duration: 1.0)) {
+                var transaction = Transaction(animation: .linear(duration: 1.0))
+                transaction.disablesAnimations = false
+                withTransaction(transaction) {
                     model.value = 24
                 }
 
-                host.data.rootSubgraph.update()
+                host.runTransaction(
+                    transaction,
+                    do: {
+                        host.data.rootSubgraph.update()
+                    },
+                    id: nil
+                )
 
                 let sampledWidth = layoutAttr.value.sizeThatFits(.unspecified).width
                 XCTAssertLessThan(sampledWidth, 24)
                 XCTAssertGreaterThanOrEqual(sampledWidth, 10)
-                let propagated = try XCTUnwrap(graph.transaction(for: layoutAttr.identifier))
-                XCTAssertNotNil(propagated.animation)
+                XCTAssertTrue(host.data.transaction.isEmpty)
             }
         }
     }
@@ -517,13 +524,13 @@ final class ViewObservationTransactionTests: XCTestCase {
                     toggle()
                 }
 
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
 
                 let sampledWidth = layoutAttr.value.sizeThatFits(.unspecified).width
                 XCTAssertLessThan(sampledWidth, 24)
                 XCTAssertGreaterThanOrEqual(sampledWidth, 10)
-                let propagated = try XCTUnwrap(graph.transaction(for: layoutAttr.identifier))
-                XCTAssertNotNil(propagated.animation)
+                XCTAssertTrue(host.data.transaction.isEmpty)
             }
         }
     }
@@ -559,6 +566,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 withAnimation(.linear(duration: 1.0)) {
                     toggle()
                 }
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -613,6 +621,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 withAnimation(.linear(duration: 1.0)) {
                     toggle()
                 }
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -676,6 +685,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 withAnimation(.spring(duration: 20.0, bounce: 0.35)) {
                     toggle()
                 }
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -952,6 +962,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 withAnimation(.linear(duration: 1.0)) {
                     toggle()
                 }
+                host.flushTransactions()
 
                 var samples: [(time: Double, color: Color)] = []
                 for step in 0...10 {
@@ -1008,6 +1019,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let toggle = try XCTUnwrap(probe.toggle)
 
                 toggle()
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -1068,6 +1080,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let toggle = try XCTUnwrap(probe.toggle)
 
                 toggle()
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -1128,6 +1141,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let toggle = try XCTUnwrap(probe.toggle)
 
                 toggle()
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -1143,6 +1157,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 XCTAssertLessThan(outboundBounds.width, 21.6)
 
                 toggle()
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = Attribute<DisplayList>(displayID).value
 
@@ -1199,6 +1214,7 @@ final class ViewObservationTransactionTests: XCTestCase {
                 withAnimation(.linear(duration: 1.0)) {
                     toggle()
                 }
+                host.flushTransactions()
                 host.data.rootSubgraph.update()
                 _ = layoutAttr.value.sizeThatFits(.unspecified)
 
@@ -1609,7 +1625,7 @@ final class ViewObservationTransactionTests: XCTestCase {
             time: time ?? graph.makeInput(value: Time(seconds: 0)),
             phase: graph.makeInput(value: Phase()),
             environment: environment,
-            transaction: graph.makeInput(value: Transaction())
+            transaction: GraphHost.currentHost.data._transaction
         )
         return _ViewInputs(
             base: base,

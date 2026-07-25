@@ -1076,7 +1076,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     replayContents(contents, context)
                 }
 
-                private static func interpolationTransform(
+                static func interpolationTransform(
                     from sourceBounds: CGRect,
                     to outputBounds: CGRect
                 ) -> CGAffineTransform? {
@@ -1156,6 +1156,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 copy.transform = transform.concatenating(affineTransform)
                 return copy
             }
+
         }
 
         struct TextValue {
@@ -1500,6 +1501,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 return copy
             }
         }
+
     }
 
     struct Item: Equatable, CustomStringConvertible {
@@ -2131,6 +2133,488 @@ struct DisplayList: Equatable, CustomStringConvertible {
             styleChain: item.styleChain
         ))
         recordInterpolationBounds(transformedContent.command.bounds)
+    }
+
+    func translated(by offset: CGSize) -> DisplayList {
+        guard offset.width != 0 || offset.height != 0 else {
+            return self
+        }
+
+        return transformed(by: CGAffineTransform(
+            translationX: offset.width,
+            y: offset.height
+        ))
+    }
+
+    func transformed(by transform: CGAffineTransform) -> DisplayList {
+        guard !transform.isIdentity else {
+            return self
+        }
+
+        var result = DisplayList()
+        result.items = items.map { item in
+            var item = item
+            item.frame = item.frame.applying(transform)
+            switch item.value {
+            case let .content(content):
+                item.value = .content(content.transformed(by: transform))
+            case let .effect(effect, contents):
+                let translatedEffect: Effect
+                if case let .mask(mask, options) = effect {
+                    translatedEffect = .mask(
+                        mask.transformed(by: transform),
+                        options
+                    )
+                } else {
+                    translatedEffect = effect
+                }
+                item.value = .effect(
+                    translatedEffect,
+                    contents.transformed(by: transform)
+                )
+            case let .states(states):
+                item.value = .states(states.map { hash, contents in
+                    (hash, contents.transformed(by: transform))
+                })
+            case .empty:
+                break
+            }
+            return item
+        }
+        result.debugItems = debugItems.map { item in
+            var item = item
+            item.frame = item.frame.applying(transform)
+            if case let .content(content) = item.value {
+                item.value = .content(content.transformed(by: transform))
+            }
+            return item
+        }
+        result.interpolationBounds = interpolationBounds?.applying(transform)
+        result.numericValue = numericValue
+        return result
+    }
+
+    private enum InterpolationMaterializationTask {
+        case list(DisplayList, CGAffineTransform, Float, StyleChain)
+        case finishList(DisplayList, Int, CGAffineTransform, Float, StyleChain)
+        case item(Item, CGAffineTransform, Float, StyleChain)
+        case finishStyle(Item, Content)
+        case finishFlattened(Item, Content)
+        case finishDrawing(Item, Content)
+        case finishEffect(Item, Effect, Int, CGAffineTransform, Float, StyleChain)
+        case finishStates(Item, [StrongHash], CGAffineTransform, Float, StyleChain)
+    }
+
+    func materializingInterpolationContents() -> DisplayList {
+        // Renderer-state composition is ordered, but it is not recursive. Keep
+        // the same ordering while using an explicit work stack so repeated
+        // retargeting cannot consume the Swift call stack.
+        var tasks: [InterpolationMaterializationTask] = [
+            .list(self, .identity, 1, StyleChain())
+        ]
+        var values: [DisplayList] = []
+
+        func takeValues(_ count: Int) -> [DisplayList] {
+            guard count > 0 else { return [] }
+            let start = values.index(values.endIndex, offsetBy: -count)
+            let result = Array(values[start...])
+            values.removeSubrange(start...)
+            return result
+        }
+
+        func transformedItem(
+            _ item: Item,
+            by transform: CGAffineTransform,
+            opacity: Float,
+            outerStyleChain: StyleChain
+        ) -> Item {
+            var item = item
+            item.frame = item.frame.applying(transform)
+            item.opacity *= opacity
+            item.styleChain = item.styleChain.appendingOuter(outerStyleChain)
+            if case let .content(content) = item.value {
+                item.value = .content(content.transformed(by: transform))
+            }
+            return item
+        }
+
+        while let task = tasks.popLast() {
+            switch task {
+            case let .list(list, transform, opacity, outerStyleChain):
+                tasks.append(
+                    .finishList(
+                        list,
+                        list.items.count,
+                        transform,
+                        opacity,
+                        outerStyleChain
+                    )
+                )
+                for item in list.items.reversed() {
+                    tasks.append(
+                        .item(item, transform, opacity, outerStyleChain)
+                    )
+                }
+
+            case let .finishList(
+                source,
+                itemCount,
+                transform,
+                opacity,
+                outerStyleChain
+            ):
+                let materializedItems = takeValues(itemCount)
+                var result = DisplayList()
+                for contents in materializedItems {
+                    result.append(contentsOf: contents)
+                }
+                result.debugItems = source.debugItems.map {
+                    transformedItem(
+                        $0,
+                        by: transform,
+                        opacity: opacity,
+                        outerStyleChain: outerStyleChain
+                    )
+                }
+                result.recordInterpolationBounds(
+                    source.interpolationBounds?.applying(transform)
+                )
+                result.numericValue = source.numericValue
+                values.append(result)
+
+            case let .item(item, transform, opacity, outerStyleChain):
+                switch item.value {
+                case let .content(content):
+                    switch content.value {
+                    case let .crossFade(crossFade):
+                        guard case let .effect(
+                            .crossFade(sourceFraction, targetFraction),
+                            _
+                        ) = crossFade.command else {
+                            preconditionFailure(
+                                "DisplayList.CrossFadeValue requires a cross-fade command"
+                            )
+                        }
+                        let inheritedStyleChain = item.styleChain
+                            .appendingOuter(outerStyleChain)
+                        var branches: [(
+                            Content.CrossFadeValue.Branch,
+                            Float,
+                            CGAffineTransform
+                        )] = []
+                        if let source = crossFade.source,
+                           1 - sourceFraction > 0,
+                           let branchTransform =
+                                Content.CrossFadeValue.Branch
+                                    .interpolationTransform(
+                                        from: source.sourceBounds,
+                                        to: source.outputBounds
+                                    ) {
+                            branches.append((
+                                source,
+                                1 - sourceFraction,
+                                branchTransform
+                            ))
+                        }
+                        if let target = crossFade.target,
+                           targetFraction > 0,
+                           let branchTransform =
+                                Content.CrossFadeValue.Branch
+                                    .interpolationTransform(
+                                        from: target.sourceBounds,
+                                        to: target.outputBounds
+                                    ) {
+                            branches.append((
+                                target,
+                                targetFraction,
+                                branchTransform
+                            ))
+                        }
+                        tasks.append(
+                            .finishList(
+                                DisplayList(),
+                                branches.count,
+                                .identity,
+                                1,
+                                StyleChain()
+                            )
+                        )
+                        for (
+                            branch,
+                            fraction,
+                            branchTransform
+                        ) in branches.reversed() {
+                            tasks.append(
+                                .list(
+                                    branch.contents,
+                                    branchTransform
+                                        .concatenating(crossFade.transform)
+                                        .concatenating(transform),
+                                    opacity * item.opacity * fraction,
+                                    inheritedStyleChain
+                                )
+                            )
+                        }
+
+                    case let .style(style):
+                        if case let .opacity(styleOpacity) = style.style {
+                            tasks.append(
+                                .list(
+                                    style.contents,
+                                    style.transform.concatenating(transform),
+                                    opacity * item.opacity * Float(styleOpacity),
+                                    item.styleChain
+                                        .appendingOuter(outerStyleChain)
+                                )
+                            )
+                        } else {
+                            let transformedContent = content.transformed(
+                                by: transform
+                            )
+                            tasks.append(
+                                .finishStyle(
+                                    transformedItem(
+                                        item,
+                                        by: transform,
+                                        opacity: opacity,
+                                        outerStyleChain: outerStyleChain
+                                    ),
+                                    transformedContent
+                                )
+                            )
+                            tasks.append(
+                                .list(
+                                    style.contents,
+                                    .identity,
+                                    1,
+                                    StyleChain()
+                                )
+                            )
+                        }
+
+                    case let .flattened(list, _, _):
+                        let transformedContent = content.transformed(by: transform)
+                        tasks.append(
+                            .finishFlattened(
+                                transformedItem(
+                                    item,
+                                    by: transform,
+                                    opacity: opacity,
+                                    outerStyleChain: outerStyleChain
+                                ),
+                                transformedContent
+                            )
+                        )
+                        tasks.append(
+                            .list(list, .identity, 1, StyleChain())
+                        )
+
+                    case let .drawing(contents, _, _):
+                        guard let local = contents as? LocalContents else {
+                            var result = DisplayList()
+                            result.items.append(
+                                transformedItem(
+                                    item,
+                                    by: transform,
+                                    opacity: opacity,
+                                    outerStyleChain: outerStyleChain
+                                )
+                            )
+                            result.recordInterpolationBounds(
+                                item.command.bounds?.applying(transform)
+                            )
+                            values.append(result)
+                            break
+                        }
+                        let transformedContent = content.transformed(by: transform)
+                        tasks.append(
+                            .finishDrawing(
+                                transformedItem(
+                                    item,
+                                    by: transform,
+                                    opacity: opacity,
+                                    outerStyleChain: outerStyleChain
+                                ),
+                                transformedContent
+                            )
+                        )
+                        tasks.append(
+                            .list(local.list, .identity, 1, StyleChain())
+                        )
+
+                    case .backend, .color, .shape, .image, .text:
+                        var result = DisplayList()
+                        let item = transformedItem(
+                            item,
+                            by: transform,
+                            opacity: opacity,
+                            outerStyleChain: outerStyleChain
+                        )
+                        result.items.append(item)
+                        result.recordInterpolationBounds(item.command.bounds)
+                        values.append(result)
+                    }
+
+                case let .effect(effect, contents):
+                    let childCount: Int
+                    if case .mask = effect {
+                        childCount = 2
+                    } else {
+                        childCount = 1
+                    }
+                    tasks.append(
+                        .finishEffect(
+                            item,
+                            effect,
+                            childCount,
+                            transform,
+                            opacity,
+                            outerStyleChain
+                        )
+                    )
+                    tasks.append(
+                        .list(contents, transform, 1, StyleChain())
+                    )
+                    if case let .mask(mask, _) = effect {
+                        tasks.append(
+                            .list(mask, transform, 1, StyleChain())
+                        )
+                    }
+
+                case let .states(states):
+                    tasks.append(
+                        .finishStates(
+                            item,
+                            states.map(\.0),
+                            transform,
+                            opacity,
+                            outerStyleChain
+                        )
+                    )
+                    for (_, contents) in states.reversed() {
+                        tasks.append(
+                            .list(contents, transform, 1, StyleChain())
+                        )
+                    }
+
+                case .empty:
+                    var result = DisplayList()
+                    var item = item
+                    item.frame = item.frame.applying(transform)
+                    item.opacity *= opacity
+                    item.styleChain = item.styleChain
+                        .appendingOuter(outerStyleChain)
+                    result.items.append(item)
+                    values.append(result)
+                }
+
+            case let .finishStyle(item, transformedContent):
+                let contents = values.removeLast()
+                guard case var .style(style) = transformedContent.value else {
+                    preconditionFailure(
+                        "DisplayList style materialization requires style content"
+                    )
+                }
+                style.contents = contents
+                var content = transformedContent
+                content.value = .style(style)
+                var item = item
+                item.value = .content(content)
+                var result = DisplayList()
+                result.items.append(item)
+                result.recordInterpolationBounds(item.command.bounds)
+                values.append(result)
+
+            case let .finishFlattened(item, transformedContent):
+                let contents = values.removeLast()
+                guard case let .flattened(_, origin, options) =
+                    transformedContent.value else {
+                    preconditionFailure(
+                        "DisplayList flattened materialization requires flattened content"
+                    )
+                }
+                var content = transformedContent
+                content.value = .flattened(contents, origin, options)
+                var item = item
+                item.value = .content(content)
+                var result = DisplayList()
+                result.items.append(item)
+                result.recordInterpolationBounds(item.command.bounds)
+                values.append(result)
+
+            case let .finishDrawing(item, transformedContent):
+                let contents = values.removeLast()
+                guard case let .drawing(_, origin, options) =
+                    transformedContent.value else {
+                    preconditionFailure(
+                        "DisplayList drawing materialization requires drawing content"
+                    )
+                }
+                var content = transformedContent
+                content.value = .drawing(
+                    LocalContents(list: contents),
+                    origin,
+                    options
+                )
+                var item = item
+                item.value = .content(content)
+                var result = DisplayList()
+                result.items.append(item)
+                result.recordInterpolationBounds(item.command.bounds)
+                values.append(result)
+
+            case let .finishEffect(
+                original,
+                effect,
+                childCount,
+                transform,
+                opacity,
+                outerStyleChain
+            ):
+                let children = takeValues(childCount)
+                let contents: DisplayList
+                let materializedEffect: Effect
+                if case let .mask(_, options) = effect {
+                    materializedEffect = .mask(children[0], options)
+                    contents = children[1]
+                } else {
+                    materializedEffect = effect
+                    contents = children[0]
+                }
+                var item = original
+                item.frame = item.frame.applying(transform)
+                item.opacity *= opacity
+                item.styleChain = item.styleChain
+                    .appendingOuter(outerStyleChain)
+                item.value = .effect(materializedEffect, contents)
+                var result = DisplayList()
+                result.items.append(item)
+                result.recordInterpolationBounds(item.frame)
+                values.append(result)
+
+            case let .finishStates(
+                original,
+                hashes,
+                transform,
+                opacity,
+                outerStyleChain
+            ):
+                let contents = takeValues(hashes.count)
+                var item = original
+                item.frame = item.frame.applying(transform)
+                item.opacity *= opacity
+                item.styleChain = item.styleChain
+                    .appendingOuter(outerStyleChain)
+                item.value = .states(Array(zip(hashes, contents)))
+                var result = DisplayList()
+                result.items.append(item)
+                result.recordInterpolationBounds(item.frame)
+                values.append(result)
+            }
+        }
+
+        precondition(values.count == 1)
+        return values[0]
     }
 
     mutating func appendCrossFadeItem(
@@ -3368,7 +3852,17 @@ struct ResourceList {
         let value: Int
     }
 
-    typealias Task = (GraphicsContext) -> Void
+    struct Task {
+        // Resource work can publish graph mutations after view construction. Retaining
+        // the owning transaction keeps publication and dependent layout in one host scope.
+        var transaction: Transaction
+        var body: (GraphicsContext) -> Void
+
+        func callAsFunction(_ context: GraphicsContext) {
+            body(context)
+        }
+    }
+
     var items: [Task] = []
 
     mutating func append(contentsOf other: Self) {

@@ -165,6 +165,13 @@ extension DisplayList {
             }
 
             if let removedState = state, !contents.displayList.isEmptyForInterpolation {
+                // Coalesce an unprepared tail and keep the prepared history
+                // bounded before appending the new removal.
+                if removed.last?.phase == .pending {
+                    removed.removeLast()
+                } else if removed.count >= 8 {
+                    remove(prefix: 0)
+                }
                 removed.append(
                     Removed(
                         contents: contents,
@@ -188,7 +195,9 @@ extension DisplayList {
                 version: version
             )
             if state == nil {
-                for index in removed.indices where removed[index].phase == .running {
+                // Layout can refine the endpoint during the preparation passes.
+                // Keep every already-created interpolator pointed at the latest list.
+                for index in removed.indices {
                     removed[index].interpolator?.setTo(list)
                 }
             }
@@ -213,8 +222,6 @@ extension DisplayList {
             guard needsUpdate else { return }
             needsUpdate = false
 
-            foldActivePresentationIntoPendingRemoval()
-
             let renderer: DisplayList.GraphicsRenderer
             if let currentRenderer = self.renderer {
                 renderer = currentRenderer
@@ -224,7 +231,12 @@ extension DisplayList {
                 renderer = currentRenderer
             }
 
-            for index in removed.indices {
+            // Each earlier removal contributes its sampled presentation to the
+            // source of the following removal. Final output remains owned by
+            // the last removal while the ordered entries keep independent timing.
+            var composedPresentation: DisplayList?
+            var index = removed.startIndex
+            while index < removed.endIndex {
                 switch removed[index].phase {
                 case .pending:
                     removed[index].phase = .first
@@ -242,26 +254,64 @@ extension DisplayList {
                     break
                 }
 
-                if removed[index].interpolator == nil {
-                    let from = removed[index].contents.preparedList(
+                if removed[index].activeDuration >= 0,
+                   currentTime.seconds - removed[index].startTime.seconds >=
+                    removed[index].activeDuration {
+                    remove(prefix: index)
+                    composedPresentation = nil
+                    index = removed.startIndex
+                    continue
+                }
+
+                let from = if let composedPresentation {
+                    composedPresentation
+                } else {
+                    removed[index].contents.preparedList(
                         using: renderer,
                         at: currentTime
                     )
-                    let to = contents.preparedList(
-                        using: renderer,
-                        at: currentTime
-                    )
+                }
+                if let currentInterpolator = removed[index].interpolator {
+                    let updatedInterpolator = currentInterpolator.copy()
+                        as! RBDisplayListInterpolator
+                    updatedInterpolator.setFrom(from)
+                    removed[index].interpolator = updatedInterpolator
+                } else {
+                    let logicalFrom = if composedPresentation == nil {
+                        from
+                    } else {
+                        removed[index].contents.preparedList(
+                            using: renderer,
+                            at: currentTime
+                        )
+                    }
+                    let nextIndex = removed.index(after: index)
+                    let to = if nextIndex < removed.endIndex {
+                        removed[nextIndex].contents.preparedList(
+                            using: renderer,
+                            at: currentTime
+                        )
+                    } else {
+                        contents.preparedList(
+                            using: renderer,
+                            at: currentTime
+                        )
+                    }
                     var options: [RBDisplayListInterpolatorOptionKey: Any] = [
                         .transition: removed[index].rbTransition,
                     ]
                     if let animation = removed[index].animation {
                         options[.animation] = animation.rbAnimation
                     }
-                    removed[index].interpolator = RBDisplayListInterpolator(
-                        from: from,
+                    let interpolator = RBDisplayListInterpolator(
+                        from: logicalFrom,
                         to: to,
                         options: options
                     )
+                    if composedPresentation != nil {
+                        interpolator.setFrom(from)
+                    }
+                    removed[index].interpolator = interpolator
                     let interpolatorDuration = removed[index].interpolator?.activeDuration ?? 0
                     let contentDuration = interpolatorDuration > 0
                         ? interpolatorDuration
@@ -271,6 +321,20 @@ extension DisplayList {
                         contentDuration
                     )
                 }
+                if index < removed.index(before: removed.endIndex),
+                   let interpolator = removed[index].interpolator {
+                    let elapsed = Float(
+                        max(
+                            currentTime.seconds -
+                                removed[index].startTime.seconds,
+                            0
+                        )
+                    )
+                    composedPresentation = interpolator
+                        .copyContents(withProgress: elapsed)
+                        .materializingInterpolationContents()
+                }
+                index = removed.index(after: index)
             }
             updateNextUpdateTime()
         }
@@ -286,25 +350,16 @@ extension DisplayList {
                 return false
             }
 
-            let expiredPrefix = removed.prefix { removal in
-                guard removal.activeDuration >= 0 else {
-                    return false
-                }
-                return currentTime.seconds - removal.startTime.seconds >= removal.activeDuration
-            }.count
-            remove(prefix: expiredPrefix)
-
-            guard !removed.isEmpty else {
-                return false
-            }
-
             if let removal = removed.last,
                !removal.state.transition.isIdentity,
                !removal.rbTransition.effects.isEmpty {
                 let elapsed = Float(max(currentTime.seconds - removal.startTime.seconds, 0))
                 let contents = removal.interpolator?.copyContents(withProgress: elapsed)
                     ?? removal.contents.displayList
-                list.appendEffect(.contentTransition(removal.state), contents: contents)
+                list.appendEffect(
+                    .contentTransition(removal.state),
+                    contents: contents
+                )
             }
             return true
         }
@@ -315,8 +370,14 @@ extension DisplayList {
         }
 
         mutating func remove(prefix: Int) {
-            guard prefix > 0 else { return }
-            removed.removeFirst(min(prefix, removed.count))
+            precondition(prefix >= removed.startIndex)
+            precondition(prefix < removed.endIndex)
+            removed.removeFirst(prefix + 1)
+            // Every retained entry must be rebuilt from the new first source.
+            for index in removed.indices {
+                removed[index].interpolator = nil
+            }
+            needsUpdate = true
             updateNextUpdateTime()
         }
 
@@ -336,22 +397,6 @@ extension DisplayList {
             nextUpdateTime = nextTime
         }
 
-        private mutating func foldActivePresentationIntoPendingRemoval() {
-            guard removed.count > 1,
-                  let pendingIndex = removed.lastIndex(where: { $0.phase == .pending }),
-                  pendingIndex > 0 else {
-                return
-            }
-
-            // The renderer composes earlier removals before advancing to the
-            // next entry. Materialize that presentation for the closure-backed
-            // display-list carrier so the new interpolation starts without a jump.
-            let previous = removed[pendingIndex - 1]
-            let elapsed = Float(max(currentTime.seconds - previous.startTime.seconds, 0))
-            removed[pendingIndex].contents.displayList = previous.interpolator?
-                .copyContents(withProgress: elapsed) ?? previous.contents.displayList
-            removed.removeFirst(pendingIndex)
-        }
     }
 
     // Base interpolator group hook installed on display-list output preferences.
@@ -436,7 +481,9 @@ extension DisplayList {
         }
 
         override func discardActiveInterpolators() {
-            layer.remove(prefix: layer.removedCount)
+            if layer.removedCount > 0 {
+                layer.remove(prefix: layer.removedCount - 1)
+            }
         }
 
         override func nextUpdate(after time: Time) -> Time {
@@ -597,7 +644,10 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
 
     override func discardActiveInterpolators() {
         for index in layers.indices {
-            layers[index].state.remove(prefix: layers[index].state.removedCount)
+            let removedCount = layers[index].state.removedCount
+            if removedCount > 0 {
+                layers[index].state.remove(prefix: removedCount - 1)
+            }
         }
     }
 
@@ -767,6 +817,9 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
     var phase: Attribute<Phase>
     var transaction: Attribute<Transaction>
     var position: Attribute<CGPoint>
+    var animatedPosition: OptionalAttribute<CGPoint>
+    var containerPosition: Attribute<CGPoint>
+    var animatedSize: OptionalAttribute<ViewSize>
     var presentationDisplayList: OptionalAttribute<DisplayList>
     var size: Attribute<ViewSize>
     var pixelLength: Attribute<CGFloat>
@@ -788,6 +841,9 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         phase: Attribute<Phase>,
         transaction: Attribute<Transaction>,
         position: Attribute<CGPoint>,
+        animatedPosition: OptionalAttribute<CGPoint>,
+        containerPosition: Attribute<CGPoint>,
+        animatedSize: OptionalAttribute<ViewSize>,
         presentationDisplayList: OptionalAttribute<DisplayList>,
         size: Attribute<ViewSize>,
         pixelLength: Attribute<CGFloat>,
@@ -803,6 +859,9 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         self.phase = phase
         self.transaction = transaction
         self.position = position
+        self.animatedPosition = animatedPosition
+        self.containerPosition = containerPosition
+        self.animatedSize = animatedSize
         self.presentationDisplayList = presentationDisplayList
         self.size = size
         self.pixelLength = pixelLength
@@ -819,10 +878,25 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         let currentTransaction = transaction.value
         let currentSize = size.value.value
         _ = phase.value
-        _ = position.value
+        let modelPosition = position.value
+        let presentationPosition = animatedPosition.value ?? modelPosition
+        _ = containerPosition.value
+        let presentationSize = animatedSize.value?.value ?? currentSize
         _ = pixelLength.value
         let currentPresentationList = presentationDisplayList.value ?? targetList
-
+        // The active interpolator keeps endpoint contents in model geometry.
+        // Compensate the centered local size presentation before applying the
+        // surrounding frame's presentation position.
+        let localContentOffset = CGSize(
+            width: (presentationSize.width - currentSize.width) * 0.5,
+            height: (presentationSize.height - currentSize.height) * 0.5
+        )
+        let presentationOffset = CGSize(
+            width: presentationPosition.x - modelPosition.x
+                + localContentOffset.width,
+            height: presentationPosition.y - modelPosition.y
+                + localContentOffset.height
+        )
         var state = currentEnvironment.contentTransitionState
         var transition = currentTransaction.disablesContentTransitions
             ? ContentTransition.identity
@@ -868,7 +942,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                     modifiedState.animation != nil
             }
         }
-
         let previousList = previousDisplayList
         let displayListChanged = previousList.map {
             !$0.hasSameInterpolationSurface(as: targetList)
@@ -889,6 +962,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 defersRender: defersRender,
                 supportsVFD: supportsVFD
             )
+            .translated(by: presentationOffset)
         } else {
             group.setCurrentContents(
                 contentSeed: contentSeed,
@@ -900,7 +974,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
             )
             group.updateTime(currentTime)
             output = group.hasActiveInterpolators
-                ? group.apply(to: targetList)
+                ? group.apply(to: targetList).translated(by: presentationOffset)
                 : currentPresentationList
         }
         previousContent = targetContent
@@ -915,6 +989,8 @@ extension _ViewOutputs {
         _ group: DisplayList.InterpolatorGroup,
         content: Attribute<Content>,
         inputs: _ViewInputs,
+        animatedPosition: Attribute<CGPoint>? = nil,
+        animatedSize: Attribute<ViewSize>? = nil,
         presentationDisplayList: Attribute<DisplayList>? = nil,
         animatesSize: Bool,
         defersRender: Bool
@@ -940,6 +1016,9 @@ extension _ViewOutputs {
                 phase: inputs.base.phase,
                 transaction: inputs.base.transaction,
                 position: inputs.position,
+                animatedPosition: OptionalAttribute(animatedPosition),
+                containerPosition: inputs.containerPosition,
+                animatedSize: OptionalAttribute(animatedSize),
                 presentationDisplayList: OptionalAttribute(presentationDisplayList),
                 size: inputs.size,
                 pixelLength: pixelLength,

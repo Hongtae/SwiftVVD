@@ -724,6 +724,141 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(statusMarkerBounds(in: completeDisplayList)).width, 160, accuracy: 0.5)
     }
 
+    // ASSERTIONS animationLabStatusTransactionIsolationRuntimeObserved
+    @MainActor
+    func testResolvedStatusCompletionSnapsOutsideRetainedRemovalTransaction() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedRemovalStatusRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingResolvedRemovalStatusRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 420, height: 240),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 420, height: 240),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> (
+            initial: [LayoutSchedulingResolvedTextSample],
+            intermediate: [LayoutSchedulingResolvedTextSample],
+            running: [LayoutSchedulingResolvedTextSample],
+            completed: [LayoutSchedulingResolvedTextSample]
+        ) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 420, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            return (
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Run 0: idle",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Run 1: idle",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Run 1: removal running",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Run 1: removed completion 1",
+                    environment: controller.environment
+                )
+            )
+        }
+
+        let initial = try update(time: 0)
+        XCTAssertFalse(initial.initial.isEmpty)
+        XCTAssertTrue(initial.intermediate.isEmpty)
+        XCTAssertTrue(initial.running.isEmpty)
+        XCTAssertTrue(initial.completed.isEmpty)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        for time in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.25] {
+            let sample = try update(time: time)
+            XCTAssertTrue(
+                sample.initial.allSatisfy { $0.opacity <= 0.001 },
+                "The old status must not remain in presentation at \(time): \(sample.initial)"
+            )
+            XCTAssertTrue(
+                sample.intermediate.allSatisfy { $0.opacity <= 0.001 },
+                "The first of the two plain writes must not remain in presentation at \(time): \(sample.intermediate)"
+            )
+            XCTAssertFalse(sample.running.isEmpty, "Missing running status at \(time)")
+            XCTAssertTrue(
+                sample.running.allSatisfy { abs($0.opacity - 1) <= 0.001 },
+                "The plain status write must reach full opacity immediately at \(time): \(sample.running)"
+            )
+            XCTAssertTrue(sample.completed.isEmpty)
+        }
+
+        _ = try update(time: 5.1)
+        let completed = try update(time: 5.1)
+        XCTAssertEqual(probe.completions, [1])
+        XCTAssertTrue(
+            completed.initial.allSatisfy { $0.opacity <= 0.001 }
+        )
+        XCTAssertTrue(
+            completed.intermediate.allSatisfy { $0.opacity <= 0.001 }
+        )
+        XCTAssertTrue(
+            completed.running.allSatisfy { $0.opacity <= 0.001 },
+            "The running status must snap away at completion: \(completed.running)"
+        )
+        XCTAssertFalse(completed.completed.isEmpty)
+        XCTAssertTrue(
+            completed.completed.allSatisfy { abs($0.opacity - 1) <= 0.001 },
+            "The completion status must be fully visible immediately: \(completed.completed)"
+        )
+    }
+
     @MainActor
     func testNestedOffsetScaleSurfaceSamplesOffsetDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
@@ -1330,6 +1465,359 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS graphHostSeedMutationLifecycleObserved
+    @MainActor
+    func testResolvedTextButtonBorderSamplesIntermediateWidthWhenLabelChanges() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedTextButtonRowRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingResolvedTextButtonRowRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 120),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 120),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 120),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let buttons = shapeStrokeBounds(in: try displayList(in: controller))
+                .filter { $0.width > 30 && $0.height > 15 && $0.height < 50 }
+                .sorted { $0.minX < $1.minX }
+            XCTAssertEqual(buttons.count, 4, "unexpected button strokes at \(time): \(buttons)")
+            return try XCTUnwrap(buttons.dropFirst().first)
+        }
+
+        let initialBounds = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var samples: [(time: Double, bounds: CGRect)] = []
+        for time in [0.001, 1.0 / 60.0, 0.1, 1.0, 2.5, 4.0, 5.1] {
+            samples.append((time, try update(time: time)))
+        }
+
+        let finalBounds = try XCTUnwrap(samples.last?.bounds)
+        XCTAssertNotEqual(initialBounds.width, finalBounds.width, accuracy: 0.01)
+        let lower = min(initialBounds.width, finalBounds.width)
+        let upper = max(initialBounds.width, finalBounds.width)
+        XCTAssertNotNil(
+            samples.dropLast().first { sample in
+                sample.bounds.width > lower + 0.01 && sample.bounds.width < upper - 0.01
+            },
+            "expected intermediate button width: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
+        )
+    }
+
+    // ASSERTIONS graphHostSeedMutationLifecycleObserved
+    @MainActor
+    func testResolvedTextContentChangeMovesRetainedHeadingAndButtonContinuously() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedContentGeometryRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingResolvedContentGeometryRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 320, height: 240),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 320, height: 240),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> (
+            heading: CGRect,
+            buttonLabel: CGRect,
+            buttonBorder: CGRect,
+            compact: [LayoutSchedulingResolvedTextSample],
+            expanded: [LayoutSchedulingResolvedTextSample]
+        ) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 320, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            let heading = try XCTUnwrap(
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Interpolate",
+                    environment: controller.environment
+                ).last?.frame
+            )
+            let buttonLabel = try XCTUnwrap(
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Change Text",
+                    environment: controller.environment
+                ).last?.frame
+            )
+            let buttonBorder = try XCTUnwrap(
+                shapeStrokeBounds(in: list).first {
+                    $0.width > 40 && $0.height > 15 && $0.height < 50
+                }
+            )
+            return (
+                heading,
+                buttonLabel,
+                buttonBorder,
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Compact",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Expanded value",
+                    environment: controller.environment
+                )
+            )
+        }
+
+        let initial = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var samples: [(
+            time: Double,
+            heading: CGRect,
+            buttonLabel: CGRect,
+            buttonBorder: CGRect,
+            compact: [LayoutSchedulingResolvedTextSample],
+            expanded: [LayoutSchedulingResolvedTextSample]
+        )] = []
+        for time in [0.001, 1.0 / 60.0, 0.1, 0.7, 1.4, 2.5, 5.1] {
+            let sample = try update(time: time)
+            samples.append((
+                time,
+                sample.heading,
+                sample.buttonLabel,
+                sample.buttonBorder,
+                sample.compact,
+                sample.expanded
+            ))
+        }
+
+        let final = try XCTUnwrap(samples.last)
+        XCTAssertNotEqual(initial.heading.midY, final.heading.midY, accuracy: 0.01)
+        XCTAssertNotEqual(initial.buttonLabel.midY, final.buttonLabel.midY, accuracy: 0.01)
+        XCTAssertNotEqual(initial.buttonBorder.midY, final.buttonBorder.midY, accuracy: 0.01)
+
+        func liesBetween(_ value: CGFloat, _ lhs: CGFloat, _ rhs: CGFloat) -> Bool {
+            value > min(lhs, rhs) + 0.01 && value < max(lhs, rhs) - 0.01
+        }
+
+        XCTAssertNotNil(
+            samples.dropLast().first {
+                liesBetween($0.heading.midY, initial.heading.midY, final.heading.midY)
+            },
+            "expected intermediate heading position: initial=\(initial) final=\(final) samples=\(samples)"
+        )
+        XCTAssertNotNil(
+            samples.dropLast().first {
+                liesBetween($0.buttonLabel.midY, initial.buttonLabel.midY, final.buttonLabel.midY)
+            },
+            "expected intermediate button-label position: initial=\(initial) final=\(final) samples=\(samples)"
+        )
+        XCTAssertNotNil(
+            samples.dropLast().first {
+                liesBetween($0.buttonBorder.midY, initial.buttonBorder.midY, final.buttonBorder.midY)
+            },
+            "expected intermediate button-border position: initial=\(initial) final=\(final) samples=\(samples)"
+        )
+        for sample in samples {
+            XCTAssertEqual(
+                sample.buttonLabel.midX,
+                sample.buttonBorder.midX,
+                accuracy: 0.75,
+                "button label moved horizontally inside its border: \(samples)"
+            )
+            for text in sample.compact + sample.expanded where text.opacity > 0.001 {
+                XCTAssertEqual(
+                    text.frame.midX,
+                    160,
+                    accuracy: 1.25,
+                    "changed text moved horizontally at \(sample.time): \(samples)"
+                )
+            }
+        }
+    }
+
+    // ASSERTIONS interpolatedDisplayListFinalTranslationObserved
+    // ASSERTIONS shapeStyleUnchangedTextPresentationOffsetObserved
+    @MainActor
+    func testResolvedAnimationLabVariantTextStaysCenteredDuringSpringMove() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedAnimationLabSpringRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingResolvedAnimationLabSpringRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 360),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 360),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> (
+            background: CGRect,
+            compact: [LayoutSchedulingResolvedTextSample],
+            expanded: [LayoutSchedulingResolvedTextSample]
+        ) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            let background = try XCTUnwrap(
+                translucentShapeFillRecords(in: list).first?.bounds
+            )
+            return (
+                background,
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "compact",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "expanded",
+                    environment: controller.environment
+                )
+            )
+        }
+
+        let initial = try update(time: 0)
+        XCTAssertFalse(initial.compact.isEmpty)
+        for text in initial.compact {
+            XCTAssertEqual(text.frame.midX, initial.background.midX, accuracy: 1.1)
+        }
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        for time in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.25, 2.5, 5.1] {
+            let sample = try update(time: time)
+            let texts = sample.compact + sample.expanded
+            XCTAssertFalse(texts.isEmpty, "missing variant text at \(time)")
+            for text in texts where text.opacity > 0.001 {
+                XCTAssertEqual(
+                    text.frame.midX,
+                    sample.background.midX,
+                    accuracy: 3,
+                    "variant text left the child center at \(time): \(sample)"
+                )
+            }
+        }
+    }
+
     // ASSERTIONS dynamicLayoutRetainedGeometryPreservationObserved
     @MainActor
     func testAnimationLabRetainedChildKeepsLastPublishedGeometryDuringRemoval() throws {
@@ -1452,6 +1940,888 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 "title reversed vertically: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
             )
         }
+    }
+
+    // ASSERTIONS animationLabRemovalTitleVerticalMonotonicObserved
+    @MainActor
+    func testResolvedAnimationLabRemovalTitleSamplesIntermediateVerticalPosition() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedAnimationLabRemovalTitleRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingResolvedAnimationLabRemovalTitleRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 360),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 360),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let samples = renderedResolvedTextSamples(
+                in: try displayList(in: controller),
+                matching: "Retained removal",
+                environment: controller.environment
+            )
+            return try XCTUnwrap(
+                samples.max { $0.opacity < $1.opacity }?.frame,
+                "missing resolved retained-removal title at \(time)"
+            )
+        }
+
+        let initialBounds = try update(time: 0)
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var samples: [(time: Double, bounds: CGRect)] = []
+        for time in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.0, 2.5, 4.0, 5.1] {
+            samples.append((time, try update(time: time)))
+        }
+
+        let finalBounds = try XCTUnwrap(samples.last?.bounds)
+        XCTAssertNotEqual(initialBounds.midY, finalBounds.midY, accuracy: 0.01)
+        XCTAssertNotNil(
+            samples.dropLast().first { sample in
+                sample.bounds.midY > min(initialBounds.midY, finalBounds.midY) + 0.01 &&
+                    sample.bounds.midY < max(initialBounds.midY, finalBounds.midY) - 0.01
+            },
+            "expected intermediate resolved title position: initial=\(initialBounds) final=\(finalBounds) samples=\(samples)"
+        )
+
+        try XCTUnwrap(probe.insertChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        var insertionSamples: [(time: Double, bounds: CGRect)] = []
+        for offset in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.0, 2.5, 4.0, 5.1] {
+            insertionSamples.append((
+                time: 5.1 + offset,
+                bounds: try update(time: 5.1 + offset)
+            ))
+        }
+        let insertionFinal = try XCTUnwrap(insertionSamples.last?.bounds)
+        XCTAssertEqual(insertionFinal.midY, initialBounds.midY, accuracy: 0.01)
+        XCTAssertNotNil(
+            insertionSamples.dropLast().first { sample in
+                sample.bounds.midY > min(finalBounds.midY, insertionFinal.midY) + 0.01 &&
+                    sample.bounds.midY < max(finalBounds.midY, insertionFinal.midY) - 0.01
+            },
+            "expected existing insertion animation to remain continuous: start=\(finalBounds) final=\(insertionFinal) samples=\(insertionSamples)"
+        )
+    }
+
+    @MainActor
+    func testAnimationLabReplacementTextStaysAtInsertionPositionDuringRemoval() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let textFont = VUI.Font(textureFont)
+        let previousAppContext = appContext
+        let testAppContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        appContext = testAppContext
+        defer { appContext = previousAppContext }
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingAnimationLabReplacementRoot(
+                counter: counter,
+                probe: probe,
+                font: textFont
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingAnimationLabReplacementRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 360),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 360),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        let renderer = DisplayList.GraphicsRenderer()
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> LayoutSchedulingResolvedTextSample? {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            let samples = renderedResolvedTextSamples(
+                in: list,
+                matching: "child removed",
+                environment: controller.environment
+            )
+            return samples.last
+        }
+
+        func renderedInsertionPixels(
+            in list: DisplayList,
+            titleFrame: CGRect,
+            detailFrame: CGRect
+        ) throws -> (
+            titleBounds: CGRect?,
+            titleSpread: Double?,
+            detailDarkness: Double?,
+            backgroundBounds: CGRect?
+        ) {
+            let width = 560
+            let height = 360
+            let commandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
+            let context = try XCTUnwrap(GraphicsContext(
+                sceneResources: controller.sceneResources,
+                environment: controller.environment,
+                viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: width, height: height),
+                commandBuffer: commandBuffer
+            ))
+            context.clear(with: .white)
+            renderer.render(
+                list: list,
+                at: controller.animationTimestamp,
+                in: context
+            )
+            let condition = NSCondition()
+            var completed = false
+            commandBuffer.addCompletedHandler { _ in
+                condition.lock()
+                completed = true
+                condition.broadcast()
+                condition.unlock()
+            }
+            condition.lock()
+            XCTAssertTrue(commandBuffer.commit())
+            let timeout = Date(timeIntervalSinceNow: 5)
+            while !completed {
+                if !condition.wait(until: timeout) {
+                    XCTFail("GPU command buffer timed out")
+                    break
+                }
+            }
+            condition.unlock()
+
+            let staging = try XCTUnwrap(
+                deviceContext.makeCPUAccessible(texture: context.backdrop)
+            )
+            let pointer = try XCTUnwrap(staging.contents())
+            let bytes = UnsafeRawBufferPointer(
+                start: pointer,
+                count: width * height * 4
+            )
+
+            func luminance(x: Int, y: Int) -> Double {
+                let offset = (y * width + x) * 4
+                return (
+                    Double(bytes[offset]) +
+                        Double(bytes[offset + 1]) +
+                        Double(bytes[offset + 2])
+                ) / 3
+            }
+
+            var backgroundMinX = width
+            var backgroundMinY = height
+            var backgroundMaxX = -1
+            var backgroundMaxY = -1
+            for y in 0..<height {
+                for x in 0..<width {
+                    let offset = (y * width + x) * 4
+                    let red = Int(bytes[offset])
+                    let green = Int(bytes[offset + 1])
+                    let blue = Int(bytes[offset + 2])
+                    if green > red + 8, green > blue + 8 {
+                        backgroundMinX = min(backgroundMinX, x)
+                        backgroundMinY = min(backgroundMinY, y)
+                        backgroundMaxX = max(backgroundMaxX, x)
+                        backgroundMaxY = max(backgroundMaxY, y)
+                    }
+                }
+            }
+            let backgroundBounds: CGRect? =
+                if backgroundMaxX >= backgroundMinX,
+                   backgroundMaxY >= backgroundMinY {
+                    CGRect(
+                        x: backgroundMinX,
+                        y: backgroundMinY,
+                        width: backgroundMaxX - backgroundMinX + 1,
+                        height: backgroundMaxY - backgroundMinY + 1
+                    )
+                } else {
+                    nil
+                }
+
+            var minX = width
+            var minY = height
+            var maxX = -1
+            var maxY = -1
+            let titleFrame = titleFrame.standardized
+            let titleRegion = CGRect(
+                x: titleFrame.minX - 6,
+                y: titleFrame.minY,
+                width: titleFrame.width + 12,
+                height: max(
+                    min(titleFrame.maxY, detailFrame.standardized.minY - 0.5) -
+                        titleFrame.minY,
+                    0
+                )
+            )
+            let titleMinX = max(Int(floor(titleRegion.minX)), 0)
+            let titleMaxX = min(Int(ceil(titleRegion.maxX)), width)
+            let titleMinY = max(Int(floor(titleRegion.minY)), 0)
+            let titleMaxY = min(Int(ceil(titleRegion.maxY)), height)
+            var titleWeights: [(x: Int, y: Int, value: Double)] = []
+            var maximumTitleWeight = 0.0
+            for y in titleMinY..<titleMaxY {
+                for x in titleMinX..<titleMaxX {
+                    let offset = (y * width + x) * 4
+                    let value = max(
+                        255 - max(
+                            Double(bytes[offset]),
+                            Double(bytes[offset + 1]),
+                            Double(bytes[offset + 2])
+                        ),
+                        0
+                    )
+                    maximumTitleWeight = max(maximumTitleWeight, value)
+                    titleWeights.append((x, y, value))
+                }
+            }
+            var totalTitleWeight = 0.0
+            var weightedTitleX = 0.0
+            var weightedTitleX2 = 0.0
+            let titleWeightThreshold = maximumTitleWeight * 0.08
+            for sample in titleWeights where sample.value > titleWeightThreshold {
+                minX = min(minX, sample.x)
+                minY = min(minY, sample.y)
+                maxX = max(maxX, sample.x)
+                maxY = max(maxY, sample.y)
+                totalTitleWeight += sample.value
+                weightedTitleX += Double(sample.x) * sample.value
+                weightedTitleX2 += Double(sample.x * sample.x) * sample.value
+            }
+            let titleBounds: CGRect? = if maxX >= minX, maxY >= minY {
+                CGRect(
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX + 1,
+                    height: maxY - minY + 1
+                )
+            } else {
+                nil
+            }
+            let titleSpread: Double? = if totalTitleWeight > 0 {
+                sqrt(max(
+                    weightedTitleX2 / totalTitleWeight -
+                        pow(weightedTitleX / totalTitleWeight, 2),
+                    0
+                ))
+            } else {
+                nil
+            }
+
+            let detail = detailFrame.standardized
+            let detailMinX = max(Int(floor(detail.minX)) - 1, 0)
+            let detailMaxX = min(Int(ceil(detail.maxX)) + 1, width)
+            let detailMinY = max(Int(floor(detail.minY)) - 1, 0)
+            let detailMaxY = min(Int(ceil(detail.maxY)) + 1, height)
+            let detailBackgroundMinY = min(detailMaxY + 2, height)
+            let detailBackgroundMaxY = min(detailBackgroundMinY + 4, height)
+            guard detailMinX < detailMaxX,
+                  detailMinY < detailMaxY,
+                  detailBackgroundMinY < detailBackgroundMaxY else {
+                return (titleBounds, titleSpread, nil, backgroundBounds)
+            }
+
+            var backgroundSum = 0.0
+            var backgroundCount = 0
+            for y in detailBackgroundMinY..<detailBackgroundMaxY {
+                for x in detailMinX..<detailMaxX {
+                    backgroundSum += luminance(x: x, y: y)
+                    backgroundCount += 1
+                }
+            }
+            let background = backgroundSum / Double(backgroundCount)
+            var darkness = 0.0
+            for y in detailMinY..<detailMaxY {
+                for x in detailMinX..<detailMaxX {
+                    darkness += max(background - luminance(x: x, y: y), 0)
+                }
+            }
+            return (titleBounds, titleSpread, darkness, backgroundBounds)
+        }
+
+        XCTAssertNil(try update(time: 0))
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        let samples = try [
+            0.001,
+            1.0 / 60.0,
+            2.0 / 60.0,
+            0.10,
+            0.50,
+            1.25,
+            2.50,
+            6.00,
+        ].compactMap { time in
+            try update(time: time)
+        }
+        let final = try XCTUnwrap(samples.last)
+        XCTAssertFalse(samples.isEmpty)
+        for sample in samples {
+            XCTAssertEqual(sample.frame.midX, final.frame.midX, accuracy: 0.001, "\(samples)")
+            XCTAssertEqual(sample.frame.midY, final.frame.midY, accuracy: 0.001, "\(samples)")
+        }
+        XCTAssertLessThan(try XCTUnwrap(samples.first).opacity, final.opacity)
+        XCTAssertEqual(final.opacity, 1, accuracy: 0.001)
+
+        try XCTUnwrap(probe.insertChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        let insertionSamples: [LayoutSchedulingAnimationLabInsertionSample] = try [
+            6.001,
+            6.0 + 1.0 / 60.0,
+            6.0 + 2.0 / 60.0,
+            6.10,
+            6.50,
+            7.25,
+            8.50,
+            10.35,
+            10.90,
+            11.10,
+        ].map { time in
+            _ = try update(time: time)
+            let list = try displayList(in: controller)
+            let title = renderedResolvedTextSamples(
+                in: list,
+                matching: "Animated child",
+                environment: controller.environment
+            ).last
+            let detail = renderedResolvedTextSamples(
+                in: list,
+                matching: "compact",
+                environment: controller.environment
+            ).last
+            let pixels: (
+                titleBounds: CGRect?,
+                titleSpread: Double?,
+                detailDarkness: Double?,
+                backgroundBounds: CGRect?
+            ) =
+                if time >= 7.25, let title, let detail {
+                try renderedInsertionPixels(
+                    in: list,
+                    titleFrame: title.frame,
+                    detailFrame: detail.frame
+                )
+            } else {
+                (
+                    titleBounds: nil,
+                    titleSpread: nil,
+                    detailDarkness: nil,
+                    backgroundBounds: nil
+                )
+            }
+            return LayoutSchedulingAnimationLabInsertionSample(
+                time: time,
+                title: title,
+                detail: detail,
+                titlePixels: pixels.titleBounds,
+                titlePixelSpread: pixels.titleSpread,
+                detailPixelDarkness: pixels.detailDarkness,
+                backgroundPixels: pixels.backgroundBounds
+            )
+        }
+        let insertedFinal = try XCTUnwrap(insertionSamples.last?.title)
+        let detailFinal = try XCTUnwrap(insertionSamples.last?.detail)
+        let insertedIntermediate = try XCTUnwrap(
+            insertionSamples.dropLast().compactMap { $0.title }.first {
+                $0.opacity > 0.001 && $0.opacity < 0.999
+            },
+            "expected an intermediate insertion opacity: \(insertionSamples)"
+        )
+        XCTAssertLessThan(insertedIntermediate.opacity, insertedFinal.opacity)
+        XCTAssertEqual(insertedFinal.opacity, 1, accuracy: 0.001)
+        let scaledIntermediate = try XCTUnwrap(
+            insertionSamples.first(where: { abs($0.time - 8.50) < 0.001 })?.title
+        )
+        let scaledDetailIntermediate = try XCTUnwrap(
+            insertionSamples.first(where: { abs($0.time - 8.50) < 0.001 })?.detail
+        )
+        XCTAssertLessThan(
+            scaledIntermediate.frame.width,
+            insertedFinal.frame.width - 0.25,
+            "Animated child must share the insertion scale: \(insertionSamples)"
+        )
+        XCTAssertLessThan(
+            scaledDetailIntermediate.frame.width,
+            detailFinal.frame.width - 0.25,
+            "compact must share the insertion scale: \(insertionSamples)"
+        )
+        let insertionPreterminal = try XCTUnwrap(
+            insertionSamples.first(where: { abs($0.time - 10.90) < 0.001 })
+        )
+        let titlePreterminal = try XCTUnwrap(insertionPreterminal.title)
+        let detailPreterminal = try XCTUnwrap(insertionPreterminal.detail)
+        XCTAssertGreaterThan(
+            titlePreterminal.frame.width / insertedFinal.frame.width,
+            0.94,
+            "Animated child must approach its final scale before completion: \(insertionSamples)"
+        )
+        XCTAssertGreaterThan(
+            detailPreterminal.frame.width / detailFinal.frame.width,
+            0.90,
+            "compact must approach its final scale before completion: \(insertionSamples)"
+        )
+        XCTAssertGreaterThan(
+            detailPreterminal.opacity / detailFinal.opacity,
+            0.94,
+            "compact opacity must not jump at insertion completion: \(insertionSamples)"
+        )
+        XCTAssertEqual(
+            titlePreterminal.frame.midY,
+            insertedFinal.frame.midY,
+            accuracy: 0.5,
+            "Animated child must reach its terminal position continuously: \(insertionSamples)"
+        )
+        XCTAssertEqual(
+            detailPreterminal.frame.midY,
+            detailFinal.frame.midY,
+            accuracy: 0.5,
+            "compact must reach its terminal position continuously: \(insertionSamples)"
+        )
+        let preterminalPixels = try XCTUnwrap(insertionPreterminal.titlePixels)
+        let finalPixels = try XCTUnwrap(insertionSamples.last?.titlePixels)
+        let midpointSpread = try XCTUnwrap(
+            insertionSamples.first(where: { abs($0.time - 8.50) < 0.001 })?
+                .titlePixelSpread
+        )
+        let finalSpread = try XCTUnwrap(
+            insertionSamples.last?.titlePixelSpread
+        )
+        XCTAssertLessThan(
+            midpointSpread / finalSpread,
+            0.94,
+            "Rendered Animated child pixels must share the insertion scale"
+        )
+        let midpointBackgroundPixels = try XCTUnwrap(
+            insertionSamples.first(where: { abs($0.time - 8.50) < 0.001 })?
+                .backgroundPixels
+        )
+        let finalBackgroundPixels = try XCTUnwrap(
+            insertionSamples.last?.backgroundPixels
+        )
+        XCTAssertEqual(
+            midpointBackgroundPixels.width / finalBackgroundPixels.width,
+            midpointSpread / finalSpread,
+            accuracy: 0.12,
+            "Animated child and its background must share one insertion scale"
+        )
+        XCTAssertEqual(
+            preterminalPixels.midY,
+            finalPixels.midY,
+            accuracy: 2,
+            "Rendered Animated child pixels must not jump at completion"
+        )
+        let preterminalDetailDarkness = try XCTUnwrap(
+            insertionPreterminal.detailPixelDarkness
+        )
+        let finalDetailDarkness = try XCTUnwrap(
+            insertionSamples.last?.detailPixelDarkness
+        )
+        XCTAssertGreaterThan(
+            preterminalDetailDarkness / finalDetailDarkness,
+            0.94,
+            "Rendered compact opacity must not jump at completion"
+        )
+
+        for cycle in 0..<3 {
+            let cycleStart = 11.1 + Double(cycle) * 10.2
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            for offset in [0.001, 2.5, 5.1] {
+                _ = try update(time: cycleStart + offset)
+            }
+            try XCTUnwrap(probe.insertChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            for offset in [5.101, 7.6, 10.2] {
+                _ = try update(time: cycleStart + offset)
+            }
+        }
+
+        var rapidTime = 41.7
+        for _ in 0..<12 {
+            try XCTUnwrap(probe.removeChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+            rapidTime += 0.05
+            _ = try update(time: rapidTime)
+            try XCTUnwrap(probe.insertChild)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.005))
+            rapidTime += 0.10
+            _ = try update(time: rapidTime)
+        }
+    }
+
+    @MainActor
+    func testContentTransitionLabRetainsAnimatedTextAndNumericTransitions() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingContentTransitionProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingContentTransitionRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingContentTransitionRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 680, height: 300),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 680, height: 300),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 680, height: 300),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try displayList(in: controller)
+        }
+
+        let initial = try update(0)
+        XCTAssertFalse(
+            resolvedTextSamples(
+                in: initial,
+                matching: "Compact",
+                environment: controller.environment
+            ).isEmpty
+        )
+
+        try XCTUnwrap(probe.changeText)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let changedLists = try [
+            0.001,
+            0.01,
+            0.02,
+            0.03,
+            0.05,
+            0.10,
+            0.50,
+            1.00,
+            2.53,
+        ].map(update)
+        let changed = try XCTUnwrap(changedLists.last)
+        let compact = resolvedTextSamples(
+            in: changed,
+            matching: "Compact",
+            environment: controller.environment
+        )
+        let expanded = resolvedTextSamples(
+            in: changed,
+            matching: "Expanded value",
+            environment: controller.environment
+        )
+        XCTAssertFalse(compact.isEmpty, displayListTreeDescription(changed))
+        XCTAssertFalse(expanded.isEmpty, displayListTreeDescription(changed))
+        XCTAssertTrue(
+            compact.contains { $0.opacity > 0 && $0.opacity < 1 },
+            "\(compact)"
+        )
+        XCTAssertTrue(
+            expanded.contains { $0.opacity > 0 && $0.opacity < 1 },
+            "\(expanded)"
+        )
+        for list in changedLists {
+            let compactSamples = renderedResolvedTextSamples(
+                in: list,
+                matching: "Compact",
+                environment: controller.environment
+            )
+            let expandedSamples = renderedResolvedTextSamples(
+                in: list,
+                matching: "Expanded value",
+                environment: controller.environment
+            )
+            for source in compactSamples where source.opacity > 0.001 {
+                for target in expandedSamples where target.opacity > 0.001 {
+                    XCTAssertEqual(
+                        source.frame.midX,
+                        target.frame.midX,
+                        accuracy: 1,
+                        "changed-text endpoints must share the presentation center: compact=\(compactSamples) expanded=\(expandedSamples)"
+                    )
+                }
+            }
+        }
+
+        _ = try update(5.2)
+        try XCTUnwrap(probe.increment)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(5.21)
+        _ = try update(5.22)
+        _ = try update(5.23)
+        let incremented = try update(5.24)
+        XCTAssertTrue(
+            incremented.effects.contains {
+                if case .contentTransition = $0.effect {
+                    return true
+                }
+                return false
+            },
+            displayListTreeDescription(incremented)
+        )
+    }
+
+    @MainActor
+    func testSystemFontNumericTransitionSurvivesRapidRepeatedRetargets() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingContentTransitionProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSystemNumericTransitionRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSystemNumericTransitionRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 200, height: 180),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 200, height: 180),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the numeric-text resource context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+        var time = 0.0
+
+        func update() throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 200, height: 180),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try displayList(in: controller)
+        }
+
+        _ = try update()
+        for _ in 0..<256 {
+            try XCTUnwrap(probe.increment)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.001))
+            let list = try update()
+            XCTAssertFalse(
+                renderedTextBounds(in: list).isEmpty
+            )
+            let transitionContents = list.effects.first {
+                    if case .contentTransition = $0.effect {
+                        return true
+                    }
+                    return false
+                }?.contents
+            XCTAssertNotNil(transitionContents, displayListTreeDescription(list))
+            XCTAssertFalse(
+                transitionContents?.itemCommands.compactMap(\.bounds).contains {
+                    $0.width >= 100
+                } ?? true,
+                "rapid numeric updates must retain glyph-bounded operations"
+            )
+        }
+    }
+
+    @MainActor
+    func testSystemSymbolDrawTransitionAnimatesFreshInsertion() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSymbolDrawTransitionRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSymbolDrawTransitionRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 160, height: 120),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 160, height: 120),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the symbol resource context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 160, height: 120),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try displayList(in: controller)
+        }
+
+        _ = try update(0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        for time in [0.001, 0.05, 0.20, 0.50, 1.20] {
+            _ = try update(time)
+        }
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        let insertion = try [1.201, 1.22, 1.28, 1.40, 1.70, 2.20]
+            .map(update)
+            .map(symbolDrawProgressSamples(in:))
+
+        XCTAssertTrue(
+            insertion.flatMap { $0.compactMap { $0 } }.contains { progresses in
+                progresses.contains { $0 > 0.001 && $0 < 0.999 }
+            },
+            "fresh symbol insertion did not produce an intermediate draw presentation: \(insertion)"
+        )
     }
 
     @MainActor
@@ -2455,6 +3825,355 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         return bounds
     }
 
+    private func resolvedTextSamples(
+        in displayList: DisplayList,
+        matching string: String,
+        environment: EnvironmentValues,
+        inheritedOpacity: Double = 1
+    ) -> [LayoutSchedulingResolvedTextSample] {
+        displayList.items.reduce(into: []) { samples, item in
+            let itemOpacity = inheritedOpacity * Double(item.opacity)
+            switch item.value {
+            case let .content(content):
+                if case let .text(text) = content.value,
+                   text.view.text.storage?.string == string {
+                    let foregroundOpacity: Double
+                    if case let .text(record, _) = content.command,
+                       case let .color(color)? = record.foreground {
+                        foregroundOpacity = Double(color.resolve(in: environment).opacity)
+                    } else {
+                        foregroundOpacity = 1
+                    }
+                    samples.append(LayoutSchedulingResolvedTextSample(
+                        frame: text.frame.applying(text.transform).standardized,
+                        opacity: itemOpacity * foregroundOpacity
+                    ))
+                }
+                switch content.value {
+                case let .style(style):
+                    let styleOpacity: Double
+                    if case let .opacity(opacity) = style.style {
+                        styleOpacity = opacity
+                    } else {
+                        styleOpacity = 1
+                    }
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: style.contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity * styleOpacity
+                    ))
+                case let .crossFade(crossFade):
+                    let sourceOpacity: Double
+                    let targetOpacity: Double
+                    if case let .effect(
+                        .crossFade(sourceFraction, targetFraction),
+                        _
+                    ) = crossFade.command {
+                        sourceOpacity = 1 - Double(sourceFraction)
+                        targetOpacity = Double(targetFraction)
+                    } else {
+                        sourceOpacity = 1
+                        targetOpacity = 1
+                    }
+                    if let source = crossFade.source {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: source.contents,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity * sourceOpacity
+                        ))
+                    }
+                    if let target = crossFade.target {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: target.contents,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity * targetOpacity
+                        ))
+                    }
+                case let .flattened(contents, _, _):
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity
+                    ))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        samples.append(contentsOf: resolvedTextSamples(
+                            in: local.list,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let effectOpacity: Double
+                if case let .opacity(opacity) = effect {
+                    effectOpacity = Double(opacity)
+                } else {
+                    effectOpacity = 1
+                }
+                samples.append(contentsOf: resolvedTextSamples(
+                    in: contents,
+                    matching: string,
+                    environment: environment,
+                    inheritedOpacity: itemOpacity * effectOpacity
+                ))
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    samples.append(contentsOf: resolvedTextSamples(
+                        in: contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
+    private func renderedResolvedTextSamples(
+        in displayList: DisplayList,
+        matching string: String,
+        environment: EnvironmentValues,
+        inheritedOpacity: Double = 1
+    ) -> [LayoutSchedulingResolvedTextSample] {
+        func applying(
+            _ transform: CGAffineTransform,
+            to samples: [LayoutSchedulingResolvedTextSample]
+        ) -> [LayoutSchedulingResolvedTextSample] {
+            guard !transform.isIdentity else { return samples }
+            return samples.map { sample in
+                var sample = sample
+                sample.frame = sample.frame.applying(transform).standardized
+                return sample
+            }
+        }
+
+        func branchTransform(
+            from sourceBounds: CGRect,
+            to outputBounds: CGRect
+        ) -> CGAffineTransform? {
+            guard sourceBounds.width.magnitude > .ulpOfOne,
+                  sourceBounds.height.magnitude > .ulpOfOne else {
+                return nil
+            }
+            let scaleX = outputBounds.width / sourceBounds.width
+            let scaleY = outputBounds.height / sourceBounds.height
+            return CGAffineTransform(
+                a: scaleX,
+                b: 0,
+                c: 0,
+                d: scaleY,
+                tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                ty: outputBounds.minY - sourceBounds.minY * scaleY
+            )
+        }
+
+        return displayList.items.reduce(into: []) { samples, item in
+            let itemOpacity = inheritedOpacity * Double(item.opacity)
+            switch item.value {
+            case let .content(content):
+                if case let .text(text) = content.value,
+                   text.view.text.storage?.string == string {
+                    let foregroundOpacity: Double
+                    if case let .text(record, _) = content.command,
+                       case let .color(color)? = record.foreground {
+                        foregroundOpacity = Double(color.resolve(in: environment).opacity)
+                    } else {
+                        foregroundOpacity = 1
+                    }
+                    samples.append(LayoutSchedulingResolvedTextSample(
+                        frame: text.frame.applying(text.transform).standardized,
+                        opacity: itemOpacity * foregroundOpacity
+                    ))
+                }
+                switch content.value {
+                case let .style(style):
+                    let styleOpacity: Double
+                    if case let .opacity(opacity) = style.style {
+                        styleOpacity = opacity
+                    } else {
+                        styleOpacity = 1
+                    }
+                    let nested = renderedResolvedTextSamples(
+                        in: style.contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity * styleOpacity
+                    )
+                    samples.append(contentsOf: applying(style.transform, to: nested))
+                case let .crossFade(crossFade):
+                    let sourceOpacity: Double
+                    let targetOpacity: Double
+                    if case let .effect(
+                        .crossFade(sourceFraction, targetFraction),
+                        _
+                    ) = crossFade.command {
+                        sourceOpacity = 1 - Double(sourceFraction)
+                        targetOpacity = Double(targetFraction)
+                    } else {
+                        sourceOpacity = 1
+                        targetOpacity = 1
+                    }
+                    if let source = crossFade.source,
+                       let transform = branchTransform(
+                        from: source.sourceBounds,
+                        to: source.outputBounds
+                       ) {
+                        let nested = renderedResolvedTextSamples(
+                            in: source.contents,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity * sourceOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform.concatenating(crossFade.transform),
+                            to: nested
+                        ))
+                    }
+                    if let target = crossFade.target,
+                       let transform = branchTransform(
+                        from: target.sourceBounds,
+                        to: target.outputBounds
+                       ) {
+                        let nested = renderedResolvedTextSamples(
+                            in: target.contents,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity * targetOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform.concatenating(crossFade.transform),
+                            to: nested
+                        ))
+                    }
+                case let .flattened(contents, origin, _):
+                    let nested = renderedResolvedTextSamples(
+                        in: contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(translationX: origin.x, y: origin.y),
+                        to: nested
+                    ))
+                case let .drawing(contents, origin, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        let nested = renderedResolvedTextSamples(
+                            in: local.list,
+                            matching: string,
+                            environment: environment,
+                            inheritedOpacity: itemOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            CGAffineTransform(translationX: origin.x, y: origin.y),
+                            to: nested
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let effectOpacity: Double
+                if case let .opacity(opacity) = effect {
+                    effectOpacity = Double(opacity)
+                } else {
+                    effectOpacity = 1
+                }
+                let nested = renderedResolvedTextSamples(
+                    in: contents,
+                    matching: string,
+                    environment: environment,
+                    inheritedOpacity: itemOpacity * effectOpacity
+                )
+                if case let .transform(projection) = effect, projection.isAffine {
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ),
+                        to: nested
+                    ))
+                } else {
+                    samples.append(contentsOf: nested)
+                }
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    samples.append(contentsOf: renderedResolvedTextSamples(
+                        in: contents,
+                        matching: string,
+                        environment: environment,
+                        inheritedOpacity: itemOpacity
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
+    private func symbolDrawProgressSamples(
+        in displayList: DisplayList
+    ) -> [[Double]?] {
+        var samples: [[Double]?] = []
+
+        func collect(_ list: DisplayList) {
+            for item in list.items {
+                switch item.value {
+                case let .content(content):
+                    switch content.value {
+                    case let .image(image):
+                        samples.append(image.image.symbolDrawProgresses)
+                    case let .style(style):
+                        collect(style.contents)
+                    case let .crossFade(crossFade):
+                        if let source = crossFade.source {
+                            collect(source.contents)
+                        }
+                        if let target = crossFade.target {
+                            collect(target.contents)
+                        }
+                    case let .flattened(nested, _, _):
+                        collect(nested)
+                    case let .drawing(contents, _, _):
+                        if let local = contents as? DisplayList.LocalContents {
+                            collect(local.list)
+                        }
+                    case .backend,
+                         .color,
+                         .shape,
+                         .text:
+                        break
+                    }
+                case let .effect(_, contents):
+                    collect(contents)
+                case let .states(states):
+                    for (_, contents) in states {
+                        collect(contents)
+                    }
+                case .empty:
+                    break
+                }
+            }
+        }
+
+        collect(displayList)
+        return samples
+    }
+
     private func translucentShapeFillColors(in displayList: DisplayList) -> [VUI.Color] {
         translucentShapeFillRecords(in: displayList).map(\.color)
     }
@@ -2565,6 +4284,11 @@ private final class LayoutSchedulingAnimationLabProbe {
     var insertChild: (() -> Void)?
     var springMove: (() -> Void)?
     let text = LayoutSchedulingAnimationProbe()
+}
+
+private final class LayoutSchedulingContentTransitionProbe {
+    var increment: (() -> Void)?
+    var changeText: (() -> Void)?
 }
 
 private enum LayoutSchedulingResourceEvent: Equatable {
@@ -2773,7 +4497,7 @@ private struct LayoutSchedulingResourceTransactionProbe: View {
                 )
             )
             var list = ResourceList()
-            list.items.append { _ in }
+            list.items.append(ResourceList.Task(transaction: Transaction()) { _ in })
             return list
         }
         let layoutComputer = graph.makeInput(
@@ -2843,6 +4567,54 @@ private struct LayoutSchedulingCompletionStatusRoot: View {
         case 2: 160
         default: 40
         }
+    }
+}
+
+private struct LayoutSchedulingResolvedRemovalStatusRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    let font: VUI.Font
+    @State private var showChild = true
+    @State private var runCount = 0
+    @State private var completionStatus = "idle"
+
+    var body: some View {
+        probe.toggle = {
+            let nextRun = runCount + 1
+            let wasVisible = showChild
+            runCount = nextRun
+            completionStatus = "removal running"
+            withAnimation(
+                .easeInOut(duration: 5.0),
+                completionCriteria: .removed
+            ) {
+                showChild.toggle()
+            } completion: {
+                completionStatus = wasVisible
+                    ? "removed completion \(nextRun)"
+                    : "unexpected removal state"
+                probe.completions.append(nextRun)
+            }
+        }
+        return VStack(spacing: 20) {
+            Text("Run \(runCount): \(completionStatus)")
+                .font(font)
+
+            VStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.blue)
+                    .frame(width: 120, height: 10)
+                if showChild {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.green)
+                        .frame(width: 72, height: 48)
+                        .transition(
+                            .opacity.combined(with: .scale(scale: 0.82))
+                        )
+                }
+            }
+            .frame(width: 190, height: 150)
+        }
+        .frame(width: 420, height: 240)
     }
 }
 
@@ -3117,6 +4889,199 @@ private struct LayoutSchedulingAnimationLabButtonRowRoot: View {
     }
 }
 
+private struct LayoutSchedulingResolvedTextButtonRowRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    let font: VUI.Font
+    @State private var showChild = true
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 5)) {
+                showChild.toggle()
+            }
+        }
+        return HStack(spacing: 10) {
+            Button(action: {}) {
+                Text(verbatim: "Spring Move")
+                    .font(font)
+            }
+            Button(action: {}) {
+                Text(verbatim: showChild ? "Remove Child" : "Insert Child")
+                    .font(font)
+            }
+            Button(action: {}) {
+                Text(verbatim: "Sequence")
+                    .font(font)
+            }
+            Button(action: {}) {
+                Text(verbatim: "Close")
+                    .font(font)
+            }
+        }
+        .frame(width: 560, height: 120)
+    }
+}
+
+private struct LayoutSchedulingResolvedContentGeometryRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var alternateText = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 5)) {
+                alternateText.toggle()
+            }
+        }
+        return VStack(spacing: 12) {
+            Text(verbatim: "Interpolate")
+                .font(.system(.headline))
+            Text(verbatim: alternateText ? "Expanded value" : "Compact")
+                .font(
+                    .system(
+                        size: alternateText ? 30 : 20,
+                        weight: .semibold
+                    )
+                )
+                .foregroundColor(alternateText ? .purple : .blue)
+                .contentTransition(.interpolate)
+            Button(action: {}) {
+                Text(verbatim: "Change Text")
+                    .font(.system(.body))
+            }
+        }
+        .frame(width: 240)
+        .frame(width: 320, height: 240)
+    }
+}
+
+private struct LayoutSchedulingResolvedAnimationLabSpringRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    let font: VUI.Font
+    @State private var expanded = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.spring(duration: 5, bounce: 0.35)) {
+                expanded.toggle()
+            }
+        }
+        return HStack(spacing: 28) {
+            RoundedRectangle(cornerRadius: expanded ? 28 : 10)
+                .fill(expanded ? Color.purple : Color.blue)
+                .frame(
+                    width: expanded ? 180 : 72,
+                    height: expanded ? 96 : 72
+                )
+
+            VStack(spacing: 8) {
+                Text(verbatim: "Retained removal")
+                    .font(font)
+                VStack(spacing: 6) {
+                    Text(verbatim: "Animated child")
+                        .font(font)
+                    Text(verbatim: expanded ? "expanded" : "compact")
+                        .font(font)
+                }
+                .padding(18)
+                .background {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            expanded
+                                ? Color.orange.opacity(0.35)
+                                : Color.green.opacity(0.35)
+                        )
+                }
+                .scaleEffect(expanded ? 1.0 : 0.82)
+                .offset(y: expanded ? -8 : 8)
+            }
+            .frame(width: 190, height: 150)
+            .border(.gray, width: 1)
+        }
+        .frame(width: 560, height: 360)
+    }
+}
+
+private struct LayoutSchedulingResolvedAnimationLabRemovalTitleRoot: View {
+    let probe: LayoutSchedulingAnimationLabProbe
+    let font: VUI.Font
+    @State private var expanded = false
+    @State private var showRetainedChild = true
+
+    var body: some View {
+        probe.removeChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .removed
+            ) {
+                showRetainedChild = false
+            } completion: {
+            }
+        }
+        probe.insertChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .logicallyComplete
+            ) {
+                showRetainedChild = true
+            } completion: {
+            }
+        }
+        return HStack(spacing: 28) {
+            RoundedRectangle(cornerRadius: expanded ? 28 : 10)
+                .fill(expanded ? Color.purple : Color.blue)
+                .frame(
+                    width: expanded ? 180 : 72,
+                    height: expanded ? 96 : 72
+                )
+                .scaleEffect(expanded ? 1.08 : 0.78)
+                .rotationEffect(.degrees(expanded ? 8 : -8))
+                .offset(
+                    x: expanded ? 42 : -42,
+                    y: expanded ? 8 : -8
+                )
+                .opacity(expanded ? 0.92 : 0.55)
+
+            VStack(spacing: 8) {
+                Text(verbatim: "Retained removal")
+                    .font(font)
+                if showRetainedChild {
+                    VStack(spacing: 6) {
+                        Text(verbatim: "Animated child")
+                            .font(font)
+                        Text(verbatim: expanded ? "expanded" : "compact")
+                            .font(font)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(18)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(
+                                expanded
+                                    ? Color.orange.opacity(0.35)
+                                    : Color.green.opacity(0.35)
+                            )
+                    }
+                    .scaleEffect(expanded ? 1.0 : 0.82)
+                    .offset(y: expanded ? -8 : 8)
+                    .transition(
+                        .scale(scale: 0.72)
+                            .combined(with: .opacity)
+                            .animation(.easeInOut(duration: 5))
+                    )
+                } else {
+                    Text(verbatim: "child removed")
+                        .font(font)
+                        .foregroundColor(.secondary)
+                        .padding(18)
+                }
+            }
+            .frame(width: 190, height: 150)
+            .border(.gray, width: 1)
+        }
+        .frame(width: 560, height: 360)
+    }
+}
+
 private struct LayoutSchedulingEnvironmentTextSiblingPlacementRoot: View {
     let counter: LayoutSchedulingCounter
     let probe: LayoutSchedulingAnimationProbe
@@ -3236,6 +5201,150 @@ private struct LayoutSchedulingReinsertedAnimationLabChildRoot: View {
     }
 }
 
+private struct LayoutSchedulingAnimationLabReplacementRoot: View {
+    let counter: LayoutSchedulingCounter
+    let probe: LayoutSchedulingAnimationLabProbe
+    let font: VUI.Font
+    @State private var showRetainedChild = true
+
+    var body: some View {
+        probe.removeChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .removed
+            ) {
+                showRetainedChild = false
+            } completion: {
+            }
+        }
+        probe.insertChild = {
+            withAnimation(
+                .easeInOut(duration: 5),
+                completionCriteria: .logicallyComplete
+            ) {
+                showRetainedChild = true
+            } completion: {
+            }
+        }
+        return LayoutSchedulingPassThroughLayout(counter: counter) {
+            HStack(spacing: 28) {
+                Rectangle()
+                    .fill(Color.blue)
+                    .frame(width: 72, height: 72)
+
+                VStack(spacing: 8) {
+                    LayoutSchedulingRawTextMarker(size: CGSize(width: 160, height: 20))
+                    if showRetainedChild {
+                        VStack(spacing: 6) {
+                            Text("Animated child")
+                                .font(.system(.subheadline))
+                            Text("compact")
+                                .font(.system(.caption))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(18)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.green.opacity(0.35))
+                        }
+                        .scaleEffect(0.82)
+                        .offset(y: 8)
+                        .transition(
+                            .scale(scale: 0.72)
+                                .combined(with: .opacity)
+                                .animation(.easeInOut(duration: 5))
+                        )
+                    } else {
+                        Text("child removed")
+                            .font(.system(.caption))
+                            .foregroundColor(Color(red: 1, green: 0, blue: 1))
+                            .padding(18)
+                    }
+                }
+                .frame(width: 190, height: 150)
+                .border(.gray, width: 1)
+            }
+        }
+        .frame(width: 560, height: 360)
+    }
+}
+
+private struct LayoutSchedulingContentTransitionRoot: View {
+    let probe: LayoutSchedulingContentTransitionProbe
+    let font: VUI.Font
+
+    @State private var count = 0
+    @State private var alternateText = false
+
+    var body: some View {
+        probe.increment = {
+            withAnimation(.linear(duration: 5)) {
+                count += 17
+            }
+        }
+        probe.changeText = {
+            withAnimation(.linear(duration: 5)) {
+                alternateText.toggle()
+            }
+        }
+        return HStack(spacing: 70) {
+            Text("\(count)")
+                .font(font)
+                .contentTransition(.numericText(value: Double(count)))
+                .frame(width: 200, height: 80)
+
+            Text(alternateText ? "Expanded value" : "Compact")
+                .font(font)
+                .foregroundColor(alternateText ? .purple : .blue)
+                .contentTransition(.interpolate)
+                .frame(width: 240, height: 80)
+        }
+        .frame(width: 680, height: 300)
+    }
+}
+
+private struct LayoutSchedulingSystemNumericTransitionRoot: View {
+    let probe: LayoutSchedulingContentTransitionProbe
+    @State private var count = 0
+
+    var body: some View {
+        probe.increment = {
+            withAnimation(.spring(duration: 1.2, bounce: 0.2)) {
+                count += 17
+            }
+        }
+        return VStack(spacing: 12) {
+            Text("\(count)")
+                .font(.system(size: 48, weight: .bold, design: .rounded))
+                .contentTransition(.numericText(value: Double(count)))
+            Button("Increment", action: {})
+        }
+        .frame(width: 200, height: 180)
+    }
+}
+
+private struct LayoutSchedulingSymbolDrawTransitionRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var visible = true
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation {
+                visible.toggle()
+            }
+        }
+        return ZStack {
+            if visible {
+                Image(systemName: "draw")
+                    .frame(width: 48, height: 48)
+                    .foregroundStyle(Color.blue)
+                    .transition(.symbolEffect(.drawOn.individually))
+            }
+        }
+        .frame(width: 160, height: 120)
+    }
+}
+
 private struct LayoutSchedulingRawTextSiblingPlacementRoot: View {
     let counter: LayoutSchedulingCounter
     let probe: LayoutSchedulingAnimationProbe
@@ -3319,6 +5428,43 @@ private struct LayoutSchedulingTextContent: Equatable, InterpolatableContent {
     var value: String
 }
 
+private struct LayoutSchedulingResolvedTextSample {
+    var frame: CGRect
+    var opacity: Double
+}
+
+private struct LayoutSchedulingAnimationLabInsertionSample {
+    var time: Double
+    var title: LayoutSchedulingResolvedTextSample?
+    var detail: LayoutSchedulingResolvedTextSample?
+    var titlePixels: CGRect?
+    var titlePixelSpread: Double?
+    var detailPixelDarkness: Double?
+    var backgroundPixels: CGRect?
+}
+
+private final class LayoutSchedulingAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext?
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var appWindowsController: AppWindowsController? { nil }
+    private var resources: [URL: any DataProtocol] = [:]
+
+    init(graphicsDeviceContext: GraphicsDeviceContext) {
+        self.graphicsDeviceContext = graphicsDeviceContext
+    }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? {
+        resources[url]
+    }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+        resources[url] = data
+    }
+
+    func checkWindowActivities() {
+    }
+}
+
 private struct LayoutSchedulingTransitionTextMarker: View {
     var content: LayoutSchedulingTextContent
     var size: CGSize
@@ -3340,7 +5486,9 @@ private struct LayoutSchedulingTransitionTextMarker: View {
         view[\.probe]._attribute.value.insertionSize = inputSize
         let resolvedSize = graph.makeInput(value: CGSize.zero)
         let boxedSize = UnsafeBox(view._attribute.value.size)
-        let transaction = inputs.base.transaction.value
+        let transaction = graph.transaction(
+            for: view._attribute.identifier
+        ) ?? Transaction()
         let boxedTransaction = UnsafeBox(transaction)
         graph.inbox.enqueue(transaction: transaction) {
             resolvedSize.setValue(boxedSize.value, transaction: boxedTransaction.value)

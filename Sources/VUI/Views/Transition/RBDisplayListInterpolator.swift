@@ -748,6 +748,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     var from: DisplayList
     private(set) var to: DisplayList
     let options: [RBDisplayListInterpolatorOptionKey: Any]
+    private var classifiedFrom: DisplayList?
     private var cachedItemOperationPlan: ItemOperationPlan?
     private var hasCachedItemOperationPlan = false
 
@@ -759,6 +760,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         self.from = from
         self.to = to
         self.options = options
+        self.classifiedFrom = nil
         self.cachedItemOperationPlan = nil
         super.init()
     }
@@ -811,6 +813,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     func setFrom(_ displayList: DisplayList) {
+        if classifiedFrom == nil,
+           transition?.method == ContentTransition.Method.prefixAndSuffix.method {
+            classifiedFrom = from
+        }
         from = displayList
         invalidateItemOperationPlan()
     }
@@ -859,11 +865,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     func copy(with zone: NSZone? = nil) -> Any {
-        RBDisplayListInterpolator(
+        let copy = RBDisplayListInterpolator(
             from: from,
             to: to,
             options: options
         )
+        copy.classifiedFrom = classifiedFrom
+        return copy
     }
 
     private func resolvedProgress(at time: Float) -> Float {
@@ -3870,12 +3878,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     private func numericTextOperations() -> [ItemInterpolationOperation]? {
+        let logicalSource = classifiedFrom ?? from
         guard transition?.method == ContentTransition.Method.prefixAndSuffix.method,
-              from.renderItems.count == 1,
+              logicalSource.renderItems.count == 1,
               to.renderItems.count == 1,
               let source = Self.textAtomInputs(
-                item: from.renderItems[0],
-                command: from.itemCommands[0]
+                item: logicalSource.renderItems[0],
+                command: logicalSource.itemCommands[0],
+                presentation: classifiedFrom == nil ? nil : from
               ), let target = Self.textAtomInputs(
                 item: to.renderItems[0],
                 command: to.itemCommands[0]
@@ -3927,7 +3937,8 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
     private static func textAtomInputs(
         item: DisplayList.Item,
-        command: DisplayList.ItemCommand
+        command: DisplayList.ItemCommand,
+        presentation: DisplayList? = nil
     ) -> [TextAtomInterpolationInput]? {
         guard case let .text(record, _) = command,
               case let .content(content) = item.value,
@@ -3936,7 +3947,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return nil
         }
 
-        return atoms.map { atom in
+        return atoms.enumerated().map { index, atom in
             let command = DisplayList.ItemCommand.text(record, bounds: atom.bounds)
             var atomItem = DisplayList.Item(
                 command: command,
@@ -3944,8 +3955,32 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 version: item.version
             ) { context in
                 var context = context
-                context.clip(to: Path(atom.bounds))
-                item(context)
+                if let presentation {
+                    let presentationBounds = presentation.interpolationBounds ??
+                        atom.bounds
+                    let minimumX = if index == atoms.startIndex {
+                        min(presentationBounds.minX, atom.bounds.minX)
+                    } else {
+                        (atoms[index - 1].bounds.midX + atom.bounds.midX) * 0.5
+                    }
+                    let maximumX = if index == atoms.index(before: atoms.endIndex) {
+                        max(presentationBounds.maxX, atom.bounds.maxX)
+                    } else {
+                        (atom.bounds.midX + atoms[index + 1].bounds.midX) * 0.5
+                    }
+                    let minimumY = min(presentationBounds.minY, atom.bounds.minY)
+                    let maximumY = max(presentationBounds.maxY, atom.bounds.maxY)
+                    context.clip(to: Path(CGRect(
+                        x: minimumX,
+                        y: minimumY,
+                        width: max(maximumX - minimumX, 0),
+                        height: max(maximumY - minimumY, 0)
+                    )))
+                    presentation.draw(in: context)
+                } else {
+                    context.clip(to: Path(atom.bounds))
+                    item(context)
+                }
             }
             atomItem.styleChain = item.styleChain
             return TextAtomInterpolationInput(
@@ -4119,7 +4154,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
     }
 
     private var transitionDirectionIsFlipped: Bool {
-        guard let source = from.numericValue,
+        guard let source = (classifiedFrom ?? from).numericValue,
               let target = to.numericValue else {
             return false
         }

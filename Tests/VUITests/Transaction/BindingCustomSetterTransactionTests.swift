@@ -51,7 +51,7 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
     }
 
     func testCustomSetterSameStoredLocationWriteDoesNotMarkScopedTransactionMutated() {
-        let location = StoredLocationBase<Int>(initialValue: 1)
+        let location = TestStoredLocation<Int>(initialValue: 1)
         var events: [String] = []
         let binding = Binding<Int>(
             get: { location.getValue() },
@@ -77,7 +77,7 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
     }
 
     func testCustomSetterChangedStoredLocationWriteMarksScopedTransactionMutated() {
-        let location = StoredLocationBase<String>(initialValue: "A")
+        let location = TestStoredLocation<String>(initialValue: "A")
         var events: [String] = []
         let binding = Binding<String>(
             get: { location.getValue() },

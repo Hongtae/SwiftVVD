@@ -22,6 +22,27 @@ extension GraphMutation {
     }
 }
 
+private struct HostGraphMutation<Mutation>: GraphMutation where Mutation: GraphMutation {
+    weak var host: GraphHost?
+    var mutation: Mutation
+
+    func apply() {
+        host?.data.withCurrent {
+            mutation.apply()
+        }
+    }
+
+    mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
+        guard let mutation = mutation as? HostGraphMutation<Mutation>,
+              let host,
+              let nextHost = mutation.host,
+              host === nextHost else {
+            return false
+        }
+        return self.mutation.combine(with: mutation.mutation)
+    }
+}
+
 struct CustomGraphMutation: GraphMutation {
     var body: () -> Void
 
@@ -46,7 +67,7 @@ struct InvalidatingGraphMutation: GraphMutation {
               attribute.isValid(in: graph) else {
             return
         }
-        let transaction = Transaction.current
+        let transaction = GraphHost.currentHost.data._transaction.value
         graph.invalidateAttribute(
             attribute.toStrong(),
             transaction: transaction,
@@ -358,11 +379,15 @@ class GraphHost: CustomReflectable {
     }
 
     static var isUpdating: Bool {
-        _AGGraph.currentlyUpdatingGraphs != nil
+        _AGGraph.currentlyUpdatingGraphs?.isEmpty == false
     }
 
     var isUpdating: Bool {
         inTransaction
+    }
+
+    var isUpdatingGraph: Bool {
+        data.isValid && data.graph.isUpdatingOnCurrentThread
     }
 
     var needsTransaction: Bool {
@@ -721,7 +746,7 @@ class GraphHost: CustomReflectable {
             return
         }
 
-        host.appendGraphMutation(mutation)
+        host.appendGraphMutation(mutation, from: self)
     }
 
     func continueTransaction<Value>(setting attribute: WeakAttribute<Value>, to value: Value) {
@@ -747,7 +772,7 @@ class GraphHost: CustomReflectable {
             return
         }
 
-        host.appendGraphMutation(mutation)
+        host.appendGraphMutation(mutation, from: self)
     }
 
     var hasPendingGlobalTransactions: Bool {
@@ -826,6 +851,12 @@ class GraphHost: CustomReflectable {
     }
 
     func flushTransactions() {
+        flushTransactions(afterEach: {})
+    }
+
+    // Backend hosts can consume transaction-owned work, such as deferred
+    // resources, before the next queued transaction begins.
+    func flushTransactions(afterEach body: () -> Void) {
         guard !pendingTransactions.isEmpty else { return }
 
         Update.begin()
@@ -843,6 +874,7 @@ class GraphHost: CustomReflectable {
                 },
                 id: transaction.transactionID.value
             )
+            body()
         }
         graphDelegate?.graphDidChange()
         resetMayDeferUpdate()
@@ -872,7 +904,9 @@ class GraphHost: CustomReflectable {
     ) {
         instantiateIfNeeded()
         data.withCurrent {
-            _ = transaction
+            if let transaction {
+                data._transaction.setValue(transaction)
+            }
             startTransactionUpdate(id: id)
             body()
             finishTransactionUpdate(
@@ -880,6 +914,9 @@ class GraphHost: CustomReflectable {
                 postUpdate: { _ in },
                 id: id
             )
+            if transaction != nil {
+                data._transaction.setValue(Transaction())
+            }
         }
     }
 
@@ -961,6 +998,19 @@ class GraphHost: CustomReflectable {
             }
         }
         continuations.append(mutation)
+    }
+
+    private func appendGraphMutation<M>(
+        _ mutation: M,
+        from sourceHost: GraphHost
+    ) where M: GraphMutation {
+        if self === sourceHost {
+            appendGraphMutation(mutation)
+        } else {
+            appendGraphMutation(
+                HostGraphMutation(host: sourceHost, mutation: mutation)
+            )
+        }
     }
 
     private func drainGraphMutationPasses(

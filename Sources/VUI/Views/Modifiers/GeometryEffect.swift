@@ -92,29 +92,7 @@ enum _GeometryEffectSupport {
               !affine.isIdentity else {
             return source
         }
-
-        let items = source.renderItems
-        let debugItems = source.debugItems
-        var result = DisplayList()
-        let transformedBounds = source.interpolationBounds?.applying(affine).standardized
-        result.recordInterpolationBounds(transformedBounds)
-        for effect in source.effects {
-            result.appendEffect(
-                effect,
-                contents: projectedDisplayList(
-                    effect.contents,
-                    applying: transform,
-                    at: position
-                )
-            )
-        }
-        for item in items {
-            result.appendTransformedItem(item, affineTransform: affine)
-        }
-        for item in debugItems {
-            result.appendTransformedDebugItem(item, affineTransform: affine)
-        }
-        return result
+        return source.transformed(by: affine)
     }
 
     private static func affineTransform(

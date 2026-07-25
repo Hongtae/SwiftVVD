@@ -65,25 +65,56 @@ enum _OpacityEffectSupport {
         var result = DisplayList()
         result.debugItems.append(contentsOf: source.debugItems)
         result.recordInterpolationBounds(source.interpolationBounds)
-        for effect in source.effects {
-            result.appendEffect(
-                effect,
-                contents: displayList(effect.contents, applyingOpacity: opacity)
-            )
+        result.numericValue = source.numericValue
+
+        var content = DisplayList()
+        func flushContent() {
+            guard !content.items.isEmpty else { return }
+            if opacity > 0 {
+                if opacity == 1 {
+                    result.append(contentsOf: content)
+                } else {
+                    result.appendOpacityItem(
+                        bounds: content.interpolationBounds,
+                        opacity: opacity,
+                        contents: content
+                    )
+                }
+            }
+            content = DisplayList()
         }
 
-        guard !source.renderItems.isEmpty else { return result }
-        guard opacity > 0 else { return result }
-        guard opacity != 1 else {
-            result.items.append(contentsOf: source.renderItems)
-            return result
+        for item in source.items {
+            switch item.value {
+            case .content:
+                content.items.append(item)
+                content.recordInterpolationBounds(item.frame)
+            case let .effect(effect, contents):
+                flushContent()
+                var transformed = item
+                transformed.value = .effect(
+                    effect,
+                    displayList(contents, applyingOpacity: opacity)
+                )
+                result.items.append(transformed)
+                result.recordInterpolationBounds(item.frame)
+            case let .states(states):
+                flushContent()
+                var transformed = item
+                transformed.value = .states(states.map { hash, contents in
+                    (
+                        hash,
+                        displayList(contents, applyingOpacity: opacity)
+                    )
+                })
+                result.items.append(transformed)
+                result.recordInterpolationBounds(item.frame)
+            case .empty:
+                flushContent()
+                result.items.append(item)
+            }
         }
-
-        result.appendOpacityItem(
-            bounds: source.interpolationBounds,
-            opacity: opacity,
-            contents: source.renderItemList
-        )
+        flushContent()
         return result
     }
 }
