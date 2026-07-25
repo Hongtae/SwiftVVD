@@ -1275,6 +1275,62 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testDynamicContainerInfoDoesNotTrackInheritedTransaction() throws {
+        typealias Rows = ForEach<[String], String, Text>
+        typealias Root = _ConditionalContent<Rows, EmptyView>
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            let graphInputs = makeGraphInputs(
+                graph: graph,
+                transaction: Transaction(animation: .linear(duration: 1))
+            )
+            let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
+            let source = graph.makeInput(
+                value: ViewBuilder.buildEither(
+                    first: ForEach(["row"], id: \.self) { Text($0) }
+                ) as Root
+            )
+            let outputs = Root._makeViewList(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+            let viewList = try XCTUnwrap({
+                if case .dynamicList(let attribute, _) = outputs.views {
+                    return attribute
+                }
+                return nil
+            }())
+            let info = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: viewList,
+                    inputs: viewInputs
+                )
+            )
+
+            _ = info.value
+
+            let node = try XCTUnwrap(
+                graph.slots[Int(info.identifier.rawValue)].node
+            )
+            let inputIdentifiers = Set(node.inputs.map(\.attribute))
+            XCTAssertTrue(
+                inputIdentifiers.contains(viewList.identifier.rawValue)
+            )
+            XCTAssertTrue(
+                inputIdentifiers.contains(
+                    viewInputs.base.phase.identifier.rawValue
+                )
+            )
+            XCTAssertFalse(
+                inputIdentifiers.contains(
+                    viewInputs.base.transaction.identifier.rawValue
+                )
+            )
+        }
+    }
+
     func testPublicConditionalReinsertionReusesRetainedBranchItem() throws {
         typealias Root = _ConditionalContent<Text, Text>
         let rendererHost = TestViewRendererHost()

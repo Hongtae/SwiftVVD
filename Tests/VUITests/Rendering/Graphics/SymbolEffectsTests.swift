@@ -284,7 +284,6 @@ final class SymbolEffectsTests: XCTestCase {
                     time: time
                 )
             )
-
             let first = child.value
             XCTAssertEqual(first.symbolEffects.count, 1)
             XCTAssertEqual(first.symbolEffectVersion, 1)
@@ -893,6 +892,17 @@ final class SymbolEffectsTests: XCTestCase {
                     time: time
                 )
             )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
 
             func drawEnvironment(
                 _ configuration: VUI.SymbolEffectConfiguration,
@@ -917,30 +927,30 @@ final class SymbolEffectsTests: XCTestCase {
                 line: UInt = #line
             ) throws -> [Double] {
                 try XCTUnwrap(
-                    child.value.symbolDrawProgresses,
+                    presentation.value.symbolDrawProgresses,
                     file: file,
                     line: line
                 )
             }
 
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
             environment.setValue(drawEnvironment(
                 DrawOffSymbolEffect.drawOff.configuration,
                 id: 31
             ))
             XCTAssertEqual(try progresses(), [1, 1])
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
 
             time.setValue(Time(seconds: longest + 0.001))
             XCTAssertEqual(try progresses(), [0, 0])
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             environment.setValue(EnvironmentValues())
             XCTAssertEqual(try progresses(), [0, 0])
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
             time.setValue(Time(seconds: longest * 2 + 0.002))
-            XCTAssertNil(child.value.symbolDrawProgresses)
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             let wholeStart = longest * 3
             time.setValue(Time(seconds: wholeStart))
@@ -948,18 +958,18 @@ final class SymbolEffectsTests: XCTestCase {
                 DrawOffSymbolEffect.drawOff.wholeSymbol.configuration,
                 id: 32
             ))
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(seconds: wholeStart + longest * 0.5))
             let whole = try progresses()
             XCTAssertEqual(whole[0], whole[1], accuracy: 0.000_001)
             XCTAssertEqual(whole[0], 0.5, accuracy: 0.000_001)
 
             time.setValue(Time(seconds: wholeStart + longest + 0.001))
-            _ = child.value
+            _ = presentation.value
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(seconds: wholeStart + longest * 2 + 0.002))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             let individualStart = wholeStart + longest * 3
             time.setValue(Time(seconds: individualStart))
@@ -967,7 +977,7 @@ final class SymbolEffectsTests: XCTestCase {
                 DrawOffSymbolEffect.drawOff.individually.configuration,
                 id: 33
             ))
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(
                 seconds: individualStart + durations[0] + 0.000_1
             ))
@@ -978,13 +988,13 @@ final class SymbolEffectsTests: XCTestCase {
             time.setValue(Time(
                 seconds: individualStart + durations.reduce(0, +) + 0.001
             ))
-            _ = child.value
+            _ = presentation.value
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(
                 seconds: individualStart + durations.reduce(0, +) * 2 + 0.002
             ))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             let reversedStart = individualStart + durations.reduce(0, +) * 3
             time.setValue(Time(seconds: reversedStart))
@@ -992,7 +1002,7 @@ final class SymbolEffectsTests: XCTestCase {
                 DrawOffSymbolEffect.drawOff.individually.reversed.configuration,
                 id: 34
             ))
-            XCTAssertTrue(child.value.symbolDrawsReversed)
+            XCTAssertTrue(presentation.value.symbolDrawsReversed)
             time.setValue(Time(
                 seconds: reversedStart + durations[1] + 0.000_1
             ))
@@ -1002,12 +1012,12 @@ final class SymbolEffectsTests: XCTestCase {
 
             let reversedEnd = reversedStart + durations.reduce(0, +) + 0.001
             time.setValue(Time(seconds: reversedEnd))
-            _ = child.value
+            _ = presentation.value
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             let restoredAfterReverse = reversedEnd + durations.reduce(0, +) + 0.001
             time.setValue(Time(seconds: restoredAfterReverse))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             let fastStart = restoredAfterReverse + 1
             time.setValue(Time(seconds: fastStart))
@@ -1016,15 +1026,15 @@ final class SymbolEffectsTests: XCTestCase {
                 options: .speed(10),
                 id: 35
             ))
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(seconds: fastStart + longest / 2 + 0.001))
             XCTAssertEqual(try progresses(), [0, 0])
 
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             let fastRestoreEnd = fastStart + longest + 0.002
             time.setValue(Time(seconds: fastRestoreEnd))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             let repeatingStart = fastRestoreEnd + 1
             time.setValue(Time(seconds: repeatingStart))
@@ -1033,16 +1043,16 @@ final class SymbolEffectsTests: XCTestCase {
                 options: .repeat(.periodic(2)),
                 id: 36
             ))
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(seconds: repeatingStart + longest * 2 + 0.001))
             XCTAssertEqual(try progresses(), [0, 0])
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             let repeatingRestoreEnd = repeatingStart + longest * 3 + 0.002
             time.setValue(Time(seconds: repeatingRestoreEnd))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             let transitionStart = repeatingRestoreEnd + 1
             time.setValue(Time(seconds: transitionStart))
@@ -1051,13 +1061,13 @@ final class SymbolEffectsTests: XCTestCase {
                 trigger: .transition(.identity),
                 id: 37
             ))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
             environment.setValue(drawEnvironment(
                 DrawOnSymbolEffect.drawOn.configuration,
                 trigger: .transition(.didDisappear),
                 id: 37
             ))
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
             time.setValue(Time(seconds: transitionStart + longest + 0.001))
             XCTAssertEqual(try progresses(), [0, 0])
             environment.setValue(drawEnvironment(
@@ -1065,9 +1075,9 @@ final class SymbolEffectsTests: XCTestCase {
                 trigger: .transition(.identity),
                 id: 37
             ))
-            _ = child.value
+            _ = presentation.value
             time.setValue(Time(seconds: transitionStart + longest * 2 + 0.002))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             // ASSERTIONS symbolEffectDrawRuntimeObserved
             // ASSERTIONS symbolEffectDrawTransitionRuntimeObserved
@@ -1102,14 +1112,24 @@ final class SymbolEffectsTests: XCTestCase {
                     resolvedImage: resolved,
                     environment: environment,
                     transaction: transaction,
-                    time: time,
-                    position: position,
-                    size: size
+                    time: time
                 )
             )
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: position,
+                        size: size,
+                        time: time
+                    )
+                )
             XCTAssertEqual(
-                child.value.displaySize?.value,
+                presentation.value.displayPosition,
+                CGPoint(x: 10, y: 20)
+            )
+            XCTAssertEqual(
+                presentation.value.displaySize?.value,
                 CGSize(width: 48, height: 48)
             )
 
@@ -1124,25 +1144,37 @@ final class SymbolEffectsTests: XCTestCase {
             )
             position.setValue(CGPoint(x: 29, y: 20))
             environment.setValue(hiding)
-            XCTAssertTrue(child.value.retainsDrawHidePosition)
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+            XCTAssertTrue(presentation.value.retainsDrawHidePosition)
+            XCTAssertEqual(
+                presentation.value.displayPosition,
+                CGPoint(x: 10, y: 20)
+            )
 
             time.setValue(Time(seconds: hideCompletionTime * 0.5))
-            XCTAssertTrue(child.value.retainsDrawHidePosition)
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+            XCTAssertTrue(presentation.value.retainsDrawHidePosition)
+            XCTAssertEqual(
+                presentation.value.displayPosition,
+                CGPoint(x: 10, y: 20)
+            )
 
             time.setValue(Time(seconds: hideCompletionTime + 0.001))
-            XCTAssertFalse(child.value.retainsDrawHidePosition)
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 29, y: 20))
+            XCTAssertFalse(presentation.value.retainsDrawHidePosition)
+            XCTAssertEqual(
+                presentation.value.displayPosition,
+                CGPoint(x: 29, y: 20)
+            )
 
             position.setValue(CGPoint(x: 10, y: 20))
             environment.setValue(EnvironmentValues())
-            XCTAssertTrue(child.value.isSymbolEffectActive)
-            XCTAssertFalse(child.value.retainsDrawHidePosition)
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 10, y: 20))
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.retainsDrawHidePosition)
+            XCTAssertEqual(
+                presentation.value.displayPosition,
+                CGPoint(x: 10, y: 20)
+            )
 
             time.setValue(Time(seconds: hideCompletionTime * 2 + 0.002))
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             var pulse = EnvironmentValues()
             pulse.appendSymbolEffect(
@@ -1155,15 +1187,18 @@ final class SymbolEffectsTests: XCTestCase {
                 for: 83
             )
             environment.setValue(pulse)
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             pulse.symbolEffects[0].effect.trigger =
                 .value(AnySymbolEffectTrigger(2))
             position.setValue(CGPoint(x: 29, y: 20))
             environment.setValue(pulse)
-            XCTAssertTrue(child.value.isSymbolEffectActive)
-            XCTAssertFalse(child.value.retainsDrawHidePosition)
-            XCTAssertEqual(child.value.displayPosition, CGPoint(x: 29, y: 20))
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
+            XCTAssertFalse(presentation.value.retainsDrawHidePosition)
+            XCTAssertEqual(
+                presentation.value.displayPosition,
+                CGPoint(x: 29, y: 20)
+            )
 
             // ASSERTIONS symbolEffectLayoutMotionObserved
             // ASSERTIONS symbolEffectLayoutDrawRestoreObserved
@@ -1207,6 +1242,201 @@ final class SymbolEffectsTests: XCTestCase {
                 layoutComputer?.sizeThatFits(.unspecified),
                 CGSize(width: 48, height: 48)
             )
+        }
+    }
+
+    func testSymbolEffectPhaseDoesNotRepublishImageLayoutComputer() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            var environment = EnvironmentValues()
+            environment.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration:
+                        DrawOnSymbolEffect.drawOn.individually.configuration,
+                    options: .default,
+                    trigger: .transition(.willAppear)
+                ),
+                for: 500
+            )
+            var inputs = makeViewInputs(
+                graph: graph,
+                environment: environment
+            )
+            inputs.requestsLayoutComputer = true
+            var willAppearTransaction = Transaction()
+            willAppearTransaction.disablesAnimations = true
+            inputs.base.transaction.setValue(willAppearTransaction)
+
+            let environmentAttribute =
+                inputs.base.cachedEnvironment.value.environment
+            let image = graph.makeInput(value: Image(systemName: "draw"))
+            let outputs = Image._makeView(
+                view: _GraphValue(_attribute: image),
+                inputs: inputs
+            )
+            let layoutAttribute = try XCTUnwrap(
+                outputs._layoutComputer.attribute
+            )
+            let initialLayout = layoutAttribute.value
+            let initialVersion = try XCTUnwrap(
+                graph.slots[Int(layoutAttribute.identifier.rawValue)]
+                    .node?.valueVersion
+            )
+
+            var identityTransaction = Transaction(
+                animation: .linear(duration: 1)
+            )
+            identityTransaction.disablesAnimations = false
+            inputs.base.transaction.setValue(identityTransaction)
+            environment.symbolEffects[0].effect.trigger =
+                .transition(.identity)
+            environmentAttribute.setValue(
+                environment,
+                transaction: identityTransaction
+            )
+
+            let updatedLayout = layoutAttribute.value
+            let updatedVersion = try XCTUnwrap(
+                graph.slots[Int(layoutAttribute.identifier.rawValue)]
+                    .node?.valueVersion
+            )
+
+            XCTAssertEqual(updatedVersion, initialVersion)
+            XCTAssertTrue(initialLayout.box === updatedLayout.box)
+            XCTAssertEqual(
+                updatedLayout.sizeThatFits(.unspecified),
+                initialLayout.sizeThatFits(.unspecified)
+            )
+        }
+    }
+
+    func testInactiveImageConsumerDoesNotRetainFrameTimeDependency() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let transaction = graph.makeInput(value: Transaction())
+            let time = graph.makeInput(value: Time.zero)
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: transaction,
+                    time: time
+                )
+            )
+
+            _ = child.value
+
+            let childNode = try XCTUnwrap(
+                graph.slots[Int(child.identifier.rawValue)].node
+            )
+            XCTAssertFalse(
+                childNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+
+            time.setValue(Time(seconds: 1))
+            _ = child.value
+            XCTAssertFalse(
+                childNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+
+            // ASSERTIONS symbolEffectIdlePresentationClockDependencyObserved
+        }
+    }
+
+    func testCompletedDrawPresentationDropsFrameTimeDependency() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let transaction = graph.makeInput(value: Transaction())
+            let time = graph.makeInput(value: Time(seconds: 1))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: transaction,
+                    time: time
+                )
+            )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
+
+            var hiding = EnvironmentValues()
+            hiding.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration:
+                        DrawOnSymbolEffect.drawOn.individually.configuration,
+                    options: .default,
+                    trigger: .transition(.didDisappear)
+                ),
+                for: 501
+            )
+            let animated = Transaction(animation: .linear(duration: 1))
+            transaction.setValue(animated)
+            environment.setValue(hiding, transaction: animated)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
+
+            let completionTime =
+                1 + symbol.drawMotionGroupDurations.reduce(0, +) + 0.001
+            time.setValue(Time(seconds: completionTime))
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
+
+            time.setValue(Time(seconds: completionTime + 1))
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+
+            let childNode = try XCTUnwrap(
+                graph.slots[Int(child.identifier.rawValue)].node
+            )
+            let presentationNode = try XCTUnwrap(
+                graph.slots[Int(presentation.identifier.rawValue)].node
+            )
+            XCTAssertFalse(
+                childNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+            XCTAssertFalse(
+                presentationNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+
+            // ASSERTIONS symbolEffectIdlePresentationClockDependencyObserved
         }
     }
 
@@ -1272,6 +1502,85 @@ final class SymbolEffectsTests: XCTestCase {
         }
     }
 
+    func testDrawTransitionStartsAtFirstResolvedPresentationAfterSemanticDelay() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            var effects = EnvironmentValues()
+            effects.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.individually.configuration,
+                    options: .default,
+                    trigger: .transition(.willAppear)
+                ),
+                for: 84
+            )
+            let environment = graph.makeInput(value: effects)
+            let time = graph.makeInput(value: Time(seconds: 1))
+            var willAppearTransaction = Transaction()
+            willAppearTransaction.disablesAnimations = true
+            let transaction = graph.makeInput(value: willAppearTransaction)
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: transaction,
+                    time: time
+                )
+            )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
+
+            var identityTransaction = Transaction(
+                animation: .linear(duration: 1)
+            )
+            identityTransaction.disablesAnimations = false
+            transaction.setValue(identityTransaction)
+            effects.symbolEffects[0].effect.trigger = .transition(.identity)
+            environment.setValue(effects, transaction: identityTransaction)
+            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
+            XCTAssertTrue(child.value.isSymbolEffectActive)
+
+            time.setValue(Time(seconds: 1.45))
+            XCTAssertEqual(
+                presentation.value.symbolDrawProgresses,
+                [0, 0],
+                "semantic-to-presentation delay must not consume draw time"
+            )
+
+            let firstGroupMidpoint =
+                1.45 + symbol.drawMotionGroupDurations[0] * 0.5
+            time.setValue(Time(seconds: firstGroupMidpoint))
+            let midpoint = try XCTUnwrap(
+                presentation.value.symbolDrawProgresses
+            )
+            XCTAssertGreaterThan(midpoint[0], 0)
+            XCTAssertLessThan(midpoint[0], 1)
+            XCTAssertEqual(midpoint[1], 0, accuracy: 0.000_001)
+
+            // ASSERTIONS symbolEffectPresentationClockObserved
+        }
+    }
+
     func testDrawTransitionUsesConsumerTransactionForRendererOwnedCompletion() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -1306,7 +1615,18 @@ final class SymbolEffectsTests: XCTestCase {
                     time: time
                 )
             )
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             var completions: [String] = []
             var removal = Transaction(animation: .linear(duration: 0.01))
@@ -1336,7 +1656,7 @@ final class SymbolEffectsTests: XCTestCase {
             let drawStart = 1.001
             time.setValue(Time(seconds: drawStart))
 
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
             finalizeAnimationCompletions(
                 in: removal,
                 animation: removal.effectiveAnimation
@@ -1345,7 +1665,7 @@ final class SymbolEffectsTests: XCTestCase {
             XCTAssertEqual(completions, [])
 
             time.setValue(Time(seconds: drawStart + 0.02))
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
             graph.drainActionOutbox()
             XCTAssertEqual(completions, [])
 
@@ -1353,8 +1673,8 @@ final class SymbolEffectsTests: XCTestCase {
                 seconds: drawStart +
                     symbol.drawMotionGroupDurations.reduce(0, +) + 0.001
             ))
-            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
             graph.drainActionOutbox()
             XCTAssertEqual(completions, ["removed", "logical"])
 
@@ -1384,8 +1704,19 @@ final class SymbolEffectsTests: XCTestCase {
                     time: time
                 )
             )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
 
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
             let durations = symbol.drawMotionGroupDurations
             let end = durations.max() ?? 0
 
@@ -1399,23 +1730,23 @@ final class SymbolEffectsTests: XCTestCase {
                 for: 31
             )
             environment.setValue(active)
-            XCTAssertEqual(child.value.symbolDrawProgresses, [1, 1])
-            XCTAssertFalse(child.value.symbolDrawsReversed)
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [1, 1])
+            XCTAssertFalse(presentation.value.symbolDrawsReversed)
 
             time.setValue(Time(seconds: end * 0.5))
-            let midpoint = try XCTUnwrap(child.value.symbolDrawProgresses)
+            let midpoint = try XCTUnwrap(presentation.value.symbolDrawProgresses)
             XCTAssertTrue(midpoint.allSatisfy { $0 >= 0 && $0 <= 1 })
             XCTAssertTrue(midpoint.contains { $0 > 0 && $0 < 1 })
 
             time.setValue(Time(seconds: end + 0.001))
-            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
-            XCTAssertFalse(child.value.isSymbolEffectActive)
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+            XCTAssertFalse(presentation.value.isSymbolEffectActive)
 
             environment.setValue(EnvironmentValues())
-            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
-            XCTAssertTrue(child.value.isSymbolEffectActive)
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
+            XCTAssertTrue(presentation.value.isSymbolEffectActive)
             time.setValue(Time(seconds: end * 2 + 0.002))
-            XCTAssertNil(child.value.symbolDrawProgresses)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
 
             time.setValue(Time(seconds: 3))
             var reversed = EnvironmentValues()
@@ -1429,9 +1760,9 @@ final class SymbolEffectsTests: XCTestCase {
                 for: 32
             )
             environment.setValue(reversed)
-            XCTAssertTrue(child.value.symbolDrawsReversed)
+            XCTAssertTrue(presentation.value.symbolDrawsReversed)
             time.setValue(Time(seconds: 3 + end / 2 + 0.001))
-            XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
+            XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
 
             var entering = EnvironmentValues()
             entering.appendSymbolEffect(
@@ -1453,14 +1784,31 @@ final class SymbolEffectsTests: XCTestCase {
                         time: transitionTime
                     )
                 )
-            XCTAssertEqual(transitionChild.value.symbolDrawProgresses, [0, 0])
-            XCTAssertFalse(transitionChild.value.isSymbolEffectActive)
+            let transitionPresentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: transitionChild,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: transitionTime
+                    )
+                )
+            XCTAssertEqual(
+                transitionPresentation.value.symbolDrawProgresses,
+                [0, 0]
+            )
+            XCTAssertFalse(transitionPresentation.value.isSymbolEffectActive)
             entering.symbolEffects[0].effect.trigger = .transition(.identity)
             transitionEnvironment.setValue(entering)
-            XCTAssertEqual(transitionChild.value.symbolDrawProgresses, [0, 0])
-            XCTAssertTrue(transitionChild.value.isSymbolEffectActive)
+            XCTAssertEqual(
+                transitionPresentation.value.symbolDrawProgresses,
+                [0, 0]
+            )
+            XCTAssertTrue(transitionPresentation.value.isSymbolEffectActive)
             transitionTime.setValue(Time(seconds: 5 + end + 0.001))
-            XCTAssertNil(transitionChild.value.symbolDrawProgresses)
+            XCTAssertNil(transitionPresentation.value.symbolDrawProgresses)
 
             let fallbackSymbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
                 name: "star",
@@ -1470,7 +1818,7 @@ final class SymbolEffectsTests: XCTestCase {
             resolved.setValue(GraphicsContext.ResolvedImage(symbol: fallbackSymbol))
             time.setValue(Time(seconds: 7))
             environment.setValue(EnvironmentValues())
-            _ = child.value
+            _ = presentation.value
             var fallback = EnvironmentValues()
             fallback.appendSymbolEffect(
                 ResolvedSymbolEffect(
@@ -1481,11 +1829,11 @@ final class SymbolEffectsTests: XCTestCase {
                 for: 34
             )
             environment.setValue(fallback)
-            XCTAssertNil(child.value.symbolDrawProgresses)
-            XCTAssertEqual(child.value.symbolDrawFallbackOpacity, 1)
+            XCTAssertNil(presentation.value.symbolDrawProgresses)
+            XCTAssertEqual(presentation.value.symbolDrawFallbackOpacity, 1)
             time.setValue(Time(seconds: 7.8))
             XCTAssertEqual(
-                try XCTUnwrap(child.value.symbolDrawFallbackOpacity),
+                try XCTUnwrap(presentation.value.symbolDrawFallbackOpacity),
                 0,
                 accuracy: 0.000_001
             )

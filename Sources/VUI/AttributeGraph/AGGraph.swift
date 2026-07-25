@@ -30,6 +30,17 @@ final class _AGUpdateContext {
 final class _AGGraph: Equatable, @unchecked Sendable {
     // MARK: Node Storage
 
+    struct InputEdge {
+        static let identityMask: UInt8 = 0x0d
+        static let permanent: UInt8 = 0x04
+        static let changed: UInt8 = 0x10
+        static let readThisEvaluation: UInt8 = 0x20
+
+        var attribute: UInt32
+        var flags: UInt8
+        var valueVersion: UInt64
+    }
+
     // Describes how a node computes its value.
     // Exactly one case is active per node. Mutual exclusion is guaranteed at the type level.
     enum NodeKind {
@@ -107,7 +118,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         }
     }
 
-    struct Node {
+    final class Node {
         var value: (any _AnyAGValueStorage)?
         var makeValueStorage: (Any) -> any _AnyAGValueStorage
         var valuesEqual: (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool
@@ -119,10 +130,10 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // propagation can clear needsEvaluation without running this node when
         // every input retains the version observed during the previous run.
         var forceEvaluation: Bool = false
-        // Versions advance only when the cached output changes. They separate
-        // upstream dirty scheduling from downstream changed-value propagation.
+        // Versions advance only when the cached output changes. Each input
+        // edge retains the version observed by this node's last completed
+        // evaluation.
         var valueVersion: UInt64 = 0
-        var inputVersions: [UInt32: UInt64] = [:]
         // Graph-local invalidation traversal marker. This avoids allocating a
         // hash set for every source mutation while preserving one output walk
         // per node in cyclic or diamond dependency graphs.
@@ -133,14 +144,32 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         var updateTraversal: UInt64 = 0
         var updateTraversalState: UInt8 = 0
         var inputsChanged: Bool = true
-        var changedInputs: Set<UInt32> = []
         var isEvaluating: Bool = false  // for cycle detection
 
-        // Dependency graph edges (stored as raw slot indices)
-        var inputs: Set<UInt32> = []        // nodes this node depends on
-        var outputs: Set<UInt32> = []       // nodes that depend on this node
-        // Permanent deps registered via setIndirectDependency. They are never cleared on re-evaluation.
-        var staticInputs: Set<UInt32> = []
+        // Input records remain sorted by raw slot index. Their flag byte owns
+        // permanent, changed, and current-evaluation read state. Reverse
+        // outputs append one raw slot index per input record.
+        var inputs: ContiguousArray<InputEdge> = []
+        var outputs: ContiguousArray<UInt32> = []
+
+        init(
+            value: (any _AnyAGValueStorage)?,
+            makeValueStorage: @escaping (Any) -> any _AnyAGValueStorage,
+            valuesEqual: @escaping (
+                any _AnyAGValueStorage,
+                any _AnyAGValueStorage
+            ) -> Bool,
+            kind: NodeKind,
+            needsEvaluation: Bool = true,
+            forceEvaluation: Bool = false
+        ) {
+            self.value = value
+            self.makeValueStorage = makeValueStorage
+            self.valuesEqual = valuesEqual
+            self.kind = kind
+            self.needsEvaluation = needsEvaluation
+            self.forceEvaluation = forceEvaluation
+        }
     }
 
     struct NodeSlot {

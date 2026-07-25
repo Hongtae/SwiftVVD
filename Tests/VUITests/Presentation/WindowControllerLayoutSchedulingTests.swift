@@ -2815,13 +2815,25 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let insertion = try [1.201, 1.22, 1.28, 1.40, 1.70, 2.20]
             .map(update)
             .map(symbolDrawProgressSamples(in:))
+        let insertionProgresses = insertion.flatMap {
+            $0.compactMap { $0 }
+        }
 
-        XCTAssertTrue(
-            insertion.flatMap { $0.compactMap { $0 } }.contains { progresses in
-                progresses.contains { $0 > 0.001 && $0 < 0.999 }
-            },
-            "fresh symbol insertion did not produce an intermediate draw presentation: \(insertion)"
+        XCTAssertEqual(
+            insertionProgresses.first,
+            [0, 0],
+            "fresh symbol insertion consumed draw time before its first presentation: \(insertion)"
         )
+        for motionGroup in 0..<2 {
+            XCTAssertTrue(
+                insertionProgresses.contains { progresses in
+                    progresses.indices.contains(motionGroup) &&
+                        progresses[motionGroup] > 0.001 &&
+                        progresses[motionGroup] < 0.999
+                },
+                "fresh symbol insertion skipped motion group \(motionGroup): \(insertion)"
+            )
+        }
     }
 
     @MainActor

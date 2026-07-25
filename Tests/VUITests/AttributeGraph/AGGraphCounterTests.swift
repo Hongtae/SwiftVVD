@@ -172,6 +172,171 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testRepeatedDynamicReadsReuseOneInputEdge() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 3)
+            let output = graph.makeRule {
+                source.value + source.value
+            }
+
+            XCTAssertEqual(output.value, 6)
+            let outputIndex = Int(output.identifier.rawValue)
+            let sourceIndex = Int(source.identifier.rawValue)
+            XCTAssertEqual(
+                graph.slots[outputIndex].node!.inputs.filter {
+                    $0.attribute == source.identifier.rawValue
+                }.count,
+                1
+            )
+            XCTAssertEqual(
+                graph.slots[sourceIndex].node!.outputs.filter {
+                    $0 == output.identifier.rawValue
+                }.count,
+                1
+            )
+
+            source.setValue(4)
+            XCTAssertEqual(output.value, 8)
+            XCTAssertEqual(
+                graph.slots[outputIndex].node!.inputs.filter {
+                    $0.attribute == source.identifier.rawValue
+                }.count,
+                1
+            )
+            XCTAssertEqual(
+                graph.slots[sourceIndex].node!.outputs.filter {
+                    $0 == output.identifier.rawValue
+                }.count,
+                1
+            )
+        }
+    }
+
+    func testConditionalDynamicReadReplacesItsStaleInputEdge() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let selector = graph.makeInput(value: true)
+            let left = graph.makeInput(value: 11)
+            let right = graph.makeInput(value: 29)
+            let output = graph.makeRule {
+                selector.value ? left.value : right.value
+            }
+
+            XCTAssertEqual(output.value, 11)
+            let outputIndex = Int(output.identifier.rawValue)
+            XCTAssertTrue(
+                graph.slots[outputIndex].node!.inputs.contains {
+                    $0.attribute == left.identifier.rawValue
+                }
+            )
+            XCTAssertFalse(
+                graph.slots[outputIndex].node!.inputs.contains {
+                    $0.attribute == right.identifier.rawValue
+                }
+            )
+
+            selector.setValue(false)
+            XCTAssertEqual(output.value, 29)
+            XCTAssertFalse(
+                graph.slots[outputIndex].node!.inputs.contains {
+                    $0.attribute == left.identifier.rawValue
+                }
+            )
+            XCTAssertTrue(
+                graph.slots[outputIndex].node!.inputs.contains {
+                    $0.attribute == right.identifier.rawValue
+                }
+            )
+            XCTAssertFalse(
+                graph.slots[Int(left.identifier.rawValue)].node!.outputs
+                    .contains(output.identifier.rawValue)
+            )
+            XCTAssertEqual(
+                graph.slots[Int(right.identifier.rawValue)].node!.outputs
+                    .filter { $0 == output.identifier.rawValue }.count,
+                1
+            )
+        }
+    }
+
+    func testRepeatedExplicitInputsPreserveRepeatedEdgeRecords() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let output = graph.makeRule { 42 }
+            XCTAssertEqual(output.value, 42)
+
+            output.addInput(
+                source,
+                options: AGInputOptions(rawValue: 0),
+                token: 0
+            )
+            output.addInput(
+                source,
+                options: AGInputOptions(rawValue: 0),
+                token: 1
+            )
+
+            XCTAssertEqual(
+                graph.slots[Int(output.identifier.rawValue)].node!.inputs
+                    .filter { $0.attribute == source.identifier.rawValue }.count,
+                2
+            )
+            XCTAssertEqual(
+                graph.slots[Int(source.identifier.rawValue)].node!.outputs
+                    .filter { $0 == output.identifier.rawValue }.count,
+                2
+            )
+        }
+    }
+
+    func testFixedProjectionKeepsOnePermanentInputEdge() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(
+                value: KeyPathChangedInputPair(first: 1, second: 10)
+            )
+            let projection = graph.subscriptNode(
+                parent: source,
+                keyPath: \.first
+            )
+            let projectionIndex = Int(projection.identifier.rawValue)
+
+            XCTAssertEqual(projection.value, 1)
+            XCTAssertEqual(
+                graph.slots[projectionIndex].node!.inputs.count,
+                1
+            )
+            XCTAssertEqual(
+                graph.slots[projectionIndex].node!.inputs[0].attribute,
+                source.identifier.rawValue
+            )
+            XCTAssertNotEqual(
+                graph.slots[projectionIndex].node!.inputs[0].flags
+                    & _AGGraph.InputEdge.permanent,
+                0
+            )
+
+            source.setValue(
+                KeyPathChangedInputPair(first: 2, second: 20)
+            )
+            XCTAssertEqual(projection.value, 2)
+            XCTAssertEqual(
+                graph.slots[projectionIndex].node!.inputs.count,
+                1
+            )
+        }
+    }
+
     func testBreadthFirstSearchChecksStartAndDeduplicatesCycles() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

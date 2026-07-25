@@ -19,6 +19,22 @@ private final class ProbeTexture: Texture {
     }
 }
 
+private final class CountingVectorImageProvider: AnyImageProviderBox, @unchecked Sendable {
+    let symbol: ResolvedVectorSymbol
+    private(set) var resolutionCount = 0
+
+    init(symbol: ResolvedVectorSymbol) {
+        self.symbol = symbol
+    }
+
+    override var requiresBackendResolution: Bool { false }
+
+    override func makeVectorSymbol() -> ResolvedVectorSymbol? {
+        resolutionCount += 1
+        return symbol
+    }
+}
+
 private final class NumericTransitionTestTypeface: Typeface {
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
         .texture(TextureFont.GlyphData(
@@ -7020,16 +7036,94 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let graph = _AGGraph()
 
         try _AGGraph.withCurrent(graph) {
-            let image = graph.makeInput(value: Image(systemName: "photo.fill"))
+            let image = graph.makeInput(value: Image(
+                size: CGSize(width: 24, height: 12)
+            ) { _ in })
             let outputs = Image._makeView(
                 view: _GraphValue(_attribute: image),
                 inputs: makeViewInputs(graph: graph)
             )
 
-            XCTAssertEqual(outputs.preferences.values(for: ResourceList.Key.self).count, 1)
+            let resourceID = try XCTUnwrap(
+                outputs.preferences.value(for: ResourceList.Key.self)
+            )
+            XCTAssertEqual(Attribute<ResourceList>(resourceID).value.items.count, 1)
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             XCTAssertTrue(graph.debugDescription(for: outputID).contains("(stateful)"))
             XCTAssertEqual(Attribute<DisplayList>(outputID).value.items.count, 0)
+        }
+    }
+
+    func testSystemSymbolImageResolvesBeforeTheResourcePass() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let image = graph.makeInput(value: Image(systemName: "draw"))
+            let outputs = Image._makeView(
+                view: _GraphValue(_attribute: image),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let resourceID = try XCTUnwrap(
+                outputs.preferences.value(for: ResourceList.Key.self)
+            )
+            XCTAssertTrue(Attribute<ResourceList>(resourceID).value.items.isEmpty)
+
+            let layoutComputer = try XCTUnwrap(
+                outputs._layoutComputer.attribute?.value
+            )
+            let resolvedSize = layoutComputer.sizeThatFits(.unspecified)
+            XCTAssertGreaterThan(resolvedSize.width, 0)
+            XCTAssertGreaterThan(resolvedSize.height, 0)
+
+            let outputID = try XCTUnwrap(
+                outputs.preferences.value(for: DisplayList.Key.self)
+            )
+            XCTAssertFalse(Attribute<DisplayList>(outputID).value.items.isEmpty)
+
+            // ASSERTIONS imageViewChildSynchronousResolutionObserved
+        }
+    }
+
+    func testPortableVectorResolutionIsCachedAcrossPresentationTicks() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let provider = CountingVectorImageProvider(symbol: symbol)
+            let image = graph.makeInput(value: Image(provider: provider))
+            let backendSource = graph.makeInput(value: Optional<VUI.Image>.none)
+            let backendImage = graph.makeInput(
+                value: GraphicsContext.ResolvedImage?.none
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let transaction = graph.makeInput(value: Transaction())
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    view: image,
+                    backendSource: backendSource,
+                    backendImage: backendImage,
+                    environment: environment,
+                    transaction: transaction,
+                    time: time
+                )
+            )
+
+            XCTAssertNotNil(child.value.image?.symbol)
+            XCTAssertEqual(provider.resolutionCount, 1)
+
+            time.setValue(Time(seconds: 0.25))
+            XCTAssertNotNil(child.value.image?.symbol)
+            time.setValue(Time(seconds: 0.5))
+            XCTAssertNotNil(child.value.image?.symbol)
+            XCTAssertEqual(provider.resolutionCount, 1)
+
+            // ASSERTIONS imageViewChildSynchronousResolutionObserved
         }
     }
 

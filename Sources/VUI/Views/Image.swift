@@ -9,6 +9,8 @@ import Foundation
 import VVD
 
 class AnyImageProviderBox: @unchecked Sendable {
+    var requiresBackendResolution: Bool { true }
+
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
     }
@@ -174,6 +176,8 @@ final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
         self.label = label
     }
 
+    override var requiresBackendResolution: Bool { false }
+
     override func makeVectorSymbol() -> ResolvedVectorSymbol? {
         SymbolAssetCatalog.resolve(
             name: name,
@@ -200,6 +204,8 @@ final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
         self.label = label
     }
 
+    override var requiresBackendResolution: Bool { false }
+
     override func makeSVG() -> SVG? {
         svg
     }
@@ -210,10 +216,9 @@ final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
-// Image resolution is published asynchronously by the backend resource pass, while the
-// display-list interpolation lane requires a stable non-optional content value. This adapter
-// ignores the initial unresolved-to-resolved publication and delegates real image changes to
-// the resolved-image transition contract.
+// Backend image resolution can begin with a nil value, while the display-list interpolation
+// lane requires stable non-optional endpoints. This adapter ignores unresolved publication
+// boundaries and delegates resolved image changes to the image transition contract.
 private struct ResolvedImageTransitionContent: InterpolatableContent {
     var image: GraphicsContext.ResolvedImage?
 
@@ -233,6 +238,27 @@ private struct ResolvedImageTransitionContent: InterpolatableContent {
 }
 
 struct ImageViewChild: StatefulRule, AsyncAttribute {
+    // Graph evaluation is serialized. Reference semantics let the presentation
+    // rule seed this write-once clock without introducing a cross-rule lock.
+    final class PresentationStart {
+        private(set) var time: Time?
+
+        func activate(at value: Time) {
+            if time == nil {
+                time = value
+            }
+        }
+    }
+
+    private enum Source {
+        case image(
+            view: Attribute<Image>,
+            backendSource: Attribute<Image?>,
+            backendImage: Attribute<GraphicsContext.ResolvedImage?>
+        )
+        case resolved(Attribute<GraphicsContext.ResolvedImage?>)
+    }
+
     struct ActivePulse {
         var id: Int
         var startTime: Time
@@ -279,7 +305,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
 
     struct ActiveDraw {
         var id: Int
-        var startTime: Time
+        var presentationStart: PresentationStart
         var motionGroupDurations: [Double]
         var initialProgresses: [Double]
         var targetProgress: Double
@@ -287,6 +313,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         var layerBehavior: DrawLayerBehavior
         var isReversed: Bool
         var usesOpacityFallback: Bool
+        // A completed draw-to-hidden request keeps its terminal presentation,
+        // but must no longer keep the frame-clock dependency alive.
+        var isComplete = false
         // Symbol draw timing is renderer-owned, so these tokens keep transition
         // completion tied to the draw presentation instead of the outer curve.
         var completionTokens: [AnimationCompletionToken]
@@ -325,39 +354,52 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         var symbolDrawsReversed: Bool
         var isSymbolEffectActive: Bool
         var retainsDrawHidePosition: Bool
+        var drawPresentationStart: PresentationStart?
         var displayPosition: CGPoint?
         var displaySize: ViewSize?
     }
 
-    var resolvedImage: Attribute<GraphicsContext.ResolvedImage?>
+    private var source: Source
     var environment: Attribute<EnvironmentValues>
     var transaction: Attribute<Transaction>
     var time: Attribute<Time>
-    var position: Attribute<CGPoint>?
-    var size: Attribute<ViewSize>?
     var phase = Phase()
-    private var previousTargetPosition: CGPoint?
-    private var retainedDrawHidePosition: CGPoint?
+    private var synchronousSource: Image?
+    private var synchronousImage: GraphicsContext.ResolvedImage?
+    private var attemptedSynchronousResolution = false
+
+    init(
+        view: Attribute<Image>,
+        backendSource: Attribute<Image?>,
+        backendImage: Attribute<GraphicsContext.ResolvedImage?>,
+        environment: Attribute<EnvironmentValues>,
+        transaction: Attribute<Transaction>,
+        time: Attribute<Time>
+    ) {
+        self.source = .image(
+            view: view,
+            backendSource: backendSource,
+            backendImage: backendImage
+        )
+        self.environment = environment
+        self.transaction = transaction
+        self.time = time
+    }
 
     init(
         resolvedImage: Attribute<GraphicsContext.ResolvedImage?>,
         environment: Attribute<EnvironmentValues>,
         transaction: Attribute<Transaction>,
-        time: Attribute<Time>,
-        position: Attribute<CGPoint>? = nil,
-        size: Attribute<ViewSize>? = nil
+        time: Attribute<Time>
     ) {
-        self.resolvedImage = resolvedImage
+        self.source = .resolved(resolvedImage)
         self.environment = environment
         self.transaction = transaction
         self.time = time
-        self.position = position
-        self.size = size
     }
 
     mutating func updateValue() {
-        let image = resolvedImage.value
-        let now = time.value
+        let image = resolvedImage()
         let environmentEffects = environment.value.symbolEffects
         let transaction = transaction.value
         let pendingDrawTransition = updatePendingDrawTransition(
@@ -378,6 +420,16 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             matchingPendingDrawTransition = nil
         }
         let effectsChanged = !symbolEffectListsEqual(phase.effects, nextEffects)
+
+        // The semantic image consumer must not retain the frame clock while its
+        // animator is idle. A time edge is installed only while an existing
+        // presentation is active or while an effect change needs a start time;
+        // the graph's dynamic-edge lifecycle removes it on the first idle pass.
+        let needsPresentationTime = effectsChanged ||
+            phase.activePulse != nil ||
+            phase.activeVariableColor != nil ||
+            phase.activeDraw?.isComplete == false
+        let now = needsPresentationTime ? time.value : .zero
         let previousVariablePresentation = variableColorPresentation(at: now)
         let previousDrawPresentation = drawPresentation(at: now)
 
@@ -464,7 +516,6 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                             )
                             : nil,
                         transaction: pendingDrawTransition.transaction ?? transaction,
-                        at: now,
                         immediate: !shouldAnimateFromHidden
                     )
                 } else {
@@ -478,8 +529,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                         presentation: previousDrawPresentation,
                         symbol: symbol,
                         hasResolvedEffects: phase.hasResolvedEffects,
-                        transaction: transaction,
-                        at: now
+                        transaction: transaction
                     )
                 }
             } else {
@@ -511,7 +561,6 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                     symbol: symbol,
                     initialProgresses: nil,
                     transaction: drawTransaction,
-                    at: now,
                     immediate: true
                 )
             } else {
@@ -534,29 +583,6 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         let isActive = pulse.isActive || variableColor.isActive || draw.isActive
         let retainsDrawHidePosition = draw.isActive &&
             phase.activeDraw?.targetProgress == 0
-        let targetPosition = image == nil ? nil : position?.value
-        let displaySize = image == nil ? nil : size?.value
-        let displayPosition: CGPoint?
-        if let targetPosition {
-            // Draw-to-hidden keeps the symbol at its pre-update origin while
-            // surrounding layout commits. Restore and other effects follow
-            // the current layout position.
-            if retainsDrawHidePosition {
-                if retainedDrawHidePosition == nil {
-                    retainedDrawHidePosition =
-                        previousTargetPosition ?? targetPosition
-                }
-                displayPosition = retainedDrawHidePosition ?? targetPosition
-            } else {
-                retainedDrawHidePosition = nil
-                displayPosition = targetPosition
-            }
-            previousTargetPosition = targetPosition
-        } else {
-            retainedDrawHidePosition = nil
-            previousTargetPosition = nil
-            displayPosition = nil
-        }
         if isActive,
            let ref = _AGGraphContext.current,
            let viewGraph = ref.context as? ViewGraph {
@@ -575,9 +601,46 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             symbolDrawsReversed: draw.isReversed,
             isSymbolEffectActive: isActive,
             retainsDrawHidePosition: retainsDrawHidePosition,
-            displayPosition: displayPosition,
-            displaySize: displaySize
+            drawPresentationStart: draw.isActive
+                ? phase.activeDraw?.presentationStart
+                : nil,
+            displayPosition: nil,
+            displaySize: nil
         ))
+    }
+
+    private mutating func resolvedImage() -> GraphicsContext.ResolvedImage? {
+        switch source {
+        case let .resolved(image):
+            return image.value
+
+        case let .image(view, backendSource, backendImage):
+            let image = view.value
+            guard !image.provider.requiresBackendResolution else {
+                synchronousSource = nil
+                synchronousImage = nil
+                attemptedSynchronousResolution = false
+                guard backendSource.value == image else { return nil }
+                return backendImage.value
+            }
+
+            if attemptedSynchronousResolution, synchronousSource == image {
+                return synchronousImage
+            }
+
+            let resolved: GraphicsContext.ResolvedImage?
+            if let symbol = image.provider.makeVectorSymbol() {
+                resolved = GraphicsContext.ResolvedImage(symbol: symbol)
+            } else if let svg = image.provider.makeSVG() {
+                resolved = GraphicsContext.ResolvedImage(svg: svg)
+            } else {
+                resolved = nil
+            }
+            synchronousSource = image
+            synchronousImage = resolved
+            attemptedSynchronousResolution = true
+            return resolved
+        }
     }
 
     private mutating func updatePendingDrawTransition(
@@ -817,7 +880,30 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         guard var active = phase.activeDraw else {
             return DrawPresentation()
         }
-        let elapsed = max(time.seconds - active.startTime.seconds, 0) *
+        if active.isComplete {
+            // Clearing a completed hide would restore the fully drawn symbol.
+            // Publish the terminal value without sampling presentation time.
+            let progresses = [Double](
+                repeating: active.targetProgress,
+                count: active.initialProgresses.count
+            )
+            if active.usesOpacityFallback {
+                return DrawPresentation(
+                    progresses: nil,
+                    fallbackOpacity: active.targetProgress,
+                    isReversed: active.isReversed,
+                    isActive: false
+                )
+            }
+            return DrawPresentation(
+                progresses: progresses,
+                fallbackOpacity: nil,
+                isReversed: active.isReversed,
+                isActive: false
+            )
+        }
+        let startTime = active.presentationStart.time ?? time
+        let elapsed = max(time.seconds - startTime.seconds, 0) *
             active.effectiveSpeed
         var progresses = active.initialProgresses
         var isComplete = true
@@ -902,6 +988,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         if isComplete {
             let tokens = active.completionTokens
             active.completionTokens.removeAll()
+            active.isComplete = true
             enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
             if active.targetProgress >= 1 {
                 phase.activeDraw = nil
@@ -923,6 +1010,59 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             isReversed: active.isReversed,
             isActive: !isComplete
         )
+    }
+}
+
+struct ImageViewPresentation: StatefulRule, AsyncAttribute {
+    typealias Value = ImageViewChild.Value
+
+    var image: Attribute<ImageViewChild.Value>
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var time: Attribute<Time>
+    private var previousTargetPosition: CGPoint?
+    private var retainedDrawHidePosition: CGPoint?
+
+    init(
+        image: Attribute<ImageViewChild.Value>,
+        position: Attribute<CGPoint>,
+        size: Attribute<ViewSize>,
+        time: Attribute<Time>
+    ) {
+        self.image = image
+        self.position = position
+        self.size = size
+        self.time = time
+    }
+
+    mutating func updateValue() {
+        var presentation = image.value
+        presentation.drawPresentationStart?.activate(at: time.value)
+        let targetPosition = presentation.image == nil ? nil : position.value
+        let displaySize = presentation.image == nil ? nil : size.value
+        let displayPosition: CGPoint?
+
+        if let targetPosition {
+            if presentation.retainsDrawHidePosition {
+                if retainedDrawHidePosition == nil {
+                    retainedDrawHidePosition =
+                        previousTargetPosition ?? targetPosition
+                }
+                displayPosition = retainedDrawHidePosition ?? targetPosition
+            } else {
+                retainedDrawHidePosition = nil
+                displayPosition = targetPosition
+            }
+            previousTargetPosition = targetPosition
+        } else {
+            retainedDrawHidePosition = nil
+            previousTargetPosition = nil
+            displayPosition = nil
+        }
+
+        presentation.displayPosition = displayPosition
+        presentation.displaySize = displaySize
+        _AGGraph.setStatefulOutput(presentation)
     }
 }
 
@@ -993,8 +1133,7 @@ private func updatedDrawAnimation(
     presentation: ImageViewChild.DrawPresentation,
     symbol: ResolvedVectorSymbol,
     hasResolvedEffects: Bool,
-    transaction: Transaction,
-    at time: Time
+    transaction: Transaction
 ) -> ImageViewChild.ActiveDraw? {
     let previousRequest = drawRequest(in: previous)
     let nextRequest = drawRequest(in: next)
@@ -1008,7 +1147,6 @@ private func updatedDrawAnimation(
             symbol: symbol,
             initialProgresses: initialProgresses,
             transaction: transaction,
-            at: time,
             immediate: nextRequest.isTransition && !hasResolvedEffects
         )
     }
@@ -1018,8 +1156,7 @@ private func updatedDrawAnimation(
             for: previousRequest,
             symbol: symbol,
             initialProgresses: initialProgresses,
-            transaction: transaction,
-            at: time
+            transaction: transaction
         )
     }
     return current
@@ -1030,7 +1167,6 @@ private func drawAnimation(
     symbol: ResolvedVectorSymbol,
     initialProgresses: [Double]?,
     transaction: Transaction,
-    at time: Time,
     immediate: Bool = false
 ) -> ImageViewChild.ActiveDraw {
     let measuredDurations = symbol.drawMotionGroupDurations
@@ -1050,7 +1186,7 @@ private func drawAnimation(
     completionTokens.forEach { $0.start() }
     return ImageViewChild.ActiveDraw(
         id: request.id,
-        startTime: time,
+        presentationStart: ImageViewChild.PresentationStart(),
         motionGroupDurations: durations,
         initialProgresses: initial,
         targetProgress: request.targetProgress,
@@ -1494,8 +1630,8 @@ extension Image: View {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
-        // 1. Internal state nodes for communication between the resource and layout passes.
-        // Caches the fully resolved image object (including GPU texture).
+        // Backend-only image contents are published by the resource pass.
+        // Portable vector contents resolve in ImageViewChild with the source image.
         let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
         let resolvedSourceAttr = graph.makeInput(value: Image?.none)
         let resolvedImageTransactionAttr = graph.makeInput(value: Transaction())
@@ -1514,6 +1650,11 @@ extension Image: View {
         // Evaluated before drawing (in updateView) to upload the image texture to the GPU.
         let resourceAttr: Attribute<ResourceList> = graph.makeRule {
             let image = view._attribute.value // Dependency: image provider changes
+
+            if !image.provider.requiresBackendResolution {
+                resourceResolutionState.didResolve(image: image)
+                return ResourceList()
+            }
 
             // Optimization (Cache Hit): Return an empty list if the image is already cached.
             // Note: For a robust implementation, you might want to compare an image "version"
@@ -1580,29 +1721,40 @@ extension Image: View {
 
         let imageViewChildAttr: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
             ImageViewChild(
-                resolvedImage: resolvedImageAttr,
+                view: view._attribute,
+                backendSource: resolvedSourceAttr,
+                backendImage: resolvedImageAttr,
                 environment: envAttr,
                 transaction: inputs.base.transaction,
-                time: inputs.base.time,
-                position: positionAttr,
-                size: sizeAttr
+                time: inputs.base.time
             )
         )
+        let intrinsicImageAttr = graph.subscriptNode(
+            parent: imageViewChildAttr,
+            keyPath: \ImageViewChild.Value.image
+        )
+        let imagePresentationAttr: Attribute<ImageViewChild.Value> =
+            graph.makeStatefulRule(
+                ImageViewPresentation(
+                    image: imageViewChildAttr,
+                    position: positionAttr,
+                    size: sizeAttr,
+                    time: inputs.base.time
+                )
+            )
         let transitionContentAttr: Attribute<ResolvedImageTransitionContent> = graph.makeRule {
-            ResolvedImageTransitionContent(image: resolvedImageAttr.value)
+            ResolvedImageTransitionContent(image: imageViewChildAttr.value.image)
+        }
+        let imageTransactionAttr: Attribute<Transaction> = graph.makeRule {
+            let image = view._attribute.value
+            return image.provider.requiresBackendResolution
+                ? resolvedImageTransactionAttr.value
+                : inheritedTransactionAttr.value
         }
 
         // 3. Layout pass (Layout Rule)
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            // Intrinsic size depends only on the resolved resource. Depending on
-            // presentation state here would make framed images read their own
-            // placement while the parent layout computer is still being built.
-            let resolved = resolvedImageAttr.value
-            if resolved == nil {
-                // Establish the stateful effect environment before deferred
-                // resource publication promotes the image to its first frame.
-                _ = imageViewChildAttr.value
-            }
+            let resolved = intrinsicImageAttr.value
 
             return LayoutComputer(
                 sizeThatFits: { _ in resolved?.size ?? .zero }
@@ -1612,7 +1764,7 @@ extension Image: View {
         // 4. Drawing pass (DisplayList Rule)
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let _ = view._attribute.value // Dependency: image changes
-            let presentation = imageViewChildAttr.value
+            let presentation = imagePresentationAttr.value
             let position = presentation.displayPosition ?? positionAttr.value
             let viewSize = (presentation.displaySize ?? sizeAttr.value).value
             let environment = envAttr.value.untrackedCopy()
@@ -1654,7 +1806,7 @@ extension Image: View {
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         var interpolatorInputs = inputs
-        interpolatorInputs.base.transaction = resolvedImageTransactionAttr
+        interpolatorInputs.base.transaction = imageTransactionAttr
         outputs.applyInterpolatorGroup(
             DisplayList.UnaryInterpolatorGroup(),
             content: transitionContentAttr,

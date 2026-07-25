@@ -129,6 +129,43 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testKeyPathProjectionUsesLayoutComparison() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let source = graph.makeInput(
+                value: KeyPathPaddedComparisonRoot(
+                    projected: PaddedComparisonPayload(byte: 7, word: 42)
+                )
+            )
+            let projection = graph.subscriptNode(
+                parent: source,
+                keyPath: \.projected
+            )
+            let projectionNode = try! XCTUnwrap(
+                graph.slots[Int(projection.identifier.rawValue)].node
+            )
+            let lhs = makePaddedComparisonStorage(
+                fill: 0x11,
+                byte: 7,
+                word: 42
+            )
+            let differentPadding = makePaddedComparisonStorage(
+                fill: 0xee,
+                byte: 7,
+                word: 42
+            )
+            let changedField = makePaddedComparisonStorage(
+                fill: 0x11,
+                byte: 8,
+                word: 42
+            )
+
+            XCTAssertTrue(projectionNode.valuesEqual(lhs, differentPadding))
+            XCTAssertFalse(projectionNode.valuesEqual(lhs, changedField))
+        }
+    }
+
     func testExistentialUnusedStorageFollowsTheComparisonMode() {
         let lhs = makeExistentialComparisonPointer(fill: 0x11, value: 7)
         let sameStorage = makeExistentialComparisonPointer(fill: 0x11, value: 7)
@@ -1097,6 +1134,10 @@ private struct PaddedComparisonPayload {
     var word: UInt64
 }
 
+private struct KeyPathPaddedComparisonRoot {
+    var projected: PaddedComparisonPayload
+}
+
 private enum ComparisonModeReads {
     nonisolated(unsafe) static var rule = 0
     nonisolated(unsafe) static var statefulRule = 0
@@ -1153,6 +1194,26 @@ private func makePaddedComparisonPointer(
         raw.advanced(by: offset).storeBytes(of: fill, as: UInt8.self)
     }
     return pointer
+}
+
+private func makePaddedComparisonStorage(
+    fill: UInt8,
+    byte: UInt8,
+    word: UInt64
+) -> _AGValueStorage<PaddedComparisonPayload> {
+    let storage = _AGValueStorage(
+        PaddedComparisonPayload(byte: byte, word: word)
+    )
+    guard let wordOffset = MemoryLayout<PaddedComparisonPayload>.offset(
+        of: \.word
+    ) else {
+        fatalError("PaddedComparisonPayload.word has no stable offset")
+    }
+    let raw = UnsafeMutableRawPointer(mutating: storage.pointer)
+    for offset in MemoryLayout<UInt8>.size..<wordOffset {
+        raw.advanced(by: offset).storeBytes(of: fill, as: UInt8.self)
+    }
+    return storage
 }
 
 private func makeExistentialComparisonPointer(

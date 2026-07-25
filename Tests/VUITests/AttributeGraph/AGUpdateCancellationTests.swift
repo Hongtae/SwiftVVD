@@ -71,6 +71,49 @@ final class AGUpdateCancellationTests: XCTestCase {
         XCTAssertEqual(recorder.inputsChanged, [true, true])
     }
 
+    func testCancelledRetryReusesItsDynamicInputEdge() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        let recorder = AGCancellationRecorder()
+
+        context.withCurrent {
+            let source = graph.makeInput(value: 5)
+            let output = graph.makeStatefulRule(
+                AGCancelingRule(source: source, recorder: recorder)
+            )
+            let outputIndex = Int(output.identifier.rawValue)
+            let sourceIndex = Int(source.identifier.rawValue)
+
+            recorder.shouldCancel = true
+            XCTAssertEqual(output.value, 5)
+            XCTAssertEqual(
+                graph.slots[outputIndex].node!.inputs.filter {
+                    $0.attribute == source.identifier.rawValue
+                }.count,
+                1
+            )
+
+            XCTAssertEqual(output.value, 5)
+            XCTAssertEqual(
+                graph.slots[outputIndex].node!.inputs.filter {
+                    $0.attribute == source.identifier.rawValue
+                }.count,
+                1
+            )
+            XCTAssertEqual(
+                graph.slots[sourceIndex].node!.outputs.filter {
+                    $0 == output.identifier.rawValue
+                }.count,
+                1
+            )
+            XCTAssertEqual(
+                graph.slots[outputIndex].node!.inputs[0].flags
+                    & _AGGraph.InputEdge.readThisEvaluation,
+                0
+            )
+        }
+    }
+
     func testEstablishedChildCancellationDefersParentPublicationUntilRetry() {
         let graph = _AGGraph()
         let context = _AGGraphContext(graph: graph)

@@ -859,8 +859,8 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
 
         let capturedInputs = inputs
         let currentList = viewListAttr.value
-        let inheritedTransaction = inputs.base.transaction.value
-        let listTransaction = graph.transaction(for: viewListAttr.identifier) ?? inheritedTransaction
+        let listTransaction =
+            graph.transaction(for: viewListAttr.identifier) ?? Transaction()
         var from = 0
         var liveIDs = Set<_ViewList_ID.Canonical>()
         var orderedItems: [DynamicContainer.ItemInfo] = []

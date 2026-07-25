@@ -763,7 +763,6 @@ class WindowController: WindowDelegate,
     func updateFrame(tick: UInt64, delta: Double, date: Date,
                      contentSize: CGSize, shouldDrawFrame: Bool,
                      _ withGC: WindowContext.WithGraphicsContext) {
-
         self.date = date
 
         // Pull render context from delegate (ViewGraphRenderDelegate).
@@ -821,7 +820,6 @@ class WindowController: WindowDelegate,
                              contentSize: CGSize, redraw: inout Bool,
                              _ withGC: WindowContext.WithGraphicsContext) {
         Update.begin()
-        defer { Update.end() }
         updateView(
             tick: tick,
             delta: delta,
@@ -830,6 +828,7 @@ class WindowController: WindowDelegate,
             redraw: &redraw,
             withGC
         )
+        Update.end()
     }
 
     func updateView(tick: UInt64, delta: Double, date: Date,

@@ -51,6 +51,8 @@ final class AGSubgraphRef: @unchecked Sendable {
     private(set) var children: [AGSubgraphRef] = []
     private(set) weak var parent: AGSubgraphRef? = nil
     private var secondaryAncestors: [WeakAncestor] = []
+    private var pendingFlags: UInt32 = 0
+    private var descendantPendingFlags: UInt32 = 0
     private(set) var isValid: Bool = true
     private(set) var isInserted: Bool = true
     private var invalidationPending = false
@@ -86,6 +88,61 @@ final class AGSubgraphRef: @unchecked Sendable {
     func register(_ id: AGAttribute) {
         nodes.append(id)
         graph?.setSubgraph(self, for: id)
+    }
+
+    func markPending(flags: UInt32) {
+        guard isValid, flags != 0 else { return }
+        let addedFlags = flags & ~pendingFlags
+        guard addedFlags != 0 else { return }
+        pendingFlags |= addedFlags
+        propagateDescendantPending(pendingFlags | descendantPendingFlags)
+    }
+
+    func hasPending(flags: UInt32) -> Bool {
+        isValid && (pendingFlags | descendantPendingFlags) & flags != 0
+    }
+
+    func consumeLocalPendingFlags(matching flags: UInt32) -> UInt32 {
+        let selected = pendingFlags & flags
+        pendingFlags &= ~selected
+        return selected
+    }
+
+    func consumeDescendantPendingFlags(matching flags: UInt32) -> UInt32 {
+        let selected = descendantPendingFlags & flags
+        descendantPendingFlags &= ~selected
+        return selected
+    }
+
+    private func propagateDescendantPending(_ flags: UInt32) {
+        var work: [AGSubgraphRef] = []
+        if let parent {
+            work.append(parent)
+        }
+        for ancestor in secondaryAncestors {
+            if let ancestor = ancestor.value {
+                work.append(ancestor)
+            }
+        }
+
+        var visited: Set<ObjectIdentifier> = []
+        while let ancestor = work.popLast() {
+            guard ancestor.isValid,
+                  visited.insert(ObjectIdentifier(ancestor)).inserted else {
+                continue
+            }
+            let addedFlags = flags & ~ancestor.descendantPendingFlags
+            guard addedFlags != 0 else { continue }
+            ancestor.descendantPendingFlags |= addedFlags
+            if let parent = ancestor.parent {
+                work.append(parent)
+            }
+            for secondary in ancestor.secondaryAncestors {
+                if let secondary = secondary.value {
+                    work.append(secondary)
+                }
+            }
+        }
     }
 
     func invalidate() {
@@ -153,6 +210,16 @@ final class AGSubgraphRef: @unchecked Sendable {
         }
         children.append(child)
         child.secondaryAncestors.append(WeakAncestor(self))
+        let childPending = child.pendingFlags | child.descendantPendingFlags
+        if childPending != 0 {
+            let addedFlags = childPending & ~descendantPendingFlags
+            if addedFlags != 0 {
+                descendantPendingFlags |= addedFlags
+                propagateDescendantPending(
+                    pendingFlags | descendantPendingFlags
+                )
+            }
+        }
     }
 
     private func removeSecondaryAncestor(_ ancestor: AGSubgraphRef) {
