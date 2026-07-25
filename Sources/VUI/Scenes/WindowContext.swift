@@ -179,8 +179,13 @@ class WindowContext: @unchecked Sendable {
             var surfaceRevision: Int = 0
             var shouldDrawFrame = true
             var additionalDeltaTimes: Double = 0.0
+            var displaySyncEnabled = true
 
             var debugFrameCount: UInt64 = 1
+
+            // Establish the default presentation policy before the first
+            // configuration snapshot and render-pass acquisition.
+            self?.swapChain?.displaySyncEnabled = displaySyncEnabled
 
             mainLoop: while true {
                 guard let self = self else { break }
@@ -208,6 +213,14 @@ class WindowContext: @unchecked Sendable {
                     shouldDrawFrame = true
                 }
                 if config.drawEveryFrames {
+                    shouldDrawFrame = true
+                }
+                if displaySyncEnabled != config.displaySyncEnabled {
+                    displaySyncEnabled = config.displaySyncEnabled
+                    // Swap-chain presentation policy is render-thread-owned.
+                    // Apply changes before acquiring the next drawable or
+                    // backend render-pass descriptor.
+                    self.swapChain?.displaySyncEnabled = displaySyncEnabled
                     shouldDrawFrame = true
                 }
 

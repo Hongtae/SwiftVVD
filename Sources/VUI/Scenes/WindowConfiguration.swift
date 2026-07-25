@@ -11,6 +11,8 @@ import Foundation
 struct WindowConfiguration {
     var activeFrameInterval = 1.0 / 60.0
     var inactiveFrameInterval = 1.0 / 30.0
+    // Windows synchronize presentation to the display unless a scene opts out.
+    var displaySyncEnabled = true
     var drawEveryFrames: Bool = true
     var backgroundColor = BackendColor(
         rgba8: .init(r: 255, g: 255, b: 241, a: 255)
@@ -22,6 +24,7 @@ struct WindowConfiguration {
     struct Override {
         var activeFrameInterval: Double? = nil
         var inactiveFrameInterval: Double? = nil
+        var displaySyncEnabled: Bool? = nil
         var drawEveryFrames: Bool? = nil
         var backgroundColor: BackendColor? = nil
         var drawDebugInfo: _DrawDebug.Info? = nil
@@ -34,6 +37,9 @@ struct WindowConfiguration {
         }
         if let value = override.inactiveFrameInterval {
             result.inactiveFrameInterval = value
+        }
+        if let value = override.displaySyncEnabled {
+            result.displaySyncEnabled = value
         }
         if let value = override.drawEveryFrames {
             result.drawEveryFrames = value
@@ -63,6 +69,9 @@ extension WindowConfiguration.Override {
             }
             if let nextValue = next.inactiveFrameInterval {
                 value.inactiveFrameInterval = nextValue
+            }
+            if let nextValue = next.displaySyncEnabled {
+                value.displaySyncEnabled = nextValue
             }
             if let nextValue = next.drawEveryFrames {
                 value.drawEveryFrames = nextValue

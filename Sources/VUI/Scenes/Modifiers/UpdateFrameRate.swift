@@ -12,6 +12,7 @@ public struct _UpdateFrameRate: _SceneModifier {
 
     var active: CGFloat = 60.0
     var inactive: CGFloat = 30.0
+    var displaySyncEnabled = true
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         guard let graph = _AGGraph.current else {
@@ -22,7 +23,8 @@ public struct _UpdateFrameRate: _SceneModifier {
             let m = modifier._attribute.value
             return WindowConfiguration.Override(
                 activeFrameInterval: Double(1.0 / m.active),
-                inactiveFrameInterval: Double(1.0 / m.inactive)
+                inactiveFrameInterval: Double(1.0 / m.inactive),
+                displaySyncEnabled: m.displaySyncEnabled
             )
         }
         outputs.preferences.append(
@@ -35,8 +37,13 @@ public struct _UpdateFrameRate: _SceneModifier {
 
 extension Scene {
     public func updateFrameRate(forActiveState active: CGFloat,
-                                forInactiveState inactive: CGFloat) -> some Scene {
-        let modifier = _UpdateFrameRate(active: active, inactive: inactive)
+                                forInactiveState inactive: CGFloat,
+                                enableVSync: Bool = true) -> some Scene {
+        let modifier = _UpdateFrameRate(
+            active: active,
+            inactive: inactive,
+            displaySyncEnabled: enableVSync
+        )
         return self.modifier(modifier)
     }
 }

@@ -6,11 +6,13 @@ final class WindowConfigurationTests: XCTestCase {
         var base = WindowConfiguration()
         base.activeFrameInterval = 0.1
         base.inactiveFrameInterval = 0.2
+        base.displaySyncEnabled = true
         base.drawEveryFrames = true
         base.drawDebugInfo = [.frameInfo]
 
         let override = WindowConfiguration.Override(
             activeFrameInterval: 0.01,
+            displaySyncEnabled: false,
             drawEveryFrames: false,
             drawDebugInfo: [.thread]
         )
@@ -18,6 +20,7 @@ final class WindowConfigurationTests: XCTestCase {
 
         XCTAssertEqual(resolved.activeFrameInterval, 0.01)
         XCTAssertEqual(resolved.inactiveFrameInterval, 0.2)
+        XCTAssertFalse(resolved.displaySyncEnabled)
         XCTAssertFalse(resolved.drawEveryFrames)
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, [.thread])
@@ -27,6 +30,7 @@ final class WindowConfigurationTests: XCTestCase {
         var base = WindowConfiguration()
         base.activeFrameInterval = 0.1
         base.inactiveFrameInterval = 0.2
+        base.displaySyncEnabled = false
         base.drawEveryFrames = false
         base.drawDebugInfo = [.queue, .windowState]
 
@@ -34,6 +38,7 @@ final class WindowConfigurationTests: XCTestCase {
 
         XCTAssertEqual(resolved.activeFrameInterval, base.activeFrameInterval)
         XCTAssertEqual(resolved.inactiveFrameInterval, base.inactiveFrameInterval)
+        XCTAssertEqual(resolved.displaySyncEnabled, base.displaySyncEnabled)
         XCTAssertEqual(resolved.drawEveryFrames, base.drawEveryFrames)
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, base.drawDebugInfo)
@@ -51,6 +56,7 @@ final class WindowConfigurationTests: XCTestCase {
     func testOverridePreferenceReductionUsesLastScalarAndUnionsDebugInfo() {
         var value = WindowConfiguration.Override(
             activeFrameInterval: 0.1,
+            displaySyncEnabled: true,
             drawDebugInfo: [.frameInfo]
         )
 
@@ -58,6 +64,7 @@ final class WindowConfigurationTests: XCTestCase {
             WindowConfiguration.Override(
                 activeFrameInterval: 0.01,
                 inactiveFrameInterval: 0.2,
+                displaySyncEnabled: false,
                 drawEveryFrames: false,
                 drawDebugInfo: [.thread]
             )
@@ -65,8 +72,24 @@ final class WindowConfigurationTests: XCTestCase {
 
         XCTAssertEqual(value.activeFrameInterval, 0.01)
         XCTAssertEqual(value.inactiveFrameInterval, 0.2)
+        XCTAssertEqual(value.displaySyncEnabled, false)
         XCTAssertEqual(value.drawEveryFrames, false)
         XCTAssertEqual(value.drawDebugInfo, [.frameInfo, .thread])
+    }
+
+    func testFrameRateModifierDefaultsToVSyncEnabled() {
+        XCTAssertTrue(WindowConfiguration().displaySyncEnabled)
+        XCTAssertTrue(_UpdateFrameRate().displaySyncEnabled)
+
+        _ = _EmptyScene().updateFrameRate(
+            forActiveState: 120,
+            forInactiveState: 60
+        )
+        _ = _EmptyScene().updateFrameRate(
+            forActiveState: 300,
+            forInactiveState: 300,
+            enableVSync: false
+        )
     }
 
     @MainActor
@@ -78,6 +101,7 @@ final class WindowConfigurationTests: XCTestCase {
         let root = WindowController(content: EmptyView(), scene: scene)
         root.configurationOverride = .init(
             activeFrameInterval: 0.01,
+            displaySyncEnabled: false,
             drawDebugInfo: [.frameInfo]
         )
 
@@ -88,6 +112,7 @@ final class WindowConfigurationTests: XCTestCase {
         )
         root.addPresentationChild(child: child)
         XCTAssertEqual(child.configurationOverride.activeFrameInterval, 0.01)
+        XCTAssertEqual(child.configurationOverride.displaySyncEnabled, false)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.frameInfo])
 
         let nestedChild = PopupWindowController(
@@ -99,24 +124,29 @@ final class WindowConfigurationTests: XCTestCase {
 
         root.configurationOverride = .init(
             inactiveFrameInterval: 0.2,
+            displaySyncEnabled: true,
             drawDebugInfo: [.thread, .queue]
         )
 
         for controller in [child, nestedChild] {
             XCTAssertNil(controller.configurationOverride.activeFrameInterval)
             XCTAssertEqual(controller.configurationOverride.inactiveFrameInterval, 0.2)
+            XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, true)
             XCTAssertEqual(controller.configurationOverride.drawDebugInfo, [.thread, .queue])
         }
     }
 
     @MainActor
-    func testModalChildrenInheritAndTrackConfigurationOverride() {
+    func testPlatformModalChildrenInheritAndTrackConfigurationOverride() {
         let scene = WindowKey(
             namespace: .app,
             sceneID: SceneID(WindowConfigurationTests.self, index: 1)
         )
         let root = WindowController(content: EmptyView(), scene: scene)
-        root.configurationOverride = .init(drawDebugInfo: [.windowState])
+        root.configurationOverride = .init(
+            displaySyncEnabled: false,
+            drawDebugInfo: [.windowState]
+        )
 
         let content = AnyView(EmptyView())
         let child = root.viewGraph.data.withCurrent {
@@ -127,7 +157,7 @@ final class WindowConfigurationTests: XCTestCase {
                 sourceGraph: sourceGraph,
                 scene: scene,
                 parentController: root,
-                usesPlatformWindow: false
+                usesPlatformWindow: true
             )
         }
         root.addModal(
@@ -140,17 +170,22 @@ final class WindowConfigurationTests: XCTestCase {
                 drawsBackground: true,
                 placement: .automatic,
                 activeInspector: nil,
-                usesPlatformWindow: false
+                usesPlatformWindow: true
             ))
         )
+        XCTAssertEqual(child.configurationOverride.displaySyncEnabled, false)
+        XCTAssertFalse(child.configuration.displaySyncEnabled)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.windowState])
 
         root.configurationOverride = .init(
             activeFrameInterval: 0.02,
+            displaySyncEnabled: true,
             drawDebugInfo: [.appState]
         )
 
         XCTAssertEqual(child.configurationOverride.activeFrameInterval, 0.02)
+        XCTAssertEqual(child.configurationOverride.displaySyncEnabled, true)
+        XCTAssertTrue(child.configuration.displaySyncEnabled)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.appState])
     }
 }
