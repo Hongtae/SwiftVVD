@@ -8,6 +8,15 @@ struct TestApp1: App {
                 .environment(\.resourceBundle, .module)
                 //.environment(\._debugLayout, true)
         }
-        .drawDebugInfo(.all)
+        .drawDebugInfo(.frameInfo,
+                       .updateTiming,
+                       .queue,
+                       .appState,
+                       .windowState)
+        .updateFrameRate(
+            forActiveState: 60,
+            forInactiveState: 30,
+            renderingMode: .continuousWithDisplaySync
+        )
     }
 }
