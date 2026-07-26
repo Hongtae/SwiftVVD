@@ -3947,36 +3947,34 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return nil
         }
 
+        let atomBounds = atoms.map(\.bounds)
+        let presentationBounds = presentation?.interpolationBounds
+        let presentationPartitions = presentation.map {
+            textPresentationPartitions(
+                $0,
+                atomBounds: atomBounds
+            )
+        }
+
         return atoms.enumerated().map { index, atom in
             let command = DisplayList.ItemCommand.text(record, bounds: atom.bounds)
+            let presentationPartition = presentationPartitions?[index]
+            let presentationClipBounds = presentation.map { _ in
+                textPresentationClipBounds(
+                    at: index,
+                    atomBounds: atomBounds,
+                    presentationBounds: presentationBounds
+                )
+            }
             var atomItem = DisplayList.Item(
                 command: command,
                 identity: item.identity,
                 version: item.version
             ) { context in
                 var context = context
-                if let presentation {
-                    let presentationBounds = presentation.interpolationBounds ??
-                        atom.bounds
-                    let minimumX = if index == atoms.startIndex {
-                        min(presentationBounds.minX, atom.bounds.minX)
-                    } else {
-                        (atoms[index - 1].bounds.midX + atom.bounds.midX) * 0.5
-                    }
-                    let maximumX = if index == atoms.index(before: atoms.endIndex) {
-                        max(presentationBounds.maxX, atom.bounds.maxX)
-                    } else {
-                        (atom.bounds.midX + atoms[index + 1].bounds.midX) * 0.5
-                    }
-                    let minimumY = min(presentationBounds.minY, atom.bounds.minY)
-                    let maximumY = max(presentationBounds.maxY, atom.bounds.maxY)
-                    context.clip(to: Path(CGRect(
-                        x: minimumX,
-                        y: minimumY,
-                        width: max(maximumX - minimumX, 0),
-                        height: max(maximumY - minimumY, 0)
-                    )))
-                    presentation.draw(in: context)
+                if let presentationPartition, let presentationClipBounds {
+                    context.clip(to: Path(presentationClipBounds))
+                    presentationPartition.draw(in: context)
                 } else {
                     context.clip(to: Path(atom.bounds))
                     item(context)
@@ -3992,6 +3990,75 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 )
             )
         }
+    }
+
+    private static func textPresentationClipBounds(
+        at index: Int,
+        atomBounds: [CGRect],
+        presentationBounds: CGRect?
+    ) -> CGRect {
+        let atom = atomBounds[index]
+        let minimumX = if index == atomBounds.startIndex {
+            min(presentationBounds?.minX ?? atom.minX, atom.minX)
+        } else {
+            (atomBounds[index - 1].midX + atom.midX) * 0.5
+        }
+        let maximumX = if index == atomBounds.index(before: atomBounds.endIndex) {
+            max(presentationBounds?.maxX ?? atom.maxX, atom.maxX)
+        } else {
+            (atom.midX + atomBounds[index + 1].midX) * 0.5
+        }
+        let minimumY = min(presentationBounds?.minY ?? atom.minY, atom.minY)
+        let maximumY = max(presentationBounds?.maxY ?? atom.maxY, atom.maxY)
+        return CGRect(
+            x: minimumX,
+            y: minimumY,
+            width: max(maximumX - minimumX, 0),
+            height: max(maximumY - minimumY, 0)
+        )
+    }
+
+    private static func textPresentationPartitions(
+        _ presentation: DisplayList,
+        atomBounds: [CGRect]
+    ) -> [DisplayList] {
+        guard !atomBounds.isEmpty else { return [] }
+
+        var partitions = Array(repeating: DisplayList(), count: atomBounds.count)
+
+        func partitionIndex(for item: DisplayList.Item) -> Int? {
+            guard let bounds = item.command.bounds,
+                  !bounds.isNull,
+                  bounds.midX.isFinite else {
+                return nil
+            }
+            return atomBounds.indices.min {
+                abs(atomBounds[$0].midX - bounds.midX) <
+                    abs(atomBounds[$1].midX - bounds.midX)
+            }
+        }
+
+        // A materialized numeric presentation already contains independent
+        // glyph-operation items. Keep only the nearest logical glyph's items
+        // in each replay closure so retained retargets do not multiply the
+        // entire preceding presentation at every level.
+        for item in presentation.items {
+            guard let index = partitionIndex(for: item) else {
+                return Array(repeating: presentation, count: atomBounds.count)
+            }
+            partitions[index].items.append(item)
+            partitions[index].recordInterpolationBounds(item.command.bounds)
+        }
+        for item in presentation.debugItems {
+            guard let index = partitionIndex(for: item) else {
+                return Array(repeating: presentation, count: atomBounds.count)
+            }
+            partitions[index].debugItems.append(item)
+        }
+        for index in partitions.indices {
+            partitions[index].numericValue = presentation.numericValue
+        }
+        return partitions
     }
 
     private func applyTransitionSequenceDelay(
