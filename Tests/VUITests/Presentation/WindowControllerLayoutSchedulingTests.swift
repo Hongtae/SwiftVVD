@@ -96,6 +96,59 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testForcedIdleDrawReusesGraphOutputsWithoutAdvancingGraphTime() {
+        let counter = LayoutSchedulingCounter()
+        let controller = WindowController(
+            content: LayoutSchedulingRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingRoot.self)
+            )
+        )
+        var presentRequests = 0
+        let withGC: WindowContext.WithGraphicsContext = { needsPresent, _ in
+            if needsPresent {
+                presentRequests += 1
+            }
+        }
+
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 120, height: 80),
+            shouldDrawFrame: false,
+            withGC
+        )
+        XCTAssertFalse(controller.viewGraph.hasScheduledViewUpdate)
+        let graphCounter = controller.viewGraph.data.graph.graphCounter(lane: 1)
+        let graphTime = controller.viewGraph.currentTimestamp
+        let animationTime = controller.animationTimestamp
+        presentRequests = 0
+
+        controller.updateFrame(
+            tick: 1,
+            delta: 1.0 / 300.0,
+            date: controller.date.addingTimeInterval(1.0 / 300.0),
+            contentSize: CGSize(width: 120, height: 80),
+            shouldDrawFrame: true,
+            withGC
+        )
+
+        XCTAssertEqual(presentRequests, 1)
+        XCTAssertEqual(
+            controller.animationTimestamp.seconds,
+            animationTime.seconds + 1.0 / 300.0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(controller.viewGraph.currentTimestamp, graphTime)
+        XCTAssertEqual(
+            controller.viewGraph.data.graph.graphCounter(lane: 1),
+            graphCounter
+        )
+    }
+
+    @MainActor
     func testIdleUpdateDoesNotRepeatRootLayoutPlacement() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(

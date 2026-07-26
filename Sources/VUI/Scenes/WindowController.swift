@@ -746,6 +746,7 @@ class WindowController: WindowDelegate,
     }
 
     private var viewChangedWhileDrawing: Bool = false
+    private var permitsIdleGraphSkip = false
     private var hasDeliveredViewLayoutUpdate = false
     private(set) var cachedRootFittedSize: CGSize?
     private(set) var cachedContentSize: CGSize = .zero
@@ -774,8 +775,15 @@ class WindowController: WindowDelegate,
         // Pending parity: propagate renderCtx.contentsScale to draw calls.
 
         var redraw = false
-        self._updateView(tick: tick, delta: delta, date: date,
-                         contentSize: contentSize, redraw: &redraw, withGC)
+        self._updateView(
+            tick: tick,
+            delta: delta,
+            date: date,
+            contentSize: contentSize,
+            redraw: &redraw,
+            permitsIdleGraphSkip: shouldDrawFrame,
+            withGC
+        )
 
         if redraw || shouldDrawFrame {
             let clearColor = configuration.backgroundColor
@@ -818,7 +826,13 @@ class WindowController: WindowDelegate,
 
     private func _updateView(tick: UInt64, delta: Double, date: Date,
                              contentSize: CGSize, redraw: inout Bool,
+                             permitsIdleGraphSkip: Bool = false,
                              _ withGC: WindowContext.WithGraphicsContext) {
+        let previousPermitsIdleGraphSkip = self.permitsIdleGraphSkip
+        self.permitsIdleGraphSkip = permitsIdleGraphSkip
+        defer {
+            self.permitsIdleGraphSkip = previousPermitsIdleGraphSkip
+        }
         Update.begin()
         updateView(
             tick: tick,
@@ -860,14 +874,54 @@ class WindowController: WindowDelegate,
         let hadGraphWork = viewGraph.hasPendingTransactions ||
             viewGraph.needsTransaction ||
             viewGraph.data.graph.inbox.hasPendingWork ||
+            !viewGraph.data.graph.pendingActions.isEmpty ||
             !viewGraph.data.graph.actionOutbox.isEmpty
         let hadViewChangedWhileDrawing = self.viewChangedWhileDrawing
+        let hadCrossGraphWork: Bool
+        if window == nil, let sourceGraph = crossGraphSourceGraph {
+            hadCrossGraphWork =
+                sourceGraph.inbox.hasPendingWork ||
+                !sourceGraph.pendingActions.isEmpty ||
+                !sourceGraph.actionOutbox.isEmpty
+        } else {
+            hadCrossGraphWork = false
+        }
+        let gestureDeadlineReached = gestureGraph.map {
+            !(currentTimestamp < $0.nextGestureUpdateTime)
+        } ?? false
+        let hadGestureGraphWork = gestureGraph.map {
+            $0.data.graph.inbox.hasPendingWork ||
+            !$0.data.graph.pendingActions.isEmpty ||
+            !$0.data.graph.actionOutbox.isEmpty
+        } ?? false
 
         var needsLayoutPass = !hasDeliveredViewLayoutUpdate ||
             sizeChanged ||
             hadRootValueUpdates ||
             hadGraphWork ||
             hadViewChangedWhileDrawing
+
+        // The backend may present cached contents continuously, but graph
+        // output evaluation is event-driven. Avoid advancing the graph's time
+        // input when this host has no scheduled or pending update work.
+        let needsRootUpdate =
+            needsLayoutPass ||
+            hadScheduledViewUpdate ||
+            !events.isEmpty ||
+            hadCrossGraphWork ||
+            gestureDeadlineReached ||
+            hadGestureGraphWork
+        guard !permitsIdleGraphSkip || needsRootUpdate else {
+            updateOverlayChildren(
+                tick: tick,
+                delta: delta,
+                date: date,
+                contentSize: contentSize,
+                redraw: &redraw,
+                withGC
+            )
+            return
+        }
 
         var flushedCrossGraphSource = false
         var drainedGestureOutbox = false
@@ -1114,17 +1168,49 @@ class WindowController: WindowDelegate,
         }
         self.viewChangedWhileDrawing = false
 
-        // Overlay presentation children: update after self.
+        updateOverlayChildren(
+            tick: tick,
+            delta: delta,
+            date: date,
+            contentSize: contentSize,
+            redraw: &redraw,
+            withGC
+        )
+    }
+
+    private func updateOverlayChildren(
+        tick: UInt64,
+        delta: Double,
+        date: Date,
+        contentSize: CGSize,
+        redraw: inout Bool,
+        _ withGC: WindowContext.WithGraphicsContext
+    ) {
+        // Overlay presentation children update after their parent.
         for entry in self.presentationChildren.withLock({ $0 }) {
             guard entry.isOverlay, entry.initiated else { continue }
-            entry.controller._updateView(tick: tick, delta: delta, date: date,
-                                         contentSize: contentSize, redraw: &redraw, withGC)
+            entry.controller._updateView(
+                tick: tick,
+                delta: delta,
+                date: date,
+                contentSize: contentSize,
+                redraw: &redraw,
+                permitsIdleGraphSkip: permitsIdleGraphSkip,
+                withGC
+            )
         }
-        // Overlay modal child (at most one): update last.
+        // The single overlay modal updates last.
         if let entry = self.modalChildren.withLock({ $0.first }),
            entry.isOverlay, entry.initiated {
-            entry.controller._updateView(tick: tick, delta: delta, date: date,
-                                         contentSize: contentSize, redraw: &redraw, withGC)
+            entry.controller._updateView(
+                tick: tick,
+                delta: delta,
+                date: date,
+                contentSize: contentSize,
+                redraw: &redraw,
+                permitsIdleGraphSkip: permitsIdleGraphSkip,
+                withGC
+            )
         }
     }
 

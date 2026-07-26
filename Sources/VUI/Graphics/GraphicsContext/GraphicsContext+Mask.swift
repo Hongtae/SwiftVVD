@@ -209,6 +209,12 @@ extension GraphicsContext {
     }
 
     func applyMaskToSource() -> Bool {
+        // The shared default mask is fully opaque, so applying it cannot alter
+        // source pixels. Preserve the render pass only after a clip installs a
+        // context-specific mask.
+        if self.maskTexture === self.pipeline.defaultMaskTexture {
+            return true
+        }
         let width = self.renderTargets.width
         let height = self.renderTargets.height
         let viewport = CGRect(x: 0, y: 0, width: width, height: height)

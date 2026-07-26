@@ -150,7 +150,54 @@ class WindowContext: @unchecked Sendable {
     }
 
     private func runUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+        struct PeriodicFrameTiming {
+            struct Summary {
+                var minimum = 0.0
+                var maximum = 0.0
+                var average = 0.0
+            }
+
+            // Durations are milliseconds; elapsed time and intervals are seconds.
+            var latestDuration = 0.0
+            var accumulatedDuration = 0.0
+            var minimumDuration = Double.infinity
+            var maximumDuration = 0.0
+            var sampleCount: UInt64 = 0
+            var accumulatedTime = 0.0
+            var latestSummary = Summary()
+
+            mutating func record(
+                duration: Double,
+                elapsedTime: Double,
+                summaryInterval: Double
+            ) {
+                latestDuration = duration
+                accumulatedDuration += duration
+                minimumDuration = min(minimumDuration, duration)
+                maximumDuration = max(maximumDuration, duration)
+                sampleCount += 1
+                accumulatedTime += elapsedTime
+
+                guard accumulatedTime >= summaryInterval else {
+                    return
+                }
+
+                latestSummary = Summary(
+                    minimum: minimumDuration,
+                    maximum: maximumDuration,
+                    average: accumulatedDuration / Double(sampleCount)
+                )
+                accumulatedDuration = 0.0
+                minimumDuration = Double.infinity
+                maximumDuration = 0.0
+                sampleCount = 0
+                accumulatedTime = 0.0
+            }
+        }
+
+        let timingSummaryInterval = 1.0
+
+        return Task.detached(priority: .userInitiated) { @Sendable [weak self] in
             var onFinalize = self?.onFinalize
             defer {
                 onFinalize?()
@@ -158,19 +205,10 @@ class WindowContext: @unchecked Sendable {
             }
             Log.info("WindowContext update task is started.")
 
-            var timestamp = DispatchTime.now()
-
-            let elapsed = {
-                let now = DispatchTime.now()
-                let delta = Double(now.uptimeNanoseconds - timestamp.uptimeNanoseconds)
-                return delta * 0.000_000_001
+            let timestamp = { (start: UInt64) in
+                DispatchTime.now().uptimeNanoseconds - start
             }
-            let resetTimestamp = {
-                let now = DispatchTime.now()
-                let delta = Double(now.uptimeNanoseconds - timestamp.uptimeNanoseconds)
-                timestamp = now
-                return delta * 0.000_000_001
-            }
+            var frameTimestamp = timestamp(0)
 
             var contentSize: CGSize = .zero
             var contentScaleFactor: CGFloat = 1
@@ -178,10 +216,14 @@ class WindowContext: @unchecked Sendable {
 
             var surfaceRevision: Int = 0
             var shouldDrawFrame = true
-            var additionalDeltaTimes: Double = 0.0
+            var additionalDeltaNanoseconds: UInt64 = 0
             var displaySyncEnabled = true
 
             var debugFrameCount: UInt64 = 1
+            var updateTiming = PeriodicFrameTiming()
+            var resourceTiming = PeriodicFrameTiming()
+            var drawTiming = PeriodicFrameTiming()
+            var presentTiming = PeriodicFrameTiming()
 
             // Establish the default presentation policy before the first
             // configuration snapshot and render-pass acquisition.
@@ -224,10 +266,14 @@ class WindowContext: @unchecked Sendable {
                     shouldDrawFrame = true
                 }
 
-                let delta = resetTimestamp() + additionalDeltaTimes
-                let tick = timestamp.uptimeNanoseconds
+                let elapsedFrameNanoseconds = timestamp(frameTimestamp)
+                frameTimestamp += elapsedFrameNanoseconds
+                let deltaNanoseconds =
+                    elapsedFrameNanoseconds + additionalDeltaNanoseconds
+                let delta = Double(deltaNanoseconds) * 0.000_000_001
+                let tick = frameTimestamp
                 let date = Date(timeIntervalSinceNow: 0)
-                additionalDeltaTimes = delta
+                additionalDeltaNanoseconds = deltaNanoseconds
 
                 if let swapChain {
                     var renderPass = swapChain.currentRenderPassDescriptor()
@@ -247,12 +293,34 @@ class WindowContext: @unchecked Sendable {
                     renderPass.colorAttachments[0].clearColor = .clear
 
                     if let updateFrame {
+                        let debugDrawInfo = config.drawDebugInfo
+                        let measureUpdateTiming = debugDrawInfo.contains(.updateTiming)
+                        let measureResourceTiming = debugDrawInfo.contains(.resourceTiming)
+                        let measureDrawTiming = debugDrawInfo.contains(.drawTiming)
+                        let measurePresentTiming = debugDrawInfo.contains(.presentTiming)
+
                         var present = false
                         var commandBuffer: CommandBuffer? = nil
                         var graphicsContext: GraphicsContext? = nil
+                        var isMeasuringUpdateFrame = false
+                        var frameResourceNanoseconds: UInt64 = 0
+                        var frameDrawNanoseconds: UInt64 = 0
 
                         let sceneResources = self.sceneResources
                         let withGC = { (needPresent: Bool, handler: (GraphicsContext)->Void) in
+                            let phaseStart = isMeasuringUpdateFrame
+                                ? timestamp(0)
+                                : nil
+                            defer {
+                                if let phaseStart {
+                                    let duration = timestamp(phaseStart)
+                                    if needPresent {
+                                        frameDrawNanoseconds += duration
+                                    } else {
+                                        frameResourceNanoseconds += duration
+                                    }
+                                }
+                            }
                             if let renderTargets {
                                 if commandBuffer == nil {
                                     commandBuffer = swapChain.commandQueue.makeCommandBuffer()
@@ -284,13 +352,46 @@ class WindowContext: @unchecked Sendable {
                             }
                         }
 
-                        let debugDrawInfo = config.drawDebugInfo
                         if debugDrawInfo.isEmpty == false {
                             shouldDrawFrame = true
                         }
 
+                        let timingUpdateStart = measureUpdateTiming
+                            ? timestamp(0)
+                            : nil
+                        isMeasuringUpdateFrame =
+                            measureUpdateTiming || measureResourceTiming || measureDrawTiming
                         updateFrame(tick, delta, date, contentSize, shouldDrawFrame, withGC)
-                        additionalDeltaTimes = 0.0
+                        isMeasuringUpdateFrame = false
+                        if let timingUpdateStart {
+                            let frameUpdateDuration = timestamp(timingUpdateStart)
+                            let excludedPhaseNanoseconds =
+                                frameResourceNanoseconds + frameDrawNanoseconds
+                            let frameUpdateNanoseconds =
+                                frameUpdateDuration >= excludedPhaseNanoseconds
+                                    ? frameUpdateDuration - excludedPhaseNanoseconds
+                                    : 0
+                            updateTiming.record(
+                                duration: Double(frameUpdateNanoseconds) / 1_000_000.0,
+                                elapsedTime: delta,
+                                summaryInterval: timingSummaryInterval
+                            )
+                        }
+                        if measureResourceTiming {
+                            resourceTiming.record(
+                                duration: Double(frameResourceNanoseconds) / 1_000_000.0,
+                                elapsedTime: delta,
+                                summaryInterval: timingSummaryInterval
+                            )
+                        }
+                        if measureDrawTiming {
+                            drawTiming.record(
+                                duration: Double(frameDrawNanoseconds) / 1_000_000.0,
+                                elapsedTime: delta,
+                                summaryInterval: timingSummaryInterval
+                            )
+                        }
+                        additionalDeltaNanoseconds = 0
 
                         if debugDrawInfo.isEmpty == false {
                             withGC(true) { context in
@@ -303,10 +404,50 @@ class WindowContext: @unchecked Sendable {
                                 if debugDrawInfo.contains(.frameInfo) {
                                     if config.drawEveryFrames {
                                         let d = max(delta, 0.001001) // up to 999
-                                        drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
+                                        drawText(Text(String(
+                                            format: "%.1f FPS (%f, V-Sync: \(displaySyncEnabled ? "ON" : "OFF"))",
+                                            1.0 / d,
+                                            delta
+                                        )))
                                     } else {
                                         drawText(Text(String(format: "frame: %llu", debugFrameCount)))
                                     }
+                                }
+                                if debugDrawInfo.contains(.updateTiming) {
+                                    drawText(Text(String(
+                                        format: "update: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
+                                        updateTiming.latestDuration,
+                                        updateTiming.latestSummary.minimum,
+                                        updateTiming.latestSummary.maximum,
+                                        updateTiming.latestSummary.average
+                                    )))
+                                }
+                                if debugDrawInfo.contains(.resourceTiming) {
+                                    drawText(Text(String(
+                                        format: "resource: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
+                                        resourceTiming.latestDuration,
+                                        resourceTiming.latestSummary.minimum,
+                                        resourceTiming.latestSummary.maximum,
+                                        resourceTiming.latestSummary.average
+                                    )))
+                                }
+                                if debugDrawInfo.contains(.drawTiming) {
+                                    drawText(Text(String(
+                                        format: "draw: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
+                                        drawTiming.latestDuration,
+                                        drawTiming.latestSummary.minimum,
+                                        drawTiming.latestSummary.maximum,
+                                        drawTiming.latestSummary.average
+                                    )))
+                                }
+                                if debugDrawInfo.contains(.presentTiming) {
+                                    drawText(Text(String(
+                                        format: "present: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
+                                        presentTiming.latestDuration,
+                                        presentTiming.latestSummary.minimum,
+                                        presentTiming.latestSummary.maximum,
+                                        presentTiming.latestSummary.average
+                                    )))
                                 }
                                 if debugDrawInfo.contains(.thread) {
                                     drawText(Text("thread: \(Platform.currentThreadID())"))
@@ -348,7 +489,18 @@ class WindowContext: @unchecked Sendable {
                             commandBuffer.commit()
 
                             if present {
+                                let presentStart = measurePresentTiming
+                                    ? timestamp(0)
+                                    : nil
                                 _=swapChain.present()
+                                if let presentStart {
+                                    let presentDuration = timestamp(presentStart)
+                                    presentTiming.record(
+                                        duration: Double(presentDuration) / 1_000_000.0,
+                                        elapsedTime: delta,
+                                        summaryInterval: timingSummaryInterval
+                                    )
+                                }
 
                                 shouldDrawFrame = false
                                 debugFrameCount += 1
@@ -371,11 +523,26 @@ class WindowContext: @unchecked Sendable {
                 let configuredFrameInterval = state.activated
                     ? config.activeFrameInterval
                     : config.inactiveFrameInterval
-                let frameInterval = Self.resolvedFrameInterval(
+                let frameIntervalSeconds = Self.resolvedFrameInterval(
                     configured: configuredFrameInterval,
                     requested: self.preferredFrameInterval?()
                 )
-                let timeForBusyWait = state.activated ? 0.001 : 0.0
+                let scaledFrameInterval =
+                    frameIntervalSeconds * 1_000_000_000.0
+                let frameIntervalNanoseconds: UInt64
+                if scaledFrameInterval.isNaN || scaledFrameInterval <= 0 {
+                    frameIntervalNanoseconds = 0
+                } else if scaledFrameInterval >= Double(UInt64.max) {
+                    frameIntervalNanoseconds = .max
+                } else {
+                    frameIntervalNanoseconds = UInt64(scaledFrameInterval)
+                }
+                let busyWaitNanoseconds: UInt64 =
+                    state.activated ? 1_000_000 : 0
+                let yieldIntervalNanoseconds =
+                    frameIntervalNanoseconds > busyWaitNanoseconds
+                        ? frameIntervalNanoseconds - busyWaitNanoseconds
+                        : 0
 
                 repeat {
                     if Task.isCancelled { break mainLoop }
@@ -384,10 +551,10 @@ class WindowContext: @unchecked Sendable {
                     } else {
                         await Task.yield()
                     }
-                } while elapsed() < frameInterval - timeForBusyWait
+                } while timestamp(frameTimestamp) < yieldIntervalNanoseconds
 
                 // busy waiting, remaining time is too short to yield.
-                while elapsed() < frameInterval {
+                while timestamp(frameTimestamp) < frameIntervalNanoseconds {
                     if Task.isCancelled { break mainLoop }
                     Platform.threadYield()
                 }
