@@ -7,12 +7,53 @@
 
 import Foundation
 
+/// Controls whether frames are rendered continuously and whether presentation
+/// is synchronized to the display.
+public enum FrameRenderingMode: Equatable, Sendable {
+    /// Draw every frame and synchronize presentation to the display.
+    case continuousWithDisplaySync
+
+    /// Draw every frame without synchronizing presentation to the display.
+    case continuousWithoutDisplaySync
+
+    /// Draw only when content changes, synchronizing each presentation.
+    case onDemand
+
+    var displaySyncEnabled: Bool {
+        switch self {
+        case .continuousWithDisplaySync, .onDemand:
+            true
+        case .continuousWithoutDisplaySync:
+            false
+        }
+    }
+
+    var drawsEveryFrame: Bool {
+        switch self {
+        case .continuousWithDisplaySync, .continuousWithoutDisplaySync:
+            true
+        case .onDemand:
+            false
+        }
+    }
+}
+
 public struct _UpdateFrameRate: _SceneModifier {
     public typealias Body = Never
 
-    var active: CGFloat = 60.0
-    var inactive: CGFloat = 30.0
-    var displaySyncEnabled = true
+    var active: CGFloat
+    var inactive: CGFloat
+    var renderingMode: FrameRenderingMode
+
+    init(
+        active: CGFloat = 60.0,
+        inactive: CGFloat? = nil,
+        renderingMode: FrameRenderingMode = .continuousWithDisplaySync
+    ) {
+        self.active = active
+        self.inactive = inactive ?? active
+        self.renderingMode = renderingMode
+    }
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         guard let graph = _AGGraph.current else {
@@ -24,7 +65,8 @@ public struct _UpdateFrameRate: _SceneModifier {
             return WindowConfiguration.Override(
                 activeFrameInterval: Double(1.0 / m.active),
                 inactiveFrameInterval: Double(1.0 / m.inactive),
-                displaySyncEnabled: m.displaySyncEnabled
+                displaySyncEnabled: m.renderingMode.displaySyncEnabled,
+                drawEveryFrames: m.renderingMode.drawsEveryFrame
             )
         }
         outputs.preferences.append(
@@ -36,13 +78,15 @@ public struct _UpdateFrameRate: _SceneModifier {
 }
 
 extension Scene {
-    public func updateFrameRate(forActiveState active: CGFloat,
-                                forInactiveState inactive: CGFloat,
-                                enableVSync: Bool = true) -> some Scene {
+    public func updateFrameRate(
+        forActiveState active: CGFloat,
+        forInactiveState inactive: CGFloat? = nil,
+        renderingMode: FrameRenderingMode = .continuousWithDisplaySync
+    ) -> some Scene {
         let modifier = _UpdateFrameRate(
             active: active,
             inactive: inactive,
-            displaySyncEnabled: enableVSync
+            renderingMode: renderingMode
         )
         return self.modifier(modifier)
     }

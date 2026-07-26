@@ -77,18 +77,54 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(value.drawDebugInfo, [.frameInfo, .thread])
     }
 
-    func testFrameRateModifierDefaultsToVSyncEnabled() {
+    func testFrameRateModifierMapsRenderingModesAndInactiveDefault() {
         XCTAssertTrue(WindowConfiguration().displaySyncEnabled)
-        XCTAssertTrue(_UpdateFrameRate().displaySyncEnabled)
+        XCTAssertTrue(WindowConfiguration().drawEveryFrames)
+
+        let inheritedInactive = _UpdateFrameRate(active: 120)
+        XCTAssertEqual(inheritedInactive.active, 120)
+        XCTAssertEqual(inheritedInactive.inactive, 120)
+        XCTAssertEqual(
+            inheritedInactive.renderingMode,
+            .continuousWithDisplaySync
+        )
+
+        let explicitInactive = _UpdateFrameRate(
+            active: 120,
+            inactive: 30,
+            renderingMode: .onDemand
+        )
+        XCTAssertEqual(explicitInactive.inactive, 30)
+
+        let modes: [(FrameRenderingMode, Bool, Bool)] = [
+            (.continuousWithDisplaySync, true, true),
+            (.continuousWithoutDisplaySync, false, true),
+            (.onDemand, true, false),
+        ]
+        for (mode, displaySyncEnabled, drawsEveryFrame) in modes {
+            XCTAssertEqual(
+                mode.displaySyncEnabled,
+                displaySyncEnabled,
+                "\(mode)"
+            )
+            XCTAssertEqual(
+                mode.drawsEveryFrame,
+                drawsEveryFrame,
+                "\(mode)"
+            )
+        }
 
         _ = _EmptyScene().updateFrameRate(
-            forActiveState: 120,
-            forInactiveState: 60
+            forActiveState: 120
         )
         _ = _EmptyScene().updateFrameRate(
             forActiveState: 300,
             forInactiveState: 300,
-            enableVSync: false
+            renderingMode: .continuousWithoutDisplaySync
+        )
+        _ = _EmptyScene().updateFrameRate(
+            forActiveState: 60,
+            renderingMode: .onDemand
         )
     }
 
