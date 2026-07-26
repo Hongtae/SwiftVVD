@@ -262,6 +262,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
         let updateInputs = helper.beginUpdate(
             value: &updateValue,
             defaultAnimation: nil,
+            hasExternalAnimationState: hasExternalAnimationState,
             transactionForChangedTarget: { nil }
         )
         let target = updateInputs.target
@@ -318,6 +319,24 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             fallbackValue: previousOutput,
             fallbackTime: updateInputs.time
         )
+    }
+
+    private var hasExternalAnimationState: Bool {
+        startValue != nil ||
+            currentGeneration != nil ||
+            !samplingLayers.isEmpty ||
+            customReplacementCompletionGroup != nil ||
+            sourceCustomResidualReplacementCompletionGroup != nil ||
+            residualWrapperReplacementCompletionGroup != nil ||
+            combinedResidualCompletionGroup != nil ||
+            combinedFiniteCompletionGroup != nil ||
+            velocityTrackingImmediateCompletionGroup != nil ||
+            noAnimationRetargetPresentationDeadline != nil ||
+            deferredTerminalPresentationDeadline != nil ||
+            !contextLogicalCompletionSuppressedGenerations.isEmpty ||
+            !deadlineOwnedLogicalCompletionGenerations.isEmpty ||
+            !deadlineOwnedLogicalCompletionOrderGenerations.isEmpty ||
+            !completionRecords.isEmpty
     }
 
     private mutating func updateAnimatedTargetChange(

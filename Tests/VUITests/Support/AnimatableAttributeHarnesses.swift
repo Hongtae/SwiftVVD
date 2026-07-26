@@ -50,6 +50,12 @@ final class AnimatableAttributeHarness {
         }
     }
 
+    func valueNeedsEvaluation() -> Bool {
+        viewGraph.data.withCurrent {
+            animated.valueState.rawValue & 1 != 0
+        }
+    }
+
     func setSource(_ value: _OpacityEffect, animation: Animation?) {
         setSource(value, transaction: Transaction(animation: animation))
     }
@@ -214,6 +220,12 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
     func currentValue() -> Value {
         viewGraph.data.withCurrent {
             animated.value
+        }
+    }
+
+    func valueNeedsEvaluation() -> Bool {
+        viewGraph.data.withCurrent {
+            animated.valueState.rawValue & 1 != 0
         }
     }
 
@@ -466,6 +478,12 @@ final class AnimatableFrameAttributeHarness {
     func currentFrame() -> ViewFrame {
         viewGraph.data.withCurrent {
             animatedFrame.value
+        }
+    }
+
+    func frameNeedsEvaluation() -> Bool {
+        viewGraph.data.withCurrent {
+            animatedFrame.valueState.rawValue & 1 != 0
         }
     }
 

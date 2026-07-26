@@ -19,6 +19,42 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001)
     }
 
+    func testAnimatableAttributeIdleTimeStopsInvalidatingAfterSettling() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0.25)
+        )
+
+        _ = harness.currentValue()
+        harness.setTime(1)
+        XCTAssertTrue(harness.valueNeedsEvaluation())
+
+        _ = harness.currentValue()
+        XCTAssertFalse(harness.valueNeedsEvaluation())
+
+        harness.setTime(2)
+        XCTAssertFalse(harness.valueNeedsEvaluation())
+    }
+
+    func testAnimatableAttributeActiveAnimationKeepsTimeDependency() {
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        _ = harness.currentValue()
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            animation: .linear(duration: 1)
+        )
+        _ = harness.currentValue()
+
+        harness.setTime(0.5)
+        XCTAssertTrue(harness.valueNeedsEvaluation())
+        _ = harness.currentValue()
+
+        harness.setTime(0.6)
+        XCTAssertTrue(harness.valueNeedsEvaluation())
+        XCTAssertGreaterThan(harness.currentValue().opacity, 0)
+    }
+
     func testAnimatorStatePendingFirstSecondPhaseSkipsMiddleSample() {
         let sampleRecorder = AnimationCompletionRecorder()
         let completionRecorder = AnimationCompletionRecorder()
@@ -405,6 +441,41 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(frame.size.width, 10, accuracy: 0.000_001)
         XCTAssertEqual(frame.size.height, 20, accuracy: 0.000_001)
     }
+
+    func testAnimatableFrameAttributeIdleTimeStopsInvalidatingAfterSettling() {
+        assertAnimatableFrameAttributeIdleTimeStopsInvalidatingAfterSettling(
+            supportsVFD: false
+        )
+    }
+
+    func testAnimatableFrameAttributeVFDIdleTimeStopsInvalidatingAfterSettling() {
+        assertAnimatableFrameAttributeIdleTimeStopsInvalidatingAfterSettling(
+            supportsVFD: true
+        )
+    }
+
+    private func assertAnimatableFrameAttributeIdleTimeStopsInvalidatingAfterSettling(
+        supportsVFD: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: CGPoint(x: 1, y: 2),
+            initialSize: ViewSize(width: 10, height: 20),
+            supportsVFD: supportsVFD
+        )
+
+        _ = harness.currentFrame()
+        harness.setTime(1)
+        XCTAssertTrue(harness.frameNeedsEvaluation(), file: file, line: line)
+
+        _ = harness.currentFrame()
+        XCTAssertFalse(harness.frameNeedsEvaluation(), file: file, line: line)
+
+        harness.setTime(2)
+        XCTAssertFalse(harness.frameNeedsEvaluation(), file: file, line: line)
+    }
+
     func testAnimatableFrameAttributeAnimatesPositionAndSizeTogether() {
         let harness = AnimatableFrameAttributeHarness(
             initialPosition: .zero,

@@ -16,8 +16,8 @@ private struct _AGUpdateFrame {
 private final class _AGUpdateWorkList {
     var frames: [_AGUpdateFrame]
 
-    init(root: AGAttribute) {
-        frames = [_AGUpdateFrame(id: root.rawValue, afterInputs: false)]
+    init() {
+        frames = []
         frames.reserveCapacity(64)
     }
 
@@ -1225,27 +1225,65 @@ extension _AGGraph {
 
     private func updateNodeIfNeeded(_ rootID: AGAttribute) {
         let traversal = beginUpdateTraversal()
-        let workList = _AGUpdateWorkList(root: rootID)
+        let workList = _AGUpdateWorkList()
         let context = _AGUpdateContext(
             predecessor: _AGGraph.currentUpdateContext
         )
 
         _AGGraph.withCurrentUpdateContext(context) {
-            while !context.isCancelled, let frame = workList.popLast() {
-                switch nextUpdateAction(
-                    for: frame,
+            updateNodeIfNeeded(
+                rootID,
+                traversal: traversal,
+                workList: workList,
+                context: context
+            )
+        }
+    }
+
+    private func updateNodeIfNeeded(
+        _ rootID: AGAttribute,
+        traversal: UInt64,
+        workList: _AGUpdateWorkList,
+        context: _AGUpdateContext
+    ) {
+        workList.append(rootID.rawValue, afterInputs: false)
+        while !context.isCancelled, let frame = workList.popLast() {
+            switch nextUpdateAction(
+                for: frame,
+                traversal: traversal,
+                workList: workList
+            ) {
+            case .none:
+                continue
+            case .evaluate(let id, let index):
+                evaluateNodeForUpdate(id)
+                completeUpdateTraversal(index: index, traversal: traversal)
+            case .finish(let id, let index):
+                finishEvaluationWithoutUpdating(id)
+                completeUpdateTraversal(index: index, traversal: traversal)
+            }
+        }
+    }
+
+    private func updateSubgraphNodeBatch(
+        _ nodes: ContiguousArray<AGAttribute>
+    ) {
+        guard !nodes.isEmpty else { return }
+        let traversal = beginUpdateTraversal()
+        let workList = _AGUpdateWorkList()
+        let context = _AGUpdateContext(
+            predecessor: _AGGraph.currentUpdateContext
+        )
+
+        _AGGraph.withCurrentUpdateContext(context) {
+            for node in nodes {
+                guard !context.isCancelled else { break }
+                updateNodeIfNeeded(
+                    node,
                     traversal: traversal,
-                    workList: workList
-                ) {
-                case .none:
-                    continue
-                case .evaluate(let id, let index):
-                    evaluateNodeForUpdate(id)
-                    completeUpdateTraversal(index: index, traversal: traversal)
-                case .finish(let id, let index):
-                    finishEvaluationWithoutUpdating(id)
-                    completeUpdateTraversal(index: index, traversal: traversal)
-                }
+                    workList: workList,
+                    context: context
+                )
             }
         }
     }
@@ -1367,7 +1405,10 @@ extension _AGGraph {
 
             inbox.drain()
             while subgraph.consumeLocalPendingFlags(matching: flags) != 0 {
-                for node in subgraph.nodes {
+                // Registration appends locally, while update work consumes the
+                // newest registered node first.
+                var selectedNodes: ContiguousArray<AGAttribute> = []
+                for node in subgraph.nodes.reversed() {
                     guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                         continue
                     }
@@ -1376,8 +1417,9 @@ extension _AGGraph {
                           liveStorage.needsEvaluation else {
                         continue
                     }
-                    _ = value(for: liveNode)
+                    selectedNodes.append(liveNode)
                 }
+                updateSubgraphNodeBatch(selectedNodes)
                 guard subgraph.isValid else { break }
             }
 
@@ -1385,8 +1427,10 @@ extension _AGGraph {
                   subgraph.consumeDescendantPendingFlags(matching: flags) != 0 else {
                 continue
             }
-            for child in subgraph.children where child.hasPending(flags: flags) {
-                work.append(child)
+            for child in subgraph.children {
+                if child.hasPending(flags: flags) {
+                    work.append(child)
+                }
             }
         }
     }
@@ -1720,29 +1764,47 @@ extension _AGGraph {
             invalidationTraversal = 1
         }
         let traversal = invalidationTraversal
+        let initialCount = queue.count
+        var readIndex = 0
+        var writeIndex = 0
+        while readIndex < initialCount {
+            let (rawID, incomingChangedInput) = queue[readIndex]
+            readIndex += 1
+            let index = Int(rawID)
+            guard slots.indices.contains(index),
+                  slots[index].node != nil else {
+                continue
+            }
+            if inputsChanged, let incomingChangedInput {
+                markInputChanged(
+                    incomingChangedInput,
+                    forNodeAt: index
+                )
+            }
+            guard slots[index].node!.invalidationTraversal != traversal else {
+                continue
+            }
+            slots[index].node!.invalidationTraversal = traversal
+            queue[writeIndex] = (rawID, nil)
+            writeIndex += 1
+        }
+        if writeIndex < queue.count {
+            queue.removeSubrange(writeIndex...)
+        }
+
         var i = 0
         while i < queue.count {
-            let (rawID, incomingChangedInput) = queue[i]
+            let rawID = queue[i].id
             i += 1
             let index = Int(rawID)
             guard slots.indices.contains(index), slots[index].node != nil else {
                 continue
-            }
-            let firstVisit = slots[index].node!.invalidationTraversal != traversal
-            if firstVisit {
-                slots[index].node!.invalidationTraversal = traversal
             }
             if propagateTransaction {
                 slots[index].node!.transaction = transaction
             }
             if inputsChanged {
                 slots[index].node!.inputsChanged = true
-                if let incomingChangedInput {
-                    markInputChanged(
-                        incomingChangedInput,
-                        forNodeAt: index
-                    )
-                }
             }
             if !slots[index].node!.needsEvaluation {
                 slots[index].node!.needsEvaluation = true
@@ -1753,16 +1815,31 @@ extension _AGGraph {
             if rawID == forcedStart || forcedStarts?.contains(rawID) == true {
                 slots[index].node!.forceEvaluation = true
             }
-            if firstVisit && slots[index].node!.kind.isSideEffect {
+            if slots[index].node!.kind.isSideEffect {
                 sideEffects.append(UInt32(index))
             }
-            guard firstVisit else { continue }
             // Even when a node is already dirty, keep walking its outputs.
             // Structural updates can leave intermediate preference/layout nodes
             // dirty. Later source changes still need to reach side-effect refresh
             // rules that may have been evaluated and cleared in the meantime.
             for output in slots[index].node!.outputs {
-                queue.append((output, UInt32(index)))
+                let outputIndex = Int(output)
+                guard slots.indices.contains(outputIndex),
+                      slots[outputIndex].node != nil else {
+                    continue
+                }
+                if inputsChanged {
+                    markInputChanged(
+                        UInt32(index),
+                        forNodeAt: outputIndex
+                    )
+                }
+                guard slots[outputIndex].node!.invalidationTraversal
+                        != traversal else {
+                    continue
+                }
+                slots[outputIndex].node!.invalidationTraversal = traversal
+                queue.append((output, nil))
             }
             // Propagate to cross-graph proxy nodes watching this node.
             notifyCrossGraphObservers(

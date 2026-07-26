@@ -1653,10 +1653,15 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     mutating func beginUpdate(
         value: inout (value: AnimatedValue, changed: Bool),
         defaultAnimation: Animation?,
+        hasExternalAnimationState: Bool,
         transactionForChangedTarget: () -> Transaction?
     ) -> UpdateInputs {
         // The completion-record path lets the outer rule drain copied records
         // after a phase reset, while the helper clears its own optional state.
+        let existingAnimationTime =
+            animatorState != nil || hasExternalAnimationState
+                ? _time.value
+                : nil
         let didReset = checkResetForCompletionRecords()
         let targetChanged = hasModelDataChanged(value.value.animatableData)
         if didReset || targetChanged {
@@ -1672,7 +1677,10 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             didReset: didReset,
             target: value.value,
             targetAnimationBranch: branch,
-            time: _time.value
+            time: targetChanged
+                ? _time.value
+                : existingAnimationTime
+                    ?? Time(seconds: -Double.infinity)
         )
     }
 
@@ -1681,6 +1689,10 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         defaultAnimation: Animation?,
         transactionForChangedTarget: () -> Transaction?
     ) -> UpdateInputs {
+        // An idle helper must not retain a dynamic dependency on graph time.
+        // Sample time before reset only when live animation state entered this
+        // update, while a changed target still acquires its activation time.
+        let existingAnimationTime = animatorState.map { _ in _time.value }
         let didReset = checkReset()
         let targetChanged = hasModelDataChanged(value.value.animatableData)
         if didReset || targetChanged {
@@ -1696,7 +1708,10 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             didReset: didReset,
             target: value.value,
             targetAnimationBranch: branch,
-            time: _time.value
+            time: targetChanged
+                ? _time.value
+                : existingAnimationTime
+                    ?? Time(seconds: -Double.infinity)
         )
     }
 

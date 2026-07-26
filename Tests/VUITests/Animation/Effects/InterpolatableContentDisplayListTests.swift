@@ -6642,6 +6642,92 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
+    func testInterpolatedDisplayListIdleTimeDoesNotInvalidateOutput() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let displayList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))
+            let content = graph.makeInput(value: VersionedTransitionContent(value: 0))
+            let inputs = makeViewInputs(graph: graph)
+            let group = DisplayList.UnaryInterpolatorGroup()
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                group,
+                content: content,
+                inputs: inputs,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            _ = output.value
+            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+
+            inputs.base.time.setValue(Time(seconds: 1))
+
+            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(group.hasActiveInterpolators)
+        }
+    }
+
+    func testInterpolatedDisplayListReadsTimeWhileActiveThenReleasesDependency() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let firstList = makeDisplayList(debugItemCount: 1)
+            let secondList = makeDisplayList(debugItemCount: 1)
+            let displayList = graph.makeInput(value: firstList)
+            let content = graph.makeInput(value: VersionedTransitionContent(value: 0))
+            let inputs = makeViewInputs(graph: graph)
+            var transaction = Transaction()
+            transaction.animation = .linear(duration: 0.2)
+            inputs.base.transaction.setValue(transaction)
+            let group = DisplayList.UnaryInterpolatorGroup()
+            var outputs = _ViewOutputs()
+            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
+
+            outputs.applyInterpolatorGroup(
+                group,
+                content: content,
+                inputs: inputs,
+                animatesSize: false,
+                defersRender: false
+            )
+
+            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let output = Attribute<DisplayList>(outputID)
+            _ = output.value
+
+            displayList.setValue(secondList, transaction: transaction)
+            content.setValue(
+                VersionedTransitionContent(value: 1),
+                transaction: transaction
+            )
+            _ = output.value
+            XCTAssertTrue(group.hasActiveInterpolators)
+
+            inputs.base.time.setValue(Time(seconds: 0.01))
+            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            _ = output.value
+            inputs.base.time.setValue(Time(seconds: 0.02))
+            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            _ = output.value
+            inputs.base.time.setValue(Time(seconds: 0.22))
+            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            _ = output.value
+            XCTAssertFalse(group.hasActiveInterpolators)
+
+            inputs.base.time.setValue(Time(seconds: 0.23))
+            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            _ = output.value
+            inputs.base.time.setValue(Time(seconds: 0.24))
+            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+        }
+    }
+
     func testResolvedStyledTextTransitionRetargetsGeometryWithoutAccumulatingRemovedLayers() throws {
         let graph = _AGGraph()
 

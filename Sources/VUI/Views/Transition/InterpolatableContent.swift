@@ -433,10 +433,27 @@ extension DisplayList {
             contentSeed: DisplayList.Seed,
             target: DisplayList,
             transition: ContentTransition,
+            supportsVFD: Bool,
+            rasterizationOptions: RasterizationOptions
+        ) {
+        }
+
+        func setCurrentContents(
+            contentSeed: DisplayList.Seed,
+            target: DisplayList,
+            transition: ContentTransition,
             time: Time,
             supportsVFD: Bool,
             rasterizationOptions: RasterizationOptions
         ) {
+            setCurrentContents(
+                contentSeed: contentSeed,
+                target: target,
+                transition: transition,
+                supportsVFD: supportsVFD,
+                rasterizationOptions: rasterizationOptions
+            )
+            updateTime(time)
         }
 
         func update(
@@ -513,7 +530,6 @@ extension DisplayList {
             contentSeed: DisplayList.Seed,
             target: DisplayList,
             transition: ContentTransition,
-            time: Time,
             supportsVFD: Bool,
             rasterizationOptions: RasterizationOptions
         ) {
@@ -526,12 +542,6 @@ extension DisplayList {
                 version: DisplayList.Version(value: Int(contentSeed.value)),
                 numericValue: transition.numericValue
             )
-            layer.updateInterpolators(
-                contentsScale: layer.contents.contentsScale,
-                maxDuration: maxDuration,
-                time: time
-            )
-            scheduleNextUpdate(after: time)
         }
 
         override func update(
@@ -675,7 +685,6 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
         contentSeed: DisplayList.Seed,
         target: DisplayList,
         transition: ContentTransition,
-        time: Time,
         supportsVFD: Bool,
         rasterizationOptions: RasterizationOptions
     ) {
@@ -687,12 +696,6 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
             version: DisplayList.Version(value: Int(contentSeed.value)),
             numericValue: transition.numericValue
         )
-        layers[index].state.updateInterpolators(
-            contentsScale: contentsScale,
-            maxDuration: maxDuration,
-            time: time
-        )
-        scheduleNextUpdate(after: time)
     }
 
     override func update(
@@ -874,7 +877,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         let targetContent = content.value
         let targetList = displayList.value
         let currentEnvironment = environment.value
-        let currentTime = time.value
         let currentTransaction = transaction.value
         let currentSize = size.value.value
         _ = phase.value
@@ -957,7 +959,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 current: previousList ?? targetList,
                 target: targetList,
                 state: state,
-                time: currentTime,
+                time: time.value,
                 animatesSize: animatesSize,
                 defersRender: defersRender,
                 supportsVFD: supportsVFD
@@ -968,11 +970,12 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 contentSeed: contentSeed,
                 target: targetList,
                 transition: state.transition,
-                time: currentTime,
                 supportsVFD: supportsVFD,
                 rasterizationOptions: state.rasterizationOptions
             )
-            group.updateTime(currentTime)
+            if group.hasActiveInterpolators {
+                group.updateTime(time.value)
+            }
             output = group.hasActiveInterpolators
                 ? group.apply(to: targetList).translated(by: presentationOffset)
                 : currentPresentationList

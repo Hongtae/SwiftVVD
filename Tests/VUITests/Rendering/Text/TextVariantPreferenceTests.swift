@@ -549,6 +549,64 @@ final class TextVariantPreferenceTests: XCTestCase {
         }
     }
 
+    func testStaticTextResourceRuleDoesNotDependOnFrameTime() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let text = graph.makeInput(value: Text("static"))
+            let inputs = makeViewInputs(graph: graph)
+            let outputs = Text._makeView(
+                view: _GraphValue(_attribute: text),
+                inputs: inputs
+            )
+            let resourceID = try XCTUnwrap(
+                outputs.preferences.value(for: ResourceList.Key.self)
+            )
+            let resource = Attribute<ResourceList>(resourceID)
+
+            _ = resource.value
+            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+
+            inputs.base.time.setValue(Time(seconds: 1))
+
+            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+        }
+    }
+
+    func testDynamicTextResourceRuleDependsOnFrameTime() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let text = graph.makeInput(value: Text(
+                Date().addingTimeInterval(4.25),
+                style: .relative
+            ))
+            let inputs = makeViewInputs(graph: graph)
+            let outputs = Text._makeView(
+                view: _GraphValue(_attribute: text),
+                inputs: inputs
+            )
+            let resourceID = try XCTUnwrap(
+                outputs.preferences.value(for: ResourceList.Key.self)
+            )
+            let resource = Attribute<ResourceList>(resourceID)
+
+            _ = resource.value
+            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+
+            inputs.base.time.setValue(Time(seconds: 1))
+
+            XCTAssertTrue(resource.valueState.rawValue & 1 != 0)
+        }
+    }
+
     func testPreferenceCarriersMatchObservedEmptyLayout() {
         XCTAssertEqual(MemoryLayout<FixedTextVariant>.size, 0)
         XCTAssertEqual(MemoryLayout<FixedTextVariant>.stride, 1)

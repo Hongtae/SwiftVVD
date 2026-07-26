@@ -806,6 +806,43 @@ final class AGGraphCounterTests: XCTestCase {
         XCTAssertEqual(recorder.allOutputsWereDirty, true)
     }
 
+    func testDiamondInvalidationMarksEveryChangedInputBeforeDeduplicatingNode() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let first = graph.makeRule {
+                source.value + 10
+            }
+            let second = graph.makeRule {
+                source.value + 20
+            }
+            let output = graph.makeRule {
+                first.value + second.value
+            }
+
+            XCTAssertEqual(output.value, 32)
+
+            source.setValue(2)
+
+            let outputIndex = Int(output.identifier.rawValue)
+            let changedInputs = Set(
+                graph.slots[outputIndex].node!.inputs.compactMap { input in
+                    input.flags & _AGGraph.InputEdge.changed != 0
+                        ? input.attribute
+                        : nil
+                }
+            )
+            XCTAssertEqual(changedInputs, Set([
+                first.identifier.rawValue,
+                second.identifier.rawValue,
+            ]))
+            XCTAssertTrue(graph.slots[outputIndex].node!.needsEvaluation)
+            XCTAssertEqual(output.value, 34)
+        }
+    }
+
     func testSideEffectCreatedDuringEvaluationRunsFromGraphWorkList() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1205,17 +1242,17 @@ final class AGGraphCounterTests: XCTestCase {
             let source = AGSubgraph.withCurrent(subgraph) {
                 graph.makeInput(value: 1)
             }
+            let mutator = AGSubgraph.withCurrent(subgraph) {
+                graph.makeStatefulRule(
+                    SubgraphUpdateSourceMutationRule(source: source)
+                )
+            }
             let output = AGSubgraph.withCurrent(subgraph) {
                 graph.makeStatefulRule(
                     SubgraphUpdateRecordingRule(
                         source: source,
                         recorder: recorder
                     )
-                )
-            }
-            let mutator = AGSubgraph.withCurrent(subgraph) {
-                graph.makeStatefulRule(
-                    SubgraphUpdateSourceMutationRule(source: source)
                 )
             }
             output.identifier.setFlags(.transactional, mask: .transactional)
@@ -1225,6 +1262,34 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(recorder.values, [1, 2])
             XCTAssertEqual(output.value, 2)
+        }
+    }
+
+    func testSubgraphUpdateEvaluatesNewestRegisteredNodeFirst() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var evaluations: [String] = []
+
+        ref.withCurrent {
+            let subgraph = AGSubgraph()
+            let first = AGSubgraph.withCurrent(subgraph) {
+                graph.makeRule {
+                    evaluations.append("first")
+                    return 1
+                }
+            }
+            let second = AGSubgraph.withCurrent(subgraph) {
+                graph.makeRule {
+                    evaluations.append("second")
+                    return 2
+                }
+            }
+            first.identifier.setFlags(.transactional, mask: .transactional)
+            second.identifier.setFlags(.transactional, mask: .transactional)
+
+            subgraph.update(flags: AGAttributeFlags.transactional.rawValue)
+
+            XCTAssertEqual(evaluations, ["second", "first"])
         }
     }
 }

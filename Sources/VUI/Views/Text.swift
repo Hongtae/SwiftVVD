@@ -1678,7 +1678,6 @@ extension Text: View {
         let resourceAttr: Attribute<ResourceList> = graph.makeRule {
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
-            let currentTime = timeAttr.value
             let referenceDate = Date()
             let renderEnvironment = environment.untrackedCopy()
             let transitionText = text._resolveTransitionText(in: environment)
@@ -1703,6 +1702,7 @@ extension Text: View {
                 referenceDate: referenceDate
             ), delay.isFinite, delay > 0,
                let viewGraph = _AGGraphContext.current?.context as? ViewGraph {
+                let currentTime = timeAttr.value
                 viewGraph.nextUpdate.views.at(currentTime + delay)
             }
 
