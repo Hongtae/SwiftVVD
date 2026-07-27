@@ -271,10 +271,23 @@ extension DisplayList {
                         at: currentTime
                     )
                 }
+                let hasFollowingRemoval =
+                    index < removed.index(before: removed.endIndex)
                 if let currentInterpolator = removed[index].interpolator {
                     let updatedInterpolator = currentInterpolator.copy()
                         as! RBDisplayListInterpolator
-                    updatedInterpolator.setFrom(from)
+                    // Intermediate renderer contents are local to the following
+                    // endpoint. Typed text lists retain scene coordinates here,
+                    // so align that source before flattening its presentation.
+                    let alignsIntermediateSource = hasFollowingRemoval &&
+                        currentInterpolator.requiresIntermediateTextAlignment
+                    updatedInterpolator.setFrom(
+                        alignsIntermediateSource
+                            ? from.aligningInterpolationCenter(
+                                to: currentInterpolator.to
+                            )
+                            : from
+                    )
                     removed[index].interpolator = updatedInterpolator
                 } else {
                     let logicalFrom = if composedPresentation == nil {
@@ -308,8 +321,14 @@ extension DisplayList {
                         to: to,
                         options: options
                     )
-                    if composedPresentation != nil {
-                        interpolator.setFrom(from)
+                    let alignsIntermediateSource = hasFollowingRemoval &&
+                        interpolator.requiresIntermediateTextAlignment
+                    if composedPresentation != nil || alignsIntermediateSource {
+                        interpolator.setFrom(
+                            alignsIntermediateSource
+                                ? from.aligningInterpolationCenter(to: to)
+                                : from
+                        )
                     }
                     removed[index].interpolator = interpolator
                     let interpolatorDuration = removed[index].interpolator?.activeDuration ?? 0
@@ -792,6 +811,21 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
 private extension DisplayList {
     var isEmptyForInterpolation: Bool {
         items.isEmpty && debugItems.isEmpty && effects.isEmpty && interpolationBounds == nil
+    }
+
+    func aligningInterpolationCenter(to target: DisplayList) -> DisplayList {
+        guard let sourceBounds = interpolationBounds,
+              let targetBounds = target.interpolationBounds else {
+            return self
+        }
+        let offset = CGSize(
+            width: targetBounds.midX - sourceBounds.midX,
+            height: targetBounds.midY - sourceBounds.midY
+        )
+        guard offset.width != 0 || offset.height != 0 else {
+            return self
+        }
+        return translated(by: offset)
     }
 }
 

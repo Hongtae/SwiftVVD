@@ -1992,6 +1992,125 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS animationLabSpringReversalCompositionObserved
+    @MainActor
+    func testResolvedAnimationLabVariantTextStaysCenteredDuringRapidSpringReversal() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedAnimationLabSpringRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingResolvedAnimationLabSpringRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 360),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 360),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> (
+            background: CGRect,
+            compact: [LayoutSchedulingResolvedTextSample],
+            expanded: [LayoutSchedulingResolvedTextSample]
+        ) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            let background = try XCTUnwrap(
+                translucentShapeFillRecords(in: list).first?.bounds
+            )
+            return (
+                background,
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "compact",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "expanded",
+                    environment: controller.environment
+                )
+            )
+        }
+
+        _ = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        for time in [0.001, 1.0 / 60.0, 0.05, 0.10, 0.15] {
+            _ = try update(time: time)
+        }
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var sawComposedEndpoints = false
+        for time in [0.151, 1.0 / 6.0, 0.20, 0.30, 0.50, 0.90, 1.50, 2.50, 5.20] {
+            let sample = try update(time: time)
+            let visibleCompact = sample.compact.filter { $0.opacity > 0.001 }
+            let visibleExpanded = sample.expanded.filter { $0.opacity > 0.001 }
+            sawComposedEndpoints = sawComposedEndpoints ||
+                (!visibleCompact.isEmpty && !visibleExpanded.isEmpty)
+
+            let visibleTexts = visibleCompact + visibleExpanded
+            XCTAssertFalse(
+                visibleTexts.isEmpty,
+                "missing rapid-reversal variant text at \(time)"
+            )
+            for text in visibleTexts {
+                XCTAssertEqual(
+                    text.frame.midX,
+                    sample.background.midX,
+                    accuracy: 3,
+                    "rapid-reversal text split from the child center at \(time): \(sample)"
+                )
+            }
+        }
+        XCTAssertTrue(
+            sawComposedEndpoints,
+            "rapid reversal never exposed the native two-endpoint composition"
+        )
+    }
+
     // ASSERTIONS dynamicLayoutRetainedGeometryPreservationObserved
     @MainActor
     func testAnimationLabRetainedChildKeepsLastPublishedGeometryDuringRemoval() throws {
