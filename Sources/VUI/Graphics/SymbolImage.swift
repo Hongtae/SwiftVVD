@@ -98,6 +98,33 @@ struct ResolvedVectorSymbol: Equatable {
     var identity: Identity
     var viewport: CGRect
     var layers: [Layer]
+    var artworkBounds: CGRect
+    var intrinsicScale: CGFloat = 1
+
+    func applyingEffectiveFontMetrics(
+        in environment: EnvironmentValues
+    ) -> Self {
+        var result = self
+        let font = environment.font ?? .system(.body)
+        guard let pointSize = font.pointSizeForSymbolMetrics,
+              pointSize.isFinite,
+              pointSize >= 0 else {
+            return result
+        }
+
+        guard !artworkBounds.isNull,
+              artworkBounds.height.isFinite,
+              artworkBounds.height > 0 else {
+            return result
+        }
+
+        // Portable assets keep their source viewport, while the effective
+        // font controls the visible vertical ink. The catalog paths used here
+        // occupy a smaller region than their 24-unit design viewport.
+        let targetInkHeight = pointSize * 0.9
+        result.intrinsicScale = targetInkHeight / artworkBounds.height
+        return result
+    }
 
     var variableColorLevelCount: Int {
         layers.compactMap(\.variableColorLevel).max().map { $0 + 1 } ?? 0
@@ -290,10 +317,14 @@ enum SVGSymbolDocument {
                 }
             }
         }
+        let artworkBounds = layers.reduce(CGRect.null) {
+            $0.union($1.path.boundingRect)
+        }
         return ResolvedVectorSymbol(
             identity: identity,
             viewport: viewport,
-            layers: layers
+            layers: layers,
+            artworkBounds: artworkBounds
         )
     }
 

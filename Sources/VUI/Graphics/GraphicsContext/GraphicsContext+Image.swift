@@ -106,7 +106,7 @@ extension GraphicsContext {
         }
 
         init(symbol: ResolvedVectorSymbol, shading: Shading? = nil) {
-            self.baseline = symbol.viewport.height
+            self.baseline = symbol.viewport.height * symbol.intrinsicScale
             self.shading = shading
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
@@ -116,7 +116,7 @@ extension GraphicsContext {
             self.symbolDrawsReversed = false
             self.storage = Storage(contents: .symbol(symbol))
             self.textureTransform = .identity
-            self.scaleFactor = 1
+            self.scaleFactor = symbol.intrinsicScale
         }
 
         init(svg: SVG, shading: Shading? = nil) {
@@ -136,7 +136,9 @@ extension GraphicsContext {
 
     public func resolve(_ image: Image) -> ResolvedImage {
         if let symbol = image.provider.makeVectorSymbol() {
-            return ResolvedImage(symbol: symbol)
+            return ResolvedImage(
+                symbol: symbol.applyingEffectiveFontMetrics(in: environment)
+            )
         }
         if let svg = image.provider.makeSVG() {
             return ResolvedImage(svg: svg)

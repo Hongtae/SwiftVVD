@@ -2,6 +2,67 @@ import XCTest
 @testable import VUI
 
 final class SymbolEffectsTests: XCTestCase {
+    func testPortableSymbolResolutionUsesEffectiveFontMetrics() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let image = graph.makeInput(value: Image(systemName: "photo.fill"))
+            let backendSource = graph.makeInput(value: Optional<Image>.none)
+            let backendImage = graph.makeInput(
+                value: Optional<GraphicsContext.ResolvedImage>.none
+            )
+            var values = EnvironmentValues()
+            values.font = .system(size: 40)
+            let environment = graph.makeInput(value: values)
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    view: image,
+                    backendSource: backendSource,
+                    backendImage: backendImage,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: graph.makeInput(value: Time(seconds: 0))
+                )
+            )
+
+            let fortyPoint = try XCTUnwrap(child.value.image)
+            XCTAssertEqual(fortyPoint.size, CGSize(width: 48, height: 48))
+            XCTAssertEqual(fortyPoint.scaleFactor, 2, accuracy: 0.000_001)
+            let fortyPointSymbol = try XCTUnwrap(fortyPoint.symbol)
+            XCTAssertEqual(
+                fortyPointSymbol.artworkBounds.height * fortyPoint.scaleFactor,
+                36,
+                accuracy: 0.000_001
+            )
+
+            values.font = .system(size: 20)
+            environment.setValue(values)
+            let twentyPoint = try XCTUnwrap(child.value.image)
+            XCTAssertEqual(twentyPoint.size, CGSize(width: 24, height: 24))
+            XCTAssertEqual(twentyPoint.scaleFactor, 1, accuracy: 0.000_001)
+            XCTAssertEqual(
+                twentyPoint.symbol?.identity,
+                fortyPoint.symbol?.identity
+            )
+
+            values.font = nil
+            environment.setValue(values)
+            let defaultPoint = try XCTUnwrap(child.value.image)
+            XCTAssertEqual(
+                defaultPoint.size.width,
+                15.6,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                defaultPoint.size.height,
+                15.6,
+                accuracy: 0.000_001
+            )
+
+            // ASSERTIONS symbolFontIntrinsicMetricsObserved
+            // ASSERTIONS symbolVectorKeyEnvironmentMetricsObserved
+        }
+    }
+
     func testPortableSymbolCatalogLoadsVectorLayersAndDistinguishesVariants() throws {
         let outline = try XCTUnwrap(SymbolAssetCatalog.resolve(
             name: "star",

@@ -10,6 +10,7 @@ import VVD
 
 class AnyImageProviderBox: @unchecked Sendable {
     var requiresBackendResolution: Bool { true }
+    var usesSymbolFontMetrics: Bool { false }
 
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
@@ -177,6 +178,7 @@ final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 
     override var requiresBackendResolution: Bool { false }
+    override var usesSymbolFontMetrics: Bool { true }
 
     override func makeVectorSymbol() -> ResolvedVectorSymbol? {
         SymbolAssetCatalog.resolve(
@@ -366,6 +368,8 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     var phase = Phase()
     private var synchronousSource: Image?
     private var synchronousImage: GraphicsContext.ResolvedImage?
+    private var synchronousVectorSymbol: ResolvedVectorSymbol?
+    private var synchronousSymbolFont: Font?
     private var attemptedSynchronousResolution = false
 
     init(
@@ -399,8 +403,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     }
 
     mutating func updateValue() {
-        let image = resolvedImage()
-        let environmentEffects = environment.value.symbolEffects
+        let currentEnvironment = environment.value
+        let image = resolvedImage(in: currentEnvironment)
+        let environmentEffects = currentEnvironment.symbolEffects
         let transaction = transaction.value
         let pendingDrawTransition = updatePendingDrawTransition(
             effects: environmentEffects,
@@ -609,7 +614,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         ))
     }
 
-    private mutating func resolvedImage() -> GraphicsContext.ResolvedImage? {
+    private mutating func resolvedImage(
+        in environment: EnvironmentValues
+    ) -> GraphicsContext.ResolvedImage? {
         switch source {
         case let .resolved(image):
             return image.value
@@ -619,25 +626,43 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             guard !image.provider.requiresBackendResolution else {
                 synchronousSource = nil
                 synchronousImage = nil
+                synchronousVectorSymbol = nil
+                synchronousSymbolFont = nil
                 attemptedSynchronousResolution = false
                 guard backendSource.value == image else { return nil }
                 return backendImage.value
             }
 
-            if attemptedSynchronousResolution, synchronousSource == image {
+            let symbolFont = image.provider.usesSymbolFontMetrics
+                ? (environment.font ?? .system(.body))
+                : nil
+            if attemptedSynchronousResolution,
+               synchronousSource == image,
+               synchronousSymbolFont == symbolFont {
                 return synchronousImage
             }
 
             let resolved: GraphicsContext.ResolvedImage?
-            if let symbol = image.provider.makeVectorSymbol() {
-                resolved = GraphicsContext.ResolvedImage(symbol: symbol)
+            if synchronousSource == image,
+               let symbol = synchronousVectorSymbol {
+                resolved = GraphicsContext.ResolvedImage(
+                    symbol: symbol.applyingEffectiveFontMetrics(in: environment)
+                )
+            } else if let symbol = image.provider.makeVectorSymbol() {
+                synchronousVectorSymbol = symbol
+                resolved = GraphicsContext.ResolvedImage(
+                    symbol: symbol.applyingEffectiveFontMetrics(in: environment)
+                )
             } else if let svg = image.provider.makeSVG() {
+                synchronousVectorSymbol = nil
                 resolved = GraphicsContext.ResolvedImage(svg: svg)
             } else {
+                synchronousVectorSymbol = nil
                 resolved = nil
             }
             synchronousSource = image
             synchronousImage = resolved
+            synchronousSymbolFont = symbolFont
             attemptedSynchronousResolution = true
             return resolved
         }

@@ -556,6 +556,19 @@ public struct Font: Hashable, Sendable {
         Font(provider: provider.resolved(in: environment),
              displayScale: displayScale)
     }
+
+    var pointSizeForSymbolMetrics: CGFloat? {
+        switch provider.fontBox {
+        case let system as SystemFontProvider:
+            system.size
+        case let custom as CustomFontProvider:
+            custom.size
+        case let fixed as FixedFontProvider:
+            fixed.face.lineHeight
+        default:
+            nil
+        }
+    }
 }
 
 extension Font {
