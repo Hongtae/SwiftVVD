@@ -8,6 +8,25 @@
 import Foundation
 
 struct ResolvedVectorSymbol: Equatable {
+    struct DrawPathInterval: Equatable {
+        var from: Double
+        var to: Double
+
+        init(from: Double, to: Double) {
+            self.from = min(max(from, 0), 1)
+            self.to = min(max(to, self.from), 1)
+        }
+    }
+
+    struct DrawMotionGroupTiming: Equatable {
+        var pathDuration: Double?
+        var opacityDuration: Double?
+
+        var duration: Double {
+            max(pathDuration ?? 0, opacityDuration ?? 0)
+        }
+    }
+
     struct Identity: Equatable {
         var name: String
         var variableValue: Double?
@@ -45,6 +64,41 @@ struct ResolvedVectorSymbol: Equatable {
                         : guide.path.trimmedPath(from: 0, to: fraction)
                     result.addPath(path.strokedPath(guide.strokeStyle))
                     remaining -= length
+                }
+                return result
+            }
+
+            func clipPath(from: Double, to: Double) -> Path {
+                let lowerBound = min(max(from, 0), 1)
+                let upperBound = min(max(to, lowerBound), 1)
+                let totalLength = strokeLength
+                guard upperBound > lowerBound, totalLength > 0 else {
+                    return Path()
+                }
+
+                let intervalStart = CGFloat(lowerBound) * totalLength
+                let intervalEnd = CGFloat(upperBound) * totalLength
+                var guideStart: CGFloat = 0
+                var result = Path()
+                for guide in guides {
+                    let length = guide.path.approximateLength
+                    guard length > 0 else { continue }
+                    let guideEnd = guideStart + length
+                    let overlapStart = max(intervalStart, guideStart)
+                    let overlapEnd = min(intervalEnd, guideEnd)
+                    if overlapEnd > overlapStart {
+                        let localStart = (overlapStart - guideStart) / length
+                        let localEnd = (overlapEnd - guideStart) / length
+                        let path = guide.path.trimmedPath(
+                            from: localStart,
+                            to: localEnd
+                        )
+                        result.addPath(path.strokedPath(guide.strokeStyle))
+                    }
+                    guideStart = guideEnd
+                    if guideStart >= intervalEnd {
+                        break
+                    }
                 }
                 return result
             }
@@ -139,23 +193,43 @@ struct ResolvedVectorSymbol: Equatable {
     }
 
     var drawMotionGroupDurations: [Double] {
-        var durations = [Double](repeating: 0, count: drawMotionGroupCount)
+        drawMotionGroupTimings(appearing: false).map(\.duration)
+    }
+
+    func drawMotionGroupTimings(
+        appearing: Bool
+    ) -> [DrawMotionGroupTiming] {
+        var timings = [DrawMotionGroupTiming](
+            repeating: DrawMotionGroupTiming(
+                pathDuration: nil,
+                opacityDuration: nil
+            ),
+            count: drawMotionGroupCount
+        )
         let glyphSize = max(viewport.width, viewport.height)
-        guard glyphSize > 0 else { return durations }
+        guard glyphSize > 0 else { return timings }
         for layer in layers {
             guard let draw = layer.draw else { continue }
+            if draw.guides.isEmpty {
+                let duration = appearing ? 1.0 / 4.0 : 1.0 / 6.0
+                timings[draw.motionGroup].opacityDuration = max(
+                    timings[draw.motionGroup].opacityDuration ?? 0,
+                    duration
+                )
+                continue
+            }
             let normalizedLength = min(
                 max(Double(draw.strokeLength / glyphSize) * 0.171821311, 0),
                 1
             )
             let duration = 2.0 / 15.0 +
                 13.0 / 15.0 * normalizedLength * (2 - normalizedLength)
-            durations[draw.motionGroup] = max(
-                durations[draw.motionGroup],
+            timings[draw.motionGroup].pathDuration = max(
+                timings[draw.motionGroup].pathDuration ?? 0,
                 duration
             )
         }
-        return durations.map { max($0, 2.0 / 15.0) }
+        return timings
     }
 }
 
@@ -276,7 +350,7 @@ enum SVGSymbolDocument {
                     $0.map { $0 >= 0 } ?? true
                   }) != false,
                   metadata.drawLayers?.allSatisfy({
-                    $0.map { $0.motionGroup >= 0 && !$0.guides.isEmpty } ?? true
+                    $0.map { $0.motionGroup >= 0 } ?? true
                   }) != false else {
                 return nil
             }

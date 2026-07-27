@@ -111,30 +111,32 @@ final class SymbolEffectsTests: XCTestCase {
         XCTAssertEqual(drawable.drawMotionGroupCount, 2)
         XCTAssertEqual(
             drawable.layers.compactMap { $0.draw?.motionGroup },
-            [0, 1]
+            [1, 0]
         )
         XCTAssertEqual(drawable.drawMotionGroupDurations.count, 2)
         XCTAssertTrue(drawable.drawMotionGroupDurations.allSatisfy { $0 > 2.0 / 15.0 })
-        let firstDraw = try XCTUnwrap(drawable.layers[0].draw)
-        XCTAssertFalse(firstDraw.clipPath(progress: 0.5, reversed: false).isEmpty)
+        let pencilDraw = try XCTUnwrap(drawable.layers[0].draw)
+        XCTAssertTrue(pencilDraw.guides.isEmpty)
+        let scribbleDraw = try XCTUnwrap(drawable.layers[1].draw)
+        XCTAssertFalse(scribbleDraw.clipPath(progress: 0.5, reversed: false).isEmpty)
         XCTAssertNotEqual(
-            firstDraw.clipPath(progress: 0.5, reversed: false),
-            firstDraw.clipPath(progress: 0.5, reversed: true)
+            scribbleDraw.clipPath(progress: 0.5, reversed: false),
+            scribbleDraw.clipPath(progress: 0.5, reversed: true)
         )
-        let hiddenBoundary = firstDraw.clipBoundaryOpacities(
+        let hiddenBoundary = scribbleDraw.clipBoundaryOpacities(
             progress: 0,
             reversed: true
         )
         XCTAssertEqual(hiddenBoundary.reveal, 0)
         XCTAssertEqual(hiddenBoundary.completion, 0)
-        let startingBoundary = firstDraw.clipBoundaryOpacities(
+        let startingBoundary = scribbleDraw.clipBoundaryOpacities(
             progress: 0.000_1,
             reversed: true
         )
         XCTAssertGreaterThan(startingBoundary.reveal, 0)
         XCTAssertLessThan(startingBoundary.reveal, 0.01)
         XCTAssertEqual(startingBoundary.completion, 0)
-        let finishingBoundary = firstDraw.clipBoundaryOpacities(
+        let finishingBoundary = scribbleDraw.clipBoundaryOpacities(
             progress: 0.999_9,
             reversed: true
         )
@@ -147,11 +149,12 @@ final class SymbolEffectsTests: XCTestCase {
             bundle: nil
         ))
         XCTAssertEqual(draw.layers.count, 2)
-        XCTAssertEqual(draw.layers.compactMap { $0.draw?.motionGroup }, [0, 1])
+        XCTAssertEqual(draw.layers.compactMap { $0.draw?.motionGroup }, [1, 0])
         XCTAssertEqual(draw.drawMotionGroupCount, 2)
         XCTAssertEqual(draw.drawMotionGroupDurations.count, 2)
         XCTAssertTrue(draw.drawMotionGroupDurations.allSatisfy { $0 > 0 })
-        XCTAssertTrue(draw.layers.allSatisfy { $0.draw?.guides.isEmpty == false })
+        XCTAssertTrue(draw.layers[0].draw?.guides.isEmpty == true)
+        XCTAssertTrue(draw.layers[1].draw?.guides.isEmpty == false)
 
         let sameProvider = SymbolImageProvider(
             name: "star",
@@ -939,6 +942,9 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let durations = symbol.drawMotionGroupDurations
+            let appearanceDurations = symbol
+                .drawMotionGroupTimings(appearing: true)
+                .map(\.duration)
             let longest = try XCTUnwrap(durations.max())
             let resolved = graph.makeInput(
                 value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
@@ -1022,8 +1028,8 @@ final class SymbolEffectsTests: XCTestCase {
             _ = presentation.value
             time.setValue(Time(seconds: wholeStart + longest * 0.5))
             let whole = try progresses()
-            XCTAssertEqual(whole[0], whole[1], accuracy: 0.000_001)
             XCTAssertEqual(whole[0], 0.5, accuracy: 0.000_001)
+            XCTAssertEqual(whole[1], 0, accuracy: 0.000_001)
 
             time.setValue(Time(seconds: wholeStart + longest + 0.001))
             _ = presentation.value
@@ -1053,7 +1059,8 @@ final class SymbolEffectsTests: XCTestCase {
             environment.setValue(EnvironmentValues())
             _ = presentation.value
             time.setValue(Time(
-                seconds: individualStart + durations.reduce(0, +) * 2 + 0.002
+                seconds: individualStart + durations.reduce(0, +) +
+                    appearanceDurations.reduce(0, +) + 0.002
             ))
             XCTAssertNil(presentation.value.symbolDrawProgresses)
 
@@ -1076,7 +1083,8 @@ final class SymbolEffectsTests: XCTestCase {
             _ = presentation.value
             environment.setValue(EnvironmentValues())
             _ = presentation.value
-            let restoredAfterReverse = reversedEnd + durations.reduce(0, +) + 0.001
+            let restoredAfterReverse =
+                reversedEnd + appearanceDurations.reduce(0, +) + 0.001
             time.setValue(Time(seconds: restoredAfterReverse))
             XCTAssertNil(presentation.value.symbolDrawProgresses)
 
@@ -1822,7 +1830,9 @@ final class SymbolEffectsTests: XCTestCase {
             )
             environment.setValue(reversed)
             XCTAssertTrue(presentation.value.symbolDrawsReversed)
-            time.setValue(Time(seconds: 3 + end / 2 + 0.001))
+            time.setValue(Time(
+                seconds: 3 + durations.reduce(0, +) / 2 + 0.001
+            ))
             XCTAssertEqual(presentation.value.symbolDrawProgresses, [0, 0])
 
             var entering = EnvironmentValues()
@@ -1906,6 +1916,417 @@ final class SymbolEffectsTests: XCTestCase {
             // ASSERTIONS symbolEffectDrawBackendOptionsObserved
             // ASSERTIONS symbolEffectDrawDisassemblyObserved
         }
+    }
+
+    func testInterruptedOrdinaryDrawKeepsOutgoingStrokeFrontMovingForward() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let pencilGroup = try XCTUnwrap(
+                symbol.layers[0].draw?.motionGroup
+            )
+            let strokeGroup = try XCTUnwrap(symbol.layers[1].draw?.motionGroup)
+            let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            var hidden = EnvironmentValues()
+            hidden.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.byLayer.configuration,
+                    options: .default,
+                    trigger: .indefinite
+                ),
+                for: 71
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: time
+                )
+            )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+
+            environment.setValue(hidden)
+            _ = presentation.value
+            let restoreTime = strokeDuration * 0.35
+            time.setValue(Time(seconds: restoreTime))
+            let beforeRestore = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(beforeRestore.count, 1)
+            XCTAssertEqual(beforeRestore[0].from, 0, accuracy: 0.000_001)
+            XCTAssertGreaterThan(beforeRestore[0].to, 0)
+            XCTAssertLessThan(beforeRestore[0].to, 1)
+
+            environment.setValue(EnvironmentValues())
+            let atRestore = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(atRestore, beforeRestore)
+
+            time.setValue(Time(seconds: restoreTime + strokeDuration * 0.1))
+            let afterRestore = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(afterRestore.count, 2)
+            XCTAssertEqual(afterRestore[0].from, 0, accuracy: 0.000_001)
+            XCTAssertLessThan(afterRestore[0].to, atRestore[0].to)
+            XCTAssertGreaterThan(afterRestore[1].from, afterRestore[0].to)
+            XCTAssertLessThan(afterRestore[1].from, 1)
+            XCTAssertEqual(afterRestore[1].to, 1, accuracy: 0.000_001)
+
+            let pencilHideEnd = strokeDuration * 0.38 + 1.0 / 6.0
+            time.setValue(Time(seconds: pencilHideEnd + 0.000_1))
+            let hiddenPencil = try XCTUnwrap(
+                presentation.value.symbolDrawFallbackProgresses
+            )[pencilGroup]
+            XCTAssertEqual(hiddenPencil, 0, accuracy: 0.000_01)
+
+            time.setValue(Time(seconds: pencilHideEnd + 0.125))
+            let restoringPencil = try XCTUnwrap(
+                presentation.value.symbolDrawFallbackProgresses
+            )[pencilGroup]
+            XCTAssertGreaterThan(restoringPencil, 0)
+            XCTAssertLessThan(restoringPencil, 1)
+
+            // ASSERTIONS symbolEffectDrawInterruptedRestoreRuntimeObserved
+            // ASSERTIONS symbolEffectDrawLayerInterruptionCompositionObserved
+            // ASSERTIONS symbolEffectDrawLayerFallbackAndDirectionObserved
+        }
+    }
+
+    func testRestoreThenHideKeepsBothStrokeTrimBoundsMoving() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let pencilGroup = try XCTUnwrap(
+                symbol.layers[0].draw?.motionGroup
+            )
+            let strokeGroup = try XCTUnwrap(symbol.layers[1].draw?.motionGroup)
+            let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            var hidden = EnvironmentValues()
+            hidden.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.byLayer.configuration,
+                    options: .default,
+                    trigger: .indefinite
+                ),
+                for: 73
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: time
+                )
+            )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+
+            environment.setValue(hidden)
+            _ = presentation.value
+            let hiddenTime = 2.0
+            time.setValue(Time(seconds: hiddenTime))
+            let fullyHidden = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertTrue(fullyHidden.isEmpty)
+            XCTAssertEqual(
+                try XCTUnwrap(
+                    presentation.value.symbolDrawFallbackProgresses
+                )[pencilGroup],
+                0,
+                accuracy: 0.000_001
+            )
+
+            environment.setValue(EnvironmentValues())
+            XCTAssertTrue(try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup].isEmpty)
+
+            let hideTime = hiddenTime + strokeDuration * 0.35
+            time.setValue(Time(seconds: hideTime))
+            let restoring = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(restoring.count, 1)
+            XCTAssertGreaterThan(restoring[0].from, 0)
+            XCTAssertLessThan(restoring[0].from, 1)
+            XCTAssertEqual(restoring[0].to, 1, accuracy: 0.000_001)
+            let restoringPencil = try XCTUnwrap(
+                presentation.value.symbolDrawFallbackProgresses
+            )[pencilGroup]
+            XCTAssertGreaterThan(restoringPencil, 0)
+            XCTAssertLessThan(restoringPencil, 1)
+
+            environment.setValue(hidden)
+            let atHide = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(atHide, restoring)
+            XCTAssertEqual(
+                try XCTUnwrap(
+                    presentation.value.symbolDrawFallbackProgresses
+                )[pencilGroup],
+                restoringPencil,
+                accuracy: 0.000_001
+            )
+
+            time.setValue(Time(seconds: hideTime + strokeDuration * 0.1))
+            let overlapping = try XCTUnwrap(
+                presentation.value.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertEqual(overlapping.count, 1)
+            XCTAssertLessThan(overlapping[0].from, restoring[0].from)
+            XCTAssertGreaterThan(overlapping[0].to, overlapping[0].from)
+            XCTAssertLessThan(overlapping[0].to, 1)
+            XCTAssertGreaterThan(
+                try XCTUnwrap(
+                    presentation.value.symbolDrawFallbackProgresses
+                )[pencilGroup],
+                restoringPencil * 0.5
+            )
+
+            // ASSERTIONS symbolEffectDrawRestoreThenHideCompositionObserved
+            // ASSERTIONS symbolEffectDrawLayerInterruptionCompositionObserved
+            // ASSERTIONS symbolEffectDrawIndependentTrimBoundsObserved
+            // ASSERTIONS symbolEffectDrawRetargetTrimBoundsObserved
+            // ASSERTIONS symbolEffectDrawRetargetPresentationGenerationObserved
+        }
+    }
+
+    func testRepeatedOrdinaryDrawRetargetDoesNotPublishEmptyPresentation() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let symbol = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "draw",
+                variableValue: nil,
+                bundle: nil
+            ))
+            let pencilGroup = try XCTUnwrap(
+                symbol.layers[0].draw?.motionGroup
+            )
+            let strokeGroup = try XCTUnwrap(
+                symbol.layers[1].draw?.motionGroup
+            )
+            let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
+            let resolved = graph.makeInput(
+                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+            )
+            var hidden = EnvironmentValues()
+            hidden.appendSymbolEffect(
+                ResolvedSymbolEffect(
+                    configuration: DrawOnSymbolEffect.drawOn.byLayer.configuration,
+                    options: .default,
+                    trigger: .indefinite
+                ),
+                for: 72
+            )
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let time = graph.makeInput(value: Time(seconds: 0))
+            let child: Attribute<ImageViewChild.Value> = graph.makeStatefulRule(
+                ImageViewChild(
+                    resolvedImage: resolved,
+                    environment: environment,
+                    transaction: graph.makeInput(value: Transaction()),
+                    time: time
+                )
+            )
+            let presentation: Attribute<ImageViewChild.Value> =
+                graph.makeStatefulRule(
+                    ImageViewPresentation(
+                        image: child,
+                        position: graph.makeInput(value: CGPoint.zero),
+                        size: graph.makeInput(value: ViewSize(
+                            CGSize(width: 48, height: 48)
+                        )),
+                        time: time
+                    )
+                )
+
+            environment.setValue(hidden)
+            _ = presentation.value
+            let restoreTime = strokeDuration * 0.35
+            time.setValue(Time(seconds: restoreTime))
+            _ = presentation.value
+            environment.setValue(EnvironmentValues())
+            _ = presentation.value
+
+            let primaryHideEnd = max(
+                strokeDuration,
+                strokeDuration * 0.38 + 1.0 / 6.0
+            )
+            time.setValue(Time(seconds: primaryHideEnd + 0.000_1))
+            let beforeRepeatedHide = presentation.value
+            let followingStroke = try XCTUnwrap(
+                beforeRepeatedHide.symbolDrawPathIntervals
+            )[strokeGroup]
+            XCTAssertFalse(followingStroke.isEmpty)
+            XCTAssertGreaterThan(
+                followingStroke.reduce(0) { $0 + $1.to - $1.from },
+                0.1
+            )
+
+            func visibleAmount(
+                _ value: ImageViewChild.Value
+            ) -> Double {
+                let stroke = value.symbolDrawPathIntervals?[strokeGroup]
+                    .reduce(0) { $0 + $1.to - $1.from } ?? 0
+                let pencil =
+                    value.symbolDrawFallbackProgresses?[pencilGroup] ?? 0
+                return stroke + pencil
+            }
+
+            let beforeAmount = visibleAmount(beforeRepeatedHide)
+            environment.setValue(hidden)
+            let atRepeatedHide = presentation.value
+            XCTAssertEqual(
+                visibleAmount(atRepeatedHide),
+                beforeAmount,
+                accuracy: 0.000_001
+            )
+
+            var isHidden = true
+            var currentTime = primaryHideEnd + 0.000_1
+            for iteration in 0..<10 {
+                currentTime += strokeDuration * 0.08
+                time.setValue(Time(seconds: currentTime))
+                let beforeRetarget = presentation.value
+                let beforeRetargetAmount = visibleAmount(beforeRetarget)
+                isHidden.toggle()
+                environment.setValue(
+                    isHidden ? hidden : EnvironmentValues()
+                )
+                let afterRetargetAmount = visibleAmount(presentation.value)
+                XCTAssertEqual(
+                    afterRetargetAmount,
+                    beforeRetargetAmount,
+                    accuracy: 0.000_001,
+                    "retarget \(iteration) changed the current draw presentation"
+                )
+            }
+
+            time.setValue(Time(seconds: currentTime + 5))
+            let settled = presentation.value
+            XCTAssertFalse(settled.isSymbolEffectActive)
+            XCTAssertTrue(try XCTUnwrap(
+                settled.symbolDrawPathIntervals
+            )[strokeGroup].isEmpty)
+            time.setValue(Time(seconds: currentTime + 6))
+            let idle = presentation.value
+            XCTAssertFalse(idle.isSymbolEffectActive)
+            XCTAssertTrue(try XCTUnwrap(
+                idle.symbolDrawPathIntervals
+            )[strokeGroup].isEmpty)
+            let childNode = try XCTUnwrap(
+                graph.slots[Int(child.identifier.rawValue)].node
+            )
+            let presentationNode = try XCTUnwrap(
+                graph.slots[Int(presentation.identifier.rawValue)].node
+            )
+            XCTAssertFalse(
+                childNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+            XCTAssertFalse(
+                presentationNode.inputs.contains {
+                    $0.attribute == time.identifier.rawValue
+                }
+            )
+
+            // ASSERTIONS symbolEffectDrawRepeatedRetargetContinuityObserved
+            // ASSERTIONS symbolEffectIdlePresentationClockDependencyObserved
+        }
+    }
+
+    func testDrawPathWavesLowerToVisibleIntervalsInTriggerOrder() {
+        let full = [
+            ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 1)
+        ]
+
+        let hiding = applyingDrawPathWave(
+            to: full,
+            frontProgress: 0.6,
+            makesVisible: false
+        )
+        XCTAssertEqual(hiding, [
+            ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 0.4)
+        ])
+
+        let restoringBehindHide = applyingDrawPathWave(
+            to: hiding,
+            frontProgress: 0.3,
+            makesVisible: true
+        )
+        XCTAssertEqual(restoringBehindHide, [
+            ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 0.4),
+            ResolvedVectorSymbol.DrawPathInterval(from: 0.7, to: 1),
+        ])
+
+        let secondHide = applyingDrawPathWave(
+            to: restoringBehindHide,
+            frontProgress: 0.2,
+            makesVisible: false
+        )
+        XCTAssertEqual(secondHide, [
+            ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 0.4),
+            ResolvedVectorSymbol.DrawPathInterval(from: 0.7, to: 0.8),
+        ])
+
+        let restoringFromHidden = applyingDrawPathWave(
+            to: [],
+            frontProgress: 0.6,
+            makesVisible: true
+        )
+        let hidingRestoredPath = applyingDrawPathWave(
+            to: restoringFromHidden,
+            frontProgress: 0.2,
+            makesVisible: false
+        )
+        XCTAssertEqual(hidingRestoredPath, [
+            ResolvedVectorSymbol.DrawPathInterval(from: 0.4, to: 0.8)
+        ])
+
+        // ASSERTIONS symbolEffectDrawOrderedAnimationApplicationObserved
     }
 
     func testObservedConfigurationFactoriesAndFluentMembers() {

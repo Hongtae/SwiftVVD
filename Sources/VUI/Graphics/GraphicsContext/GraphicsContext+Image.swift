@@ -57,7 +57,10 @@ extension GraphicsContext {
         var symbolLayerOpacities: [Double]?
         var symbolReplacementLayerOpacities: [Double]?
         var symbolVariableColorOpacities: [Double]?
+        var symbolDrawPathIntervals:
+            [[ResolvedVectorSymbol.DrawPathInterval]]?
         var symbolDrawProgresses: [Double]?
+        var symbolDrawFallbackProgresses: [Double]?
         var symbolDrawFallbackOpacity: Double?
         var symbolDrawsReversed: Bool
 
@@ -97,7 +100,9 @@ extension GraphicsContext {
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
+            self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackProgresses = nil
             self.symbolDrawFallbackOpacity = nil
             self.symbolDrawsReversed = false
             self.storage = Storage(contents: texture.map(Storage.Contents.texture))
@@ -111,7 +116,9 @@ extension GraphicsContext {
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
+            self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackProgresses = nil
             self.symbolDrawFallbackOpacity = nil
             self.symbolDrawsReversed = false
             self.storage = Storage(contents: .symbol(symbol))
@@ -125,7 +132,9 @@ extension GraphicsContext {
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
             self.symbolVariableColorOpacities = nil
+            self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
+            self.symbolDrawFallbackProgresses = nil
             self.symbolDrawFallbackOpacity = nil
             self.symbolDrawsReversed = false
             self.storage = Storage(contents: .svg(svg))
@@ -212,9 +221,18 @@ extension GraphicsContext {
                     opacities.indices.contains(level) ? opacities[level] : nil
                 }
             } ?? 1
-            let presentationOpacity = effectOpacity * replacementOpacity *
+            var presentationOpacity = effectOpacity * replacementOpacity *
                 variableColorOpacity *
                 (image.symbolDrawFallbackOpacity ?? 1)
+            if let draw = layer.draw,
+               draw.guides.isEmpty,
+               let progresses = image.symbolDrawFallbackProgresses,
+               progresses.indices.contains(draw.motionGroup) {
+                presentationOpacity *= min(
+                    max(progresses[draw.motionGroup], 0),
+                    1
+                )
+            }
             guard presentationOpacity > 0 else { continue }
             let layerOpacity = layer.opacity * presentationOpacity
             let layerPath = layer.path.applying(transform)
@@ -223,46 +241,73 @@ extension GraphicsContext {
                 eoFill: layer.isEOFilled || style.isEOFilled,
                 antialiased: style.isAntialiased
             )
-            if let draw = layer.draw,
-               let progresses = image.symbolDrawProgresses,
-               progresses.indices.contains(draw.motionGroup) {
-                let progress = min(max(progresses[draw.motionGroup], 0), 1)
-                guard progress > 0 else { continue }
-                if progress < 1 {
-                    let revealPath = draw.clipPath(
-                        progress: progress,
-                        reversed: image.symbolDrawsReversed
-                    ).applying(transform)
-                    guard !revealPath.isEmpty else { continue }
-                    let boundaryOpacities = draw.clipBoundaryOpacities(
-                        progress: progress,
-                        reversed: image.symbolDrawsReversed
+            if let draw = layer.draw, !draw.guides.isEmpty {
+                if let intervalGroups = image.symbolDrawPathIntervals,
+                   intervalGroups.indices.contains(draw.motionGroup) {
+                    let intervals = intervalGroups[draw.motionGroup]
+                    if !intervals.contains(where: {
+                        $0.from <= 0 && $0.to >= 1
+                    }) {
+                        for interval in intervals where interval.to > interval.from {
+                            let revealPath = draw.clipPath(
+                                from: interval.from,
+                                to: interval.to
+                            ).applying(transform)
+                            guard !revealPath.isEmpty else { continue }
+                            var context = self
+                            context.opacity *= layerOpacity
+                            context.clip(to: revealPath)
+                            context.fill(
+                                layerPath,
+                                with: shading,
+                                style: fillStyle
+                            )
+                        }
+                        continue
+                    }
+                } else if let progresses = image.symbolDrawProgresses,
+                          progresses.indices.contains(draw.motionGroup) {
+                    let progress = min(
+                        max(progresses[draw.motionGroup], 0),
+                        1
                     )
-                    if boundaryOpacities.completion > 0 {
-                        var completionContext = self
-                        completionContext.opacity *= layerOpacity *
-                            boundaryOpacities.completion
-                        completionContext.clip(
-                            to: revealPath,
-                            options: .inverse
+                    guard progress > 0 else { continue }
+                    if progress < 1 {
+                        let revealPath = draw.clipPath(
+                            progress: progress,
+                            reversed: image.symbolDrawsReversed
+                        ).applying(transform)
+                        guard !revealPath.isEmpty else { continue }
+                        let boundaryOpacities = draw.clipBoundaryOpacities(
+                            progress: progress,
+                            reversed: image.symbolDrawsReversed
                         )
-                        completionContext.fill(
+                        if boundaryOpacities.completion > 0 {
+                            var completionContext = self
+                            completionContext.opacity *= layerOpacity *
+                                boundaryOpacities.completion
+                            completionContext.clip(
+                                to: revealPath,
+                                options: .inverse
+                            )
+                            completionContext.fill(
+                                layerPath,
+                                with: shading,
+                                style: fillStyle
+                            )
+                        }
+                        guard boundaryOpacities.reveal > 0 else { continue }
+                        var revealContext = self
+                        revealContext.opacity *= layerOpacity *
+                            boundaryOpacities.reveal
+                        revealContext.clip(to: revealPath)
+                        revealContext.fill(
                             layerPath,
                             with: shading,
                             style: fillStyle
                         )
+                        continue
                     }
-                    guard boundaryOpacities.reveal > 0 else { continue }
-                    var revealContext = self
-                    revealContext.opacity *= layerOpacity *
-                        boundaryOpacities.reveal
-                    revealContext.clip(to: revealPath)
-                    revealContext.fill(
-                        layerPath,
-                        with: shading,
-                        style: fillStyle
-                    )
-                    continue
                 }
             }
             var context = self

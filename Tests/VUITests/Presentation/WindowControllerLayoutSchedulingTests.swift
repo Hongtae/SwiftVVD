@@ -3276,10 +3276,18 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         try XCTUnwrap(probe.toggle)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
-        let insertion = try [1.201, 1.22, 1.28, 1.40, 1.70, 2.20]
+        let insertionLists = try [
+            1.201, 1.22, 1.28, 1.40, 1.70, 1.80, 1.90, 2.20,
+        ]
             .map(update)
-            .map(symbolDrawProgressSamples(in:))
+        let insertion = insertionLists.map(symbolDrawProgressSamples(in:))
+        let fallbackInsertion = insertionLists.map(
+            symbolDrawFallbackProgressSamples(in:)
+        )
         let insertionProgresses = insertion.flatMap {
+            $0.compactMap { $0 }
+        }
+        let fallbackProgresses = fallbackInsertion.flatMap {
             $0.compactMap { $0 }
         }
 
@@ -3288,16 +3296,22 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             [0, 0],
             "fresh symbol insertion consumed draw time before its first presentation: \(insertion)"
         )
-        for motionGroup in 0..<2 {
-            XCTAssertTrue(
-                insertionProgresses.contains { progresses in
-                    progresses.indices.contains(motionGroup) &&
-                        progresses[motionGroup] > 0.001 &&
-                        progresses[motionGroup] < 0.999
-                },
-                "fresh symbol insertion skipped motion group \(motionGroup): \(insertion)"
-            )
-        }
+        XCTAssertTrue(
+            insertionProgresses.contains { progresses in
+                progresses.indices.contains(0) &&
+                    progresses[0] > 0.001 &&
+                    progresses[0] < 0.999
+            },
+            "fresh symbol insertion skipped stroke motion group: \(insertion)"
+        )
+        XCTAssertTrue(
+            fallbackProgresses.contains { progresses in
+                progresses.indices.contains(1) &&
+                    progresses[1] > 0.001 &&
+                    progresses[1] < 0.999
+            },
+            "fresh symbol insertion skipped pencil opacity group: \(fallbackInsertion)"
+        )
     }
 
     @MainActor
@@ -4730,6 +4744,57 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                     switch content.value {
                     case let .image(image):
                         samples.append(image.image.symbolDrawProgresses)
+                    case let .style(style):
+                        collect(style.contents)
+                    case let .crossFade(crossFade):
+                        if let source = crossFade.source {
+                            collect(source.contents)
+                        }
+                        if let target = crossFade.target {
+                            collect(target.contents)
+                        }
+                    case let .flattened(nested, _, _):
+                        collect(nested)
+                    case let .drawing(contents, _, _):
+                        if let local = contents as? DisplayList.LocalContents {
+                            collect(local.list)
+                        }
+                    case .backend,
+                         .color,
+                         .shape,
+                         .text:
+                        break
+                    }
+                case let .effect(_, contents):
+                    collect(contents)
+                case let .states(states):
+                    for (_, contents) in states {
+                        collect(contents)
+                    }
+                case .empty:
+                    break
+                }
+            }
+        }
+
+        collect(displayList)
+        return samples
+    }
+
+    private func symbolDrawFallbackProgressSamples(
+        in displayList: DisplayList
+    ) -> [[Double]?] {
+        var samples: [[Double]?] = []
+
+        func collect(_ list: DisplayList) {
+            for item in list.items {
+                switch item.value {
+                case let .content(content):
+                    switch content.value {
+                    case let .image(image):
+                        samples.append(
+                            image.image.symbolDrawFallbackProgresses
+                        )
                     case let .style(style):
                         collect(style.contents)
                     case let .crossFade(crossFade):

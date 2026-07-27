@@ -1377,6 +1377,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             return nil
         }
         imageValue.image.symbolDrawProgresses = progresses
+        imageValue.image.symbolDrawFallbackProgresses = progresses
         content.value = .image(imageValue)
         var result = item
         result.value = .content(content)

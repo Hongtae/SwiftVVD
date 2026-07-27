@@ -244,11 +244,17 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     // rule seed this write-once clock without introducing a cross-rule lock.
     final class PresentationStart {
         private(set) var time: Time?
+        private var continuations: [PresentationStart] = []
 
         func activate(at value: Time) {
             if time == nil {
                 time = value
             }
+            continuations.forEach { $0.activate(at: value) }
+        }
+
+        func append(_ continuation: PresentationStart) {
+            continuations.append(continuation)
         }
     }
 
@@ -305,29 +311,58 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         }
     }
 
+    struct DrawLeg {
+        var motionGroupTimings: [ResolvedVectorSymbol.DrawMotionGroupTiming]
+        var pathStartOffsets: [Double]
+        var opacityStartOffsets: [Double]
+        var initialProgresses: [Double]
+        var initialFallbackProgresses: [Double]
+        var targetProgress: Double
+        var effectiveSpeed: Double
+        var isReversed: Bool
+        var completionTokens: [AnimationCompletionToken]
+    }
+
+    struct DrawContinuation {
+        var presentationStart: PresentationStart
+        var leg: DrawLeg
+    }
+
     struct ActiveDraw {
         var id: Int
         var presentationStart: PresentationStart
-        var motionGroupDurations: [Double]
-        var initialProgresses: [Double]
-        var targetProgress: Double
-        var effectiveSpeed: Double
+        var primary: DrawLeg
+        var continuations: [DrawContinuation]
+        var pathBaseIntervals:
+            [[ResolvedVectorSymbol.DrawPathInterval]]?
+        var fallbackBaseProgresses: [Double]
         var layerBehavior: DrawLayerBehavior
-        var isReversed: Bool
+        var configuredReversed: Bool
         var usesOpacityFallback: Bool
         // A completed draw-to-hidden request keeps its terminal presentation,
         // but must no longer keep the frame-clock dependency alive.
         var isComplete = false
-        // Symbol draw timing is renderer-owned, so these tokens keep transition
-        // completion tied to the draw presentation instead of the outer curve.
-        var completionTokens: [AnimationCompletionToken]
+
+        var targetProgress: Double {
+            continuations.last?.leg.targetProgress ?? primary.targetProgress
+        }
     }
 
     struct DrawPresentation {
+        var pathIntervals:
+            [[ResolvedVectorSymbol.DrawPathInterval]]?
         var progresses: [Double]?
+        var fallbackProgresses: [Double]?
         var fallbackOpacity: Double?
         var isReversed = false
         var isActive = false
+    }
+
+    struct DrawLegPresentation {
+        var progresses: [Double]
+        var fallbackProgresses: [Double]
+        var fallbackStarted: [Bool]
+        var isComplete: Bool
     }
 
     struct Phase {
@@ -351,7 +386,10 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         var symbolOpacity: Double
         var symbolLayerOpacities: [Double]?
         var symbolVariableColorOpacities: [Double]?
+        var symbolDrawPathIntervals:
+            [[ResolvedVectorSymbol.DrawPathInterval]]?
         var symbolDrawProgresses: [Double]?
+        var symbolDrawFallbackProgresses: [Double]?
         var symbolDrawFallbackOpacity: Double?
         var symbolDrawsReversed: Bool
         var isSymbolEffectActive: Bool
@@ -524,7 +562,12 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                         immediate: !shouldAnimateFromHidden
                     )
                 } else {
-                    if drawRequest(in: phase.effects) != nextDrawRequest {
+                    if drawRequest(in: phase.effects) != nextDrawRequest,
+                       !canAppendOrdinaryDrawWave(
+                        previous: phase.effects,
+                        next: nextEffects,
+                        current: phase.activeDraw
+                       ) {
                         finishActiveDrawCompletionTokens()
                     }
                     phase.activeDraw = updatedDrawAnimation(
@@ -534,7 +577,8 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                         presentation: previousDrawPresentation,
                         symbol: symbol,
                         hasResolvedEffects: phase.hasResolvedEffects,
-                        transaction: transaction
+                        transaction: transaction,
+                        at: now
                     )
                 }
             } else {
@@ -601,7 +645,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             symbolOpacity: pulse.opacity,
             symbolLayerOpacities: pulse.layerOpacities,
             symbolVariableColorOpacities: variableColor.opacities,
+            symbolDrawPathIntervals: draw.pathIntervals,
             symbolDrawProgresses: draw.progresses,
+            symbolDrawFallbackProgresses: draw.fallbackProgresses,
             symbolDrawFallbackOpacity: draw.fallbackOpacity,
             symbolDrawsReversed: draw.isReversed,
             isSymbolEffectActive: isActive,
@@ -704,13 +750,17 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     }
 
     private mutating func finishActiveDrawCompletionTokens() {
-        guard var active = phase.activeDraw,
-              !active.completionTokens.isEmpty else {
-            return
+        guard var active = phase.activeDraw else { return }
+        var tokens = active.primary.completionTokens
+        active.primary.completionTokens.removeAll()
+        for index in active.continuations.indices {
+            var continuation = active.continuations[index]
+            tokens.append(contentsOf: continuation.leg.completionTokens)
+            continuation.leg.completionTokens.removeAll()
+            active.continuations[index] = continuation
         }
-        let tokens = active.completionTokens
-        active.completionTokens.removeAll()
         phase.activeDraw = active
+        guard !tokens.isEmpty else { return }
         enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
     }
 
@@ -910,130 +960,240 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             // Publish the terminal value without sampling presentation time.
             let progresses = [Double](
                 repeating: active.targetProgress,
-                count: active.initialProgresses.count
+                count: active.primary.initialProgresses.count
             )
             if active.usesOpacityFallback {
                 return DrawPresentation(
                     progresses: nil,
                     fallbackOpacity: active.targetProgress,
-                    isReversed: active.isReversed,
+                    isReversed: active.primary.isReversed,
                     isActive: false
                 )
             }
             return DrawPresentation(
+                pathIntervals: active.pathBaseIntervals.map {
+                    $0.map { _ in [] }
+                },
                 progresses: progresses,
-                fallbackOpacity: nil,
-                isReversed: active.isReversed,
+                fallbackProgresses: progresses,
+                isReversed: active.primary.isReversed,
                 isActive: false
             )
         }
         let startTime = active.presentationStart.time ?? time
-        let elapsed = max(time.seconds - startTime.seconds, 0) *
-            active.effectiveSpeed
-        var progresses = active.initialProgresses
-        var isComplete = true
+        let primaryElapsed = max(time.seconds - startTime.seconds, 0) *
+            active.primary.effectiveSpeed
 
         func resolvedProgress(
             initial: Double,
+            target: Double,
             duration: Double,
+            startOffset: Double,
             elapsed: Double
-        ) -> Double {
-            let distance = abs(active.targetProgress - initial)
+        ) -> (value: Double, isComplete: Bool, hasStarted: Bool) {
+            let distance = abs(target - initial)
             let scaledDuration = duration * distance
             guard scaledDuration > .ulpOfOne else {
-                return active.targetProgress
+                return (target, true, true)
             }
-            let linearProgress = min(max(elapsed / scaledDuration, 0), 1)
-            if linearProgress < 1 {
-                isComplete = false
+            guard elapsed > startOffset else {
+                return (initial, false, false)
             }
-            return drawMix(
+            let linearProgress = min(
+                max((elapsed - startOffset) / scaledDuration, 0),
+                1
+            )
+            return (
+                drawMix(
                 initial,
-                active.targetProgress,
+                    target,
                 progress: drawEase(linearProgress)
+                ),
+                linearProgress >= 1,
+                true
             )
         }
 
-        switch active.layerBehavior {
-        case .byLayer:
-            for index in progresses.indices {
-                progresses[index] = resolvedProgress(
-                    initial: active.initialProgresses[index],
-                    duration: active.motionGroupDurations[index],
+        func presentation(
+            of leg: DrawLeg,
+            elapsed: Double
+        ) -> DrawLegPresentation {
+            var progresses = leg.initialProgresses
+            var fallbackProgresses = leg.initialFallbackProgresses
+            var fallbackStarted = [Bool](
+                repeating: false,
+                count: leg.motionGroupTimings.count
+            )
+            var isComplete = true
+            for index in leg.motionGroupTimings.indices {
+                let timing = leg.motionGroupTimings[index]
+                let path = resolvedProgress(
+                    initial: leg.initialProgresses[index],
+                    target: leg.targetProgress,
+                    duration: timing.pathDuration ??
+                        timing.opacityDuration ?? 0,
+                    startOffset: leg.pathStartOffsets[index],
                     elapsed: elapsed
                 )
-            }
-        case .wholeSymbol:
-            let duration = active.motionGroupDurations.max() ?? 0
-            let distance = active.initialProgresses.map {
-                abs(active.targetProgress - $0)
-            }.max() ?? 0
-            let scaledDuration = duration * distance
-            let linearProgress = scaledDuration > .ulpOfOne
-                ? min(max(elapsed / scaledDuration, 0), 1)
-                : 1
-            isComplete = linearProgress >= 1
-            let easedProgress = drawEase(linearProgress)
-            for index in progresses.indices {
-                progresses[index] = drawMix(
-                    active.initialProgresses[index],
-                    active.targetProgress,
-                    progress: easedProgress
+                progresses[index] = path.value
+                isComplete = isComplete && path.isComplete
+
+                let fallback = resolvedProgress(
+                    initial: leg.initialFallbackProgresses[index],
+                    target: leg.targetProgress,
+                    duration: timing.opacityDuration ??
+                        timing.pathDuration ?? 0,
+                    startOffset: leg.opacityStartOffsets[index],
+                    elapsed: elapsed
                 )
+                fallbackProgresses[index] = fallback.value
+                fallbackStarted[index] = fallback.hasStarted
+                isComplete = isComplete && fallback.isComplete
             }
-        case .individually:
-            let forwardOrder = Array(progresses.indices)
-            let order = active.isReversed
-                ? Array(forwardOrder.reversed())
-                : forwardOrder
-            var start = 0.0
-            for index in order {
-                let initial = active.initialProgresses[index]
-                let duration = active.motionGroupDurations[index] *
-                    abs(active.targetProgress - initial)
-                if elapsed <= start {
-                    progresses[index] = initial
-                    if duration > .ulpOfOne {
-                        isComplete = false
-                    }
-                } else if elapsed >= start + duration {
-                    progresses[index] = active.targetProgress
-                } else {
-                    progresses[index] = drawMix(
-                        initial,
-                        active.targetProgress,
-                        progress: drawEase((elapsed - start) / duration)
-                    )
-                    isComplete = false
-                }
-                start += duration
-            }
+            return DrawLegPresentation(
+                progresses: progresses,
+                fallbackProgresses: fallbackProgresses,
+                fallbackStarted: fallbackStarted,
+                isComplete: isComplete
+            )
         }
 
-        if isComplete {
-            let tokens = active.completionTokens
-            active.completionTokens.removeAll()
-            active.isComplete = true
-            enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
+        var legPresentations = [presentation(
+            of: active.primary,
+            elapsed: primaryElapsed
+        )]
+        if legPresentations[0].isComplete,
+           !active.primary.completionTokens.isEmpty {
+            let tokens = active.primary.completionTokens
+            active.primary.completionTokens.removeAll()
+            enqueueAnimationCompletionActions(
+                finishDrawCompletionTokens(tokens)
+            )
+        }
+
+        for index in active.continuations.indices {
+            var continuation = active.continuations[index]
+            let elapsed = max(
+                time.seconds -
+                    (continuation.presentationStart.time ?? time).seconds,
+                0
+            ) * continuation.leg.effectiveSpeed
+            let resolved = presentation(
+                of: continuation.leg,
+                elapsed: elapsed
+            )
+            if resolved.isComplete,
+               !continuation.leg.completionTokens.isEmpty {
+                let tokens = continuation.leg.completionTokens
+                continuation.leg.completionTokens.removeAll()
+                enqueueAnimationCompletionActions(
+                    finishDrawCompletionTokens(tokens)
+                )
+            }
+            active.continuations[index] = continuation
+            legPresentations.append(resolved)
+        }
+
+        while legPresentations.first?.isComplete == true,
+              !active.continuations.isEmpty {
+            let completedTarget = active.primary.targetProgress
+            if let pathBaseIntervals = active.pathBaseIntervals {
+                active.pathBaseIntervals = pathBaseIntervals.map { _ in
+                    completedTarget >= 1
+                        ? [ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 1)]
+                        : []
+                }
+            }
+            active.fallbackBaseProgresses = [Double](
+                repeating: completedTarget,
+                count: active.fallbackBaseProgresses.count
+            )
+            let promoted = active.continuations.removeFirst()
+            active.primary = promoted.leg
+            active.presentationStart = promoted.presentationStart
+            legPresentations.removeFirst()
+        }
+
+        let allComplete = legPresentations.allSatisfy(\.isComplete)
+        if allComplete {
             if active.targetProgress >= 1 {
                 phase.activeDraw = nil
                 return DrawPresentation()
             }
+            if let pathBaseIntervals = active.pathBaseIntervals {
+                active.pathBaseIntervals = pathBaseIntervals.map { _ in [] }
+            }
+            active.fallbackBaseProgresses = [Double](
+                repeating: 0,
+                count: active.fallbackBaseProgresses.count
+            )
+            active.isComplete = true
             phase.activeDraw = active
+            let progresses = [Double](
+                repeating: 0,
+                count: active.primary.initialProgresses.count
+            )
+            if active.usesOpacityFallback {
+                return DrawPresentation(
+                    fallbackOpacity: 0,
+                    isActive: false
+                )
+            }
+            return DrawPresentation(
+                pathIntervals: active.pathBaseIntervals.map {
+                    $0.map { _ in [] }
+                },
+                progresses: progresses,
+                fallbackProgresses: progresses,
+                isReversed: active.primary.isReversed,
+                isActive: false
+            )
         }
+
+        let legs = [active.primary] +
+            active.continuations.map(\.leg)
+        var fallbackProgresses = active.fallbackBaseProgresses
+        for legPresentation in legPresentations {
+            for index in legPresentation.fallbackProgresses.indices
+            where legPresentation.fallbackStarted[index] {
+                fallbackProgresses[index] =
+                    legPresentation.fallbackProgresses[index]
+            }
+        }
+
+        var pathIntervals = active.pathBaseIntervals
+        if var intervals = pathIntervals {
+            for (leg, legPresentation) in zip(legs, legPresentations) {
+                let makesVisible = leg.targetProgress >= 1
+                for index in intervals.indices {
+                    let value = legPresentation.progresses[index]
+                    let frontProgress = makesVisible ? value : 1 - value
+                    intervals[index] = applyingDrawPathWave(
+                        to: intervals[index],
+                        frontProgress: frontProgress,
+                        makesVisible: makesVisible
+                    )
+                }
+            }
+            pathIntervals = intervals
+        }
+        phase.activeDraw = active
+
         if active.usesOpacityFallback {
             return DrawPresentation(
                 progresses: nil,
-                fallbackOpacity: progresses.first ?? active.targetProgress,
-                isReversed: active.isReversed,
-                isActive: !isComplete
+                fallbackOpacity: fallbackProgresses.first ??
+                    active.targetProgress,
+                isReversed: legs.last?.isReversed ?? false,
+                isActive: true
             )
         }
         return DrawPresentation(
-            progresses: progresses,
-            fallbackOpacity: nil,
-            isReversed: active.isReversed,
-            isActive: !isComplete
+            pathIntervals: pathIntervals,
+            progresses: legPresentations.last?.progresses,
+            fallbackProgresses: fallbackProgresses,
+            isReversed: legs.last?.isReversed ?? false,
+            isActive: true
         )
     }
 }
@@ -1158,7 +1318,8 @@ private func updatedDrawAnimation(
     presentation: ImageViewChild.DrawPresentation,
     symbol: ResolvedVectorSymbol,
     hasResolvedEffects: Bool,
-    transaction: Transaction
+    transaction: Transaction,
+    at time: Time
 ) -> ImageViewChild.ActiveDraw? {
     let previousRequest = drawRequest(in: previous)
     let nextRequest = drawRequest(in: next)
@@ -1166,61 +1327,309 @@ private func updatedDrawAnimation(
 
     let initialProgresses = presentation.progresses ??
         presentation.fallbackOpacity.map { [$0] }
+    let initialFallbackProgresses = presentation.fallbackProgresses ??
+        presentation.fallbackOpacity.map { [$0] }
+    let request: DrawRequest
     if let nextRequest {
-        return drawAnimation(
-            for: nextRequest,
-            symbol: symbol,
-            initialProgresses: initialProgresses,
-            transaction: transaction,
-            immediate: nextRequest.isTransition && !hasResolvedEffects
-        )
-    }
-    if var previousRequest {
+        request = nextRequest
+    } else if var previousRequest {
         previousRequest.targetProgress = 1
-        return drawAnimation(
-            for: previousRequest,
+        request = previousRequest
+    } else {
+        return current
+    }
+
+    if var current,
+       canAppendOrdinaryDrawWave(
+        previous: previous,
+        next: next,
+        current: current
+       ) {
+        let canonicalStart = request.targetProgress >= 1 ? 0.0 : 1.0
+        var continuation = drawLeg(
+            for: request,
             symbol: symbol,
-            initialProgresses: initialProgresses,
+            initialProgresses: [Double](
+                repeating: canonicalStart,
+                count: current.primary.motionGroupTimings.count
+            ),
+            initialFallbackProgresses: [Double](
+                repeating: canonicalStart,
+                count: current.primary.motionGroupTimings.count
+            ),
             transaction: transaction
         )
+        let priorLegs = [(
+            start: current.presentationStart.time ?? time,
+            leg: current.primary
+        )] + current.continuations.map {
+            (
+                start: $0.presentationStart.time ?? time,
+                leg: $0.leg
+            )
+        }
+        for index in continuation.opacityStartOffsets.indices {
+            var completionTime = time.seconds
+            for prior in priorLegs {
+                guard prior.leg.motionGroupTimings.indices.contains(index),
+                      let duration = prior.leg
+                        .motionGroupTimings[index].opacityDuration else {
+                    continue
+                }
+                let distance = abs(
+                    prior.leg.targetProgress -
+                        prior.leg.initialFallbackProgresses[index]
+                )
+                completionTime = max(
+                    completionTime,
+                    prior.start.seconds +
+                        (
+                            prior.leg.opacityStartOffsets[index] +
+                                duration * distance
+                        ) / prior.leg.effectiveSpeed
+                )
+            }
+            let requiredOffset = max(
+                completionTime - time.seconds,
+                0
+            ) * continuation.effectiveSpeed
+            continuation.opacityStartOffsets[index] = max(
+                continuation.opacityStartOffsets[index],
+                requiredOffset
+            )
+        }
+        let continuationStart = ImageViewChild.PresentationStart()
+        current.presentationStart.append(continuationStart)
+        current.continuations.append(ImageViewChild.DrawContinuation(
+            presentationStart: continuationStart,
+            leg: continuation
+        ))
+        current.isComplete = false
+        return current
     }
-    return current
+
+    return drawAnimation(
+        for: request,
+        symbol: symbol,
+        initialPathIntervals: presentation.pathIntervals,
+        initialProgresses: initialProgresses,
+        initialFallbackProgresses: initialFallbackProgresses,
+        initialProgressesReversed: presentation.isReversed,
+        transaction: transaction,
+        immediate: request.isTransition && !hasResolvedEffects
+    )
 }
 
 private func drawAnimation(
     for request: DrawRequest,
     symbol: ResolvedVectorSymbol,
+    initialPathIntervals:
+        [[ResolvedVectorSymbol.DrawPathInterval]]? = nil,
     initialProgresses: [Double]?,
+    initialFallbackProgresses: [Double]? = nil,
+    initialProgressesReversed: Bool? = nil,
     transaction: Transaction,
     immediate: Bool = false
 ) -> ImageViewChild.ActiveDraw {
-    let measuredDurations = symbol.drawMotionGroupDurations
-    let usesOpacityFallback = measuredDurations.isEmpty
-    let durations = usesOpacityFallback ? [0.8] : measuredDurations
+    let usesOpacityFallback = symbol.drawMotionGroupCount == 0
+    let pathComposition = !request.isReversed &&
+        symbol.layers.contains {
+            guard let draw = $0.draw else { return false }
+            return !draw.guides.isEmpty
+        }
+    let timingCount = max(symbol.drawMotionGroupCount, 1)
+    let pathBaseIntervals:
+        [[ResolvedVectorSymbol.DrawPathInterval]]?
+    if pathComposition {
+        if let initialPathIntervals,
+           initialPathIntervals.count == timingCount {
+            pathBaseIntervals = initialPathIntervals
+        } else if let initialProgresses,
+                  initialProgresses.count == timingCount {
+            let reversed = initialProgressesReversed ??
+                (request.isReversed || request.targetProgress >= 1)
+            pathBaseIntervals = initialProgresses.map { progress in
+                let progress = min(max(progress, 0), 1)
+                guard progress > 0 else { return [] }
+                return [ResolvedVectorSymbol.DrawPathInterval(
+                    from: reversed ? 1 - progress : 0,
+                    to: reversed ? 1 : progress
+                )]
+            }
+        } else {
+            pathBaseIntervals = Array(
+                repeating: [
+                    ResolvedVectorSymbol.DrawPathInterval(from: 0, to: 1)
+                ],
+                count: timingCount
+            )
+        }
+    } else {
+        pathBaseIntervals = nil
+    }
+    let fallbackBaseProgresses = initialFallbackProgresses.flatMap {
+        $0.count == timingCount ? $0 : nil
+    } ?? initialProgresses.flatMap {
+        $0.count == timingCount ? $0 : nil
+    } ?? [Double](repeating: 1, count: timingCount)
+    let legInitialProgresses: [Double]?
+    if pathComposition {
+        if initialPathIntervals == nil,
+           initialProgresses == nil,
+           request.targetProgress >= 1 {
+            legInitialProgresses = [Double](
+                repeating: 1,
+                count: timingCount
+            )
+        } else {
+            legInitialProgresses = [Double](
+                repeating: request.targetProgress >= 1 ? 0 : 1,
+                count: timingCount
+            )
+        }
+    } else {
+        legInitialProgresses = initialProgresses
+    }
+    let leg = drawLeg(
+        for: request,
+        symbol: symbol,
+        initialProgresses: legInitialProgresses,
+        initialFallbackProgresses: fallbackBaseProgresses,
+        transaction: transaction,
+        immediate: immediate
+    )
+    return ImageViewChild.ActiveDraw(
+        id: request.id,
+        presentationStart: ImageViewChild.PresentationStart(),
+        primary: leg,
+        continuations: [],
+        pathBaseIntervals: pathBaseIntervals,
+        fallbackBaseProgresses: fallbackBaseProgresses,
+        layerBehavior: request.layerBehavior,
+        configuredReversed: request.isReversed,
+        usesOpacityFallback: usesOpacityFallback
+    )
+}
+
+private func drawLeg(
+    for request: DrawRequest,
+    symbol: ResolvedVectorSymbol,
+    initialProgresses: [Double]?,
+    initialFallbackProgresses: [Double]?,
+    transaction: Transaction,
+    immediate: Bool = false
+) -> ImageViewChild.DrawLeg {
+    let appearing = request.targetProgress >= 1
+    var timings = symbol.drawMotionGroupTimings(appearing: appearing)
+    if timings.isEmpty {
+        timings = [ResolvedVectorSymbol.DrawMotionGroupTiming(
+            pathDuration: nil,
+            opacityDuration: appearing ? 1.0 / 4.0 : 1.0 / 6.0
+        )]
+    }
     let initial = immediate
-        ? [Double](repeating: request.targetProgress, count: durations.count)
+        ? [Double](repeating: request.targetProgress, count: timings.count)
         : initialProgresses.flatMap {
-            $0.count == durations.count ? $0 : nil
-        } ?? [Double](repeating: 1, count: durations.count)
-    let hasMotion = zip(initial, durations).contains { initial, duration in
-        duration * abs(request.targetProgress - initial) > .ulpOfOne
+            $0.count == timings.count ? $0 : nil
+        } ?? [Double](repeating: 1, count: timings.count)
+    let initialFallback = immediate
+        ? [Double](repeating: request.targetProgress, count: timings.count)
+        : initialFallbackProgresses.flatMap {
+            $0.count == timings.count ? $0 : nil
+        } ?? initial
+    let offsets = drawMotionGroupStartOffsets(
+        timings: timings,
+        initialProgresses: zip(initial, initialFallback).map {
+            min($0.0, $0.1)
+        },
+        targetProgress: request.targetProgress,
+        layerBehavior: request.layerBehavior,
+        reversesGroupOrder: request.isReversed && !appearing,
+        appearing: appearing
+    )
+    let hasMotion = timings.indices.contains { index in
+        timings[index].duration * max(
+            abs(request.targetProgress - initial[index]),
+            abs(request.targetProgress - initialFallback[index])
+        ) > .ulpOfOne
     }
     let completionTokens = hasMotion
         ? drawCompletionTokens(for: transaction)
         : []
     completionTokens.forEach { $0.start() }
-    return ImageViewChild.ActiveDraw(
-        id: request.id,
-        presentationStart: ImageViewChild.PresentationStart(),
-        motionGroupDurations: durations,
+    return ImageViewChild.DrawLeg(
+        motionGroupTimings: timings,
+        pathStartOffsets: offsets,
+        opacityStartOffsets: offsets,
         initialProgresses: initial,
+        initialFallbackProgresses: initialFallback,
         targetProgress: request.targetProgress,
         effectiveSpeed: request.effectiveSpeed,
-        layerBehavior: request.layerBehavior,
-        isReversed: request.isReversed,
-        usesOpacityFallback: usesOpacityFallback,
+        isReversed: request.isReversed || appearing,
         completionTokens: completionTokens
     )
+}
+
+private func drawMotionGroupStartOffsets(
+    timings: [ResolvedVectorSymbol.DrawMotionGroupTiming],
+    initialProgresses: [Double],
+    targetProgress: Double,
+    layerBehavior: DrawLayerBehavior,
+    reversesGroupOrder: Bool,
+    appearing: Bool
+) -> [Double] {
+    var offsets = [Double](repeating: 0, count: timings.count)
+    let forwardOrder = Array(timings.indices)
+    let order = reversesGroupOrder
+        ? Array(forwardOrder.reversed())
+        : forwardOrder
+    guard order.count > 1 else { return offsets }
+
+    switch layerBehavior {
+    case .wholeSymbol:
+        break
+    case .byLayer:
+        let overlap = appearing ? 0.18 : 0.38
+        for pair in zip(order, order.dropFirst()) {
+            let previousDuration = timings[pair.0].duration *
+                abs(targetProgress - initialProgresses[pair.0])
+            offsets[pair.1] = offsets[pair.0] +
+                previousDuration * overlap
+        }
+    case .individually:
+        for pair in zip(order, order.dropFirst()) {
+            let previousDuration = timings[pair.0].duration *
+                abs(targetProgress - initialProgresses[pair.0])
+            offsets[pair.1] = offsets[pair.0] + previousDuration
+        }
+    }
+    return offsets
+}
+
+private func canAppendOrdinaryDrawWave(
+    previous: [IdentifiedSymbolEffect],
+    next: [IdentifiedSymbolEffect],
+    current: ImageViewChild.ActiveDraw?
+) -> Bool {
+    guard let current,
+          current.pathBaseIntervals != nil,
+          !current.configuredReversed,
+          let previousRequest = drawRequest(in: previous) ??
+            drawRequest(in: next) else {
+        return false
+    }
+    var request: DrawRequest
+    if let nextRequest = drawRequest(in: next) {
+        request = nextRequest
+    } else {
+        request = previousRequest
+        request.targetProgress = 1
+    }
+    return request.targetProgress != current.targetProgress &&
+        !request.isReversed &&
+        request.id == current.id &&
+        request.effectiveSpeed == current.primary.effectiveSpeed &&
+        request.layerBehavior == current.layerBehavior
 }
 
 private func drawCompletionTokens(
@@ -1257,6 +1666,43 @@ private func drawMix(
     progress: Double
 ) -> Double {
     from + (to - from) * progress
+}
+
+func applyingDrawPathWave(
+    to intervals: [ResolvedVectorSymbol.DrawPathInterval],
+    frontProgress: Double,
+    makesVisible: Bool
+) -> [ResolvedVectorSymbol.DrawPathInterval] {
+    // Ordinary retargets do not reverse an earlier wave. Apply each wave in
+    // trigger order so independently moving erase and restore fronts lower to
+    // the exact visible path intervals for this frame.
+    let boundary = 1 - min(max(frontProgress, 0), 1)
+    var result: [ResolvedVectorSymbol.DrawPathInterval] = []
+    result.reserveCapacity(intervals.count + (makesVisible ? 1 : 0))
+    for interval in intervals {
+        guard interval.from < boundary else { continue }
+        let upperBound = min(interval.to, boundary)
+        guard upperBound > interval.from else { continue }
+        result.append(
+            ResolvedVectorSymbol.DrawPathInterval(
+                from: interval.from,
+                to: upperBound
+            )
+        )
+    }
+    guard makesVisible, boundary < 1 else { return result }
+    if let lastIndex = result.indices.last,
+       result[lastIndex].to >= boundary - 0.000_000_001 {
+        result[lastIndex].to = 1
+    } else {
+        result.append(
+            ResolvedVectorSymbol.DrawPathInterval(
+                from: boundary,
+                to: 1
+            )
+        )
+    }
+    return result
 }
 
 private func canAppendPulse(
@@ -1807,7 +2253,11 @@ extension Image: View {
                 resolved.symbolLayerOpacities = presentation.symbolLayerOpacities
                 resolved.symbolVariableColorOpacities =
                     presentation.symbolVariableColorOpacities
+                resolved.symbolDrawPathIntervals =
+                    presentation.symbolDrawPathIntervals
                 resolved.symbolDrawProgresses = presentation.symbolDrawProgresses
+                resolved.symbolDrawFallbackProgresses =
+                    presentation.symbolDrawFallbackProgresses
                 resolved.symbolDrawFallbackOpacity =
                     presentation.symbolDrawFallbackOpacity
                 resolved.symbolDrawsReversed = presentation.symbolDrawsReversed
