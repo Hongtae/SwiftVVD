@@ -912,6 +912,127 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS animationLabAnimatedThenPlainStatusRetargetObserved
+    @MainActor
+    func testPlainResolvedTextWritePreservesItsOwnActiveInterpolation() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingAnimatedThenPlainStatusRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingAnimatedThenPlainStatusRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 420, height: 240),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 420, height: 240),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> (
+            idle: [LayoutSchedulingResolvedTextSample],
+            animated: [LayoutSchedulingResolvedTextSample],
+            plain: [LayoutSchedulingResolvedTextSample]
+        ) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 420, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            return (
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "idle",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "explicitly animated status",
+                    environment: controller.environment
+                ),
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "plain status after explicit animation",
+                    environment: controller.environment
+                )
+            )
+        }
+
+        let initial = try update(time: 0)
+        XCTAssertFalse(initial.idle.isEmpty)
+        XCTAssertTrue(initial.animated.isEmpty)
+        XCTAssertTrue(initial.plain.isEmpty)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(time: 0.001)
+        _ = try update(time: 0.25)
+        let beforePlain = try update(time: 0.75)
+        XCTAssertFalse(beforePlain.animated.isEmpty)
+
+        try XCTUnwrap(probe.plainTextChange)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        let retargeted = try [0.751, 0.8, 1.0, 1.5].map(update(time:))
+        XCTAssertNotNil(
+            retargeted.first { sample in
+                let source = sample.idle + sample.animated
+                return source.contains { $0.opacity > 0.001 }
+                    && sample.plain.contains {
+                        $0.opacity > 0.001 && $0.opacity < 0.999
+                    }
+            },
+            "The plain write should retarget the Text's existing presentation animation instead of snapping."
+        )
+
+        let settled = try update(time: 4.0)
+        XCTAssertTrue(
+            (settled.idle + settled.animated).allSatisfy {
+                $0.opacity <= 0.001
+            }
+        )
+        XCTAssertFalse(settled.plain.isEmpty)
+        XCTAssertTrue(
+            settled.plain.allSatisfy { abs($0.opacity - 1) <= 0.001 }
+        )
+    }
+
     @MainActor
     func testNestedOffsetScaleSurfaceSamplesOffsetDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
@@ -2103,6 +2224,177 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             },
             "expected existing insertion animation to remain continuous: start=\(finalBounds) final=\(insertionFinal) samples=\(insertionSamples)"
         )
+    }
+
+    // ASSERTIONS animationLabActiveSpringRemovalTitleContinuityObserved
+    // ASSERTIONS animationLabActiveSpringInsertionTitleContinuityObserved
+    // ASSERTIONS animationLabActiveSpringInsertionTrajectoryObserved
+    @MainActor
+    func testResolvedAnimationLabActiveSpringRetainedTitleKeepsActionBoundaryContinuity() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationLabProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingResolvedAnimationLabRemovalTitleRoot(
+                probe: probe,
+                font: VUI.Font(textureFont)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingResolvedAnimationLabRemovalTitleRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 560, height: 360),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 560, height: 360),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 560, height: 360),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let samples = renderedResolvedTextSamples(
+                in: try displayList(in: controller),
+                matching: "Retained removal",
+                environment: controller.environment
+            )
+            return try XCTUnwrap(
+                samples.max { $0.opacity < $1.opacity }?.frame,
+                "missing resolved retained-removal title at \(time)"
+            )
+        }
+
+        var currentTime = 0.0
+        let initial = try update(time: currentTime)
+
+        @discardableResult
+        func advance(to targetTime: Double) throws -> CGRect {
+            let interval = 1.0 / 30.0
+            var sample = try update(time: currentTime)
+            while currentTime + interval < targetTime {
+                currentTime += interval
+                sample = try update(time: currentTime)
+            }
+            currentTime = targetTime
+            return try update(time: currentTime)
+        }
+
+        try XCTUnwrap(probe.springMove)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let beforeRemoval = try advance(to: 1.0)
+
+        try XCTUnwrap(probe.removeChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let immediateRemoval = try update(time: currentTime)
+        XCTAssertEqual(
+            immediateRemoval.midX,
+            beforeRemoval.midX,
+            accuracy: 0.01,
+            "Active-spring removal must preserve the title's current horizontal presentation."
+        )
+        XCTAssertEqual(
+            immediateRemoval.midY,
+            beforeRemoval.midY,
+            accuracy: 0.01,
+            "Active-spring removal must preserve the title's current vertical presentation."
+        )
+        let earlyRemoval = try advance(to: 1.1)
+        XCTAssertLessThanOrEqual(
+            abs(earlyRemoval.midY - immediateRemoval.midY),
+            1.5,
+            "Active-spring removal must begin from the current title position instead of snapping."
+        )
+
+        _ = try advance(to: 6.2)
+        try XCTUnwrap(probe.springMove)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let beforeInsertion = try advance(to: 7.2)
+
+        try XCTUnwrap(probe.insertChild)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let immediateInsertion = try update(time: currentTime)
+        XCTAssertEqual(
+            immediateInsertion.midX,
+            beforeInsertion.midX,
+            accuracy: 0.01,
+            "Active-spring insertion must preserve the title's current horizontal presentation."
+        )
+        XCTAssertEqual(
+            immediateInsertion.midY,
+            beforeInsertion.midY,
+            accuracy: 0.01,
+            "Active-spring insertion must preserve the title's current vertical presentation."
+        )
+        let earlyInsertion = try advance(to: 7.3)
+        XCTAssertLessThanOrEqual(
+            abs(earlyInsertion.midY - immediateInsertion.midY),
+            1.5,
+            "Active-spring insertion must begin from the current title position instead of snapping."
+        )
+
+        var insertionSamples: [(time: Double, bounds: CGRect)] = []
+        for sampleTime in [7.5, 8.0, 9.0, 10.0, 11.0, 12.0, 12.15] {
+            insertionSamples.append((
+                time: sampleTime,
+                bounds: try advance(to: sampleTime)
+            ))
+        }
+        XCTAssertTrue(
+            insertionSamples.allSatisfy {
+                $0.bounds.midY <= immediateInsertion.midY + 0.05
+            },
+            "Active-spring insertion must not move away from its upward target: start=\(immediateInsertion) samples=\(insertionSamples)"
+        )
+        XCTAssertNotNil(
+            insertionSamples.first {
+                $0.bounds.midY < immediateInsertion.midY - 0.25
+            },
+            "Active-spring insertion must sample upward motion before settling: start=\(immediateInsertion) samples=\(insertionSamples)"
+        )
+        let preTerminalInsertion = try XCTUnwrap(insertionSamples.last?.bounds)
+        XCTAssertEqual(
+            preTerminalInsertion.midY,
+            initial.midY,
+            accuracy: 0.75,
+            "Active-spring insertion must approach its target before completion instead of jumping at the terminal sample."
+        )
+        let settled = try advance(to: 12.4)
+        XCTAssertEqual(settled.midY, initial.midY, accuracy: 0.5)
     }
 
     @MainActor
@@ -4337,6 +4629,7 @@ private struct LayoutSchedulingProbeLayout: Layout {
 
 private final class LayoutSchedulingAnimationProbe {
     var toggle: (() -> Void)?
+    var plainTextChange: (() -> Void)?
     var completions: [Int] = []
     var insertionPosition: Attribute<CGPoint>?
     var insertionSize: Attribute<ViewSize>?
@@ -4680,6 +4973,26 @@ private struct LayoutSchedulingResolvedRemovalStatusRoot: View {
             .frame(width: 190, height: 150)
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct LayoutSchedulingAnimatedThenPlainStatusRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    let font: VUI.Font
+    @State private var status = "idle"
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 3.0)) {
+                status = "explicitly animated status"
+            }
+        }
+        probe.plainTextChange = {
+            status = "plain status after explicit animation"
+        }
+        return Text(status)
+            .font(font)
+            .frame(width: 420, height: 240)
     }
 }
 
@@ -5089,6 +5402,11 @@ private struct LayoutSchedulingResolvedAnimationLabRemovalTitleRoot: View {
             ) {
                 showRetainedChild = true
             } completion: {
+            }
+        }
+        probe.springMove = {
+            withAnimation(.spring(duration: 5, bounce: 0.35)) {
+                expanded.toggle()
             }
         }
         return HStack(spacing: 28) {

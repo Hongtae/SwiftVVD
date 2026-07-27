@@ -306,11 +306,22 @@ enum DynamicContainer {
             var completionPublished = false
         }
 
-        private let seed: Attribute<UInt32>
-        private let inbox: AGInbox
+        private weak var host: GraphHost?
+        private let invalidationTarget: AGWeakAttribute?
+        private let seed: Attribute<UInt32>?
+        private let inbox: AGInbox?
         private let state = Mutex(State())
 
+        init(host: GraphHost, invalidationTarget: AGWeakAttribute) {
+            self.host = host
+            self.invalidationTarget = invalidationTarget
+            self.seed = nil
+            self.inbox = nil
+        }
+
         init(seed: Attribute<UInt32>, inbox: AGInbox) {
+            self.host = nil
+            self.invalidationTarget = nil
             self.seed = seed
             self.inbox = inbox
         }
@@ -324,7 +335,11 @@ enum DynamicContainer {
         }
 
         func readSeed() {
-            _ = seed.value
+            _ = seed?.value
+        }
+
+        func detachFromHost() {
+            host = nil
         }
 
         override func animationWasAdded() {
@@ -378,18 +393,29 @@ enum DynamicContainer {
         }
 
         private func complete() {
-            guard let nextSeed = state.withLock({ state -> UInt32? in
+            let shouldComplete = state.withLock { state in
                 guard !state.completed else {
-                    return nil
+                    return false
                 }
                 state.completed = true
-                state.seedValue &+= 1
-                return state.seedValue
-            }) else {
+                return true
+            }
+            guard shouldComplete else {
                 return
             }
 
-            let seed = self.seed
+            if let host, let invalidationTarget {
+                host.continueTransaction(invalidating: invalidationTarget)
+                return
+            }
+
+            guard let seed, let inbox else {
+                return
+            }
+            let nextSeed = state.withLock { state in
+                state.seedValue &+= 1
+                return state.seedValue
+            }
             inbox.enqueue { [weak self] in
                 self?.state.withLock { state in
                     state.completionPublished = true
@@ -400,9 +426,9 @@ enum DynamicContainer {
     }
 
     /// Field roles: subgraph, uniqueId, viewCount, outputs,
-        /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
-        /// resetSeed, phase, item, placement transaction, completion seed,
-        /// transition transactions.
+    /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
+    /// resetSeed, phase, item, placement transaction, transition
+    /// transactions.
     /// The identity is stored in canonical form for lookup across updates.
     final class ItemInfo {
         var subgraph: AGSubgraph
@@ -426,7 +452,6 @@ enum DynamicContainer {
         var viewPhase: Attribute<TransitionPhase>?
         var placementTransaction: Attribute<Transaction>?
         var transitionPhaseSetters: [_TransitionPhaseSetter]
-        var transitionCompletionSeed: Attribute<UInt32>?
         var transitionTransactions: _TransitionTransactionResolver?
         var removalLifecycleStarted: Bool
         var ignoredRetainedUnusedRemovalObserver: ObjectIdentifier?
@@ -450,7 +475,6 @@ enum DynamicContainer {
             resetSeed: UInt32 = 0,
             phase: UInt8 = 1,
             item: AnyHashable? = nil,
-            transitionCompletionSeed: Attribute<UInt32>? = nil,
             transitionTransactions: _TransitionTransactionResolver? = nil,
             removalLifecycleStarted: Bool = false,
             ignoredRetainedUnusedRemovalObserver: ObjectIdentifier? = nil,
@@ -473,7 +497,6 @@ enum DynamicContainer {
             self.viewPhase = viewPhase
             self.placementTransaction = placementTransaction
             self.transitionPhaseSetters = transitionPhaseSetters
-            self.transitionCompletionSeed = transitionCompletionSeed
             self.transitionTransactions = transitionTransactions
             self.removalLifecycleStarted = removalLifecycleStarted
             self.ignoredRetainedUnusedRemovalObserver = ignoredRetainedUnusedRemovalObserver
@@ -925,6 +948,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     if insertionTransaction != nil {
                         item.phase = 0
                     } else if item.phase != 1 {
+                        item.listener?.detachFromHost()
                         item.listener = nil
                         item.removalLifecycleStarted = false
                         item.retainAfterRemovalCompletion = false
@@ -966,9 +990,14 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         var unusedItems: [DynamicContainer.ItemInfo] = []
         let maxUnusedItems = max(inputs[DynamicContainerMaxUnusedItems.self], 0)
         let retainCompletedUnusedRemovals = inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
+        guard let currentAttribute = _AGGraph.currentRuleContextAttribute,
+              let invalidationTarget = graph.weakAttributeIfValid(for: currentAttribute) else {
+            fatalError("DynamicContainerInfo retained removal requires a live rule attribute.")
+        }
+        let host = GraphHost.currentHost
         func positiveRemovalTransition(
             for item: DynamicContainer.ItemInfo
-        ) -> (transaction: Transaction, completionSeed: Attribute<UInt32>)? {
+        ) -> Transaction? {
             guard !disableTransitions else {
                 return nil
             }
@@ -980,11 +1009,10 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
             guard item.needsTransitions,
                   let transitionTransaction,
                   let animation = transitionTransaction.effectiveAnimation,
-                  animation.box.duration > 0,
-                  let completionSeed = item.transitionCompletionSeed else {
+                  animation.box.duration > 0 else {
                 return nil
             }
-            return (transitionTransaction, completionSeed)
+            return transitionTransaction
         }
 
         for item in info.items where !liveIDs.contains(item.uniqueId) {
@@ -993,8 +1021,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                     eraseItem(item)
                     continue
                 }
-                listener.readSeed()
-                if listener.isCompletionPublished {
+                if listener.isComplete {
                     if item.retainAfterRemovalCompletion {
                         item.listener = nil
                         item.retainAfterRemovalCompletion = false
@@ -1029,26 +1056,25 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
             }
             if item.phase == 3 {
                 let transition = positiveRemovalTransition(for: item)
-                let observerID = transition?.transaction.animationCompletionObserver.map(ObjectIdentifier.init)
+                let observerID = transition?.animationCompletionObserver.map(ObjectIdentifier.init)
                 let didIgnoreObserver = observerID != nil &&
                     item.ignoredRetainedUnusedRemovalObserver == observerID
                 if removedItems.isEmpty,
                    !didIgnoreObserver,
                    let transition {
                     let listener = DynamicContainer.TransitionRemovalListener(
-                        seed: transition.completionSeed,
-                        inbox: graph.inbox
+                        host: host,
+                        invalidationTarget: invalidationTarget
                     )
                     item.listener = listener
                     item.ignoredRetainedUnusedRemovalObserver = nil
                     item.retainAfterRemovalCompletion = retainCompletedUnusedRemovals
                     listener.beginTrackingAnimations()
 
-                    let removalTransaction = transition.transaction
+                    let removalTransaction = transition
                     item.phase = 2
                     item.removalLifecycleStarted = true
                     item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
-                    listener.readSeed()
                     finalizeAnimationCompletions(
                         in: removalTransaction,
                         animation: removalTransaction.effectiveAnimation
@@ -1083,16 +1109,15 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
             }
 
             let listener = DynamicContainer.TransitionRemovalListener(
-                seed: transition.completionSeed,
-                inbox: graph.inbox
+                host: host,
+                invalidationTarget: invalidationTarget
             )
             item.listener = listener
             listener.beginTrackingAnimations()
 
-            let removalTransaction = transition.transaction
+            let removalTransaction = transition
             item.phase = 2
             item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
-            listener.readSeed()
             finalizeAnimationCompletions(
                 in: removalTransaction,
                 animation: removalTransaction.effectiveAnimation
@@ -1142,7 +1167,6 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
             var layoutAttributes: [LayoutProxyAttributes] = []
             var preferenceOutputs: [PreferencesOutputs] = []
             var transitionPhaseSetters: [_TransitionPhaseSetter] = []
-            let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
             let traitsListAttr = sublist.list.map { OptionalAttribute($0) } ??
                 OptionalAttribute<any ViewList>()
             let scrollContext = baseInputs[ScrollableLayoutItemGeometryContextKey.self]
@@ -1292,7 +1316,6 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                 needsTransitions: transition != nil,
                 phase: initialTransitionPhase == .willAppear ? 0 : 1,
                 item: dynamicItem,
-                transitionCompletionSeed: transitionCompletionSeed,
                 transitionTransactions: transition.map { transition in
                     { phase, transaction in
                         transition._retainedRemovalTransactions(from: transaction, phase: phase)

@@ -168,6 +168,55 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS animationLabStatusTransactionIsolationRuntimeObserved
+    func testPlainContinueTransactionInvalidationClearsPreviousTransaction() throws {
+        let host = GraphHost()
+        var input: Attribute<Int>!
+        var output: Attribute<Int>!
+        var weakInput: AGWeakAttribute!
+        var evaluations = 0
+
+        host.data.withCurrent {
+            input = host.graph.makeInput(value: 3)
+            output = host.graph.makeRule {
+                evaluations += 1
+                return input.value * 2
+            }
+            weakInput = input.asWeak().base
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 1)
+        }
+
+        var animatedTransaction = Transaction(animation: .linear(duration: 1))
+        animatedTransaction[ContinueTransactionKey.self] = 57
+        host.runTransaction(animatedTransaction, do: {
+            host.continueTransaction(invalidating: weakInput)
+        }, id: nil)
+
+        try host.data.withCurrent {
+            let propagated = try XCTUnwrap(
+                host.graph.transaction(for: output.identifier)
+            )
+            XCTAssertEqual(propagated[ContinueTransactionKey.self], 57)
+            XCTAssertNotNil(propagated.effectiveAnimation)
+        }
+
+        host.runTransaction(Transaction(), do: {
+            host.continueTransaction(invalidating: weakInput)
+        }, id: nil)
+
+        host.data.withCurrent {
+            XCTAssertNil(host.graph.transaction(for: output.identifier))
+            XCTAssertEqual(
+                evaluations,
+                1,
+                "Transaction provenance clearing must not eagerly evaluate an unused rule."
+            )
+            XCTAssertEqual(output.value, 6)
+            XCTAssertEqual(evaluations, 2)
+        }
+    }
+
     func testContinueTransactionWithoutUpdatingHostUsesUpdateActionFallback() {
         let host = GraphHost()
         var events: [String] = []

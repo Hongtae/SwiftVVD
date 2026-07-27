@@ -68,10 +68,13 @@ struct InvalidatingGraphMutation: GraphMutation {
             return
         }
         let transaction = GraphHost.currentHost.data._transaction.value
+        let transactionToPropagate = transaction.isEmpty ? nil : transaction
         graph.invalidateAttribute(
             attribute.toStrong(),
-            transaction: transaction,
-            propagateTransaction: !transaction.isEmpty
+            transaction: transactionToPropagate,
+            // A plain host transaction is still authoritative. Propagating
+            // nil clears animation provenance left by an earlier invalidation.
+            propagateTransaction: true
         )
     }
 

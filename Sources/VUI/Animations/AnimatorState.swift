@@ -117,6 +117,10 @@ final class AnimatorState<AnimatedValue: Animatable> {
     // back to the latest model target.
     private var interval: AnimatedValue.AnimatableData = .zero
     private var beginTime: Time = .zero
+    // A layout target can be refined more than once before graph time
+    // advances. Keep that refinement attached to the animated target write
+    // instead of confusing it with an ordinary sample at the same time.
+    private var lastAnimatedTargetTime: Time?
     private var quantizedFrameInterval: TimeInterval = 0
     private var nextTime: Time = .zero
     private var previousAnimationValue: AnimatedValue.AnimatableData = .zero
@@ -146,6 +150,7 @@ final class AnimatorState<AnimatedValue: Animatable> {
         self.animation = animation
         self.interval = interval
         self.beginTime = time
+        self.lastAnimatedTargetTime = time
         self.nextTime = time
         self.finishingDefinition = Self.defaultFinishingDefinition
         reason = transaction.animationReason
@@ -488,6 +493,7 @@ final class AnimatorState<AnimatedValue: Animatable> {
         self.animation = animation
         self.interval = interval
         self.beginTime = beginTime
+        self.lastAnimatedTargetTime = beginTime
         self.nextTime = sampleTime
         self.state = state
         self.isLogicallyComplete = isLogicallyComplete
@@ -498,6 +504,22 @@ final class AnimatorState<AnimatedValue: Animatable> {
 
     func updateInterval(_ interval: AnimatedValue.AnimatableData) {
         self.interval = interval
+    }
+
+    func offsetActiveTarget(by delta: AnimatedValue.AnimatableData) {
+        interval += delta
+        guard animation?.box is CustomAnimationBox<DefaultCombiningAnimation> else {
+            return
+        }
+        // A combining animation samples cumulative child endpoints from its
+        // state rather than from the outer interval. Refine the last endpoint
+        // with the model target so it cannot settle at a provisional target.
+        var combinedState = state.combinedState
+        guard let lastIndex = combinedState.entries.indices.last else {
+            return
+        }
+        combinedState.entries[lastIndex].value += delta
+        state.combinedState = combinedState
     }
 
     func resetForReplacement() {
@@ -559,6 +581,10 @@ final class AnimatorState<AnimatedValue: Animatable> {
         phase != .pending && beginTime.seconds < time.seconds
     }
 
+    func canCoalesceTargetRefinement(at time: Time) -> Bool {
+        animation != nil && lastAnimatedTargetTime == time
+    }
+
     func combine(
         newAnimation: Animation,
         newInterval: AnimatedValue.AnimatableData,
@@ -570,6 +596,7 @@ final class AnimatorState<AnimatedValue: Animatable> {
         in transaction: Transaction,
         environment: Attribute<EnvironmentValues>?
     ) -> CombineResult {
+        lastAnimatedTargetTime = time
         let finishesAtActivation = newAnimation.box.finishesRetargetCompletionAtActivation
         guard let previousAnimation = animation else {
             // No active animation means there is nothing to merge against. Reset
@@ -1543,17 +1570,21 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         animatorState?.addListeners(transaction: transaction)
     }
 
-    mutating func replaceUnelapsedStandaloneTargetWithoutAnimation(
-        start: AnimatedValue,
+    mutating func coalesceStandaloneTargetRefinementWithoutAnimation(
         target: AnimatedValue,
         at time: Time
     ) -> Bool {
-        guard let animatorState,
-              !animatorState.hasElapsedSinceActivation(at: time) else {
+        guard let previousModelData,
+              let animatorState,
+              animatorState.canCoalesceTargetRefinement(
+                  at: time
+              ) else {
             return false
         }
+        var targetDelta = target.animatableData
+        targetDelta -= previousModelData
         updatePreviousModelData(target.animatableData)
-        animatorState.updateInterval(animatableDelta(from: start, to: target))
+        animatorState.offsetActiveTarget(by: targetDelta)
         return true
     }
 

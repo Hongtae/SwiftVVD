@@ -49,7 +49,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testErasedAsymmetricCombinedTransitionMaterializesConcretePhaseSetter() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
@@ -84,7 +85,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     func testDynamicContainerMaterializationUsesCapturedParentWithoutRuleOwnership() throws {
         // ASSERTIONS dynamicContainerMaterializationParentObserved
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
@@ -105,8 +107,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testDynamicContainerRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        let graph = _AGGraph()
+    func testDynamicContainerRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -158,16 +161,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
-        XCTAssertFalse(try XCTUnwrap(retainedItem.listener).isCompletionPublished)
+        graphHost.flushTransactions()
 
         ref.withCurrent {
-            graph.invalidateAttribute(infoAttr.identifier)
-            let pendingPublication = infoAttr.value
-            XCTAssertEqual(pendingPublication.removedCount, 1)
-            XCTAssertTrue(pendingPublication.items.first === retainedItem)
-
-            graph.inbox.drain()
-            XCTAssertEqual(retainedItem.listener?.isCompletionPublished, true)
             let finalized = infoAttr.value
             XCTAssertEqual(finalized.activeItems.count, 0)
             XCTAssertEqual(finalized.removedCount, 0)
@@ -177,8 +173,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testRetainedTransitionRemovalQueuesDisappearAfterCompletionSeedFinishes() throws {
-        let graph = _AGGraph()
+    func testRetainedTransitionRemovalQueuesDisappearAfterListenerInvalidatesRule() throws {
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -238,9 +235,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertEqual(lifecycleEvents, ["row appear"])
         XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
+        graphHost.flushTransactions()
 
         ref.withCurrent {
-            graph.inbox.drain()
             let finalized = infoAttr.value
             XCTAssertEqual(finalized.removedCount, 0)
             XCTAssertTrue(finalized.items.isEmpty)
@@ -250,7 +247,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedTransitionRemovalSetsDidDisappearPhaseBeforeCompletion() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerTransitionPhaseRecorder()
         var source: Attribute<any ViewList>!
@@ -329,9 +327,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
         XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
+        graphHost.flushTransactions()
 
         ref.withCurrent {
-            graph.inbox.drain()
             let finalized = infoAttr.value
             XCTAssertEqual(finalized.removedCount, 0)
             XCTAssertTrue(finalized.items.isEmpty)
@@ -482,6 +480,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             ]
         )
         XCTAssertTrue(try XCTUnwrap(retainedItem.listener).isComplete)
+        viewGraph.flushTransactions()
 
         Update.ensure {
             viewGraph.data.withCurrent {
@@ -508,7 +507,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testSameIdentityReinsertCancelsRetainedTransitionRemovalWithoutLifecycleReinsert() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -594,9 +594,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertTrue(retainedListener.isComplete)
+        XCTAssertFalse(
+            graphHost.hasPendingTransactions,
+            "A listener detached by reinsertion must not invalidate the container when its old animations drain."
+        )
 
         try ref.withCurrent {
-            graph.inbox.drain()
             let info = infoAttr.value
             XCTAssertEqual(info.activeItems.count, 1)
             XCTAssertEqual(info.removedCount, 0)
@@ -608,8 +611,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicForEachRetainsTransitionRemovalUntilCompletionSeedFinishes { row, recorder in
+    func testPublicForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicForEachRetainsTransitionRemovalUntilListenerInvalidatesRule { row, recorder in
             DynamicContainerLifecycleRow(row: row, recorder: recorder)
                 .transition(.opacity)
         }
@@ -630,8 +633,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicGroupForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicGroupForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             Group(_content:
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -658,8 +661,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicAnyViewErasedRowRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicForEachRetainsTransitionRemovalUntilCompletionSeedFinishes { row, recorder in
+    func testPublicAnyViewErasedRowRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicForEachRetainsTransitionRemovalUntilListenerInvalidatesRule { row, recorder in
             AnyView(DynamicContainerLifecycleRow(row: row, recorder: recorder))
                 .transition(.opacity)
         }
@@ -682,8 +685,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicAnyLayoutVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicAnyLayoutVStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             AnyLayout(VStackLayout(spacing: 8)) {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -746,8 +749,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicScrollViewVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicScrollViewVStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             ScrollView {
                 VStack {
                     ForEach(rows, id: \.self) { row in
@@ -860,8 +863,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicVStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             VStack {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -905,8 +908,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicMixedVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicMixedVStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             VStack {
                 Text("Header")
                 ForEach(rows, id: \.self) { row in
@@ -937,8 +940,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicTupleViewForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicTupleViewForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             TupleView((
                 Text("Header"),
                 ForEach(rows, id: \.self) { row in
@@ -969,8 +972,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicConditionalForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicConditionalForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             DynamicContainerConditionalForEachRoot(rows: rows, recorder: recorder)
         }
     }
@@ -1017,8 +1020,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicConditionalStaticBranchRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicConditionalStaticBranchRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             VStack {
                 if let row = rows.first {
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -1075,6 +1078,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             source.setValue(root(showChild: true), transaction: insertion)
             sampleLayout()
             graph.inbox.drain()
+        }
+        viewGraph.flushTransactions()
+        viewGraph.data.withCurrent {
             sampleLayout()
 
             XCTAssertEqual(phaseRecorder.events, ["willAppear", "identity"])
@@ -1238,7 +1244,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     func testPublicConditionalActiveBranchPublishesNestedDynamicListChanges() throws {
         typealias Rows = ForEach<[String], String, Text>
         typealias Root = _ConditionalContent<Rows, EmptyView>
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<Root>!
         var list: Attribute<any ViewList>!
@@ -1278,7 +1285,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     func testDynamicContainerInfoDoesNotTrackInheritedTransaction() throws {
         typealias Rows = ForEach<[String], String, Text>
         typealias Root = _ConditionalContent<Rows, EmptyView>
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
 
         try ref.withCurrent {
@@ -1569,8 +1577,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicOptionalForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicOptionalForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             DynamicContainerOptionalForEachRoot(rows: rows, recorder: recorder)
         }
     }
@@ -1600,8 +1608,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicHStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicHStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             HStack {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -1611,8 +1619,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicZStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicZStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             ZStack {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -1639,8 +1647,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicViewThatFitsSelectedVStackForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicViewThatFitsSelectedVStackForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             ViewThatFits(in: [.horizontal, .vertical]) {
                 VStack {
                     ForEach(rows, id: \.self) { row in
@@ -1672,7 +1680,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicViewThatFitsFallbackSwitchQueuesSelectedDisappearAndFallbackAppear() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<DynamicContainerViewThatFitsFallbackRoot>!
@@ -1736,8 +1745,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicStandaloneSectionForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicStandaloneSectionForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             Section {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -1749,8 +1758,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testPublicCustomLayoutForEachRetainsTransitionRemovalUntilCompletionSeedFinishes() throws {
-        try assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+    func testPublicCustomLayoutForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             DynamicContainerProbeVStackLayout(spacing: 8) {
                 ForEach(rows, id: \.self) { row in
                     DynamicContainerLifecycleRow(row: row, recorder: recorder)
@@ -1831,6 +1840,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed"])
         XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+        viewGraph.flushTransactions()
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
@@ -1842,20 +1852,21 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    private func assertPublicForEachRetainsTransitionRemovalUntilCompletionSeedFinishes<Content: View>(
+    private func assertPublicForEachRetainsTransitionRemovalUntilListenerInvalidatesRule<Content: View>(
         @ViewBuilder content: @escaping (String, DynamicContainerLifecycleRecorder) -> Content
     ) throws {
-        try assertPublicRootRetainsTransitionRemovalUntilCompletionSeedFinishes { rows, recorder in
+        try assertPublicRootRetainsTransitionRemovalUntilListenerInvalidatesRule { rows, recorder in
             ForEach(rows, id: \.self) { row in
                 content(row, recorder)
             }
         }
     }
 
-    private func assertPublicRootRetainsTransitionRemovalUntilCompletionSeedFinishes<Root: View>(
+    private func assertPublicRootRetainsTransitionRemovalUntilListenerInvalidatesRule<Root: View>(
         @ViewBuilder makeRoot: @escaping ([String], DynamicContainerLifecycleRecorder) -> Root
     ) throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<Root>!
@@ -1916,6 +1927,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         XCTAssertEqual(recorder.events, ["row appear"])
         let listener = try XCTUnwrap(retainedItem.listener)
         XCTAssertTrue(listener.isComplete)
+        graphHost.flushTransactions()
 
         ref.withCurrent {
             graph.inbox.drain()
@@ -1929,7 +1941,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    private func assertPublicLayoutRootRetainsTransitionRemovalUntilCompletionSeedFinishes<Root: View>(
+    private func assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule<Root: View>(
         @ViewBuilder makeRoot: @escaping ([String], DynamicContainerLifecycleRecorder) -> Root
     ) throws {
         let rendererHost = TestViewRendererHost()
@@ -1981,6 +1993,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed", "removal logical"])
         XCTAssertEqual(recorder.events, ["row appear"])
+        viewGraph.flushTransactions()
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
@@ -2102,6 +2115,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 "removal logical",
             ]
         )
+        if !disappearBeforeRetainedCompletions {
+            viewGraph.flushTransactions()
+        }
 
         Update.ensure {
             viewGraph.data.withCurrent {
@@ -2279,6 +2295,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 "removal logical",
             ]
         )
+        viewGraph.flushTransactions()
 
         Update.ensure {
             viewGraph.data.withCurrent {
@@ -2304,8 +2321,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         )
     }
 
-    func testDynamicContainerRetainsMultipleTransitionRemovalsUntilAllSeedsFinish() throws {
-        let graph = _AGGraph()
+    func testDynamicContainerRetainsMultipleTransitionRemovalsUntilAllListenersInvalidateRule() throws {
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -2365,6 +2383,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         for item in retainedItems {
             XCTAssertTrue(try XCTUnwrap(item.listener).isComplete)
         }
+        graphHost.flushTransactions()
 
         ref.withCurrent {
             graph.inbox.drain()
@@ -2380,7 +2399,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testTransitionRemovalWithoutPositiveAnimationBecomesUnusedWithoutListener() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -2603,7 +2623,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testUnusedRetentionPrunesOlderPhaseThreeItemsBeyondLimit() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -2669,7 +2690,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testCompletedPhaseTwoRemovalDoesNotPruneRetainedUnusedItem() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -2739,6 +2761,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["second removed"])
         XCTAssertTrue(try XCTUnwrap(secondRemoved.listener).isComplete)
+        graphHost.flushTransactions()
 
         try ref.withCurrent {
             graph.inbox.drain()
@@ -2754,8 +2777,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testRetainedUnusedAnimatedRemovalPromotesToRemovalPhaseUntilSeedCompletes() throws {
-        let graph = _AGGraph()
+    func testRetainedUnusedAnimatedRemovalPromotesToRemovalPhaseUntilListenerInvalidatesRule() throws {
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -2835,6 +2859,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed"])
         XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+        graphHost.flushTransactions()
 
         ref.withCurrent {
             graph.inbox.drain()
@@ -2931,6 +2956,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(removalEvents, ["removal removed"])
         XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+        host.flushTransactions()
 
         try host.data.withCurrent {
             graph.inbox.drain()
@@ -2980,7 +3006,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         try assertRetainedUnusedAnimatedRemovalCriteriaOrder(
             oldCriteria: .logicallyComplete,
             removalCriteria: .removed,
-            expectedEventsAfterRemovalSeed: [
+            expectedEventsAfterListenerInvalidation: [
                 "row appear",
                 "row disappear",
                 "removal removed",
@@ -2998,7 +3024,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         try assertRetainedUnusedAnimatedRemovalCriteriaOrder(
             oldCriteria: .removed,
             removalCriteria: .logicallyComplete,
-            expectedEventsAfterRemovalSeed: [
+            expectedEventsAfterListenerInvalidation: [
                 "row appear",
                 "row disappear",
                 "removal logical",
@@ -3012,7 +3038,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         )
     }
 
-    func testRetainedUnusedAnimatedRemovalDrainsForkedAnimatableCompletionsAfterRemovalSeed() throws {
+    func testRetainedUnusedAnimatedRemovalDrainsForkedAnimatableCompletionsAfterListenerInvalidation() throws {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
             rootViewType: EmptyView.self,
@@ -3177,6 +3203,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             ]
         )
         XCTAssertTrue(try XCTUnwrap(removedItem.listener).isComplete)
+        viewGraph.flushTransactions()
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
@@ -3204,7 +3231,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     private func assertRetainedUnusedAnimatedRemovalCriteriaOrder(
         oldCriteria: AnimationCompletionCriteria,
         removalCriteria: AnimationCompletionCriteria,
-        expectedEventsAfterRemovalSeed: [String],
+        expectedEventsAfterListenerInvalidation: [String],
         expectedEventsAfterFinalDrain: [String],
         file: StaticString = #filePath,
         line: UInt = #line
@@ -3370,12 +3397,13 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         Self.flushGraphActions(graph)
-        XCTAssertEqual(recorder.events, expectedEventsAfterRemovalSeed, file: file, line: line)
+        XCTAssertEqual(recorder.events, expectedEventsAfterListenerInvalidation, file: file, line: line)
         XCTAssertTrue(
             try XCTUnwrap(removedItem.listener, file: file, line: line).isComplete,
             file: file,
             line: line
         )
+        viewGraph.flushTransactions()
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
@@ -3387,7 +3415,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testTransitionRemovalWithoutPositiveAnimationInvalidatesWhenUnusedRetentionIsDisabled() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
@@ -3483,7 +3512,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapUsesActivePrefixAndRetainedInclusiveSegments() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
@@ -3509,7 +3539,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     // ASSERTIONS dynamicLayoutRetainedViewIndexObserved
     func testRetainedItemsReceiveViewIndexesAfterTheActivePrefix() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
@@ -3552,7 +3583,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplaysRemovedItemsBelowActiveReplacements() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
@@ -3575,7 +3607,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedUnusedDisplayMapIgnoresUnusedDepthOnlyItems() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
@@ -3595,7 +3628,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapOrdersRemovedItemsBeforeSameDepthActiveItems() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
@@ -3618,7 +3652,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalDisplayMapKeepsDepthOrderingAcrossRemovedAndActiveItems() throws {
-        let graph = _AGGraph()
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()

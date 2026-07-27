@@ -695,6 +695,74 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
     }
 
+    func testAnimatableFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint() {
+        assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
+            supportsVFD: false
+        )
+    }
+
+    func testAnimatableFrameAttributeVFDSameTimePlainRefinementUpdatesCombinedEndpoint() {
+        assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
+            supportsVFD: true
+        )
+    }
+
+    private func assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
+        supportsVFD: Bool
+    ) {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: CGPoint(x: 100, y: 171),
+            initialSize: ViewSize(width: 190, height: 150),
+            supportsVFD: supportsVFD
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 200, y: 171),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .spring(duration: 5, bounce: 0.35))
+        )
+        _ = harness.currentFrame()
+        for time in [0.5, 0.6, 1.0] {
+            harness.setTime(time)
+            _ = harness.currentFrame()
+        }
+        let beforeRetarget = harness.currentPosition()
+
+        harness.setFrame(
+            position: CGPoint(x: 200, y: 186),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction(animation: .easeInOut(duration: 5))
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 200, y: 160),
+            size: ViewSize(width: 190, height: 150),
+            transaction: Transaction()
+        )
+        let immediate = harness.currentPosition()
+        XCTAssertEqual(immediate.y, beforeRetarget.y, accuracy: 0.001)
+
+        var maximumY = immediate.y
+        var midpoint = immediate.y
+        var preTerminal = immediate.y
+        for step in 1...330 {
+            harness.setTime(1.0 + Double(step) / 60.0)
+            let position = harness.currentPosition().y
+            maximumY = max(maximumY, position)
+            if step == 150 {
+                midpoint = position
+            } else if step == 294 {
+                preTerminal = position
+            }
+        }
+
+        XCTAssertLessThanOrEqual(maximumY, immediate.y + 0.001)
+        XCTAssertGreaterThan(midpoint, 160)
+        XCTAssertLessThan(midpoint, immediate.y)
+        XCTAssertEqual(preTerminal, 160, accuracy: 0.25)
+        XCTAssertEqual(harness.currentPosition().y, 160, accuracy: 0.001)
+    }
+
     func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
         assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
             supportsVFD: false

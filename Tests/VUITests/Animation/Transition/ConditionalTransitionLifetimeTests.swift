@@ -269,6 +269,78 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
         XCTAssertLessThan(midpoint.width, completed.width)
         XCTAssertEqual(completed.width, 20, accuracy: 0.25)
     }
+
+    func testMidflightReinsertThenReremovalEventuallyUsesFreshScaleInsertion() throws {
+        // ASSERTIONS contentTransitionMidflightReremovalFreshInsertionObserved
+        let probe = ConditionalTransitionLifetimeProbe()
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: ConditionalAsymmetricTransitionLifetimeRoot.self,
+            content: ConditionalAsymmetricTransitionLifetimeRoot(probe: probe),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = host
+
+        func sampleBounds(at seconds: Double) throws -> CGRect? {
+            let time = Time(seconds: seconds)
+            rendererHost.currentTimestamp = time
+            return try Update.ensure {
+                host.updateOutputs(at: time)
+                return try host.data.withCurrent {
+                    try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                        let layout = try XCTUnwrap(host.rootLayoutComputer).value
+                        let size = CGSize(width: 200, height: 120)
+                        layout.place(
+                            at: CGPoint(x: size.width / 2, y: size.height / 2),
+                            anchor: .center,
+                            proposal: ProposedViewSize(size)
+                        )
+                        let bounds = host.rootDisplayList?.value
+                            .debugItemRecords
+                            .compactMap(\.bounds)
+                            .first
+                        host.data.graph.drainActionOutbox()
+                        return bounds
+                    }
+                }
+            }
+        }
+
+        func advance(from start: Double, through end: Double) throws {
+            var time = start
+            while time <= end {
+                _ = try sampleBounds(at: time)
+                time += 1.0 / 60.0
+            }
+        }
+
+        _ = try sampleBounds(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.easeInOut(duration: 2)) {
+            toggle()
+        }
+        try advance(from: 0, through: 0.4)
+
+        withAnimation(.easeInOut(duration: 2)) {
+            toggle()
+        }
+        try advance(from: 0.4, through: 0.8)
+
+        withAnimation(.easeInOut(duration: 2)) {
+            toggle()
+        }
+        try advance(from: 0.8, through: 5)
+        XCTAssertNil(try sampleBounds(at: 5 + 1.0 / 60.0))
+
+        withAnimation(.easeInOut(duration: 2)) {
+            toggle()
+        }
+
+        let initial = try XCTUnwrap(sampleBounds(at: 5.1))
+        XCTAssertEqual(initial.width, 13, accuracy: 0.25)
+        XCTAssertEqual(initial.minX, 0, accuracy: 0.25)
+    }
 }
 
 private func firstOpacity(in list: DisplayList) -> Double? {
