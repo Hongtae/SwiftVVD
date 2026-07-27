@@ -1772,9 +1772,15 @@ extension Image: View {
         }
         let imageTransactionAttr: Attribute<Transaction> = graph.makeRule {
             let image = view._attribute.value
-            return image.provider.requiresBackendResolution
-                ? resolvedImageTransactionAttr.value
-                : inheritedTransactionAttr.value
+            if image.provider.requiresBackendResolution {
+                return resolvedImageTransactionAttr.value
+            }
+            let sourceTransaction = graph.transaction(
+                for: view._attribute.identifier
+            ) ?? Transaction()
+            return sourceTransaction.isEmpty
+                ? inheritedTransactionAttr.value
+                : sourceTransaction
         }
 
         // 3. Layout pass (Layout Rule)

@@ -3301,6 +3301,123 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testSystemSymbolReplacementKeepsStyleSpecificHostTimeline() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSymbolReplaceRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSymbolReplaceRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 400, height: 120),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 400, height: 120),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the replacement resource context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 400, height: 120),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try displayList(in: controller)
+        }
+
+        _ = try update(0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        let timeline = try [0.001, 0.01, 0.02, 0.10, 0.20, 0.30, 0.50, 0.80]
+            .map { time in
+                (
+                    time,
+                    symbolPresentationSamples(in: try update(time))
+                        .filter { $0.opacity > 0.001 }
+                )
+            }
+        let early = timeline.first { abs($0.0 - 0.10) < 0.001 }?.1 ?? []
+        let earlyNames = early.map(\.name)
+
+        XCTAssertEqual(
+            earlyNames.filter { $0 == "photo.fill" }.count,
+            4,
+            "default/downUp/upUp/whole must still present the source at 0.1s: \(timeline)"
+        )
+        XCTAssertEqual(
+            earlyNames.filter { $0 == "draw" }.count,
+            2,
+            "only offUp's two incoming groups must present the target at 0.1s: \(timeline)"
+        )
+
+        let middle = timeline.first { abs($0.0 - 0.30) < 0.001 }?.1 ?? []
+        XCTAssertTrue(
+            middle.contains {
+                $0.name == "draw" &&
+                    $0.drawProgresses?.contains(where: { $0 > 0 && $0 < 1 }) == true
+            },
+            "automatic replacement must retain its partial incoming draw tail: \(timeline)"
+        )
+
+        let settled = timeline.last?.1 ?? []
+        XCTAssertEqual(
+            settled.filter { $0.name == "draw" }.count,
+            5,
+            "every style must settle on the target independently: \(timeline)"
+        )
+        XCTAssertFalse(
+            settled.contains { $0.name == "photo.fill" },
+            "the outgoing source must be absent after the longest checked timeline: \(timeline)"
+        )
+
+        try XCTUnwrap(probe.plainTextChange)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        let plainReplacement = symbolPresentationSamples(in: try update(0.801))
+            .filter { $0.opacity > 0.001 }
+        XCTAssertEqual(
+            plainReplacement.filter { $0.name == "photo.fill" }.count,
+            5,
+            "a later plain image change must not reuse the completed animation transaction"
+        )
+        XCTAssertFalse(
+            plainReplacement.contains { $0.name == "draw" },
+            "a later plain image change must publish its target immediately"
+        )
+
+        // ASSERTIONS imageViewChildInputTransactionWiringObserved
+        // ASSERTIONS symbolEffectReplaceTimelineRuntimeObserved
+        // ASSERTIONS symbolEffectReplaceSpatialRuntimeObserved
+    }
+
+    @MainActor
     func testRawPrimitiveReceivesEndpointModelPositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4650,6 +4767,95 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         return samples
     }
 
+    private func symbolPresentationSamples(
+        in displayList: DisplayList,
+        inheritedOpacity: Double = 1
+    ) -> [LayoutSchedulingSymbolPresentationSample] {
+        displayList.items.reduce(into: []) { samples, item in
+            let itemOpacity = inheritedOpacity * Double(item.opacity)
+            switch item.value {
+            case let .content(content):
+                switch content.value {
+                case let .image(image):
+                    if let symbol = image.image.symbol {
+                        samples.append(LayoutSchedulingSymbolPresentationSample(
+                            name: symbol.identity.name,
+                            opacity: itemOpacity,
+                            drawProgresses: image.image.symbolDrawProgresses
+                        ))
+                    }
+                case let .style(style):
+                    let styleOpacity: Double
+                    if case let .opacity(opacity) = style.style {
+                        styleOpacity = opacity
+                    } else {
+                        styleOpacity = 1
+                    }
+                    samples.append(contentsOf: symbolPresentationSamples(
+                        in: style.contents,
+                        inheritedOpacity: itemOpacity * styleOpacity
+                    ))
+                case let .crossFade(crossFade):
+                    let sourceOpacity: Double
+                    let targetOpacity: Double
+                    if case let .effect(
+                        .crossFade(sourceFraction, targetFraction),
+                        _
+                    ) = crossFade.command {
+                        sourceOpacity = 1 - Double(sourceFraction)
+                        targetOpacity = Double(targetFraction)
+                    } else {
+                        sourceOpacity = 1
+                        targetOpacity = 1
+                    }
+                    if let source = crossFade.source {
+                        samples.append(contentsOf: symbolPresentationSamples(
+                            in: source.contents,
+                            inheritedOpacity: itemOpacity * sourceOpacity
+                        ))
+                    }
+                    if let target = crossFade.target {
+                        samples.append(contentsOf: symbolPresentationSamples(
+                            in: target.contents,
+                            inheritedOpacity: itemOpacity * targetOpacity
+                        ))
+                    }
+                case let .flattened(nested, _, _):
+                    samples.append(contentsOf: symbolPresentationSamples(
+                        in: nested,
+                        inheritedOpacity: itemOpacity
+                    ))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        samples.append(contentsOf: symbolPresentationSamples(
+                            in: local.list,
+                            inheritedOpacity: itemOpacity
+                        ))
+                    }
+                case .backend,
+                     .color,
+                     .shape,
+                     .text:
+                    break
+                }
+            case let .effect(_, contents):
+                samples.append(contentsOf: symbolPresentationSamples(
+                    in: contents,
+                    inheritedOpacity: itemOpacity
+                ))
+            case let .states(states):
+                for (_, contents) in states {
+                    samples.append(contentsOf: symbolPresentationSamples(
+                        in: contents,
+                        inheritedOpacity: itemOpacity
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
     private func translucentShapeFillColors(in displayList: DisplayList) -> [VUI.Color] {
         translucentShapeFillRecords(in: displayList).map(\.color)
     }
@@ -4766,6 +4972,16 @@ private final class LayoutSchedulingAnimationLabProbe {
 private final class LayoutSchedulingContentTransitionProbe {
     var increment: (() -> Void)?
     var changeText: (() -> Void)?
+}
+
+private struct LayoutSchedulingSymbolPresentationSample: CustomStringConvertible {
+    var name: String
+    var opacity: Double
+    var drawProgresses: [Double]?
+
+    var description: String {
+        "\(name)(opacity: \(opacity), draw: \(String(describing: drawProgresses)))"
+    }
 }
 
 private enum LayoutSchedulingResourceEvent: Equatable {
@@ -5844,6 +6060,39 @@ private struct LayoutSchedulingSymbolDrawTransitionRoot: View {
             }
         }
         .frame(width: 160, height: 120)
+    }
+}
+
+private struct LayoutSchedulingSymbolReplaceRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var usesDraw = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.linear(duration: 3)) {
+                usesDraw.toggle()
+            }
+        }
+        probe.plainTextChange = {
+            usesDraw.toggle()
+        }
+        return HStack(spacing: 10) {
+            replacement(ReplaceSymbolEffect.replace)
+            replacement(ReplaceSymbolEffect.replace.downUp)
+            replacement(ReplaceSymbolEffect.replace.upUp)
+            replacement(ReplaceSymbolEffect.replace.offUp)
+            replacement(ReplaceSymbolEffect.replace.wholeSymbol)
+        }
+        .frame(width: 400, height: 120)
+    }
+
+    private func replacement<Effect>(_ effect: Effect) -> some View
+    where Effect: VUI.SymbolEffect & VUI.ContentTransitionSymbolEffect {
+        Image(systemName: usesDraw ? "draw" : "photo.fill")
+            .font(.system(size: 40))
+            .frame(width: 56, height: 56)
+            .foregroundStyle(Color.blue, Color.orange)
+            .contentTransition(.symbolEffect(effect))
     }
 }
 
