@@ -153,14 +153,20 @@ struct ContentView: View {
             .padding(24)
             .frame(width: 360, height: 180)
         }
-        .environment(\.modalSessionUsingPlatformWindow, false)
+        .environment(
+            \.modalSessionUsingPlatformWindow,
+            usesPlatformPresentationWindows
+        )
         .alert("Delete Item?", isPresented: $showAlert) {
             Button("Delete", role: .destructive) { alertResult = "deleted" }
             Button("Cancel", role: .cancel) { alertResult = "cancelled" }
         } message: {
             Text("This action cannot be undone.")
         }
-        .environment(\.modalSessionUsingPlatformWindow, false)
+        .environment(
+            \.modalSessionUsingPlatformWindow,
+            usesPlatformPresentationWindows
+        )
         .alert("Delete File?", isPresented: $showDataAlert, presenting: selectedFile) { file in
             Button("Delete \(file.name)", role: .destructive) {
                 alertResult = "deleted: \(file.name)"
@@ -173,12 +179,18 @@ struct ContentView: View {
         } message: { file in
             Text("\(file.name) (\(file.size)) will be permanently removed.")
         }
-        .environment(\.modalSessionUsingPlatformWindow, true)
+        .environment(
+            \.modalSessionUsingPlatformWindow,
+            usesPlatformPresentationWindows
+        )
         .alert(isPresented: $showErrorAlert, error: currentError) {
             Button("Retry") { alertResult = "retried" }
             Button("Cancel", role: .cancel) { alertResult = "error cancelled" }
         }
-        .environment(\.modalSessionUsingPlatformWindow, false)
+        .environment(
+            \.modalSessionUsingPlatformWindow,
+            usesPlatformPresentationWindows
+        )
     }
 
     @ViewBuilder
