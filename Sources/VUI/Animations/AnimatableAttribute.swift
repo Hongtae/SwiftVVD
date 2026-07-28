@@ -810,10 +810,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
                 previousAnimation: previousAnimation
             )
             for index in completionRecords.indices {
-                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                if shouldPreserveDirectBezierOrFluidSpringLogicalOnlyForkDeadline(
                     record: completionRecords[index],
                     previousAnimation: previousAnimation,
                     replacementAnimation: animation,
+                    replacementBoundary: presentationDeadline,
                     removedOrderGenerations: existingRemovedOrderGenerations
                 ) {
                     continue
@@ -847,10 +848,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
                 previousAnimation: previousAnimation
             )
             for index in completionRecords.indices {
-                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                if shouldPreserveDirectBezierOrFluidSpringLogicalOnlyForkDeadline(
                     record: completionRecords[index],
                     previousAnimation: previousAnimation,
                     replacementAnimation: animation,
+                    replacementBoundary: presentationDeadline,
                     removedOrderGenerations: existingRemovedOrderGenerations
                 ) {
                     continue
@@ -891,10 +893,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             // Interrupted infinite or FluidSpring boxes also finalize at a
             // non-residual replacement boundary in the sampled handoff paths.
             for index in completionRecords.indices {
-                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                if shouldPreserveDirectBezierOrFluidSpringLogicalOnlyForkDeadline(
                     record: completionRecords[index],
                     previousAnimation: previousAnimation,
                     replacementAnimation: animation,
+                    replacementBoundary: deadline,
                     removedOrderGenerations: existingRemovedOrderGenerations
                 ) {
                     continue
@@ -907,10 +910,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             replacementAnimation: animation
         ) {
             for index in completionRecords.indices where completionRecords[index].deadline.seconds > deadline.seconds {
-                if shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+                if shouldPreserveDirectBezierOrFluidSpringLogicalOnlyForkDeadline(
                     record: completionRecords[index],
                     previousAnimation: previousAnimation,
                     replacementAnimation: animation,
+                    replacementBoundary: deadline,
                     removedOrderGenerations: existingRemovedOrderGenerations
                 ) {
                     continue
@@ -3168,20 +3172,26 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
         return false
     }
 
-    private func shouldPreserveDirectFluidSpringLogicalOnlyForkDeadline(
+    private func shouldPreserveDirectBezierOrFluidSpringLogicalOnlyForkDeadline(
         record: CompletionRecord,
         previousAnimation: Animation?,
         replacementAnimation: Animation,
+        replacementBoundary: Time,
         removedOrderGenerations: Set<UInt64>
     ) -> Bool {
         guard record.criteria != .removed,
               !removedOrderGenerations.contains(record.orderGeneration),
               let previousAnimation,
-              previousAnimation.box is FluidSpringAnimationBox,
               replacementAnimation.box is FluidSpringAnimationBox else {
             return false
         }
-        return true
+        // A logical-only direct lane keeps its own completion boundary while
+        // the replacement spring begins from the sampled presentation value.
+        if previousAnimation.box is FluidSpringAnimationBox {
+            return true
+        }
+        return previousAnimation.box is BezierAnimationBox &&
+            record.deadline.seconds <= replacementBoundary.seconds
     }
 
     private func shouldGroupResidualWrapperReplacementCompletionRecords(

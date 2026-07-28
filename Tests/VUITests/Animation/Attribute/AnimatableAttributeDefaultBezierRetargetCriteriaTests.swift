@@ -2,6 +2,70 @@ import XCTest
 @testable import VUI
 
 final class AnimatableAttributeDefaultBezierRetargetCriteriaTests: XCTestCase {
+    func testShortEaseLogicalListenerFinishesBeforeDurationSpringReplacement() {
+        let recorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let oldAnimation = Animation.easeInOut(duration: 0.55)
+        let replacementAnimation = Animation.spring(duration: 0.8, bounce: 0.35)
+
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+
+        var oldTransaction = Transaction(animation: oldAnimation)
+        oldTransaction.animationLogicalListener = RecordingAnimationListener(
+            label: "oldEase",
+            recorder: recorder
+        )
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: oldTransaction
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+
+        harness.setTime(0.30)
+        let retargetStartValue = harness.currentValue().opacity
+        harness.flushCompletionActions()
+
+        var replacementTransaction = Transaction(animation: replacementAnimation)
+        replacementTransaction.animationLogicalListener = RecordingAnimationListener(
+            label: "replacementSpring",
+            recorder: recorder
+        )
+        harness.setSource(
+            _OpacityEffect(opacity: -0.5),
+            transaction: replacementTransaction
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+        recorder.removeAll()
+
+        let frame = min(
+            oldAnimation.box.defaultDisplayFrameInterval,
+            replacementAnimation.box.defaultDisplayFrameInterval
+        )
+        let replacementEnd = 0.30 + max(
+            replacementAnimation.box.duration,
+            replacementAnimation.box.presentationDuration(
+                for: -0.5 - retargetStartValue
+            )
+        )
+        var sampleTime = 0.30 + frame
+        while sampleTime <= replacementEnd + 1.0,
+              recorder.events.count < 2 {
+            harness.setTime(sampleTime)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            sampleTime += frame
+        }
+
+        XCTAssertEqual(recorder.events, [
+            "oldEase removed",
+            "replacementSpring removed",
+        ])
+    }
+
     func testDefaultAndBezierRetargetedToFluidSpringKeepSampledCriteriaOrder() {
         assertRetargetOrder(
             oldAnimation: .default,

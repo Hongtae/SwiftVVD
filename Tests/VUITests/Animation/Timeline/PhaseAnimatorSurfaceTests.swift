@@ -597,6 +597,187 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         XCTAssertEqual(compactedPhases(recorder.phases).first, 1)
     }
 
+    @MainActor
+    func testSingleRetriggerDuringFadedTransitionReturnsToCompactInOverlayPresentation() throws {
+        let recorder = PhaseTriggerActionRecorder()
+        let content = StateDrivenPhaseAnimatorVisualRoot(recorder: recorder)
+        let parent = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(EmptyView.self)
+            )
+        )
+        let child = parent.viewGraph.data.withCurrent {
+            let sourceGraph = parent.viewGraph.data.graph
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(
+                value: AnyView(SheetContent(content: AnyView(content)))
+            )
+            return ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: sourceGraph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(StateDrivenPhaseAnimatorVisualRoot.self)
+                ),
+                parentController: parent,
+                usesPlatformWindow: false
+            )
+        }
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Display-list animation sampling should not request graphics resources.")
+        }
+
+        func update(at seconds: Double, tick: UInt64) throws -> DisplayList {
+            var redraw = false
+            child.updateView(
+                tick: tick,
+                delta: seconds - child.animationTimestamp.seconds,
+                date: child.date.addingTimeInterval(seconds),
+                contentSize: CGSize(width: 680, height: 430),
+                redraw: &redraw,
+                withGC
+            )
+            return try child.viewGraph.data.withCurrent {
+                try XCTUnwrap(child.viewGraph.rootDisplayList?.value)
+            }
+        }
+
+        let initial = try update(at: 0, tick: 0)
+        for settleTick in 1...4 {
+            guard child.viewGraph.hasPendingTransactions ||
+                    child.viewGraph.data.graph.inbox.hasPendingWork else {
+                break
+            }
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            _ = try update(at: 0, tick: UInt64(settleTick))
+        }
+
+        recorder.phases.removeAll()
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var tick = UInt64(10)
+        for step in 0...22 {
+            _ = try update(at: Double(step) * 0.05, tick: tick)
+            tick += 1
+        }
+        XCTAssertEqual(compactedPhases(recorder.phases), [1, 2])
+
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var settled = try update(at: 1.15, tick: tick)
+        tick += 1
+        for step in 24...70 {
+            settled = try update(at: Double(step) * 0.05, tick: tick)
+            tick += 1
+        }
+
+        XCTAssertEqual(
+            compactedPhases(recorder.phases),
+            [1, 2, 1, 2, 0],
+            "One retrigger during faded motion must finish the restarted cycle."
+        )
+        XCTAssertEqual(
+            firstPhaseItemBounds(in: settled),
+            firstPhaseItemBounds(in: initial)
+        )
+    }
+
+    @MainActor
+    func testRapidDoubleRetriggerDuringFadedTransitionStopsAtFadedInOverlayPresentation() throws {
+        let recorder = PhaseTriggerActionRecorder()
+        let content = StateDrivenPhaseAnimatorVisualRoot(recorder: recorder)
+        let parent = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(EmptyView.self)
+            )
+        )
+        let child = parent.viewGraph.data.withCurrent {
+            let sourceGraph = parent.viewGraph.data.graph
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(
+                value: AnyView(SheetContent(content: AnyView(content)))
+            )
+            return ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: sourceGraph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(StateDrivenPhaseAnimatorVisualRoot.self)
+                ),
+                parentController: parent,
+                usesPlatformWindow: false
+            )
+        }
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Display-list animation sampling should not request graphics resources.")
+        }
+
+        func update(at seconds: Double, tick: UInt64) throws -> DisplayList {
+            var redraw = false
+            child.updateView(
+                tick: tick,
+                delta: seconds - child.animationTimestamp.seconds,
+                date: child.date.addingTimeInterval(seconds),
+                contentSize: CGSize(width: 680, height: 430),
+                redraw: &redraw,
+                withGC
+            )
+            return try child.viewGraph.data.withCurrent {
+                try XCTUnwrap(child.viewGraph.rootDisplayList?.value)
+            }
+        }
+
+        let initial = try update(at: 0, tick: 0)
+        for settleTick in 1...4 {
+            guard child.viewGraph.hasPendingTransactions ||
+                    child.viewGraph.data.graph.inbox.hasPendingWork else {
+                break
+            }
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            _ = try update(at: 0, tick: UInt64(settleTick))
+        }
+
+        recorder.phases.removeAll()
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var tick = UInt64(10)
+        for step in 0...22 {
+            _ = try update(at: Double(step) * 0.05, tick: tick)
+            tick += 1
+        }
+        XCTAssertEqual(compactedPhases(recorder.phases), [1, 2])
+
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(at: 1.15, tick: tick)
+        tick += 1
+
+        try XCTUnwrap(recorder.phaseAction)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var stopped = try update(at: 1.20, tick: tick)
+        tick += 1
+        for step in 25...70 {
+            stopped = try update(at: Double(step) * 0.05, tick: tick)
+            tick += 1
+        }
+
+        XCTAssertEqual(
+            compactedPhases(recorder.phases),
+            [1, 2, 1, 2],
+            "Two rapid retriggers at the faded boundary preserve the observed faded stop."
+        )
+        let initialBounds = try XCTUnwrap(firstPhaseItemBounds(in: initial))
+        let stoppedBounds = try XCTUnwrap(firstPhaseItemBounds(in: stopped))
+        XCTAssertEqual(stoppedBounds.size, initialBounds.size)
+        XCTAssertEqual(stoppedBounds.midY - initialBounds.midY, 42, accuracy: 0.001)
+    }
+
     func testChildValueStorageLabelsMatchObservedProjectionShape() {
         typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
 
