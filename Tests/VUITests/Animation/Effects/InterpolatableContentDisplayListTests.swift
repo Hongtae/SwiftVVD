@@ -6034,6 +6034,70 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
+    func testInterpolatorLayerRefinementUpdatesOnlyCurrentEndpoint() throws {
+        var layer = DisplayList.InterpolatorLayer()
+        let initial = makeDisplayList(debugItemCount: 1)
+        let firstTarget = makeDisplayList(debugItemCount: 2)
+        let secondTarget = makeDisplayList(debugItemCount: 3)
+        let refinedSecondTarget = makeDisplayList(debugItemCount: 4)
+        var state = ContentTransition.State(transition: .opacity)
+        state.animation = .linear(duration: 20)
+
+        layer.setDisplayList(initial, origin: .zero)
+        layer.setDisplayList(
+            firstTarget,
+            origin: .zero,
+            state: state,
+            animation: state.animation
+        )
+        layer.updateInterpolators(
+            contentsScale: 1,
+            maxDuration: .infinity,
+            time: .zero
+        )
+
+        layer.setDisplayList(
+            secondTarget,
+            origin: .zero,
+            state: state,
+            animation: state.animation
+        )
+        layer.updateInterpolators(
+            contentsScale: 1,
+            maxDuration: .infinity,
+            time: Time(seconds: 0.1)
+        )
+
+        XCTAssertEqual(layer.removedCount, 2)
+        let historical = try XCTUnwrap(
+            layer.removed.first?.interpolator
+        )
+        let current = try XCTUnwrap(
+            layer.removed.last?.interpolator
+        )
+        XCTAssertEqual(
+            historical.copyContents(withProgress: 20).debugItems.count,
+            2
+        )
+        XCTAssertEqual(
+            current.copyContents(withProgress: 20).debugItems.count,
+            3
+        )
+
+        layer.setDisplayList(refinedSecondTarget, origin: .zero)
+
+        XCTAssertTrue(layer.removed.first?.interpolator === historical)
+        XCTAssertTrue(layer.removed.last?.interpolator === current)
+        XCTAssertEqual(
+            historical.copyContents(withProgress: 20).debugItems.count,
+            2
+        )
+        XCTAssertEqual(
+            current.copyContents(withProgress: 20).debugItems.count,
+            4
+        )
+    }
+
     func testUnaryInterpolatorGroupTracksLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
         let current = makeDisplayList(debugItemCount: 1)
@@ -6364,6 +6428,59 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             at: Time(seconds: 2)
         )
         XCTAssertEqual(sampled.items.count, 8)
+    }
+
+    func testUnaryInterpolatorGroupRapidRetargetSettlesAtLatestEndpoint() throws {
+        func textList(width: CGFloat) -> DisplayList {
+            var list = DisplayList()
+            list.appendTextItem(
+                foreground: .color(width < 100 ? .blue : .purple),
+                bounds: CGRect(x: 0, y: 0, width: width, height: 24)
+            ) { _ in }
+            return list
+        }
+
+        let compact = textList(width: 84)
+        let expanded = textList(width: 215)
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        var current = compact
+        var state = ContentTransition.State(transition: .text)
+        state.animation = .easeInOut(duration: 1.4)
+
+        unary.setCurrentContents(
+            contentSeed: DisplayList.Seed(decodedValue: 0),
+            target: compact,
+            transition: .text,
+            time: .zero,
+            supportsVFD: false,
+            rasterizationOptions: RasterizationOptions()
+        )
+
+        for action in 0..<16 {
+            let time = 2.0 + Double(action) * 0.12
+            unary.updateTime(Time(seconds: time))
+            let target = action.isMultiple(of: 2) ? expanded : compact
+            _ = unary.update(
+                contentSeed: DisplayList.Seed(decodedValue: UInt16(action + 1)),
+                current: current,
+                target: target,
+                state: state,
+                time: Time(seconds: time),
+                animatesSize: false,
+                defersRender: false,
+                supportsVFD: false
+            )
+            unary.updateTime(Time(seconds: time + 0.001))
+            current = target
+        }
+
+        unary.updateTime(Time(seconds: 3.92))
+        unary.updateTime(Time(seconds: 4.04))
+        unary.updateTime(Time(seconds: 5.55))
+        let output = unary.apply(to: current)
+        XCTAssertEqual(unary.layer.removedCount, 0)
+        XCTAssertTrue(output.hasSameInterpolationSurface(as: compact))
+        XCTAssertFalse(output.hasSameInterpolationSurface(as: expanded))
     }
 
     func testUnaryInterpolatorGroupRebasesExistingInterpolatorFromComposedPresentation() throws {

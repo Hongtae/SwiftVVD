@@ -196,10 +196,10 @@ extension DisplayList {
             )
             if state == nil {
                 // Layout can refine the endpoint during the preparation passes.
-                // Keep every already-created interpolator pointed at the latest list.
-                for index in removed.indices {
-                    removed[index].interpolator?.setTo(list)
-                }
+                // Only the last removal targets the current contents. Earlier
+                // entries target the following retained contents and must keep
+                // their historical endpoints across later refinements.
+                removed.last?.interpolator?.setTo(list)
             }
             maxDuration = .infinity
             needsUpdate = true

@@ -3138,6 +3138,173 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS contentTransitionRapidTextPublicRetargetContinuityObserved
+    @MainActor
+    func testContentTransitionRapidTextRetargetPreservesPresentationTrajectory() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingRapidContentTextRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingRapidContentTextRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 320, height: 240),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 320, height: 240),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the rapid text graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        struct Sample {
+            var buttonMidY: CGFloat
+            var compactOpacity: Double
+            var expandedOpacity: Double
+        }
+
+        func compositeOpacity(
+            _ samples: [LayoutSchedulingResolvedTextSample]
+        ) -> Double {
+            1 - samples.reduce(1) {
+                $0 * (1 - $1.opacity)
+            }
+        }
+
+        func update(time: Double) throws -> Sample {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 320, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            let list = try displayList(in: controller)
+            let buttonMidY = try XCTUnwrap(
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "Change Text",
+                    environment: controller.environment
+                ).last?.frame.midY
+            )
+            let compact = renderedResolvedTextSamples(
+                in: list,
+                matching: "Compact",
+                environment: controller.environment
+            )
+            let expanded = renderedResolvedTextSamples(
+                in: list,
+                matching: "Expanded value",
+                environment: controller.environment
+            )
+            return Sample(
+                buttonMidY: buttonMidY,
+                compactOpacity: compositeOpacity(compact),
+                expandedOpacity: compositeOpacity(expanded)
+            )
+        }
+
+        let initial = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(time: 0.001)
+        _ = try update(time: 0.05)
+        let beforeRetarget = try update(time: 0.12)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        let afterRetarget = try update(time: 0.121)
+        let continued = try update(time: 0.24)
+        let later = try update(time: 0.72)
+        let settled = try update(time: 1.70)
+
+        XCTAssertEqual(
+            afterRetarget.buttonMidY,
+            beforeRetarget.buttonMidY,
+            accuracy: 0.5
+        )
+        XCTAssertGreaterThan(beforeRetarget.expandedOpacity, 0)
+        XCTAssertGreaterThan(afterRetarget.expandedOpacity, 0)
+        XCTAssertGreaterThanOrEqual(
+            continued.expandedOpacity,
+            beforeRetarget.expandedOpacity
+        )
+        XCTAssertGreaterThan(
+            abs(continued.buttonMidY - initial.buttonMidY),
+            abs(beforeRetarget.buttonMidY - initial.buttonMidY)
+        )
+        XCTAssertGreaterThan(
+            abs(later.buttonMidY - initial.buttonMidY),
+            abs(continued.buttonMidY - initial.buttonMidY)
+        )
+        XCTAssertEqual(settled.buttonMidY, initial.buttonMidY, accuracy: 0.5)
+        XCTAssertEqual(settled.compactOpacity, 1, accuracy: 0.01)
+        XCTAssertEqual(settled.expandedOpacity, 0, accuracy: 0.01)
+
+        var repeatedBoundaries: [Sample] = []
+        for action in 0..<16 {
+            let actionTime = 2.0 + Double(action) * 0.12
+            let boundary = try update(time: actionTime)
+            repeatedBoundaries.append(boundary)
+            try XCTUnwrap(probe.toggle)()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+            let immediate = try update(time: actionTime + 0.001)
+            XCTAssertEqual(
+                immediate.buttonMidY,
+                boundary.buttonMidY,
+                accuracy: 0.5,
+                "repeated retarget restarted at action \(action + 1)"
+            )
+        }
+
+        for (index, sample) in repeatedBoundaries.enumerated().dropFirst(2) {
+            XCTAssertGreaterThan(
+                sample.compactOpacity,
+                0.001,
+                "Compact presentation disappeared at action \(index + 1)"
+            )
+            XCTAssertGreaterThan(
+                sample.expandedOpacity,
+                0.001,
+                "Expanded presentation disappeared at action \(index + 1)"
+            )
+        }
+
+        _ = try update(time: 3.92)
+        _ = try update(time: 4.04)
+        let repeatedSettled = try update(time: 5.55)
+        XCTAssertEqual(
+            repeatedSettled.buttonMidY,
+            initial.buttonMidY,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(repeatedSettled.compactOpacity, 1, accuracy: 0.01)
+        XCTAssertEqual(repeatedSettled.expandedOpacity, 0, accuracy: 0.01)
+    }
+
     @MainActor
     func testSystemFontNumericTransitionSurvivesRapidRepeatedRetargets() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
@@ -5726,6 +5893,35 @@ private struct LayoutSchedulingResolvedContentGeometryRoot: View {
                 Text(verbatim: "Change Text")
                     .font(.system(.body))
             }
+        }
+        .frame(width: 240)
+        .frame(width: 320, height: 240)
+    }
+}
+
+private struct LayoutSchedulingRapidContentTextRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var alternateText = false
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 1.4)) {
+                alternateText.toggle()
+            }
+        }
+        return VStack(spacing: 12) {
+            Text("Interpolate")
+                .font(.system(.headline))
+            Text(alternateText ? "Expanded value" : "Compact")
+                .font(
+                    .system(
+                        size: alternateText ? 30 : 20,
+                        weight: .semibold
+                    )
+                )
+                .foregroundColor(alternateText ? .purple : .blue)
+                .contentTransition(.interpolate)
+            Button("Change Text", action: {})
         }
         .frame(width: 240)
         .frame(width: 320, height: 240)
