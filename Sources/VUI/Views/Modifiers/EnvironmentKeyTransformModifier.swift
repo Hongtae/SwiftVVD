@@ -34,7 +34,14 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
 }
 
 extension View {
-    @inlinable public func transformEnvironment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, transform: @escaping (inout V) -> Void) -> some View {
+    @inlinable nonisolated public func transformEnvironment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, transform: @escaping (inout V) -> Void) -> some View {
         return modifier(_EnvironmentKeyTransformModifier(keyPath: keyPath, transform: transform))
+    }
+
+    @inlinable nonisolated public func disabled(_ disabled: Bool) -> some View {
+        return modifier(_EnvironmentKeyTransformModifier(
+            keyPath: \.isEnabled,
+            transform: { $0 = $0 && !disabled }
+        ))
     }
 }
