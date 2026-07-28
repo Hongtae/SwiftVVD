@@ -28,6 +28,7 @@ struct ImageLabSheet: View {
 
             if let vulkanLogo {
                 Image(svg: vulkanLogo, label: Text("Vulkan"))
+                    .resizable()
                     .frame(width: 160, height: 62)
 
                 Text("SVG resource · 160 × 62")
