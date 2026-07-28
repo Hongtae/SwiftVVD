@@ -4,13 +4,30 @@ import VUI
 struct ContextMenuLabSheet: View {
     let onClose: () -> Void
 
+    @Environment(\.modalSessionUsingPlatformWindow)
+    private var currentSheetUsesPlatformWindow
+
+    @State private var usesPlatformPresentationWindows = true
     @State private var contextMenuToggle = true
     @State private var contextMenuLiveCount = 0
+
+    private var contextMenusUsePlatformWindows: Bool {
+        currentSheetUsesPlatformWindow && usesPlatformPresentationWindows
+    }
 
     var body: some View {
         VStack(spacing: 12) {
             Text("Context Menus")
                 .font(.system(size: 22, weight: .semibold))
+
+            Toggle(
+                "Open Context Menus in Platform Windows",
+                isOn: Binding(
+                    get: { contextMenusUsePlatformWindows },
+                    set: { usesPlatformPresentationWindows = $0 }
+                )
+            )
+            .disabled(!currentSheetUsesPlatformWindow)
 
             HStack {
                 menu("Menu Action") {
@@ -23,37 +40,18 @@ struct ContextMenuLabSheet: View {
                 .menuStyle(ButtonMenuStyle())
             }
 
-            HStack {
-                menu("Platform Action") {
-                    print("Platform PrimaryAction")
-                }
-                .environment(\.presentationChildUsingPlatformWindow, true)
-                menu("Platform Menu")
-                    .environment(\.presentationChildUsingPlatformWindow, true)
-            }
-
             Button("Start Live Refresh: \(contextMenuLiveCount)") {
                 startLiveRefreshProbe()
             }
 
             HStack {
-                Text("Overlay")
+                Text("Context Menu")
                     .contextMenu {
                         ContextMenuLabItems(
                             toggle: $contextMenuToggle,
                             liveCount: contextMenuLiveCount
                         )
                     }
-                    .environment(\.presentationChildUsingPlatformWindow, false)
-                Divider()
-                Text("Platform")
-                    .contextMenu {
-                        ContextMenuLabItems(
-                            toggle: $contextMenuToggle,
-                            liveCount: contextMenuLiveCount
-                        )
-                    }
-                    .environment(\.presentationChildUsingPlatformWindow, true)
                 Divider()
                 Text("Long Press")
                     .contextMenu {
@@ -63,7 +61,6 @@ struct ContextMenuLabSheet: View {
                         )
                     }
                     .environment(\.contextMenuTriggerPolicy, .longPress)
-                    .environment(\.presentationChildUsingPlatformWindow, false)
             }
             .padding(8)
             .frame(maxHeight: 40)
@@ -79,6 +76,10 @@ struct ContextMenuLabSheet: View {
         }
         .padding(20)
         .frame(width: 680, height: 360)
+        .environment(
+            \.presentationChildUsingPlatformWindow,
+            contextMenusUsePlatformWindows
+        )
     }
 
     @ViewBuilder

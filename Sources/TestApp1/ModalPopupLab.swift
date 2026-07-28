@@ -48,7 +48,7 @@ struct ModalPopupLabSheet: View {
                     set: { usesPlatformPresentationWindows = $0 }
                 )
             )
-            .environment(\.isEnabled, currentSheetUsesPlatformWindow)
+            .disabled(!currentSheetUsesPlatformWindow)
 
             Button("Open Nested Sheet") {
                 showNestedSheet = true
