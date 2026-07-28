@@ -269,14 +269,17 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier, PrimitiveVi
                 .rendererHost as? WindowController)?
                 .gestureGraph?
                 .eventBindingManager
+        // Keep live value reads in the update rule below. Child construction
+        // can run while a dynamic parent is evaluating, and reading here would
+        // attach responder dependencies to that parent.
         let responder = HoverResponder(
-            callback: modifier._attribute.value.callback,
+            callback: nil,
             continuousCallback: nil,
             coordinateSpace: .local,
-            transform: inputs.transform.value,
-            size: inputs.size.value,
-            isEnabled: environmentAttr.value.isEnabled,
-            innerResponders: innerRespondersAttr.value,
+            transform: .identity,
+            size: .zero,
+            isEnabled: true,
+            innerResponders: [],
             eventBindingManager: eventBindingManager
         )
         graph.makeSideEffectRule { [weak responder] in
@@ -351,14 +354,16 @@ public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
                 .rendererHost as? WindowController)?
                 .gestureGraph?
                 .eventBindingManager
+        // Keep live value reads in the update rule below for the same
+        // child-construction dependency boundary as the Bool hover responder.
         let responder = HoverResponder(
             callback: nil,
-            continuousCallback: modifier._attribute.value.callback,
-            coordinateSpace: modifier._attribute.value.coordinateSpace,
-            transform: inputs.transform.value,
-            size: inputs.size.value,
-            isEnabled: environmentAttr.value.isEnabled,
-            innerResponders: innerRespondersAttr.value,
+            continuousCallback: nil,
+            coordinateSpace: .local,
+            transform: .identity,
+            size: .zero,
+            isEnabled: true,
+            innerResponders: [],
             eventBindingManager: eventBindingManager
         )
         graph.makeSideEffectRule { [weak responder] in

@@ -215,17 +215,19 @@ extension MenuDropdownModifier {
             )
         )
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        let value = modifier._attribute.value
+        // The update rule below owns live modifier, geometry, environment, and
+        // child-responder reads so dynamic child construction stays independent
+        // of parent layout evaluation.
         let responder = MenuDropdownResponder(
             itemList: itemListAttr,
             environment: environmentAttr,
             transform: inputs.transform,
             size: inputs.size,
-            onHoverChanged: value.onHoverChanged,
-            onMenuOpenChanged: value.onMenuOpenChanged,
-            onPressingChanged: value.onPressingChanged,
-            onPresentationChanged: value.onPresentationChanged,
-            innerResponders: innerRespondersAttr.value
+            onHoverChanged: nil,
+            onMenuOpenChanged: nil,
+            onPressingChanged: nil,
+            onPresentationChanged: nil,
+            innerResponders: []
         )
         graph.makeSideEffectRule { [weak responder] in
             guard let responder else { return }
@@ -302,9 +304,6 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
         self.environment = environment
         self.transform = transform
         self.size = size
-        self.snapshotTransform = transform.value
-        self.snapshotSize = size.value
-        self.snapshotIsEnabled = environment.value.isEnabled
         self.onHoverChanged = onHoverChanged
         self.onMenuOpenChanged = onMenuOpenChanged
         self.onPressingChanged = onPressingChanged
