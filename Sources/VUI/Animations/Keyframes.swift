@@ -48,9 +48,7 @@ extension Never: Keyframes {
         into resolved: inout _ResolvedKeyframes<Never>,
         initialValue: Never,
         initialVelocity: Never?
-    ) {
-        switch self {}
-    }
+    ) {}
 }
 
 public struct _ResolvedKeyframes<Value> {

@@ -487,7 +487,7 @@ final class LayoutGestureBox {
         var outputs: _GestureOutputs<Void>? = nil
 
         func binds(_ binding: EventBinding) -> Bool {
-            guard let responderNode = responder as? ResponderNode else {
+            guard let responderNode = responder else {
                 return false
             }
             if binding.responder === responderNode {
@@ -622,10 +622,10 @@ final class LayoutGestureBox {
         let target: ResponderNode?
         if let event = event as? any HitTestableEventType {
             target = child.containsGlobalLocation(event.hitTestLocation)
-                ? child.responder as? ResponderNode
+                ? child.responder
                 : nil
         } else {
-            target = child.responder as? ResponderNode
+            target = child.responder
         }
 
         let movement = eventBindingManager.rebindEvent(id, to: target)
@@ -869,7 +869,7 @@ struct LayoutGestureChildProxy: RandomAccessCollection {
         var responder: (ViewResponder)?
 
         func binds(_ binding: EventBinding) -> Bool {
-            guard let responderNode = responder as? ResponderNode else {
+            guard let responderNode = responder else {
                 return false
             }
             if binding.responder === responderNode {

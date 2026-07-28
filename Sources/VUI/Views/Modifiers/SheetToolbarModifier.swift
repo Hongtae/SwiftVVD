@@ -430,9 +430,7 @@ public struct TupleToolbarContent<C>: ToolbarContent {
 // buildBlock methods are @inlinable so the public TupleToolbarContent type is usable at call sites.
 @resultBuilder
 public struct ToolbarContentBuilder {
-    public static func buildBlock(_ content: Never) -> Never {
-        content
-    }
+    public static func buildBlock(_ content: Never) -> Never {}
 
     @inlinable
     public static func buildBlock<C: ToolbarContent>(_ c: C) -> TupleToolbarContent<C> {

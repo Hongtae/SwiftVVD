@@ -1240,7 +1240,7 @@ extension PreferencesOutputs {
                               targetWeak.isValid(in: graph) else {
                             return
                         }
-                        Transaction.withScopedThreadTransaction(transaction) {
+                        _ = Transaction.withScopedThreadTransaction(transaction) {
                             targetWeak.toStrong().setValue(value, transaction: transaction)
                         }
                     }

@@ -73,8 +73,8 @@ extension AnyGestureResponder {
     /// Returns true if self is a descendant of other in the nextResponder chain.
     /// Convenience wrapper for exclusionPolicy checks.
     func isDescendant(of other: any AnyGestureResponder) -> Bool {
-        guard let selfVR = self as? ViewResponder,
-              let otherNode = other as? ResponderNode else { return false }
+        guard let selfVR = self as? ViewResponder else { return false }
+        let otherNode: ResponderNode = other
         return selfVR.isDescendant(of: otherNode)
     }
 

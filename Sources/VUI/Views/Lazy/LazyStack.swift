@@ -2620,7 +2620,10 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     }
 
     override func reset() {
-        let subviews = LayoutSubviews(subviews: [], layoutDirection: _layoutDirection.value)
+        _ = LayoutSubviews(
+            subviews: [],
+            layoutDirection: _layoutDirection.value
+        )
         cacheState.setValue(LayoutType.initialCache)
         super.reset()
     }
@@ -5129,7 +5132,7 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
         let accessibilityEnabled: Attribute<Bool> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.accessibilityEnabled
         }
-        let initialSubviews = LayoutSubviews(
+        _ = LayoutSubviews(
             subviews: [],
             layoutDirection: layoutDirection.value
         )

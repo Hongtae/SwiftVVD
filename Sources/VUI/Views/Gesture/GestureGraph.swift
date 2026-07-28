@@ -597,7 +597,10 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     var nextUpdateTime: Time
 
     var responderNode: ResponderNode? {
-        (rootResponder as? ResponderNode) ?? eventBindingManager.rootResponder
+        if let rootResponder {
+            return rootResponder
+        }
+        return eventBindingManager.rootResponder
     }
 
     var focusedResponder: ResponderNode? {
@@ -667,13 +670,11 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     convenience init(rootResponder: any AnyGestureResponder) {
         self.init()
         self.rootResponder = rootResponder
-        if let responder = rootResponder as? ResponderNode {
-            eventBindingManager.rootResponder = responder
-        }
+        eventBindingManager.rootResponder = rootResponder
     }
 
     deinit {
-        gestureGraphRuntimeStates.withLock { states in
+        _ = gestureGraphRuntimeStates.withLock { states in
             states.removeValue(forKey: ObjectIdentifier(self))
         }
     }
@@ -681,10 +682,10 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     func eventBinding(at location: CGPoint, accepting eventType: Any.Type) -> EventBinding? {
         guard let responder = hitTestResponders(
             at: location
-        ).first,
-              let node = responder as? ResponderNode else {
+        ).first else {
             return nil
         }
+        let node: ResponderNode = responder
         return EventBinding(responder: node)
     }
 
@@ -855,7 +856,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             _inheritedPhase.setValue(.defaultValue)
             _gestureResetSeed.setValue(0)
             _gesturePreferenceKeys.setValue(PreferenceKeys())
-            (rootResponder as? ResponderNode)?.resetGesture()
+            rootResponder?.resetGesture()
         }
         _rootPhase = OptionalAttribute()
         _gestureCategoryAttr = OptionalAttribute()

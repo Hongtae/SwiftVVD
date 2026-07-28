@@ -76,15 +76,15 @@ struct Spacing: Equatable, CustomStringConvertible {
             self.base = base
         }
 
-        nonisolated(unsafe) static let `default` = Category()
-        nonisolated(unsafe) static let textToText = Category()
-        nonisolated(unsafe) static let edgeAboveText = Category()
-        nonisolated(unsafe) static let edgeBelowText = Category()
-        nonisolated(unsafe) static let textBaseline = Category()
-        nonisolated(unsafe) static let edgeLeftText = Category()
-        nonisolated(unsafe) static let edgeRightText = Category()
-        nonisolated(unsafe) static let leftTextBaseline = Category()
-        nonisolated(unsafe) static let rightTextBaseline = Category()
+        static let `default` = Category()
+        static let textToText = Category()
+        static let edgeAboveText = Category()
+        static let edgeBelowText = Category()
+        static let textBaseline = Category()
+        static let edgeLeftText = Category()
+        static let edgeRightText = Category()
+        static let leftTextBaseline = Category()
+        static let rightTextBaseline = Category()
     }
 
     struct Key: Hashable {
