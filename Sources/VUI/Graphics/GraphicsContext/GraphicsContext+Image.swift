@@ -18,11 +18,13 @@ extension GraphicsContext {
             }
 
             var contents: Contents?
+            var resizingMode: Image.ResizingMode?
             let width: Int
             let height: Int
 
             init(contents: Contents?) {
                 self.contents = contents
+                self.resizingMode = nil
                 switch contents {
                 case let .texture(texture):
                     self.width = texture.width
@@ -94,6 +96,11 @@ extension GraphicsContext {
             return ObjectIdentifier(storage)
         }
 
+        var resizingMode: Image.ResizingMode? {
+            get { storage.resizingMode }
+            set { storage.resizingMode = newValue }
+        }
+
         init(baseline: CGFloat, shading: Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
             self.baseline = baseline
             self.shading = shading
@@ -144,19 +151,28 @@ extension GraphicsContext {
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {
+        var resolved: ResolvedImage
         if let symbol = image.provider.makeVectorSymbol() {
-            return ResolvedImage(
+            resolved = ResolvedImage(
                 symbol: symbol.applyingEffectiveFontMetrics(in: environment)
             )
+        } else if let svg = image.provider.makeSVG() {
+            resolved = ResolvedImage(svg: svg)
+        } else {
+            let texture = image.provider.makeTexture(self)
+            let displayScale = self.sceneResources.contentScaleFactor
+            let scaleFactor = image.provider.scaleFactor / displayScale
+            let baseline = CGFloat(texture?.height ?? 0) * scaleFactor
+            resolved = ResolvedImage(
+                baseline: baseline,
+                shading: nil,
+                texture: texture,
+                textureTransform: .identity,
+                scaleFactor: scaleFactor
+            )
         }
-        if let svg = image.provider.makeSVG() {
-            return ResolvedImage(svg: svg)
-        }
-        let texture = image.provider.makeTexture(self)
-        let displayScale = self.sceneResources.contentScaleFactor
-        let scaleFactor = image.provider.scaleFactor / displayScale
-        let baseline = CGFloat(texture?.height ?? 0) * scaleFactor
-        return ResolvedImage(baseline: baseline, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)
+        resolved.applyResizingProvider(image.provider)
+        return resolved
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
@@ -164,7 +180,12 @@ extension GraphicsContext {
             return
         }
         if let svg = image.svg, rect.width > 0, rect.height > 0 {
-            draw(svg, shading: image.shading, in: rect)
+            draw(
+                svg,
+                shading: image.shading,
+                in: rect,
+                stretchesToFill: image.resizingMode == .stretch
+            )
             return
         }
         if let texture = image.texture, (rect.width > 0 && rect.height > 0) {
@@ -195,14 +216,26 @@ extension GraphicsContext {
     ) {
         let viewport = symbol.viewport
         guard viewport.width > 0, viewport.height > 0 else { return }
-        let scale = min(rect.width / viewport.width, rect.height / viewport.height)
+        let scaleX: CGFloat
+        let scaleY: CGFloat
+        if image.resizingMode == .stretch {
+            scaleX = rect.width / viewport.width
+            scaleY = rect.height / viewport.height
+        } else {
+            let scale = min(
+                rect.width / viewport.width,
+                rect.height / viewport.height
+            )
+            scaleX = scale
+            scaleY = scale
+        }
         let transform = CGAffineTransform(
-            a: scale,
+            a: scaleX,
             b: 0,
             c: 0,
-            d: scale,
-            tx: rect.midX - viewport.midX * scale,
-            ty: rect.midY - viewport.midY * scale
+            d: scaleY,
+            tx: rect.midX - viewport.midX * scaleX,
+            ty: rect.midY - viewport.midY * scaleY
         )
         for layer in symbol.layers where layer.opacity > 0 {
             let effectOpacity = image.symbolLayerOpacities.flatMap { opacities in
@@ -339,7 +372,7 @@ extension GraphicsContext {
     }
 
     public func draw(_ svg: SVG, in rect: CGRect) {
-        draw(svg, shading: nil, in: rect)
+        draw(svg, shading: nil, in: rect, stretchesToFill: false)
     }
 
     public func draw(_ layer: SVG.Layer) {
@@ -349,23 +382,33 @@ extension GraphicsContext {
     private func draw(
         _ svg: SVG,
         shading: Shading?,
-        in rect: CGRect
+        in rect: CGRect,
+        stretchesToFill: Bool
     ) {
         guard svg.viewBox.width > 0, svg.viewBox.height > 0,
               rect.width > 0, rect.height > 0 else {
             return
         }
-        let scale = min(
-            rect.width / svg.viewBox.width,
-            rect.height / svg.viewBox.height
-        )
+        let scaleX: CGFloat
+        let scaleY: CGFloat
+        if stretchesToFill {
+            scaleX = rect.width / svg.viewBox.width
+            scaleY = rect.height / svg.viewBox.height
+        } else {
+            let scale = min(
+                rect.width / svg.viewBox.width,
+                rect.height / svg.viewBox.height
+            )
+            scaleX = scale
+            scaleY = scale
+        }
         let viewportTransform = CGAffineTransform(
-            a: scale,
+            a: scaleX,
             b: 0,
             c: 0,
-            d: scale,
-            tx: rect.midX - svg.viewBox.midX * scale,
-            ty: rect.midY - svg.viewBox.midY * scale
+            d: scaleY,
+            tx: rect.midX - svg.viewBox.midX * scaleX,
+            ty: rect.midY - svg.viewBox.midY * scaleY
         )
         for layer in svg.layers {
             draw(layer, applying: viewportTransform, shading: shading)
@@ -478,6 +521,24 @@ extension GraphicsContext {
                                vertices: vertices,
                                texture: texture,
                                blendState: blendState)
+    }
+}
+
+extension GraphicsContext.ResolvedImage {
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        guard resizingMode != nil else { return size }
+        return CGSize(
+            width: proposal.width ?? size.width,
+            height: proposal.height ?? size.height
+        )
+    }
+
+    mutating func applyResizingProvider(_ provider: AnyImageProviderBox) {
+        guard let resizingProvider = provider.resizingProvider else {
+            resizingMode = nil
+            return
+        }
+        resizingMode = resizingProvider.resizingMode
     }
 }
 

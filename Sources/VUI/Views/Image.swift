@@ -11,6 +11,7 @@ import VVD
 class AnyImageProviderBox: @unchecked Sendable {
     var requiresBackendResolution: Bool { true }
     var usesSymbolFontMetrics: Bool { false }
+    var resizingProvider: ResizableProvider? { nil }
 
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
@@ -32,6 +33,57 @@ class AnyImageProviderBox: @unchecked Sendable {
 
     @TaskLocal
     fileprivate static var _preferredBundle: Bundle?
+}
+
+final class ResizableProvider: AnyImageProviderBox, @unchecked Sendable {
+    let base: Image
+    let capInsets: EdgeInsets
+    let resizingMode: Image.ResizingMode
+
+    init(
+        base: Image,
+        capInsets: EdgeInsets,
+        resizingMode: Image.ResizingMode
+    ) {
+        self.base = base
+        self.capInsets = capInsets
+        self.resizingMode = resizingMode
+    }
+
+    override var requiresBackendResolution: Bool {
+        base.provider.requiresBackendResolution
+    }
+
+    override var usesSymbolFontMetrics: Bool {
+        base.provider.usesSymbolFontMetrics
+    }
+
+    override var resizingProvider: ResizableProvider? {
+        self
+    }
+
+    override func makeTexture(_ context: GraphicsContext) -> Texture? {
+        base.provider.makeTexture(context)
+    }
+
+    override func makeVectorSymbol() -> ResolvedVectorSymbol? {
+        base.provider.makeVectorSymbol()
+    }
+
+    override func makeSVG() -> SVG? {
+        base.provider.makeSVG()
+    }
+
+    override var scaleFactor: CGFloat {
+        base.provider.scaleFactor
+    }
+
+    override func isEqual(to other: AnyImageProviderBox) -> Bool {
+        guard let other = other as? ResizableProvider else { return false }
+        return base == other.base &&
+            capInsets == other.capInsets &&
+            resizingMode == other.resizingMode
+    }
 }
 
 final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
@@ -688,7 +740,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                 return synchronousImage
             }
 
-            let resolved: GraphicsContext.ResolvedImage?
+            var resolved: GraphicsContext.ResolvedImage?
             if synchronousSource == image,
                let symbol = synchronousVectorSymbol {
                 resolved = GraphicsContext.ResolvedImage(
@@ -706,6 +758,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                 synchronousVectorSymbol = nil
                 resolved = nil
             }
+            resolved?.applyResizingProvider(image.provider)
             synchronousSource = image
             synchronousImage = resolved
             synchronousSymbolFont = symbolFont
@@ -2022,6 +2075,24 @@ final class _ImageResourceResolutionState {
 }
 
 extension Image {
+    public enum ResizingMode: Hashable, Sendable {
+        case tile
+        case stretch
+    }
+
+    public func resizable(
+        capInsets: EdgeInsets = EdgeInsets(),
+        resizingMode: ResizingMode = .stretch
+    ) -> Image {
+        Image(provider: ResizableProvider(
+            base: self,
+            capInsets: capInsets,
+            resizingMode: resizingMode
+        ))
+    }
+}
+
+extension Image {
     public struct DynamicRange: Hashable, Sendable {
         enum Storage: UInt8, Hashable, Sendable {
             case standard
@@ -2234,7 +2305,7 @@ extension Image: View {
             let resolved = intrinsicImageAttr.value
 
             return LayoutComputer(
-                sizeThatFits: { _ in resolved?.size ?? .zero }
+                sizeThatFits: { resolved?.sizeThatFits($0) ?? .zero }
             )
         }
 

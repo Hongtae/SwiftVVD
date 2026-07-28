@@ -185,6 +185,223 @@ final class SVGTests: XCTestCase {
         XCTAssertNil(record.symbolID)
     }
 
+    func testResizableSVGMatchesNativeProposalRouting() throws {
+        let svg = try SVG(source: """
+        <svg viewBox="0 0 1300 500">
+          <path d="M0 0H1300V500H0Z" fill="#ff0000" />
+        </svg>
+        """)
+        let original = Image(svg: svg)
+        let resizable = original.resizable()
+        let provider = try XCTUnwrap(
+            resizable.provider as? ResizableProvider
+        )
+
+        XCTAssertEqual(provider.base, original)
+        XCTAssertEqual(provider.capInsets, EdgeInsets())
+        XCTAssertEqual(provider.resizingMode, .stretch)
+
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.requestsLayoutComputer = true
+
+            func layoutComputer(for image: VUI.Image) throws -> LayoutComputer {
+                let attribute = graph.makeInput(value: image)
+                let outputs = VUI.Image._makeView(
+                    view: _GraphValue(_attribute: attribute),
+                    inputs: inputs
+                )
+                return try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            }
+
+            let originalLayout = try layoutComputer(for: original)
+            XCTAssertEqual(
+                originalLayout.sizeThatFits(.unspecified),
+                CGSize(width: 1300, height: 500)
+            )
+            XCTAssertEqual(
+                originalLayout.sizeThatFits(
+                    _ProposedSize(width: 160, height: 62)
+                ),
+                CGSize(width: 1300, height: 500)
+            )
+
+            let resizableLayout = try layoutComputer(for: resizable)
+            XCTAssertEqual(
+                resizableLayout.sizeThatFits(.unspecified),
+                CGSize(width: 1300, height: 500)
+            )
+            XCTAssertEqual(
+                resizableLayout.sizeThatFits(.zero),
+                .zero
+            )
+            XCTAssertEqual(
+                resizableLayout.sizeThatFits(
+                    _ProposedSize(width: 160, height: nil)
+                ),
+                CGSize(width: 160, height: 500)
+            )
+            XCTAssertEqual(
+                resizableLayout.sizeThatFits(
+                    _ProposedSize(width: nil, height: 62)
+                ),
+                CGSize(width: 1300, height: 62)
+            )
+            XCTAssertEqual(
+                resizableLayout.sizeThatFits(
+                    _ProposedSize(width: 160, height: 62)
+                ),
+                CGSize(width: 160, height: 62)
+            )
+        }
+
+        // ASSERTIONS imageResizableFixedFrameRuntimeObserved
+    }
+
+    func testResizableSVGStretchesIntoTheProposedFrameOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let svg = try SVG(source: """
+        <svg viewBox="0 0 10 10">
+          <path d="M0 0H10V10H0Z" fill="#ff0000" />
+        </svg>
+        """)
+        let width = 40
+        let height = 10
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: SceneResources(),
+            environment: EnvironmentValues(),
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .clear)
+        context.draw(
+            context.resolve(Image(svg: svg)),
+            in: CGRect(x: 0, y: 0, width: 20, height: 10)
+        )
+        context.draw(
+            context.resolve(Image(svg: svg).resizable()),
+            in: CGRect(x: 20, y: 0, width: 20, height: 10)
+        )
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        func pixel(x: Int, y: Int) -> [UInt8] {
+            let offset = ((y * width) + x) * 4
+            return Array(
+                UnsafeRawBufferPointer(
+                    start: pointer + offset,
+                    count: 4
+                )
+            )
+        }
+
+        XCTAssertEqual(pixel(x: 1, y: 5), [0, 0, 0, 0])
+        XCTAssertEqual(pixel(x: 6, y: 5), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(x: 21, y: 5), [255, 0, 0, 255])
+        XCTAssertEqual(pixel(x: 39, y: 5), [255, 0, 0, 255])
+
+        // ASSERTIONS imageResizableFixedFrameRuntimeObserved
+    }
+
+    @MainActor
+    func testResizableSVGFixedFrameInsideOptionalKeepsFollowingTextBelowImage() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue(),
+              let fontURL = defaultFontURL,
+              let textureFont = TextureFont(
+                deviceContext: deviceContext,
+                path: fontURL.path
+              ) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        _ = textureFont
+        let previousAppContext = appContext
+        appContext = SVGTestAppContext(graphicsDeviceContext: deviceContext)
+        defer { appContext = previousAppContext }
+
+        let svg = try SVG(source: """
+        <svg viewBox="0 0 1300 500">
+          <path d="M0 0H1300V500H0Z" fill="#ff0000" />
+        </svg>
+        """)
+        let controller = WindowController(
+            content: ResizableSVGCaptionRoot(
+                portrait: Image(
+                    size: CGSize(width: 154, height: 180),
+                    opaque: true
+                ) { _ in },
+                logo: Image(svg: svg)
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(ResizableSVGCaptionRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 360, height: 440),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 360, height: 440),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 360, height: 440),
+            shouldDrawFrame: false,
+            withGC
+        )
+
+        let displayList = try controller.viewGraph.data.withCurrent {
+            try XCTUnwrap(controller.viewGraph.rootDisplayList?.value)
+        }
+        let imageBounds = displayBounds(of: .image, in: displayList)
+        let textBounds = displayBounds(of: .text, in: displayList)
+        let imageFrame = try XCTUnwrap(
+            imageBounds.first {
+                abs($0.width - 160) <= 0.5 &&
+                    abs($0.height - 62) <= 0.5
+            }
+        )
+        let captionFrame = try XCTUnwrap(
+            textBounds.first {
+                $0.minY >= imageFrame.minY &&
+                    $0.minY <= imageFrame.maxY + 40
+            }
+        )
+
+        XCTAssertEqual(imageFrame.size, CGSize(width: 160, height: 62))
+        XCTAssertGreaterThanOrEqual(
+            captionFrame.minY,
+            imageFrame.maxY + 13.5,
+            "caption=\(captionFrame), image=\(imageFrame)"
+        )
+
+        // ASSERTIONS imageResizableFixedFrameRuntimeObserved
+        // ASSERTIONS conditionalMultiviewDynamicItemsUnaryObserved
+    }
+
     func testSVGDrawsThroughOrderedPathPassesOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
@@ -264,6 +481,100 @@ final class SVGTests: XCTestCase {
                 break
             }
         }
+    }
+
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
+        let base = _GraphInputs(
+            time: graph.makeInput(value: Time(seconds: 0)),
+            phase: graph.makeInput(value: Phase()),
+            environment: graph.makeInput(value: EnvironmentValues()),
+            transaction: graph.makeInput(value: Transaction())
+        )
+        return _ViewInputs(
+            base: base,
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
+    }
+
+    private func displayBounds(
+        of kind: DisplayList.ItemRecord.Kind,
+        in displayList: DisplayList
+    ) -> [CGRect] {
+        var bounds = displayList.itemRecords.compactMap { record -> CGRect? in
+            guard record.kind == kind else { return nil }
+            return record.bounds
+        }
+        for effect in displayList.effects {
+            bounds.append(contentsOf: displayBounds(of: kind, in: effect.contents))
+        }
+        return bounds
+    }
+}
+
+private struct ResizableSVGCaptionRoot: View {
+    let portrait: VUI.Image
+    let logo: VUI.Image?
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text("Image Lab")
+                .font(.system(size: 22, weight: .semibold))
+
+            portrait
+                .frame(width: 154, height: 180)
+
+            Text("Named JPEG resource · 154 × 180")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+
+            if let logo {
+                logo
+                    .resizable()
+                    .frame(width: 160, height: 62)
+
+                Text("SVG resource · 160 × 62")
+                    .font(.system(.caption))
+                    .foregroundColor(.secondary)
+            }
+
+            Button("Close") {
+            }
+        }
+        .padding(20)
+        .frame(width: 360, height: 440)
+    }
+}
+
+private final class SVGTestAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext?
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var appWindowsController: AppWindowsController? { nil }
+    private var resources: [URL: any DataProtocol] = [:]
+
+    init(graphicsDeviceContext: GraphicsDeviceContext) {
+        self.graphicsDeviceContext = graphicsDeviceContext
+    }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? {
+        resources[url]
+    }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+        resources[url] = data
+    }
+
+    func checkWindowActivities() {
     }
 }
 

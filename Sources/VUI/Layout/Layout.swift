@@ -895,7 +895,12 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                 let id = sublist.id.elementID(at: elementIndex).canonicalID
                 liveIDs.insert(id)
 
-                let viewCount = sublist.elements.count
+                // A multi-element sublist exposes one dynamic adaptor item per
+                // element. A transformed single-item sublist can still replace
+                // its elements with a genuinely non-unary payload.
+                let viewCount = sublist.count == 1
+                    ? sublist.elements.count
+                    : 1
                 let needsTransitions = sublist.traits[CanTransitionTraitKey.self]
                 // allUnary becomes false when any active item reports viewCount != 1.
                 // The same viewCount is used for cumulative child offsets.
