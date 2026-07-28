@@ -654,7 +654,6 @@ struct AlertOverlayView: View {
     var body: some View {
         ZStack {
             Color.black.opacity(0.3)
-                .onTapGesture {}
             DialogOverlayPanel(title: preference.title,
                                makeMessage: preference.makeMessage,
                                buttonItems: preference.actionsItemList?.buttonItems,
