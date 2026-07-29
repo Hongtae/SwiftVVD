@@ -36,14 +36,7 @@ public struct _StrokedShape<S>: Shape where S: Shape {
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let size = proposal.replacingUnspecifiedDimensions()
-        if size.width == .infinity || size.height == .infinity {
-            return size
-        }
-        let path = self.path(in: CGRect(origin: .zero, size: size))
-        let bounds = path.boundingRect.standardized
-        return CGSize(width: bounds.width + self.style.lineWidth,
-                      height: bounds.height + self.style.lineWidth)
+        shape.sizeThatFits(proposal)
     }
 
     public var body: Body {

@@ -39,6 +39,19 @@ private struct LeafAnimatableShape: Shape {
     }
 }
 
+private struct LeafDefaultSizingShape: Shape {
+    var phase: CGFloat
+
+    var animatableData: CGFloat {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect.insetBy(dx: 20, dy: 30))
+    }
+}
+
 private final class RootLeafInputCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var _requestsLayoutComputer = false
@@ -200,6 +213,51 @@ final class LeafViewLayoutTests: XCTestCase {
             XCTAssertEqual(
                 animatedComputer.sizeThatFits(.unspecified),
                 CGSize(width: 13, height: 8)
+            )
+        }
+    }
+
+    func testStrokedAnimatableShapePreservesFixedProposalForPathGeometry() {
+        withGraph { graph in
+            let view = graph.makeInput(
+                value: _ShapeView(
+                    shape: _StrokedShape(
+                        shape: LeafDefaultSizingShape(phase: 0),
+                        style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                    ),
+                    style: Color.purple
+                )
+            )
+            let outputs = _ShapeView<
+                _StrokedShape<LeafDefaultSizingShape>,
+                Color
+            >._makeView(
+                view: _GraphValue(_attribute: view),
+                inputs: makeViewInputs(
+                    graph: graph,
+                    requestsLayoutComputer: true
+                )
+            )
+            let computer = try! XCTUnwrap(
+                outputs._layoutComputer.attribute
+            ).value
+
+            XCTAssertTrue(
+                computer.box is LayoutEngineBox<
+                    LeafLayoutEngine<
+                        AnimatedShape<_StrokedShape<LeafDefaultSizingShape>>
+                    >
+                >
+            )
+            XCTAssertEqual(
+                computer.sizeThatFits(
+                    _ProposedSize(width: 240, height: 110)
+                ),
+                CGSize(width: 240, height: 110)
+            )
+            XCTAssertEqual(
+                computer.sizeThatFits(.unspecified),
+                CGSize(width: 10, height: 10)
             )
         }
     }
