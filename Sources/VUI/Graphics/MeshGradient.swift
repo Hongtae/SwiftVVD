@@ -165,6 +165,156 @@ extension MeshGradient: View {
     public typealias Body = _ShapeView<Rectangle, MeshGradient>
 }
 
+extension MeshGradient {
+    struct _PaintFlags: OptionSet, Equatable, Sendable {
+        let rawValue: UInt32
+
+        static let smoothsColors = Self(rawValue: 0x10)
+        static let perceptualColorSpace = Self(rawValue: 0x03)
+    }
+
+    struct _Paint: Equatable, Animatable, Sendable {
+        typealias ColorData = Color.Resolved.AnimatableData
+        typealias AnimatableData = AnimatablePair<
+            AnimatableArray<Float>,
+            AnimatablePair<
+                AnimatableArray<ColorData>,
+                Color.ResolvedHDR._Animatable
+            >
+        >
+
+        var locations: Locations
+        var colors: [Color.Resolved]
+        var background: Color.ResolvedHDR
+        var width: Int
+        var height: Int
+        var allowedDynamicRange: Image.DynamicRange
+        var flags: _PaintFlags
+
+        var animatableData: AnimatableData {
+            get {
+                AnimatableData(
+                    AnimatableArray(locationComponents),
+                    AnimatablePair(
+                        AnimatableArray(colors.map(\.animatableData)),
+                        background.animatableData
+                    )
+                )
+            }
+            set {
+                setLocationComponents(newValue.first.elements)
+                for index in colors.indices where index < newValue.second.first.elements.count {
+                    colors[index].animatableData = newValue.second.first.elements[index]
+                }
+                background.animatableData = newValue.second.second
+            }
+        }
+
+        var meshGradient: MeshGradient {
+            MeshGradient(
+                width: width,
+                height: height,
+                locations: locations,
+                colors: .resolvedColors(colors),
+                background: Color(background),
+                smoothsColors: flags.contains(.smoothsColors),
+                colorSpace: flags.contains(.perceptualColorSpace)
+                    ? .perceptual
+                    : .device
+            )
+        }
+
+        private var locationComponents: [Float] {
+            switch locations {
+            case let .points(points):
+                return points.flatMap { [$0.x, $0.y] }
+            case let .bezierPoints(points):
+                return points.flatMap {
+                    [
+                        $0.position.x, $0.position.y,
+                        $0.leadingControlPoint.x, $0.leadingControlPoint.y,
+                        $0.topControlPoint.x, $0.topControlPoint.y,
+                        $0.trailingControlPoint.x, $0.trailingControlPoint.y,
+                        $0.bottomControlPoint.x, $0.bottomControlPoint.y,
+                    ]
+                }
+            }
+        }
+
+        private mutating func setLocationComponents(_ values: [Float]) {
+            switch locations {
+            case var .points(points):
+                for index in points.indices {
+                    let offset = index * 2
+                    guard offset + 1 < values.count else { break }
+                    points[index] = SIMD2(values[offset], values[offset + 1])
+                }
+                locations = .points(points)
+            case var .bezierPoints(points):
+                for index in points.indices {
+                    let offset = index * 10
+                    guard offset + 9 < values.count else { break }
+                    points[index] = BezierPoint(
+                        position: SIMD2(values[offset], values[offset + 1]),
+                        leadingControlPoint: SIMD2(values[offset + 2], values[offset + 3]),
+                        topControlPoint: SIMD2(values[offset + 4], values[offset + 5]),
+                        trailingControlPoint: SIMD2(values[offset + 6], values[offset + 7]),
+                        bottomControlPoint: SIMD2(values[offset + 8], values[offset + 9])
+                    )
+                }
+                locations = .bezierPoints(points)
+            }
+        }
+    }
+
+    func resolvePaint(in environment: EnvironmentValues) -> _Paint {
+        let resolvedBackground = background.resolveHDR(in: environment)
+        var maximumHeadroom = resolvedBackground._headroom
+        let resolvedColors: [Color.Resolved]
+        switch colors {
+        case let .colors(colors):
+            resolvedColors = colors.map {
+                let resolved = $0.resolveHDR(in: environment)
+                maximumHeadroom = Self.maximumHeadroom(
+                    maximumHeadroom,
+                    resolved._headroom
+                )
+                return resolved.base
+            }
+        case let .resolvedColors(colors):
+            resolvedColors = colors
+        }
+        var flags: _PaintFlags = []
+        if smoothsColors {
+            flags.insert(.smoothsColors)
+        }
+        if colorSpace == .perceptual {
+            flags.insert(.perceptualColorSpace)
+        }
+        return _Paint(
+            locations: locations,
+            colors: resolvedColors,
+            background: resolvedBackground,
+            width: width,
+            height: height,
+            allowedDynamicRange: maximumHeadroom > 1
+                ? environment.effectiveAllowedDynamicRange(explicitRange: nil)
+                : .standard,
+            flags: flags
+        )
+    }
+
+    private static func maximumHeadroom(_ lhs: Float, _ rhs: Float) -> Float {
+        if lhs.isNaN {
+            return rhs
+        }
+        if rhs.isNaN {
+            return lhs
+        }
+        return max(lhs, rhs)
+    }
+}
+
 private struct MeshGradientSampleColor {
     var components: SIMD3<Double>
     var opacity: Double

@@ -98,6 +98,116 @@ private struct ShapeStyledResponderFilter<Content: ContentResponder>: StatefulRu
     }
 }
 
+struct DirectShapeStyleResolver<Style: ShapeStyle>: StatefulRule, ObservedAttribute, AsyncAttribute {
+    typealias Value = _ShapeStyle_Pack
+
+    var _style: OptionalAttribute<Style>
+    var _environment: Attribute<EnvironmentValues>
+    var role: ShapeRole
+    var animationsDisabled: Bool
+    var helper: AnimatableAttributeHelper<_ShapeStyle_Pack>
+    var tracker: _PropertyListTracker
+
+    init(
+        style: OptionalAttribute<Style>,
+        environment: Attribute<EnvironmentValues>,
+        role: ShapeRole,
+        animationsDisabled: Bool,
+        helper: AnimatableAttributeHelper<_ShapeStyle_Pack>,
+        tracker: _PropertyListTracker = _PropertyListTracker()
+    ) {
+        self._style = style
+        self._environment = environment
+        self.role = role
+        self.animationsDisabled = animationsDisabled
+        self.helper = helper
+        self.tracker = tracker
+    }
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        let styleValue = _style.changedValue(
+            options: AGValueOptions(rawValue: 0)
+        )
+        let environmentValue = _environment.changedValue(
+            options: AGValueOptions(rawValue: 0)
+        )
+        let environment = environmentValue.value
+        let needsResolution = isInitialValue ||
+            (styleValue?.changed ?? false) ||
+            helper.needsModelResolutionForReset ||
+            (
+                environmentValue.changed &&
+                    tracker.hasDifferentUsedValues(environment._plist)
+            )
+
+        if !needsResolution && !helper.isAnimating {
+            return
+        }
+
+        if needsResolution {
+            tracker.reset()
+        }
+        let trackedEnvironment = EnvironmentValues(
+            environment._plist,
+            tracker: tracker
+        )
+        guard let style = styleValue?.value else {
+            finishValue(_ShapeStyle_Pack())
+            return
+        }
+        let target = resolvedPack(
+            style: style,
+            environment: trackedEnvironment
+        )
+        if animationsDisabled {
+            finishValue(target)
+            return
+        }
+
+        var value = (value: target, changed: needsResolution)
+        helper.update(
+            value: &value,
+            defaultAnimation: nil,
+            environment: _environment
+        )
+        if value.changed {
+            _AGGraph.setStatefulOutput(value.value)
+        }
+    }
+
+    mutating func destroy() {
+        helper.finishAndClearAnimatorState()
+    }
+
+    private func resolvedPack(
+        style: Style,
+        environment: EnvironmentValues
+    ) -> _ShapeStyle_Pack {
+        var shape = _ShapeStyle_Shape()
+        style._apply(to: &shape)
+        guard let property = shape.shading?.properties.first else {
+            return _ShapeStyle_Pack()
+        }
+        switch property {
+        case let .color(color):
+            return .fill(.color(color.resolveHDR(in: environment)))
+        case let .meshGradient(mesh):
+            return .fill(.paint(_AnyResolvedPaint(
+                mesh.resolvePaint(in: environment)
+            )))
+        default:
+            return _ShapeStyle_Pack()
+        }
+    }
+
+    private mutating func finishValue(_ value: _ShapeStyle_Pack) {
+        helper.finishAndClearAnimatorState()
+        helper.commitTarget(value)
+        _AGGraph.setStatefulOutput(value)
+    }
+}
+
 public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
     where Content: Shape, Style: ShapeStyle {
     public var shape: Content
@@ -121,7 +231,7 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
         let sourceShape = view[\.shape]
         var animatedShape = sourceShape
         Content._makeAnimatable(value: &animatedShape, inputs: inputs.base)
-        let animatedColorStyle = Self.makeAnimatedColorStyle(
+        let animatedStylePack = Self.makeAnimatedStylePack(
             view: view,
             inputs: inputs,
             graph: graph
@@ -133,21 +243,20 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
         cachedEnvironmentAttribute.value = cachedEnvironment
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let responderStyles: Attribute<_ShapeStyle_Pack>
-        if let animatedColorStyle {
-            responderStyles = graph.makeRule {
-                _ShapeStyle_Pack.fill(.color(animatedColorStyle.value))
-            }
+        if let animatedStylePack {
+            responderStyles = animatedStylePack
         } else {
             responderStyles = graph.makeRule {
                 _ = view._attribute.value.style
                 return _ShapeStyle_Pack.fill(
-                    .color(Color.black.resolve(in: environmentAttr.value))
+                    .color(Color.black.resolveHDR(in: environmentAttr.value))
                 )
             }
         }
+        let fillStyleAttr = view[\.fillStyle]._attribute
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
-            let v = view._attribute.value   // dep: style/fillStyle changes
             let shape = animatedShape._attribute.value
+            let fillStyle = fillStyleAttr.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
             let environment = environmentAttr.value.untrackedCopy()
@@ -156,18 +265,23 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
             if viewSize.width > 0 && viewSize.height > 0 {
                 let frame = CGRect(origin: position, size: viewSize)
                 let strokeStyle = (shape as? ShapeStrokeStyleProviding)?.strokeStyle
-                if let animatedColorStyle {
-                    let style = animatedColorStyle.value
+                if let animatedStylePack,
+                   let style = animatedStylePack.value.shapeStyle() {
                     if let drawer = shape as? ShapeDrawer {
                         list.appendShapeItem(
                             role: Content.role,
                             style: style,
                             bounds: frame,
-                            fillStyle: v.fillStyle,
+                            fillStyle: fillStyle,
                             strokeStyle: strokeStyle,
                             environment: environment
                         ) { context in
-                            drawer._draw(in: frame, style: style, fillStyle: v.fillStyle, context: context)
+                            drawer._draw(
+                                in: frame,
+                                style: style,
+                                fillStyle: fillStyle,
+                                context: context
+                            )
                         }
                     } else {
                         list.appendShapeItem(
@@ -175,30 +289,36 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
                             role: Content.role,
                             style: style,
                             bounds: frame,
-                            fillStyle: v.fillStyle,
+                            fillStyle: fillStyle,
                             strokeStyle: strokeStyle,
                             environment: environment
                         )
                     }
                 } else {
+                    let style = view._attribute.value.style
                     if let drawer = shape as? ShapeDrawer {
                         list.appendShapeItem(
                             role: Content.role,
-                            style: v.style,
+                            style: style,
                             bounds: frame,
-                            fillStyle: v.fillStyle,
+                            fillStyle: fillStyle,
                             strokeStyle: strokeStyle,
                             environment: environment
                         ) { context in
-                            drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
+                            drawer._draw(
+                                in: frame,
+                                style: style,
+                                fillStyle: fillStyle,
+                                context: context
+                            )
                         }
                     } else {
                         list.appendShapeItem(
                             path: shape.path(in: frame),
                             role: Content.role,
-                            style: v.style,
+                            style: style,
                             bounds: frame,
-                            fillStyle: v.fillStyle,
+                            fillStyle: fillStyle,
                             strokeStyle: strokeStyle,
                             environment: environment
                         )
@@ -278,25 +398,30 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
         )
     }
 
-    private static func makeAnimatedColorStyle(
+    private static func makeAnimatedStylePack(
         view: _GraphValue<Self>,
         inputs: _ViewInputs,
         graph: _AGGraph
-    ) -> Attribute<Color.Resolved>? {
-        guard Style.self == Color.self else {
+    ) -> Attribute<_ShapeStyle_Pack>? {
+        guard Style.self == Color.self || Style.self == MeshGradient.self else {
             return nil
         }
 
         let environment = inputs.base.cachedEnvironment.value.environment
-        let resolvedStyle: Attribute<Color.Resolved> = graph.makeRule {
-            guard let color = view._attribute.value.style as? Color else {
-                return Color.clear.resolve(in: environment.value)
-            }
-            return color.resolve(in: environment.value)
-        }
-        var animatedStyle = _GraphValue(_attribute: resolvedStyle)
-        Color.Resolved._makeAnimatable(value: &animatedStyle, inputs: inputs.base)
-        return animatedStyle._attribute
+        let resolver = DirectShapeStyleResolver(
+            style: OptionalAttribute(view[\.style]._attribute),
+            environment: environment,
+            role: Content.role,
+            animationsDisabled: inputs.base.options.contains(.animationsDisabled),
+            helper: AnimatableAttributeHelper(
+                _phase: inputs.base.phase,
+                _time: inputs.base.time,
+                _transaction: inputs.base.transaction
+            )
+        )
+        let resolvedStyle = graph.makeStatefulRule(resolver)
+        resolvedStyle.flags = .transactional
+        return resolvedStyle
     }
 
     public typealias Body = Never

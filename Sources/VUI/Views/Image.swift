@@ -2112,6 +2112,60 @@ extension Image {
     }
 }
 
+extension EnvironmentValues {
+    private struct AllowedDynamicRangeKey: EnvironmentKey {
+        static let defaultValue: Image.DynamicRange? = nil
+    }
+
+    struct MaxAllowedDynamicRangeKey: EnvironmentKey {
+        static let defaultValue: Image.DynamicRange? = nil
+    }
+
+    public var allowedDynamicRange: Image.DynamicRange? {
+        get { self[AllowedDynamicRangeKey.self] }
+        set { self[AllowedDynamicRangeKey.self] = newValue }
+    }
+
+    var maxAllowedDynamicRange: Image.DynamicRange? {
+        get { self[MaxAllowedDynamicRangeKey.self] }
+        set { self[MaxAllowedDynamicRangeKey.self] = newValue }
+    }
+
+    func effectiveAllowedDynamicRange(
+        hdrContent: Bool,
+        explicitRange: Image.DynamicRange?
+    ) -> Image.DynamicRange {
+        guard hdrContent else {
+            return .standard
+        }
+        return effectiveAllowedDynamicRange(explicitRange: explicitRange)
+    }
+
+    func effectiveAllowedDynamicRange(
+        explicitRange: Image.DynamicRange?
+    ) -> Image.DynamicRange {
+        let requested = explicitRange ?? allowedDynamicRange ?? .high
+        guard requested != .standard else {
+            return .standard
+        }
+        guard let maximum = maxAllowedDynamicRange else {
+            return requested
+        }
+        return requested.storage.rawValue < maximum.storage.rawValue
+            ? requested
+            : maximum
+    }
+}
+
+extension View {
+    @inlinable nonisolated
+    public func allowedDynamicRange(
+        _ range: Image.DynamicRange?
+    ) -> some View {
+        environment(\.allowedDynamicRange, range)
+    }
+}
+
 extension Image {
     public enum Orientation: UInt8, CaseIterable, Hashable {
         case up

@@ -38,17 +38,22 @@ final class ShadowStyleTests: XCTestCase {
 
         resolved.headroom = 2
         XCTAssertEqual(resolved.description, "#597C9566^2.0")
-        var data = resolved.animatableData
-        data.red = 0.5
-        data.green = 0.6
-        data.blue = 0.7
-        data.opacity = 0.8
-        resolved.animatableData = data
+        let target = Color.ResolvedHDR(
+            Color.Resolved(
+                colorSpace: .sRGBLinear,
+                red: 0.5,
+                green: 0.6,
+                blue: 0.7,
+                opacity: 0.8
+            ),
+            headroom: 2
+        )
+        resolved.animatableData = target.animatableData
 
-        XCTAssertEqual(resolved.linearRed, 0.5)
-        XCTAssertEqual(resolved.linearGreen, 0.6)
-        XCTAssertEqual(resolved.linearBlue, 0.7)
-        XCTAssertEqual(resolved.opacity, 0.8)
+        XCTAssertEqual(resolved.linearRed, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(resolved.linearGreen, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(resolved.linearBlue, 0.7, accuracy: 0.000_001)
+        XCTAssertEqual(resolved.opacity, 0.8, accuracy: 0.000_001)
         XCTAssertEqual(resolved.headroom, 2)
 
         let encoded = try JSONEncoder().encode(resolved)
@@ -72,6 +77,104 @@ final class ShadowStyleTests: XCTestCase {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(nilHeadroom)) as? [String: Any]
         )
         XCTAssertNil(nilObject["headroom"])
+    }
+
+    func testResolvedHDRAnimatableCarrierMatchesObservedPerceptualScaling() {
+        let base = Color.Resolved(
+            colorSpace: .sRGBLinear,
+            red: 0.25,
+            green: 0.5,
+            blue: 0.75,
+            opacity: 0.8
+        )
+        let resolved = Color.ResolvedHDR(base, headroom: 4)
+        let data = resolved.animatableData
+
+        XCTAssertEqual(MemoryLayout<Color.ResolvedHDR>.size, 20)
+        XCTAssertEqual(
+            MemoryLayout<Color.ResolvedHDR._Animatable>.size,
+            20
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: data).children.compactMap(\.label),
+            ["color", "headroom"]
+        )
+        XCTAssertEqual(data.color.first, 76.06055, accuracy: 0.000_1)
+        XCTAssertEqual(
+            data.color.second.first,
+            79.83391,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(
+            data.color.second.second.first,
+            88.0346,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(
+            data.color.second.second.second,
+            102.4,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(data.headroom, 4)
+
+        var scaled = data
+        scaled.scale(by: 0.5)
+        XCTAssertEqual(
+            scaled.color.first,
+            data.color.first * 0.5,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(
+            scaled.color.second.second.second,
+            data.color.second.second.second * 0.5,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(scaled.headroom, 4)
+
+        var scaledRoundTrip = resolved
+        scaledRoundTrip.animatableData = scaled
+        XCTAssertEqual(
+            scaledRoundTrip.linearRed,
+            base.linearRed,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            scaledRoundTrip.linearGreen,
+            base.linearGreen,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            scaledRoundTrip.linearBlue,
+            base.linearBlue,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(scaledRoundTrip.opacity, 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(scaledRoundTrip.headroom, 4)
+
+        let higherHeadroom = Color.ResolvedHDR(
+            base,
+            headroom: 8
+        ).animatableData
+        var sum = data
+        sum += higherHeadroom
+        XCTAssertEqual(sum.headroom, 8)
+        var difference = data
+        difference -= higherHeadroom
+        XCTAssertEqual(difference.headroom, 8)
+        XCTAssertEqual(
+            data.magnitudeSquared,
+            higherHeadroom.magnitudeSquared
+        )
+
+        var zeroRoundTrip = resolved
+        zeroRoundTrip.animatableData = .zero
+        XCTAssertEqual(zeroRoundTrip.linearRed, 0)
+        XCTAssertEqual(zeroRoundTrip.linearGreen, 0)
+        XCTAssertEqual(zeroRoundTrip.linearBlue, 0)
+        XCTAssertEqual(zeroRoundTrip.opacity, 0)
+        XCTAssertNil(zeroRoundTrip.headroom)
+
+        // ASSERTIONS colorResolvedHDRAnimatableRuntimeObserved
     }
 
     func testShadowStyleFactoriesAndKindBitsMatchObservedSurface() throws {
@@ -143,7 +246,26 @@ final class ShadowStyleTests: XCTestCase {
 
         shadow.animatableData = target.animatableData
 
-        XCTAssertEqual(shadow.color.base, target.color.base)
+        XCTAssertEqual(
+            shadow.color.linearRed,
+            target.color.linearRed,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            shadow.color.linearGreen,
+            target.color.linearGreen,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            shadow.color.linearBlue,
+            target.color.linearBlue,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            shadow.color.opacity,
+            target.color.opacity,
+            accuracy: 0.000_001
+        )
         XCTAssertEqual(shadow.radius, target.radius)
         XCTAssertEqual(shadow.offset, target.offset)
         XCTAssertEqual(shadow.color.headroom, 3)

@@ -1471,6 +1471,10 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         animatorState != nil
     }
 
+    var needsModelResolutionForReset: Bool {
+        _phase.value.resetSeed != resetSeed
+    }
+
     private mutating func ensureAnimatorState() {
         if animatorState == nil {
             animatorState = AnimatorState()
@@ -1743,6 +1747,68 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
                 ? _time.value
                 : existingAnimationTime
                     ?? Time(seconds: -Double.infinity)
+        )
+    }
+
+    mutating func update(
+        value: inout (value: AnimatedValue, changed: Bool),
+        defaultAnimation: Animation?,
+        environment: Attribute<EnvironmentValues>,
+        sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
+    ) {
+        let didReset = checkReset()
+        if didReset {
+            value.changed = true
+        }
+        let previousOutput: AnimatedValue? = _AGGraph.currentStatefulOutput()
+
+        if didReset || previousOutput == nil {
+            finishAndClearAnimatorState()
+            commitTarget(value.value)
+            value.changed = true
+            return
+        }
+
+        if value.changed && hasModelDataChanged(value.value.animatableData) {
+            let target = value.value
+            switch targetAnimationBranch(
+                defaultAnimation: defaultAnimation,
+                transactionForChangedTarget: { nil }
+            ) {
+            case let .animated(animation, transaction, time):
+                retargetStandaloneAnimation(
+                    animation: animation,
+                    start: previousOutput ?? target,
+                    target: target,
+                    transaction: transaction,
+                    time: time,
+                    environment: environment
+                )
+                value.value = target
+            case .noAnimation:
+                commitTarget(target)
+                value.value = target
+            }
+        }
+
+        guard isAnimating else { return }
+        update(
+            value: &value,
+            environment: environment,
+            sampleCollector: sampleCollector
+        )
+    }
+
+    mutating func update(
+        value: inout (value: AnimatedValue, changed: Bool),
+        defaultAnimation: Animation?,
+        environment: Attribute<EnvironmentValues>
+    ) {
+        update(
+            value: &value,
+            defaultAnimation: defaultAnimation,
+            environment: environment,
+            sampleCollector: { _, _ in }
         )
     }
 

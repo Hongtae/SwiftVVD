@@ -36,12 +36,17 @@ private protocol ColorProvider: Hashable {
     var description: String { get }
 
     func resolve(in environment: EnvironmentValues) -> Color.Resolved
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR
     func isEqual(to other: any ColorProvider) -> Bool
 }
 
 private extension ColorProvider {
     func resolve(in environment: EnvironmentValues) -> Color.Resolved {
         components.resolve()
+    }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        Color.ResolvedHDR(resolve(in: environment))
     }
 
     func isEqual(to other: any ColorProvider) -> Bool {
@@ -91,6 +96,38 @@ private struct OpacityColor: ColorProvider {
         resolved.opacity *= Float(opacity)
         return resolved
     }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        var resolved = base.resolveHDR(in: environment)
+        resolved.opacity *= Float(opacity)
+        return resolved
+    }
+}
+
+private struct ResolvedHDRColorProvider: ColorProvider {
+    var color: Color.ResolvedHDR
+
+    var components: ColorComponents {
+        ColorComponents(
+            colorSpace: .sRGBLinear,
+            red: Double(color.linearRed),
+            green: Double(color.linearGreen),
+            blue: Double(color.linearBlue),
+            alpha: Double(color.opacity)
+        )
+    }
+
+    var description: String {
+        color.description
+    }
+
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        color.base
+    }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        color
+    }
 }
 
 private enum SystemColorType: String, ColorProvider, Sendable {
@@ -109,6 +146,16 @@ private enum SystemColorType: String, ColorProvider, Sendable {
             scheme: environment.colorScheme,
             contrast: environment.colorSchemeContrast
         ).resolve()
+    }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        let resolved = resolve(in: environment)
+        switch self {
+        case .white, .black, .clear:
+            return Color.ResolvedHDR(resolved)
+        default:
+            return Color.ResolvedHDR(resolved, headroom: 1)
+        }
     }
 
     private func components(
@@ -219,6 +266,10 @@ final class AnyColorBox: Hashable, @unchecked Sendable {
 
     func resolve(in environment: EnvironmentValues) -> Color.Resolved {
         colorProvider.resolve(in: environment)
+    }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        colorProvider.resolveHDR(in: environment)
     }
 }
 
@@ -350,7 +401,7 @@ extension Color: ShapeStyle {
     }
 
     public func resolveHDR(in environment: EnvironmentValues) -> ResolvedHDR {
-        ResolvedHDR(resolve(in: environment))
+        provider.resolveHDR(in: environment)
     }
     
     public func _apply(to shape: inout _ShapeStyle_Shape) {
@@ -416,16 +467,68 @@ extension Color: ShapeStyle {
             set { linearBlue = Self.sRGBToLinear(newValue) }
         }
         
-        // Animatable data follows the stored linear channel order plus opacity.
         public typealias AnimatableData = AnimatablePair<Float, AnimatablePair<Float, AnimatablePair<Float, Float>>>
         public var animatableData: AnimatableData {
-            get { .init(linearRed, .init(linearGreen, .init(linearBlue, opacity))) }
-            set {
-                linearRed   = newValue.first
-                linearGreen = newValue.second.first
-                linearBlue  = newValue.second.second.first
-                opacity     = newValue.second.second.second
+            get { Self.interpolatableColor(from: self) }
+            set { self = Self.resolvedColor(from: newValue) }
+        }
+
+        fileprivate static func interpolatableColor(
+            from color: Self
+        ) -> AnimatableData {
+            let l = signedCubeRoot(
+                0.4122214708 * color.linearRed +
+                    0.5363325363 * color.linearGreen +
+                    0.0514459929 * color.linearBlue
+            )
+            let m = signedCubeRoot(
+                0.2119034982 * color.linearRed +
+                    0.6806995451 * color.linearGreen +
+                    0.1073969566 * color.linearBlue
+            )
+            let s = signedCubeRoot(
+                0.0883024619 * color.linearRed +
+                    0.2817188376 * color.linearGreen +
+                    0.6299787005 * color.linearBlue
+            )
+            let scale = color.opacity * 128
+            return AnimatableData(
+                l * scale,
+                .init(
+                    m * scale,
+                    .init(s * scale, color.opacity * 128)
+                )
+            )
+        }
+
+        fileprivate static func resolvedColor(
+            from data: AnimatableData
+        ) -> Self {
+            let inverseScale: Float = 1 / 128
+            var l = data.first * inverseScale
+            var m = data.second.first * inverseScale
+            var s = data.second.second.first * inverseScale
+            let opacity = data.second.second.second * inverseScale
+            if opacity != 0 {
+                l /= opacity
+                m /= opacity
+                s /= opacity
             }
+            l *= l * l
+            m *= m * m
+            s *= s * s
+            return Self(
+                colorSpace: .sRGBLinear,
+                red: 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                green: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                blue: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+                opacity: opacity
+            )
+        }
+
+        private static func signedCubeRoot(_ value: Float) -> Float {
+            let result = pow(abs(value), 1.0 / 3.0)
+            return value.sign == .minus ? -result : result
         }
         
         public var description: String {
@@ -515,27 +618,25 @@ extension Color {
         }
 
         public struct _Animatable: VectorArithmetic, Sendable {
-            var red: Float
-            var green: Float
-            var blue: Float
-            var opacity: Float
+            var color: Color.Resolved.AnimatableData
+            var headroom: Float
 
             public static var zero: Self {
-                Self(red: 0, green: 0, blue: 0, opacity: 0)
+                Self(color: .zero, headroom: 0)
             }
 
             public static func += (lhs: inout Self, rhs: Self) {
-                lhs.red += rhs.red
-                lhs.green += rhs.green
-                lhs.blue += rhs.blue
-                lhs.opacity += rhs.opacity
+                lhs.color += rhs.color
+                if lhs.headroom <= rhs.headroom {
+                    lhs.headroom = rhs.headroom
+                }
             }
 
             public static func -= (lhs: inout Self, rhs: Self) {
-                lhs.red -= rhs.red
-                lhs.green -= rhs.green
-                lhs.blue -= rhs.blue
-                lhs.opacity -= rhs.opacity
+                lhs.color -= rhs.color
+                if lhs.headroom <= rhs.headroom {
+                    lhs.headroom = rhs.headroom
+                }
             }
 
             public static func + (lhs: Self, rhs: Self) -> Self {
@@ -551,15 +652,11 @@ extension Color {
             }
 
             public mutating func scale(by rhs: Double) {
-                red.scale(by: rhs)
-                green.scale(by: rhs)
-                blue.scale(by: rhs)
-                opacity.scale(by: rhs)
+                color.scale(by: rhs)
             }
 
             public var magnitudeSquared: Double {
-                red.magnitudeSquared + green.magnitudeSquared +
-                    blue.magnitudeSquared + opacity.magnitudeSquared
+                color.magnitudeSquared
             }
         }
 
@@ -568,17 +665,15 @@ extension Color {
         public var animatableData: AnimatableData {
             get {
                 AnimatableData(
-                    red: linearRed,
-                    green: linearGreen,
-                    blue: linearBlue,
-                    opacity: opacity
+                    color: base.animatableData,
+                    headroom: _headroom.isNaN ? 0 : _headroom
                 )
             }
             set {
-                linearRed = newValue.red
-                linearGreen = newValue.green
-                linearBlue = newValue.blue
-                opacity = newValue.opacity
+                base.animatableData = newValue.color
+                _headroom = newValue.headroom > 0
+                    ? newValue.headroom
+                    : .nan
             }
         }
 
@@ -632,7 +727,7 @@ extension Color {
     }
 
     public init(_ resolved: Color.ResolvedHDR) {
-        self.init(resolved.base)
+        self.init(AnyColorBox(ResolvedHDRColorProvider(color: resolved)))
     }
 }
 

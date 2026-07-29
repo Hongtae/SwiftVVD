@@ -46,6 +46,411 @@ final class MeshGradientTests: XCTestCase {
         // ASSERTIONS meshGradientFieldMetadataObserved
     }
 
+    func testResolvedPaintAnimatableDataInterpolatesMeshPayload() throws {
+        let source = MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(0, 0), SIMD2(1, 0),
+                SIMD2(0, 1), SIMD2(1, 1),
+            ],
+            colors: [.blue, .cyan, .green, .orange],
+            background: .black,
+            smoothsColors: true,
+            colorSpace: .perceptual
+        ).resolvePaint(in: EnvironmentValues())
+        let target = MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(0.2, 0.1), SIMD2(0.8, 0.1),
+                SIMD2(0.2, 0.9), SIMD2(0.8, 0.9),
+            ],
+            colors: [.red, .orange, .yellow, .pink],
+            background: .white,
+            smoothsColors: true,
+            colorSpace: .perceptual
+        ).resolvePaint(in: EnvironmentValues())
+
+        var delta = target.animatableData - source.animatableData
+        delta.scale(by: 0.5)
+        var midpoint = target
+        midpoint.animatableData = source.animatableData + delta
+
+        guard case let .points(points) = midpoint.locations else {
+            return XCTFail("expected point locations")
+        }
+        XCTAssertEqual(points[0], SIMD2(0.1, 0.05))
+        XCTAssertEqual(points[3], SIMD2(0.9, 0.95))
+        XCTAssertEqual(
+            midpoint.colors[0].linearRed,
+            0.41017696,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.colors[0].linearGreen,
+            0.19103125,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.colors[0].linearBlue,
+            0.39165568,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.background.linearRed,
+            0.125,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.background.linearGreen,
+            0.125,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.background.linearBlue,
+            0.125,
+            accuracy: 0.000_01
+        )
+        XCTAssertNil(midpoint.background.headroom)
+        XCTAssertEqual(midpoint.width, target.width)
+        XCTAssertEqual(midpoint.height, target.height)
+        XCTAssertEqual(midpoint.flags, target.flags)
+
+        // ASSERTIONS meshGradientResolvedPaintAnimationPathObserved
+    }
+
+    func testResolvedPaintPreservesObservedBezierVectorAndFlags() {
+        func bezierPoint(_ base: Float) -> MeshGradient.BezierPoint {
+            MeshGradient.BezierPoint(
+                position: SIMD2(base, base + 1),
+                leadingControlPoint: SIMD2(base + 2, base + 3),
+                topControlPoint: SIMD2(base + 4, base + 5),
+                trailingControlPoint: SIMD2(base + 6, base + 7),
+                bottomControlPoint: SIMD2(base + 8, base + 9)
+            )
+        }
+
+        let points = [
+            bezierPoint(0),
+            bezierPoint(10),
+            bezierPoint(20),
+            bezierPoint(30),
+        ]
+        func resolvedPaint(
+            smoothsColors: Bool,
+            colorSpace: Gradient.ColorSpace
+        ) -> MeshGradient._Paint {
+            MeshGradient(
+                width: 2,
+                height: 2,
+                bezierPoints: points,
+                colors: [.red, .green, .blue, .white],
+                smoothsColors: smoothsColors,
+                colorSpace: colorSpace
+            ).resolvePaint(in: EnvironmentValues())
+        }
+
+        XCTAssertEqual(
+            resolvedPaint(
+                smoothsColors: false,
+                colorSpace: .device
+            ).flags.rawValue,
+            0x00
+        )
+        XCTAssertEqual(
+            resolvedPaint(
+                smoothsColors: true,
+                colorSpace: .device
+            ).flags.rawValue,
+            0x10
+        )
+        XCTAssertEqual(
+            resolvedPaint(
+                smoothsColors: false,
+                colorSpace: .perceptual
+            ).flags.rawValue,
+            0x03
+        )
+
+        var paint = resolvedPaint(
+            smoothsColors: true,
+            colorSpace: .perceptual
+        )
+        XCTAssertEqual(paint.flags.rawValue, 0x13)
+        XCTAssertEqual(
+            Mirror(reflecting: paint).children.compactMap(\.label),
+            [
+                "locations",
+                "colors",
+                "background",
+                "width",
+                "height",
+                "allowedDynamicRange",
+                "flags",
+            ]
+        )
+        var data = paint.animatableData
+        XCTAssertEqual(
+            data.first.elements,
+            (0..<40).map(Float.init)
+        )
+        XCTAssertEqual(data.second.first.elements.count, 4)
+
+        data.first.elements = data.first.elements.map { $0 + 100 }
+        paint.animatableData = data
+        guard case let .bezierPoints(updatedPoints) = paint.locations else {
+            return XCTFail("expected Bezier locations")
+        }
+        XCTAssertEqual(updatedPoints[0], bezierPoint(100))
+        XCTAssertEqual(updatedPoints[3], bezierPoint(130))
+
+        // ASSERTIONS meshGradientResolvedPaintAnimationPathObserved
+        // ASSERTIONS meshGradientHDRDynamicRangeResolutionObserved
+    }
+
+    func testResolvedPaintUsesObservedHDRDynamicRangeResolution() {
+        let standardColor = VUI.Color.red
+        let standard = makeSolidMesh(color: standardColor)
+            .resolvePaint(in: EnvironmentValues())
+        XCTAssertEqual(standard.allowedDynamicRange, .standard)
+
+        let base = standardColor.resolve(in: EnvironmentValues())
+        let hdrColor = VUI.Color(
+            VUI.Color.ResolvedHDR(base, headroom: 4)
+        )
+        XCTAssertEqual(
+            hdrColor.resolveHDR(in: EnvironmentValues()).headroom,
+            4
+        )
+
+        var environment = EnvironmentValues()
+        let defaultHDR = makeSolidMesh(color: hdrColor)
+            .resolvePaint(in: environment)
+        XCTAssertEqual(defaultHDR.allowedDynamicRange, .high)
+
+        environment.allowedDynamicRange = .constrainedHigh
+        let constrained = makeSolidMesh(color: hdrColor)
+            .resolvePaint(in: environment)
+        XCTAssertEqual(constrained.allowedDynamicRange, .constrainedHigh)
+
+        environment.allowedDynamicRange = .high
+        environment.maxAllowedDynamicRange = .constrainedHigh
+        let capped = makeSolidMesh(color: hdrColor)
+            .resolvePaint(in: environment)
+        XCTAssertEqual(capped.allowedDynamicRange, .constrainedHigh)
+
+        environment.allowedDynamicRange = .standard
+        let explicitlyStandard = makeSolidMesh(color: hdrColor)
+            .resolvePaint(in: environment)
+        XCTAssertEqual(explicitlyStandard.allowedDynamicRange, .standard)
+
+        let hdrBackground = MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(0, 0), SIMD2(1, 0),
+                SIMD2(0, 1), SIMD2(1, 1),
+            ],
+            colors: [.red, .red, .red, .red],
+            background: hdrColor
+        ).resolvePaint(in: EnvironmentValues())
+        XCTAssertEqual(hdrBackground.allowedDynamicRange, .high)
+
+        // ASSERTIONS meshGradientHDRDynamicRangeResolutionObserved
+    }
+
+    func testDirectShapeStyleResolverTracksUsedDynamicRangeValues() throws {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+
+        try context.withCurrent {
+            let phase = graph.makeInput(value: Phase())
+            let time = graph.makeInput(value: Time.zero)
+            let transaction = graph.makeInput(value: Transaction())
+            let base = VUI.Color.red.resolve(in: EnvironmentValues())
+            let hdrColor = VUI.Color(
+                VUI.Color.ResolvedHDR(base, headroom: 4)
+            )
+            let mesh = graph.makeInput(value: makeSolidMesh(color: hdrColor))
+            var environment = EnvironmentValues()
+            environment.allowedDynamicRange = .high
+            let environmentInput = graph.makeInput(value: environment)
+            let tracker = _PropertyListTracker()
+            let output = graph.makeStatefulRule(
+                DirectShapeStyleResolver(
+                    style: OptionalAttribute(mesh),
+                    environment: environmentInput,
+                    role: .fill,
+                    animationsDisabled: false,
+                    helper: AnimatableAttributeHelper(
+                        _phase: phase,
+                        _time: time,
+                        _transaction: transaction
+                    ),
+                    tracker: tracker
+                )
+            )
+
+            func dynamicRange(
+                _ pack: _ShapeStyle_Pack
+            ) throws -> VUI.Image.DynamicRange {
+                guard case let .paint(paint) = pack.styles.first?.style.fill,
+                      let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> else {
+                    throw ShapeStyleResolverTestError.missingMeshPaint
+                }
+                return paint.paint.allowedDynamicRange
+            }
+
+            XCTAssertEqual(try dynamicRange(output.value), .high)
+            XCTAssertEqual(output.value.styles.count, 1)
+
+            var standardEnvironment = environment
+            standardEnvironment.allowedDynamicRange = .standard
+            XCTAssertTrue(
+                tracker.hasDifferentUsedValues(standardEnvironment._plist)
+            )
+            environmentInput.setValue(standardEnvironment)
+            XCTAssertEqual(try dynamicRange(output.value), .standard)
+
+            let standardTracker = _PropertyListTracker()
+            let standardMesh = graph.makeInput(
+                value: makeSolidMesh(color: .red)
+            )
+            let standardOutput = graph.makeStatefulRule(
+                DirectShapeStyleResolver(
+                    style: OptionalAttribute(standardMesh),
+                    environment: environmentInput,
+                    role: .fill,
+                    animationsDisabled: false,
+                    helper: AnimatableAttributeHelper(
+                        _phase: phase,
+                        _time: time,
+                        _transaction: transaction
+                    ),
+                    tracker: standardTracker
+                )
+            )
+            XCTAssertEqual(try dynamicRange(standardOutput.value), .standard)
+
+            var unusedRangeChange = standardEnvironment
+            unusedRangeChange.allowedDynamicRange = .constrainedHigh
+            XCTAssertFalse(
+                standardTracker.hasDifferentUsedValues(
+                    unusedRangeChange._plist
+                )
+            )
+
+            // ASSERTIONS shapeStyleResolverTrackedEnvironmentObserved
+            // ASSERTIONS shapeStylePackSingleFillOpacityNoopObserved
+        }
+    }
+
+    func testDirectShapeStyleResolverKeepsSamplingAfterPlainActiveTargetChange() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let phase = graph.makeInput(value: Phase())
+                let time = graph.makeInput(value: Time.zero)
+                let transaction = graph.makeInput(value: Transaction())
+                let mesh = graph.makeInput(value: makeShiftedMesh(offset: 0))
+                let environment = graph.makeInput(value: EnvironmentValues())
+                let output = graph.makeStatefulRule(
+                    DirectShapeStyleResolver(
+                        style: OptionalAttribute(mesh),
+                        environment: environment,
+                        role: .fill,
+                        animationsDisabled: false,
+                        helper: AnimatableAttributeHelper(
+                            _phase: phase,
+                            _time: time,
+                            _transaction: transaction
+                        )
+                    )
+                )
+
+                func firstPointX(_ pack: _ShapeStyle_Pack) throws -> Float {
+                    guard case let .paint(paint) = pack.styles.first?.style.fill,
+                          let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint>,
+                          case let .points(points) = paint.paint.locations,
+                          let first = points.first else {
+                        throw ShapeStyleResolverTestError.missingMeshPaint
+                    }
+                    return first.x
+                }
+
+                XCTAssertEqual(try firstPointX(output.value), 0, accuracy: 0.000_001)
+
+                transaction.setValue(
+                    Transaction(animation: .linear(duration: 1))
+                )
+                mesh.setValue(makeShiftedMesh(offset: 0.4))
+                _ = output.value
+
+                time.setValue(Time(seconds: 0.25))
+                _ = output.value
+                time.setValue(Time(seconds: 0.5))
+                _ = output.value
+                time.setValue(Time(seconds: 0.75))
+                let animatedSample = try firstPointX(output.value)
+                XCTAssertGreaterThan(animatedSample, 0)
+                XCTAssertLessThan(animatedSample, 0.4)
+
+                transaction.setValue(Transaction())
+                mesh.setValue(makeShiftedMesh(offset: 0.8))
+                let plainRetargetSample = try firstPointX(output.value)
+                XCTAssertLessThan(plainRetargetSample, 0.8)
+
+                time.setValue(Time(seconds: 1))
+                let laterSample = try firstPointX(output.value)
+                XCTAssertGreaterThan(laterSample, plainRetargetSample)
+                XCTAssertLessThan(laterSample, 0.8)
+
+                time.setValue(Time(seconds: 3))
+                XCTAssertEqual(
+                    try firstPointX(output.value),
+                    0.8,
+                    accuracy: 0.000_1
+                )
+
+                // ASSERTIONS helperModelDataGateObserved
+            }
+        }
+    }
+
+    private func makeSolidMesh(color: VUI.Color) -> MeshGradient {
+        MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(0, 0), SIMD2(1, 0),
+                SIMD2(0, 1), SIMD2(1, 1),
+            ],
+            colors: [color, color, color, color]
+        )
+    }
+
+    private func makeShiftedMesh(offset: Float) -> MeshGradient {
+        MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(offset, 0), SIMD2(1, 0),
+                SIMD2(offset, 1), SIMD2(1, 1),
+            ],
+            colors: [.red, .green, .blue, .white]
+        )
+    }
+
     func testMetalRendererProducesObservedDeviceAndInvalidLocationPixels() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
@@ -387,4 +792,8 @@ final class MeshGradientTests: XCTestCase {
             }
         }
     }
+}
+
+private enum ShapeStyleResolverTestError: Error {
+    case missingMeshPaint
 }

@@ -230,6 +230,113 @@ final class AnimatableValueSurfaceTests: XCTestCase {
         mismatchTarget.animatableData = pairData
         XCTAssertEqual((mismatchTarget.layout as? ProbeLayout)?.value, 7)
     }
+
+    func testAnimatableArrayArithmeticMatchesHiddenCarrierRuntime() {
+        var shortRight = AnimatableArray([1.0, 2.0])
+        shortRight += AnimatableArray([10.0])
+        XCTAssertEqual(shortRight.elements, [11.0, 2.0])
+
+        var longRight = AnimatableArray([1.0])
+        longRight += AnimatableArray([10.0, 20.0])
+        XCTAssertEqual(longRight.elements, [11.0])
+
+        var subtractLongRight = AnimatableArray([1.0])
+        subtractLongRight -= AnimatableArray([10.0, 20.0])
+        XCTAssertEqual(subtractLongRight.elements, [-9.0])
+
+        var zero = AnimatableArray<Double>.zero
+        zero += AnimatableArray([10.0, 20.0])
+        XCTAssertTrue(zero.elements.isEmpty)
+
+        // ASSERTIONS animatableArrayArithmeticRuntimeObserved
+    }
+
+    func testKeyedAnimatableArrayArithmeticMatchesHiddenCarrierRuntime() {
+        typealias Array = KeyedAnimatableArray<Int, Double>
+
+        func value(_ elements: [(Int, Double)]) -> Array {
+            Array(elements.map { Array.Element(key: $0.0, data: $0.1) })
+        }
+
+        var sameKeys = value([(1, 10), (2, 20)])
+        sameKeys += value([(1, 1), (2, 2)])
+        XCTAssertEqual(sameKeys.elements.count, 2)
+        XCTAssertEqual(sameKeys.elements[0], Array.Element(key: 1, data: 11))
+        XCTAssertEqual(sameKeys.elements[1], Array.Element(key: 2, data: 22))
+
+        var reorderedKeys = value([(1, 10), (2, 20)])
+        reorderedKeys += value([(2, 2), (1, 1)])
+        XCTAssertEqual(reorderedKeys.elements, [Array.Element(key: 2, data: 22)])
+
+        var missingRight = value([(1, 10), (2, 20)])
+        missingRight += value([(2, 2), (3, 3)])
+        XCTAssertEqual(missingRight.elements, [Array.Element(key: 2, data: 22)])
+
+        var leadingRightExtras = value([(1, 10), (2, 20)])
+        leadingRightExtras += value([(3, 3), (1, 1), (2, 2)])
+        XCTAssertTrue(leadingRightExtras.elements.isEmpty)
+
+        var missingMiddle = value([(1, 10), (2, 20), (3, 30)])
+        missingMiddle -= value([(1, 1), (3, 3)])
+        XCTAssertEqual(
+            missingMiddle.elements,
+            [
+                Array.Element(key: 1, data: 9),
+                Array.Element(key: 3, data: 27),
+            ]
+        )
+
+        var zero = Array.zero
+        zero += value([(1, 10), (2, 20)])
+        XCTAssertFalse(zero.isZero)
+        XCTAssertEqual(zero.elements.count, 2)
+
+        var zeroDifference = Array.zero
+        zeroDifference -= value([(1, 10), (2, 20)])
+        XCTAssertFalse(zeroDifference.isZero)
+        XCTAssertEqual(zeroDifference.elements[0].data, -10)
+        XCTAssertEqual(zeroDifference.elements[1].data, -20)
+
+        // ASSERTIONS animatableArrayArithmeticRuntimeObserved
+        // ASSERTIONS keyedAnimatableArrayComparableMergeRuntimeObserved
+    }
+
+    func testKeyedAnimatableArrayExtractionUsesComparableMergeOrder() {
+        struct Target: Equatable {
+            var key: Int
+            var data: Double
+        }
+
+        typealias Array = KeyedAnimatableArray<Int, Double>
+        let source = Array([
+            Array.Element(key: 1, data: 10),
+            Array.Element(key: 3, data: 30),
+        ])
+        var targets = [
+            Target(key: 0, data: -1),
+            Target(key: 2, data: -1),
+            Target(key: 3, data: -1),
+            Target(key: 4, data: -1),
+        ]
+
+        source.extract(
+            into: &targets,
+            key: \.key,
+            set: { $0.data = $1 }
+        )
+
+        XCTAssertEqual(
+            targets,
+            [
+                Target(key: 0, data: -1),
+                Target(key: 2, data: -1),
+                Target(key: 3, data: 30),
+                Target(key: 4, data: -1),
+            ]
+        )
+
+        // ASSERTIONS keyedAnimatableArrayExtractionDisassemblyObserved
+    }
 }
 
 private func vuiAnimatableData<Value: VUI.Animatable>(_ value: Value) -> Value.AnimatableData {

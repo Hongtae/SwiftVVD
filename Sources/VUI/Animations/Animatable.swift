@@ -274,3 +274,173 @@ extension AnimatablePair: Equatable {
 
 extension AnimatablePair: Sendable where First: Sendable, Second: Sendable {
 }
+
+struct AnimatableArray<Element: VectorArithmetic>: VectorArithmetic {
+    var elements: [Element]
+
+    init(_ elements: [Element]) {
+        self.elements = elements
+    }
+
+    static var zero: Self {
+        Self([])
+    }
+
+    static func += (lhs: inout Self, rhs: Self) {
+        let sharedCount = min(lhs.elements.count, rhs.elements.count)
+        for index in 0..<sharedCount {
+            lhs.elements[index] += rhs.elements[index]
+        }
+    }
+
+    static func -= (lhs: inout Self, rhs: Self) {
+        let sharedCount = min(lhs.elements.count, rhs.elements.count)
+        for index in 0..<sharedCount {
+            lhs.elements[index] -= rhs.elements[index]
+        }
+    }
+
+    static func + (lhs: Self, rhs: Self) -> Self {
+        var result = lhs
+        result += rhs
+        return result
+    }
+
+    static func - (lhs: Self, rhs: Self) -> Self {
+        var result = lhs
+        result -= rhs
+        return result
+    }
+
+    mutating func scale(by rhs: Double) {
+        for index in elements.indices {
+            elements[index].scale(by: rhs)
+        }
+    }
+
+    var magnitudeSquared: Double {
+        elements.reduce(0) { $0 + $1.magnitudeSquared }
+    }
+}
+
+extension AnimatableArray: Sendable where Element: Sendable {
+}
+
+struct KeyedAnimatableArray<Key: Comparable, Data: VectorArithmetic>: VectorArithmetic {
+    struct Element: Equatable {
+        var key: Key
+        var data: Data
+    }
+
+    var elements: [Element]
+    var isZero: Bool
+
+    init(_ elements: [Element]) {
+        self.elements = elements
+        self.isZero = false
+    }
+
+    private init(elements: [Element], isZero: Bool) {
+        self.elements = elements
+        self.isZero = isZero
+    }
+
+    static var zero: Self {
+        Self(elements: [], isZero: true)
+    }
+
+    static func += (lhs: inout Self, rhs: Self) {
+        if lhs.isZero {
+            lhs = rhs
+            return
+        }
+        guard !rhs.isZero else { return }
+        lhs.combine(rhs, subtracting: false)
+    }
+
+    static func -= (lhs: inout Self, rhs: Self) {
+        guard !rhs.isZero else { return }
+        if lhs.isZero {
+            lhs = rhs
+            lhs.scale(by: -1)
+            return
+        }
+        lhs.combine(rhs, subtracting: true)
+    }
+
+    static func + (lhs: Self, rhs: Self) -> Self {
+        var result = lhs
+        result += rhs
+        return result
+    }
+
+    static func - (lhs: Self, rhs: Self) -> Self {
+        var result = lhs
+        result -= rhs
+        return result
+    }
+
+    mutating func scale(by rhs: Double) {
+        guard !isZero else { return }
+        for index in elements.indices {
+            elements[index].data.scale(by: rhs)
+        }
+    }
+
+    var magnitudeSquared: Double {
+        guard !isZero else { return 0 }
+        return elements.reduce(0) { $0 + $1.data.magnitudeSquared }
+    }
+
+    func extract<Value>(
+        into values: inout [Value],
+        key: (Value) -> Key,
+        set: (inout Value, Data) -> Void
+    ) {
+        guard !isZero else { return }
+        var valueIndex = values.startIndex
+        var elementIndex = elements.startIndex
+        while valueIndex < values.endIndex && elementIndex < elements.endIndex {
+            let element = elements[elementIndex]
+            let valueKey = key(values[valueIndex])
+            if valueKey == element.key {
+                set(&values[valueIndex], element.data)
+                values.formIndex(after: &valueIndex)
+                elements.formIndex(after: &elementIndex)
+            } else if valueKey < element.key {
+                values.formIndex(after: &valueIndex)
+            } else {
+                elements.formIndex(after: &elementIndex)
+            }
+        }
+    }
+
+    private mutating func combine(_ rhs: Self, subtracting: Bool) {
+        var lhsIndex = 0
+        var rhsIndex = 0
+        while lhsIndex < elements.count && rhsIndex < rhs.elements.count {
+            if elements[lhsIndex].key == rhs.elements[rhsIndex].key {
+                if subtracting {
+                    elements[lhsIndex].data -= rhs.elements[rhsIndex].data
+                } else {
+                    elements[lhsIndex].data += rhs.elements[rhsIndex].data
+                }
+                lhsIndex += 1
+                rhsIndex += 1
+            } else if elements[lhsIndex].key < rhs.elements[rhsIndex].key {
+                elements.remove(at: lhsIndex)
+            } else {
+                rhsIndex += 1
+            }
+        }
+        if lhsIndex < elements.count {
+            elements.removeSubrange(lhsIndex...)
+        }
+    }
+}
+
+extension KeyedAnimatableArray.Element: Sendable where Key: Sendable, Data: Sendable {
+}
+
+extension KeyedAnimatableArray: Sendable where Key: Sendable, Data: Sendable {
+}

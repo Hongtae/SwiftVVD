@@ -455,8 +455,17 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                 layoutDirection: .leftToRight
             ).first
         )
-        let color = VUI.Color.Resolved(red: 0.25, green: 0.5, blue: 0.75)
+        let color = VUI.Color.ResolvedHDR(
+            VUI.Color.Resolved(red: 0.25, green: 0.5, blue: 0.75)
+        )
         let style = _ShapeStyle_Pack.Style(.color(color))
+        let foreground2 = _ShapeStyle_Pack.Key(.foreground, 2)
+        let foreground3 = _ShapeStyle_Pack.Key(.foreground, 3)
+        let foregroundMax = _ShapeStyle_Pack.Key(
+            .foreground,
+            Int(UInt8.max)
+        )
+        let background0 = _ShapeStyle_Pack.Key(.background, 0)
 
         XCTAssertEqual(style.fill, .color(color))
         XCTAssertEqual(style.opacity, 1)
@@ -473,6 +482,73 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
         XCTAssertNil(ResolvedTextSuffix.none.line)
         XCTAssertTrue(ResolvedTextSuffix.none.styles.isEmpty)
+        XCTAssertLessThan(foreground2, foreground3)
+        XCTAssertLessThan(foregroundMax, background0)
+        XCTAssertFalse(background0 < foregroundMax)
+
+        // ASSERTIONS shapeStylePackKeyComparableOrderingRuntimeObserved
+    }
+
+    func testShapeStyleFillAnimatableArithmeticMatchesHiddenRuntime() {
+        let color = VUI.Color.ResolvedHDR(
+            VUI.Color.Resolved(
+                colorSpace: .sRGBLinear,
+                red: 0.25,
+                green: 0.5,
+                blue: 0.75,
+                opacity: 0.8
+            ),
+            headroom: 4
+        )
+        let colorData = _ShapeStyle_Pack.Fill.AnimatableData.color(
+            color.animatableData
+        )
+        let mesh = MeshGradient(
+            width: 2,
+            height: 2,
+            points: [
+                SIMD2(0, 0), SIMD2(1, 0),
+                SIMD2(0, 1), SIMD2(1, 1),
+            ],
+            colors: [.red, .green, .blue, .white]
+        ).resolvePaint(in: EnvironmentValues())
+        let meshData = _ShapeStyle_Pack.Fill.AnimatableData.meshGradient(
+            mesh.animatableData
+        )
+
+        var zeroPlusColor = _ShapeStyle_Pack.Fill.AnimatableData.zero
+        zeroPlusColor += colorData
+        XCTAssertEqual(zeroPlusColor, colorData)
+
+        var zeroMinusColor = _ShapeStyle_Pack.Fill.AnimatableData.zero
+        zeroMinusColor -= colorData
+        XCTAssertEqual(zeroMinusColor, colorData)
+
+        var colorPlusZero = colorData
+        colorPlusZero += .zero
+        XCTAssertEqual(colorPlusZero, colorData)
+
+        var colorMinusZero = colorData
+        colorMinusZero -= .zero
+        XCTAssertEqual(colorMinusZero, colorData)
+
+        var colorPlusMesh = colorData
+        colorPlusMesh += meshData
+        XCTAssertEqual(colorPlusMesh, colorData)
+
+        var colorMinusMesh = colorData
+        colorMinusMesh -= meshData
+        XCTAssertEqual(colorMinusMesh, colorData)
+
+        var meshPlusColor = meshData
+        meshPlusColor += colorData
+        XCTAssertEqual(meshPlusColor, meshData)
+
+        var meshMinusColor = meshData
+        meshMinusColor -= colorData
+        XCTAssertEqual(meshMinusColor, meshData)
+
+        // ASSERTIONS shapeStyleFillAnimatableArithmeticObserved
     }
 }
 

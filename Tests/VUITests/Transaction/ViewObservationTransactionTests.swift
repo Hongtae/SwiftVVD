@@ -280,6 +280,44 @@ private struct StateShapeFillColorOnlyRoot: View {
     }
 }
 
+private struct StateShapeFillMeshGradientOnlyRoot: View {
+    let probe: StateAnimatableTransactionProbe
+    @State private var shifted = false
+
+    var body: some View {
+        probe.toggle = {
+            shifted.toggle()
+        }
+        return RoundedRectangle(cornerRadius: 10)
+            .fill(MeshGradient(
+                width: 3,
+                height: 3,
+                points: [
+                    [0.0, 0.0], [0.5, 0.0], [1.0, 0.0],
+                    [0.0, 0.5],
+                    shifted ? [0.68, 0.30] : [0.32, 0.70],
+                    [1.0, 0.5],
+                    [0.0, 1.0], [0.5, 1.0], [1.0, 1.0],
+                ],
+                colors: shifted
+                    ? [
+                        .red, .orange, .yellow,
+                        .purple, .pink, .green,
+                        .blue, .cyan, .mint,
+                    ]
+                    : [
+                        .blue, .cyan, .mint,
+                        .indigo, .purple, .pink,
+                        .green, .yellow, .orange,
+                    ],
+                background: .black,
+                smoothsColors: true,
+                colorSpace: .perceptual
+            ))
+            .frame(width: 96, height: 72)
+    }
+}
+
 private struct StateAnimationLabPreMutationRoot: View {
     let probe: StateAnimatableTransactionProbe
     @State private var expanded = false
@@ -988,6 +1026,127 @@ final class ViewObservationTransactionTests: XCTestCase {
         }
     }
 
+    func testDefaultBodyStateActionRootShapeFillMeshSamplesIntermediatePaint() throws {
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = host
+        let probe = StateAnimatableTransactionProbe()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let time = graph.makeInput(value: Time(seconds: 0))
+                let source = graph.makeInput(
+                    value: StateShapeFillMeshGradientOnlyRoot(probe: probe)
+                )
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 200, height: 200))
+                )
+                inputs.requestsLayoutComputer = true
+                let outputs = StateShapeFillMeshGradientOnlyRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: inputs
+                )
+                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                let displayID = try XCTUnwrap(
+                    outputs.preferences.value(for: DisplayList.Key.self)
+                )
+
+                func sampleMesh(at seconds: Double) throws -> MeshGradient {
+                    time.setValue(Time(seconds: seconds))
+                    let layout = layoutAttr.value
+                    layout.place(
+                        at: .zero,
+                        anchor: .topLeading,
+                        proposal: ProposedViewSize(CGSize(width: 200, height: 200))
+                    )
+                    host.data.rootSubgraph.update()
+                    let displayList = Attribute<DisplayList>(displayID).value
+                    guard let mesh = firstShapeFillMeshGradient(in: displayList) else {
+                        XCTFail(
+                            "missing shape fill mesh at \(seconds): "
+                                + displayListSummary(displayList)
+                        )
+                        throw ViewObservationTransactionProbeError.expected
+                    }
+                    return mesh
+                }
+
+                let initialMesh = try sampleMesh(at: 0)
+                let toggle = try XCTUnwrap(probe.toggle)
+
+                withAnimation(.linear(duration: 1.0)) {
+                    toggle()
+                }
+                host.flushTransactions()
+
+                var samples: [MeshGradient] = []
+                for step in 0...10 {
+                    samples.append(try sampleMesh(at: Double(step) / 10.0))
+                }
+                let finalMesh = try sampleMesh(at: 2.0)
+
+                func point(_ mesh: MeshGradient, at index: Int) throws -> SIMD2<Float> {
+                    guard case let .points(points) = mesh.locations else {
+                        throw ViewObservationTransactionProbeError.expected
+                    }
+                    return points[index]
+                }
+
+                func color(_ mesh: MeshGradient, at index: Int) throws -> Color.Resolved {
+                    guard case let .resolvedColors(colors) = mesh.colors else {
+                        throw ViewObservationTransactionProbeError.expected
+                    }
+                    return colors[index]
+                }
+
+                let initialPoint = try point(initialMesh, at: 4)
+                let finalPoint = try point(finalMesh, at: 4)
+                let initialColor = try color(initialMesh, at: 0)
+                let finalColor = try color(finalMesh, at: 0)
+                let intermediateMesh = try XCTUnwrap(
+                    samples.dropFirst().dropLast().first { mesh in
+                        guard let point = try? point(mesh, at: 4),
+                              let color = try? color(mesh, at: 0) else {
+                            return false
+                        }
+                        return point.x > initialPoint.x &&
+                            point.x < finalPoint.x &&
+                            color.linearRed > initialColor.linearRed &&
+                            color.linearRed < finalColor.linearRed
+                    }
+                )
+                let intermediatePoint = try point(intermediateMesh, at: 4)
+                let intermediateColor = try color(intermediateMesh, at: 0)
+
+                XCTAssertEqual(initialPoint.x, 0.32, accuracy: 0.000_001)
+                XCTAssertEqual(initialPoint.y, 0.70, accuracy: 0.000_001)
+                XCTAssertGreaterThan(intermediatePoint.x, initialPoint.x)
+                XCTAssertLessThan(intermediatePoint.x, finalPoint.x)
+                XCTAssertLessThan(intermediatePoint.y, initialPoint.y)
+                XCTAssertGreaterThan(intermediatePoint.y, finalPoint.y)
+                XCTAssertGreaterThan(intermediateColor.linearRed, initialColor.linearRed)
+                XCTAssertLessThan(intermediateColor.linearRed, finalColor.linearRed)
+                XCTAssertEqual(finalPoint.x, 0.68, accuracy: 0.000_001)
+                XCTAssertEqual(finalPoint.y, 0.30, accuracy: 0.000_001)
+                XCTAssertEqual(
+                    finalColor.linearRed,
+                    Color.red.resolve(in: EnvironmentValues()).linearRed,
+                    accuracy: 0.000_001
+                )
+
+                // ASSERTIONS meshGradientResolvedPaintAnimationPathObserved
+            }
+        }
+    }
+
     func testStateActionPreMutationDoesNotStealSpringTransaction() throws {
         let rendererHost = TestViewRendererHost()
         let host = ViewGraph(
@@ -1574,6 +1733,22 @@ final class ViewObservationTransactionTests: XCTestCase {
         for effect in displayList.effects {
             if let color = firstShapeFillColor(in: effect.contents) {
                 return color
+            }
+        }
+        return nil
+    }
+
+    private func firstShapeFillMeshGradient(
+        in displayList: DisplayList
+    ) -> MeshGradient? {
+        for record in displayList.itemRecords {
+            if case let .meshGradient(mesh)? = record.shapeStyle {
+                return mesh
+            }
+        }
+        for effect in displayList.effects {
+            if let mesh = firstShapeFillMeshGradient(in: effect.contents) {
+                return mesh
             }
         }
         return nil

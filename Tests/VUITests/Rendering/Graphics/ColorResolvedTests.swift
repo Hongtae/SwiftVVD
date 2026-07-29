@@ -68,6 +68,189 @@ final class ColorResolvedTests: XCTestCase {
         XCTAssertEqual(color.backendColor.a, Double(resolved.opacity), accuracy: 0.000001)
     }
 
+    func testResolvedAnimatableDataUsesObservedPerceptualCarrier() {
+        let resolved = Color.Resolved(
+            colorSpace: .sRGBLinear,
+            red: 0.25,
+            green: 0.5,
+            blue: 0.75,
+            opacity: 0.8
+        )
+        let data = resolved.animatableData
+        XCTAssertEqual(data.first, 76.06055, accuracy: 0.000_1)
+        XCTAssertEqual(data.second.first, 79.83391, accuracy: 0.000_1)
+        XCTAssertEqual(
+            data.second.second.first,
+            88.0346,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(
+            data.second.second.second,
+            102.4,
+            accuracy: 0.000_1
+        )
+
+        var scaled = data
+        scaled.scale(by: 0.5)
+        var scaledRoundTrip = resolved
+        scaledRoundTrip.animatableData = scaled
+        XCTAssertEqual(
+            scaledRoundTrip.linearRed,
+            resolved.linearRed,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            scaledRoundTrip.linearGreen,
+            resolved.linearGreen,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            scaledRoundTrip.linearBlue,
+            resolved.linearBlue,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            scaledRoundTrip.opacity,
+            0.4,
+            accuracy: 0.000_001
+        )
+
+        let source = Color.blue.resolve(in: EnvironmentValues())
+        let target = Color.red.resolve(in: EnvironmentValues())
+        var delta = target.animatableData - source.animatableData
+        delta.scale(by: 0.5)
+        var midpoint = target
+        midpoint.animatableData = source.animatableData + delta
+        XCTAssertEqual(midpoint.linearRed, 0.41017696, accuracy: 0.000_01)
+        XCTAssertEqual(
+            midpoint.linearGreen,
+            0.19103125,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(
+            midpoint.linearBlue,
+            0.39165568,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(midpoint.opacity, 1)
+
+        let forwardBasis: [
+            (
+                color: Color.Resolved,
+                expected: (Float, Float, Float)
+            )
+        ] = [
+            (
+                Color.Resolved(
+                    colorSpace: .sRGBLinear,
+                    red: 1,
+                    green: 0,
+                    blue: 0
+                ),
+                (0.4122214708, 0.2119034982, 0.0883024619)
+            ),
+            (
+                Color.Resolved(
+                    colorSpace: .sRGBLinear,
+                    red: 0,
+                    green: 1,
+                    blue: 0
+                ),
+                (0.5363325363, 0.6806995451, 0.2817188376)
+            ),
+            (
+                Color.Resolved(
+                    colorSpace: .sRGBLinear,
+                    red: 0,
+                    green: 0,
+                    blue: 1
+                ),
+                (0.0514459929, 0.1073969566, 0.6299787005)
+            ),
+        ]
+        for basis in forwardBasis {
+            let data = basis.color.animatableData
+            XCTAssertEqual(
+                pow(data.first / 128, 3),
+                basis.expected.0,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(
+                pow(data.second.first / 128, 3),
+                basis.expected.1,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(
+                pow(data.second.second.first / 128, 3),
+                basis.expected.2,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(data.second.second.second, 128)
+        }
+
+        let inverseBasis: [
+            (
+                data: Color.Resolved.AnimatableData,
+                expected: (Float, Float, Float)
+            )
+        ] = [
+            (
+                .init(128, .init(0, .init(0, 128))),
+                (4.0767416621, -1.2684380046, -0.0041960863)
+            ),
+            (
+                .init(0, .init(128, .init(0, 128))),
+                (-3.3077115913, 2.6097574011, -0.7034186147)
+            ),
+            (
+                .init(0, .init(0, .init(128, 128))),
+                (0.2309699292, -0.3413193965, 1.7076147010)
+            ),
+        ]
+        for basis in inverseBasis {
+            var resolved = Color.Resolved(
+                colorSpace: .sRGBLinear,
+                red: 0,
+                green: 0,
+                blue: 0
+            )
+            resolved.animatableData = basis.data
+            XCTAssertEqual(
+                resolved.linearRed,
+                basis.expected.0,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(
+                resolved.linearGreen,
+                basis.expected.1,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(
+                resolved.linearBlue,
+                basis.expected.2,
+                accuracy: 0.000_01
+            )
+            XCTAssertEqual(resolved.opacity, 1)
+        }
+
+        var transparentInverseBasis = Color.Resolved(
+            colorSpace: .sRGBLinear,
+            red: 0,
+            green: 0,
+            blue: 0
+        )
+        transparentInverseBasis.animatableData =
+            .init(128, .init(0, .init(0, 0)))
+        XCTAssertEqual(
+            transparentInverseBasis.linearRed,
+            4.0767416621,
+            accuracy: 0.000_01
+        )
+        XCTAssertEqual(transparentInverseBasis.opacity, 0)
+
+        // ASSERTIONS colorResolvedAnimatableRuntimeObserved
+    }
+
     func testDisplayP3ResolvesThroughObservedLinearSRGBMatrix() {
         let red = Color.Resolved(
             colorSpace: .displayP3,
@@ -263,6 +446,31 @@ final class ColorResolvedTests: XCTestCase {
             (255, 255, 255, 178),
             environment: environment(.dark, contrast: .increased)
         )
+
+        let hdrEnvironments = [
+            environment(.light),
+            environment(.dark),
+            environment(.light, contrast: .increased),
+            environment(.dark, contrast: .increased),
+        ]
+        for hdrEnvironment in hdrEnvironments {
+            for color in standardColors.map({ $0.0 }) + [.primary, .secondary] {
+                XCTAssertEqual(
+                    color.resolveHDR(in: hdrEnvironment).headroom,
+                    1
+                )
+            }
+            for color in [Color.white, .black, .clear] {
+                XCTAssertNil(color.resolveHDR(in: hdrEnvironment).headroom)
+            }
+        }
+        XCTAssertNil(
+            Color(.sRGB, red: 1, green: 0, blue: 0)
+                .resolveHDR(in: environment(.light))
+                .headroom
+        )
+
+        // ASSERTIONS systemColorHDRHeadroomObserved
     }
 
     func testColorAndResolvedDescriptionsUseObservedRepresentations() {
