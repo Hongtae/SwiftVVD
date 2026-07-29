@@ -7,142 +7,230 @@
 
 import Foundation
 
+private struct StackLayout {
+    struct MajorAxisRangeCache {
+        var min: CGFloat?
+        var max: CGFloat?
+    }
+
+    struct Child {
+        var layoutPriority: Double
+        var majorAxisRangeCache: MajorAxisRangeCache
+        var distanceToPrevious: CGFloat
+        var fittingOrder: Int
+        var geometry: ViewGeometry
+    }
+
+    struct Header {
+        var minorAxisAlignment: AlignmentKey
+        var uniformSpacing: CGFloat?
+        var majorAxis: Axis
+        var internalSpacing: CGFloat
+        var lastProposedSize: ProposedViewSize
+        var stackSize: CGSize
+        var proxies: LayoutSubviews
+        var resizeChildrenWithTrailingOverflow: Bool
+    }
+
+    var header: Header
+    var children: [Child]
+}
+
 public struct _StackLayoutCache {
-    var spacings: [ViewSpacing] = []
-    var subviewSpacings: [CGFloat] = []
-    var priorities: [Double] = []
-
-    // Store alignment for explicitAlignment calculation
-    var horizontalAlignment: HorizontalAlignment?
-    var verticalAlignment: VerticalAlignment?
-
-    // Proposal-dependent child state. The stack's sizing and placement entry
-    // points share these values so placement can commit already-resolved child
-    // dimensions without measuring every child again.
-    var resolvedProposal: ProposedViewSize?
-    var resolvedSize: CGSize = .zero
-    var resolvedMajorLengths: [CGFloat] = []
-    var resolvedDimensions: [ViewDimensions] = []
+    fileprivate var stack: StackLayout
 }
 
 enum _StackLayoutImplementation {
-    private struct ChildRange {
-        var index: Int
-        var priority: Double
-        var minMajor: CGFloat
-        var maxMajor: CGFloat
+    private struct ChildIndexProjection: MutableCollection, RandomAccessCollection {
+        typealias Index = Int
+        typealias Element = Int
 
-        var flexibility: CGFloat {
-            maxMajor - minMajor
+        var base: UnsafeMutableBufferPointer<StackLayout.Child>
+
+        var startIndex: Int { 0 }
+        var endIndex: Int { base.count }
+
+        subscript(position: Int) -> Int {
+            get { base[position].fittingOrder }
+            set { base[position].fittingOrder = newValue }
         }
     }
 
-    static func updateCache(_ cache: inout _StackLayoutCache,
-                            axis: Axis,
-                            explicitSpacing: CGFloat?,
-                            horizontalAlignment: HorizontalAlignment?,
-                            verticalAlignment: VerticalAlignment?,
-                            subviews: LayoutSubviews) {
-        cache.priorities = subviews.map { $0.priority }
-        cache.spacings = subviews.map { $0.spacing }
-        cache.horizontalAlignment = horizontalAlignment
-        cache.verticalAlignment = verticalAlignment
-        cache.resolvedProposal = nil
-        cache.resolvedSize = .zero
-        cache.resolvedMajorLengths.removeAll(keepingCapacity: true)
-        cache.resolvedDimensions.removeAll(keepingCapacity: true)
-
-        cache.subviewSpacings = cache.spacings.indices.map { index in
-            guard index > 0 else { return 0 }
-            if let explicitSpacing {
-                return explicitSpacing
-            }
-            return cache.spacings[index - 1].distance(to: cache.spacings[index], along: axis)
-        }
-    }
-
-    static func sizeThatFits(axis: Axis,
-                             proposal: ProposedViewSize,
-                             subviews: LayoutSubviews,
-                             cache: inout _StackLayoutCache) -> CGSize {
-        guard !subviews.isEmpty else { return .zero }
-        resolveChildren(
+    static func makeCache(
+        axis: Axis,
+        uniformSpacing: CGFloat?,
+        minorAxisAlignment: AlignmentKey,
+        subviews: LayoutSubviews,
+        resizeChildrenWithTrailingOverflow: Bool
+    ) -> _StackLayoutCache {
+        var children: [StackLayout.Child] = []
+        children.reserveCapacity(subviews.count)
+        var internalSpacing: CGFloat = 0
+        makeChildren(
+            in: &children,
+            internalSpacing: &internalSpacing,
             axis: axis,
-            proposal: proposal,
-            subviews: subviews,
-            cache: &cache
+            uniformSpacing: uniformSpacing,
+            subviews: subviews
         )
-        return cache.resolvedSize
+        return _StackLayoutCache(
+            stack: StackLayout(
+                header: StackLayout.Header(
+                    minorAxisAlignment: minorAxisAlignment,
+                    uniformSpacing: uniformSpacing,
+                    majorAxis: axis,
+                    internalSpacing: internalSpacing,
+                    lastProposedSize: ProposedViewSize(
+                        width: -.infinity,
+                        height: -.infinity
+                    ),
+                    stackSize: .zero,
+                    proxies: subviews,
+                    resizeChildrenWithTrailingOverflow: resizeChildrenWithTrailingOverflow
+                ),
+                children: children
+            )
+        )
     }
 
-    static func spacing(axis: Axis, cache: _StackLayoutCache) -> ViewSpacing {
-        var spacing = ViewSpacing()
-        for index in cache.spacings.indices {
+    static func updateCache(
+        _ cache: inout _StackLayoutCache,
+        axis: Axis,
+        uniformSpacing: CGFloat?,
+        minorAxisAlignment: AlignmentKey,
+        subviews: LayoutSubviews,
+        resizeChildrenWithTrailingOverflow: Bool
+    ) {
+        cache.stack.header = StackLayout.Header(
+            minorAxisAlignment: minorAxisAlignment,
+            uniformSpacing: uniformSpacing,
+            majorAxis: axis,
+            internalSpacing: 0,
+            lastProposedSize: ProposedViewSize(
+                width: -.infinity,
+                height: -.infinity
+            ),
+            stackSize: .zero,
+            proxies: subviews,
+            resizeChildrenWithTrailingOverflow: resizeChildrenWithTrailingOverflow
+        )
+        cache.stack.children.removeAll(keepingCapacity: true)
+        makeChildren(
+            in: &cache.stack.children,
+            internalSpacing: &cache.stack.header.internalSpacing,
+            axis: axis,
+            uniformSpacing: uniformSpacing,
+            subviews: subviews
+        )
+    }
+
+    private static func makeChildren(
+        in children: inout [StackLayout.Child],
+        internalSpacing: inout CGFloat,
+        axis: Axis,
+        uniformSpacing: CGFloat?,
+        subviews: LayoutSubviews
+    ) {
+        children.reserveCapacity(subviews.count)
+        for index in subviews.indices {
+            let childSpacing: CGFloat
+            if index == subviews.startIndex {
+                childSpacing = 0
+            } else if let uniformSpacing {
+                childSpacing = uniformSpacing
+            } else {
+                childSpacing = subviews[index - 1].spacing.distance(
+                    to: subviews[index].spacing,
+                    along: axis
+                )
+            }
+
+            internalSpacing += childSpacing
+            children.append(
+                StackLayout.Child(
+                    layoutPriority: subviews[index].priority,
+                    majorAxisRangeCache: StackLayout.MajorAxisRangeCache(),
+                    distanceToPrevious: childSpacing,
+                    fittingOrder: index,
+                    geometry: .invalidValue
+                )
+            )
+        }
+    }
+
+    static func sizeThatFits(
+        proposal: ProposedViewSize,
+        cache: inout _StackLayoutCache
+    ) -> CGSize {
+        guard !cache.stack.children.isEmpty else {
+            return .zero
+        }
+        resolveChildren(proposal: proposal, cache: &cache)
+        return cache.stack.header.stackSize
+    }
+
+    static func spacing(cache: _StackLayoutCache) -> ViewSpacing {
+        let axis = cache.stack.header.majorAxis
+        let subviews = cache.stack.header.proxies
+        var spacing = ViewSpacing(
+            Spacing(),
+            layoutDirection: subviews.layoutDirection
+        )
+        for index in subviews.indices {
             var edges: Edge.Set
             switch axis {
             case .horizontal:
                 edges = [.top, .bottom]
                 if index == 0 { edges.formUnion(.leading) }
-                if index == cache.spacings.count - 1 { edges.formUnion(.trailing) }
+                if index == subviews.endIndex - 1 { edges.formUnion(.trailing) }
             case .vertical:
                 edges = [.leading, .trailing]
                 if index == 0 { edges.formUnion(.top) }
-                if index == cache.spacings.count - 1 { edges.formUnion(.bottom) }
+                if index == subviews.endIndex - 1 { edges.formUnion(.bottom) }
             }
-            spacing.formUnion(cache.spacings[index], edges: edges)
+            spacing.formUnion(subviews[index].spacing, edges: edges)
         }
         return spacing
     }
 
-    static func placeSubviews(axis: Axis,
-                              in bounds: CGRect,
-                              proposal: ProposedViewSize,
-                              subviews: LayoutSubviews,
-                              cache: inout _StackLayoutCache) {
-        guard !subviews.isEmpty else { return }
+    static func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        cache: inout _StackLayoutCache
+    ) {
+        guard !cache.stack.children.isEmpty else {
+            return
+        }
 
-        let placementProposal = proposalWhenPlacing(axis: axis,
-                                                    proposal: proposal,
-                                                    bounds: bounds)
-        resolveChildren(
+        let axis = cache.stack.header.majorAxis
+        let subviews = cache.stack.header.proxies
+        let placementProposal = proposalWhenPlacing(
             axis: axis,
-            proposal: placementProposal,
-            subviews: subviews,
-            cache: &cache
+            proposal: proposal,
+            bounds: bounds
         )
-        let majorLengths = cache.resolvedMajorLengths
-        let dimensions = cache.resolvedDimensions
+        resolveChildren(proposal: placementProposal, cache: &cache)
 
-        let crossRange = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
-        // Normalize extra cross-axis alignment bounds inside the stack-local frame.
-        // Larger outer frames move the whole stack instead of recentering children.
-        let guidePosition = minCross(bounds, axis: axis) - crossRange.min
-
-        var majorOffset = minMajor(bounds, axis: axis)
         for index in subviews.indices {
-            majorOffset += spacingBeforeSubview(at: index, cache: cache)
-
-            let childCrossOrigin = guidePosition - alignmentGuide(axis: axis,
-                                                                  dimensions: dimensions[index],
-                                                                  cache: cache)
-            let point = origin(axis: axis, major: majorOffset, cross: childCrossOrigin)
-            subviews[index].place(
-                at: point,
-                anchor: .topLeading,
-                dimensions: dimensions[index]
-            )
-
-            majorOffset += majorLengths[index]
+            var geometry = cache.stack.children[index].geometry
+            guard !geometry.isInvalid else {
+                continue
+            }
+            geometry.origin.x += bounds.minX
+            geometry.origin.y += bounds.minY
+            subviews[index].place(in: geometry, layoutDirection: .leftToRight)
         }
     }
 
-    static func explicitAlignment(axis: Axis,
-                                  guide: AlignmentKey,
-                                  in bounds: CGRect,
-                                  proposal: ProposedViewSize,
-                                  subviews: LayoutSubviews,
-                                  cache: inout _StackLayoutCache) -> CGFloat? {
-        guard !subviews.isEmpty else { return nil }
+    static func explicitAlignment(
+        guide: AlignmentKey,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        cache: inout _StackLayoutCache
+    ) -> CGFloat? {
+        guard !cache.stack.children.isEmpty else {
+            return nil
+        }
 
         // Tested non-baseline built-in stack guides do not propagate as explicit
         // values even when direct children write them. Custom guides and text
@@ -151,214 +239,423 @@ enum _StackLayoutImplementation {
             return nil
         }
 
-        let placementProposal = proposalWhenPlacing(axis: axis,
-                                                    proposal: proposal,
-                                                    bounds: bounds)
-        resolveChildren(
+        let axis = cache.stack.header.majorAxis
+        let subviews = cache.stack.header.proxies
+        let placementProposal = proposalWhenPlacing(
             axis: axis,
-            proposal: placementProposal,
-            subviews: subviews,
-            cache: &cache
+            proposal: proposal,
+            bounds: bounds
         )
-        let majorLengths = cache.resolvedMajorLengths
-        let dimensions = cache.resolvedDimensions
-
-        let crossRange = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
-        let guidePosition = minCross(bounds, axis: axis) - crossRange.min
-
-        var majorOffset = minMajor(bounds, axis: axis)
+        resolveChildren(proposal: placementProposal, cache: &cache)
         var explicitValues: [CGFloat?] = []
         explicitValues.reserveCapacity(subviews.count)
 
         for index in subviews.indices {
-            majorOffset += spacingBeforeSubview(at: index, cache: cache)
-
-            let childCrossOrigin = guidePosition - alignmentGuide(axis: axis,
-                                                                  dimensions: dimensions[index],
-                                                                  cache: cache)
-            let childOrigin = origin(axis: axis, major: majorOffset, cross: childCrossOrigin)
-            let childOffset = guide.axis == .horizontal ? childOrigin.x : childOrigin.y
-            explicitValues.append(dimensions[index][explicit: guide].map { childOffset + $0 })
-
-            majorOffset += majorLengths[index]
+            let geometry = cache.stack.children[index].geometry
+            guard !geometry.isInvalid else {
+                explicitValues.append(nil)
+                continue
+            }
+            let dimensions = geometry.dimensions
+            let childOffset = guide.axis == .horizontal
+                ? geometry.origin.x
+                : geometry.origin.y
+            explicitValues.append(dimensions[explicit: guide].map { childOffset + $0 })
         }
 
-        return guide.combineExplicit(explicitValues)
+        guard let combined = guide.combineExplicit(explicitValues) else {
+            return nil
+        }
+        let boundsOffset = guide.axis == .horizontal
+            ? bounds.minX
+            : bounds.minY
+        return boundsOffset + combined
     }
 
     private static func resolveChildren(
-        axis: Axis,
         proposal: ProposedViewSize,
-        subviews: LayoutSubviews,
         cache: inout _StackLayoutCache
     ) {
-        if cache.resolvedProposal == proposal,
-           cache.resolvedMajorLengths.count == subviews.count,
-           cache.resolvedDimensions.count == subviews.count {
+        let axis = cache.stack.header.majorAxis
+        let subviews = cache.stack.header.proxies
+        precondition(cache.stack.children.count == subviews.count)
+
+        if cache.stack.header.lastProposedSize == proposal {
             return
         }
 
-        let crossProposal = cross(proposal, axis: axis)
-        let majorLengths = self.majorLengths(
+        let previousProposal = cache.stack.header.lastProposedSize
+        if let proposedMajor = major(proposal, axis: axis) {
+            sizeChildrenGenerally(
+                axis: axis,
+                proposedMajor: proposedMajor,
+                crossProposal: cross(proposal, axis: axis),
+                previousProposal: previousProposal,
+                subviews: subviews,
+                cache: &cache
+            )
+        } else {
+            sizeChildrenIdeally(
+                axis: axis,
+                crossProposal: cross(proposal, axis: axis),
+                subviews: subviews,
+                cache: &cache
+            )
+        }
+
+        positionChildren(
             axis: axis,
-            proposal: proposal,
+            cache: &cache
+        )
+        cache.stack.header.lastProposedSize = proposal
+    }
+
+    private static func sizeChildrenIdeally(
+        axis: Axis,
+        crossProposal: CGFloat?,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        for index in subviews.indices {
+            resize(
+                childAt: index,
+                proposal: proposalFor(
+                    axis: axis,
+                    major: nil,
+                    cross: crossProposal
+                ),
+                subviews: subviews,
+                cache: &cache
+            )
+        }
+    }
+
+    private static func sizeChildrenGenerally(
+        axis: Axis,
+        proposedMajor: CGFloat,
+        crossProposal: CGFloat?,
+        previousProposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        prioritize(
+            axis: axis,
+            crossProposal: crossProposal,
+            previousProposal: previousProposal,
             subviews: subviews,
             cache: &cache
         )
-        var dimensions: [ViewDimensions] = []
-        dimensions.reserveCapacity(subviews.count)
-        for index in subviews.indices {
-            let childProposal = proposalFor(
-                axis: axis,
-                major: majorLengths[index],
-                cross: crossProposal
-            )
-            dimensions.append(subviews[index].dimensions(in: childProposal))
-        }
 
-        let totalMajor = majorLengths.reduce(0, +) +
-            totalSpacing(for: subviews.count, cache: cache)
-        let totalCross = crossExtent(
-            axis: axis,
-            dimensions: dimensions,
-            cache: cache
-        )
-        cache.resolvedProposal = proposal
-        cache.resolvedSize = size(axis: axis, major: totalMajor, cross: totalCross)
-        cache.resolvedMajorLengths = majorLengths
-        cache.resolvedDimensions = dimensions
-    }
-
-    private static func majorLengths(axis: Axis,
-                                     proposal: ProposedViewSize,
-                                     subviews: LayoutSubviews,
-                                     cache: inout _StackLayoutCache) -> [CGFloat] {
-        let crossProposal = cross(proposal, axis: axis)
-        guard let proposedMajor = major(proposal, axis: axis) else {
-            return subviews.indices.map { index in
-                major(subviews[index].sizeThatFits(proposalFor(axis: axis,
-                                                               major: nil,
-                                                               cross: crossProposal)),
-                      axis: axis)
-            }
-        }
-
-        let ranges = subviews.indices.map { index in
-            let minSize = subviews[index].sizeThatFits(proposalFor(axis: axis,
-                                                                   major: 0,
-                                                                   cross: crossProposal))
-            let maxSize = subviews[index].sizeThatFits(proposalFor(axis: axis,
-                                                                   major: .infinity,
-                                                                   cross: crossProposal))
-            return ChildRange(index: index,
-                              priority: priority(at: index, cache: cache),
-                              minMajor: major(minSize, axis: axis),
-                              maxMajor: major(maxSize, axis: axis))
-        }
-        let sortedRanges = ranges.sorted(by: childSortPrecedes(_:_:))
-        var resolved = Array(repeating: CGFloat.zero, count: subviews.count)
-        var remaining = proposedMajor - totalSpacing(for: subviews.count, cache: cache)
-
-        var groupStart = sortedRanges.startIndex
-        while groupStart < sortedRanges.endIndex {
-            var groupEnd = sortedRanges.index(after: groupStart)
-            while groupEnd < sortedRanges.endIndex &&
-                    sortedRanges[groupEnd].priority == sortedRanges[groupStart].priority {
-                groupEnd = sortedRanges.index(after: groupEnd)
+        var available = proposedMajor - cache.stack.header.internalSpacing
+        var groupStart = cache.stack.children.startIndex
+        var isFirstGroup = true
+        while groupStart < cache.stack.children.endIndex {
+            let firstIndex = cache.stack.children[groupStart].fittingOrder
+            let groupPriority = cache.stack.children[firstIndex].layoutPriority
+            var groupEnd = cache.stack.children.index(after: groupStart)
+            while groupEnd < cache.stack.children.endIndex {
+                let childIndex = cache.stack.children[groupEnd].fittingOrder
+                guard cache.stack.children[childIndex].layoutPriority == groupPriority else {
+                    break
+                }
+                groupEnd = cache.stack.children.index(after: groupEnd)
             }
 
-            let lowerMinimum = sortedRanges[groupEnd...].reduce(CGFloat.zero) { partial, range in
-                partial + range.minMajor
+            if isFirstGroup {
+                var lowerMinimum: CGFloat = 0
+                var lowerIndex = groupEnd
+                while lowerIndex < cache.stack.children.endIndex {
+                    let childIndex =
+                        cache.stack.children[lowerIndex].fittingOrder
+                    lowerMinimum += majorAxisRange(
+                        childAt: childIndex,
+                        axis: axis,
+                        crossProposal: crossProposal,
+                        subviews: subviews,
+                        cache: &cache
+                    ).min
+                    lowerIndex =
+                        cache.stack.children.index(after: lowerIndex)
+                }
+                available -= lowerMinimum
+                isFirstGroup = false
+            } else {
+                var groupMinimum: CGFloat = 0
+                var groupIndex = groupStart
+                while groupIndex < groupEnd {
+                    let childIndex =
+                        cache.stack.children[groupIndex].fittingOrder
+                    groupMinimum += majorAxisRange(
+                        childAt: childIndex,
+                        axis: axis,
+                        crossProposal: crossProposal,
+                        subviews: subviews,
+                        cache: &cache
+                    ).min
+                    groupIndex =
+                        cache.stack.children.index(after: groupIndex)
+                }
+                available += groupMinimum
             }
-            var groupRemaining = remaining - lowerMinimum
+
             var unsizedCount = groupEnd - groupStart
-            var index = groupStart
-
-            while index < groupEnd {
-                let range = sortedRanges[index]
-                let proposed = groupRemaining / CGFloat(unsizedCount)
-                let actualSize = subviews[range.index].sizeThatFits(proposalFor(axis: axis,
-                                                                                major: proposed,
-                                                                                cross: crossProposal))
-                let actualMajor = major(actualSize, axis: axis)
-                resolved[range.index] = actualMajor
-                remaining -= actualMajor
-                groupRemaining -= actualMajor
+            var sortedIndex = groupStart
+            while sortedIndex < groupEnd {
+                let childIndex = cache.stack.children[sortedIndex].fittingOrder
+                let dividedLength = available / CGFloat(unsizedCount)
+                let proposedLength = dividedLength <= 0 ? 0 : dividedLength
+                resize(
+                    childAt: childIndex,
+                    proposal: proposalFor(
+                        axis: axis,
+                        major: proposedLength,
+                        cross: crossProposal
+                    ),
+                    subviews: subviews,
+                    cache: &cache
+                )
+                let actualLength = major(
+                    cache.stack.children[childIndex].geometry.dimensions,
+                    axis: axis
+                )
+                available = subtractingWithoutNaN(
+                    actualLength,
+                    from: available
+                )
                 unsizedCount -= 1
-                index = sortedRanges.index(after: index)
+                sortedIndex = cache.stack.children.index(after: sortedIndex)
             }
 
             groupStart = groupEnd
         }
-
-        return resolved
     }
 
-    private static func childSortPrecedes(_ lhs: ChildRange, _ rhs: ChildRange) -> Bool {
-        if lhs.priority != rhs.priority {
-            return lhs.priority > rhs.priority
-        }
-
-        let lhsFlex = lhs.flexibility
-        let rhsFlex = rhs.flexibility
-        if lhsFlex.isFinite != rhsFlex.isFinite {
-            return lhsFlex.isFinite
-        }
-        if lhsFlex.isFinite && lhsFlex != rhsFlex {
-            return lhsFlex < rhsFlex
-        }
-        if !lhsFlex.isFinite && !rhsFlex.isFinite && lhs.minMajor != rhs.minMajor {
-            return lhs.minMajor > rhs.minMajor
-        }
-        return lhs.index < rhs.index
+    private static func subtractingWithoutNaN(
+        _ value: CGFloat,
+        from available: CGFloat
+    ) -> CGFloat {
+        let result = available - value
+        return result.isNaN ? available : result
     }
 
-    private static func alignmentRange(axis: Axis,
-                                       dimensions: [ViewDimensions],
-                                       cache: _StackLayoutCache) -> (min: CGFloat, max: CGFloat) {
-        guard !dimensions.isEmpty else { return (0, 0) }
+    private static func prioritize(
+        axis: Axis,
+        crossProposal: CGFloat?,
+        previousProposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        if major(previousProposal, axis: axis) != nil,
+           cross(previousProposal, axis: axis) == crossProposal {
+            return
+        }
 
-        var minValue = CGFloat.infinity
-        var maxValue = -CGFloat.infinity
-        for dimensions in dimensions {
-            let guide = alignmentGuide(axis: axis, dimensions: dimensions, cache: cache)
+        for index in cache.stack.children.indices {
+            cache.stack.children[index].majorAxisRangeCache =
+                StackLayout.MajorAxisRangeCache()
+        }
+
+        cache.stack.children.withUnsafeMutableBufferPointer { children in
+            guard let baseAddress = children.baseAddress else {
+                return
+            }
+            var projection = ChildIndexProjection(base: children)
+            projection.sort { lhsIndex, rhsIndex in
+                let lhsPriority = baseAddress[lhsIndex].layoutPriority
+                let rhsPriority = baseAddress[rhsIndex].layoutPriority
+                if lhsPriority != rhsPriority {
+                    return lhsPriority > rhsPriority
+                }
+
+                let lhsRange = majorAxisRange(
+                    childAt: lhsIndex,
+                    baseAddress: baseAddress,
+                    axis: axis,
+                    crossProposal: crossProposal,
+                    subviews: subviews
+                )
+                let rhsRange = majorAxisRange(
+                    childAt: rhsIndex,
+                    baseAddress: baseAddress,
+                    axis: axis,
+                    crossProposal: crossProposal,
+                    subviews: subviews
+                )
+                let lhsFlexibility = lhsRange.max - lhsRange.min
+                let rhsFlexibility = rhsRange.max - rhsRange.min
+                if lhsFlexibility.isFinite != rhsFlexibility.isFinite {
+                    return lhsFlexibility.isFinite
+                }
+                if lhsFlexibility.isFinite &&
+                    lhsFlexibility != rhsFlexibility {
+                    return lhsFlexibility < rhsFlexibility
+                }
+                if !lhsFlexibility.isFinite &&
+                    !rhsFlexibility.isFinite &&
+                    lhsRange.min != rhsRange.min {
+                    return lhsRange.min > rhsRange.min
+                }
+                return lhsIndex < rhsIndex
+            }
+        }
+    }
+
+    private static func majorAxisRange(
+        childAt index: Int,
+        axis: Axis,
+        crossProposal: CGFloat?,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) -> (min: CGFloat, max: CGFloat) {
+        if cache.stack.children[index].majorAxisRangeCache.min == nil {
+            cache.stack.children[index].majorAxisRangeCache.min = lengthThatFits(
+                childAt: index,
+                axis: axis,
+                major: 0,
+                cross: crossProposal,
+                subviews: subviews
+            )
+        }
+        if cache.stack.children[index].majorAxisRangeCache.max == nil {
+            cache.stack.children[index].majorAxisRangeCache.max = lengthThatFits(
+                childAt: index,
+                axis: axis,
+                major: .infinity,
+                cross: crossProposal,
+                subviews: subviews
+            )
+        }
+        return (
+            cache.stack.children[index].majorAxisRangeCache.min!,
+            cache.stack.children[index].majorAxisRangeCache.max!
+        )
+    }
+
+    private static func majorAxisRange(
+        childAt index: Int,
+        baseAddress: UnsafeMutablePointer<StackLayout.Child>,
+        axis: Axis,
+        crossProposal: CGFloat?,
+        subviews: LayoutSubviews
+    ) -> (min: CGFloat, max: CGFloat) {
+        if baseAddress[index].majorAxisRangeCache.min == nil {
+            baseAddress[index].majorAxisRangeCache.min = lengthThatFits(
+                childAt: index,
+                axis: axis,
+                major: 0,
+                cross: crossProposal,
+                subviews: subviews
+            )
+        }
+        if baseAddress[index].majorAxisRangeCache.max == nil {
+            baseAddress[index].majorAxisRangeCache.max = lengthThatFits(
+                childAt: index,
+                axis: axis,
+                major: .infinity,
+                cross: crossProposal,
+                subviews: subviews
+            )
+        }
+        return (
+            baseAddress[index].majorAxisRangeCache.min!,
+            baseAddress[index].majorAxisRangeCache.max!
+        )
+    }
+
+    private static func lengthThatFits(
+        childAt index: Int,
+        axis: Axis,
+        major: CGFloat,
+        cross: CGFloat?,
+        subviews: LayoutSubviews
+    ) -> CGFloat {
+        subviews[index].proxy.layoutComputer.lengthThatFits(
+            _ProposedSize(
+                proposalFor(
+                    axis: axis,
+                    major: major,
+                    cross: cross
+                )
+            ),
+            in: axis
+        )
+    }
+
+    private static func resize(
+        childAt index: Int,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        let dimensions = subviews[index].dimensions(in: proposal)
+        cache.stack.children[index].geometry = ViewGeometry(
+            origin: .zero,
+            dimensions: dimensions
+        )
+    }
+
+    private static func positionChildren(
+        axis: Axis,
+        cache: inout _StackLayoutCache
+    ) {
+        let crossRange = alignmentRange(axis: axis, cache: cache)
+        var majorOffset: CGFloat = 0
+        for index in cache.stack.children.indices {
+            var geometry = cache.stack.children[index].geometry
+            guard !geometry.isInvalid else {
+                continue
+            }
+            let dimensions = geometry.dimensions
+            majorOffset += cache.stack.children[index].distanceToPrevious
+            let minorOffset = -crossRange.min - alignmentGuide(
+                dimensions: dimensions,
+                cache: cache
+            )
+            geometry.origin = origin(
+                axis: axis,
+                major: majorOffset,
+                cross: minorOffset
+            )
+            cache.stack.children[index].geometry = geometry
+            majorOffset += major(dimensions, axis: axis)
+        }
+        cache.stack.header.stackSize = size(
+            axis: axis,
+            major: majorOffset,
+            cross: crossRange.max - crossRange.min
+        )
+    }
+
+    private static func alignmentRange(
+        axis: Axis,
+        cache: _StackLayoutCache
+    ) -> (min: CGFloat, max: CGFloat) {
+        guard !cache.stack.children.isEmpty else {
+            return (0, 0)
+        }
+
+        var minValue: CGFloat = 0
+        var maxValue: CGFloat = 0
+        for child in cache.stack.children {
+            guard !child.geometry.isInvalid else {
+                continue
+            }
+            let dimensions = child.geometry.dimensions
+            let guide = alignmentGuide(dimensions: dimensions, cache: cache)
             let crossLength = cross(dimensions, axis: axis)
-            minValue = Swift.min(minValue, -guide)
-            maxValue = Swift.max(maxValue, crossLength - guide)
+            let start = -guide
+            let end = start + crossLength
+            minValue = Swift.min(minValue, start, end)
+            maxValue = Swift.max(maxValue, start, end)
         }
         return (minValue, maxValue)
     }
 
-    private static func crossExtent(axis: Axis,
-                                    dimensions: [ViewDimensions],
-                                    cache: _StackLayoutCache) -> CGFloat {
-        let range = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
-        return range.max - range.min
-    }
-
-    private static func alignmentGuide(axis: Axis,
-                                       dimensions: ViewDimensions,
-                                       cache: _StackLayoutCache) -> CGFloat {
-        switch axis {
-        case .horizontal:
-            return dimensions[cache.verticalAlignment ?? .center]
-        case .vertical:
-            return dimensions[cache.horizontalAlignment ?? .center]
-        }
-    }
-
-    private static func priority(at index: Int, cache: _StackLayoutCache) -> Double {
-        guard cache.priorities.indices.contains(index) else { return 0 }
-        return cache.priorities[index]
-    }
-
-    private static func spacingBeforeSubview(at index: Int, cache: _StackLayoutCache) -> CGFloat {
-        guard cache.subviewSpacings.indices.contains(index) else { return 0 }
-        return cache.subviewSpacings[index]
-    }
-
-    private static func totalSpacing(for count: Int, cache: _StackLayoutCache) -> CGFloat {
-        cache.subviewSpacings.prefix(count).reduce(0, +)
+    private static func alignmentGuide(
+        dimensions: ViewDimensions,
+        cache: _StackLayoutCache
+    ) -> CGFloat {
+        dimensions[cache.stack.header.minorAxisAlignment]
     }
 
     private static func proposalFor(axis: Axis,
@@ -398,6 +695,13 @@ enum _StackLayoutImplementation {
         switch axis {
         case .horizontal: return size.width
         case .vertical: return size.height
+        }
+    }
+
+    private static func major(_ dimensions: ViewDimensions, axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: return dimensions.width
+        case .vertical: return dimensions.height
         }
     }
 

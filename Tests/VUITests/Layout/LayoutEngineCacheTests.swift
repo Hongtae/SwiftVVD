@@ -21,6 +21,8 @@ private final class LayoutCacheProbeStorage {
     var sizeCount = 0
     var placementCount = 0
     var proposals: [ProposedViewSize] = []
+    var placementProposals: [ProposedViewSize] = []
+    var placementBounds: [CGRect] = []
 }
 
 private final class PlacementDataBox: @unchecked Sendable {
@@ -66,6 +68,8 @@ private struct LayoutCacheProbe: Layout {
         cache: inout LayoutCacheProbeStorage
     ) {
         cache.placementCount += 1
+        cache.placementProposals.append(proposal)
+        cache.placementBounds.append(bounds)
     }
 }
 
@@ -290,6 +294,41 @@ final class LayoutEngineCacheTests: XCTestCase {
         }
     }
 
+    func testViewLayoutEnginePlacementPreservesOriginalProposal() {
+        withGraph {
+            let state = LayoutCacheProbeState()
+            let inputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            var engine = ViewLayoutEngine(
+                layout: LayoutCacheProbe(
+                    state: state,
+                    reportedSize: CGSize(width: 80, height: 30)
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+            let proposal = _ProposedSize(width: 240, height: nil)
+            let size = engine.sizeThatFits(proposal)
+
+            _ = engine.childGeometries(
+                at: ViewSize(size, proposal: proposal),
+                origin: .zero
+            )
+
+            let storage = try! XCTUnwrap(state.storage)
+            XCTAssertEqual(
+                storage.placementProposals,
+                [ProposedViewSize(proposal)]
+            )
+            XCTAssertEqual(
+                storage.placementBounds,
+                [CGRect(origin: .zero, size: size)]
+            )
+        }
+    }
+
     func testStackPlacementCommitsCachedChildDimensionsWithoutRemeasuring() {
         withGraph {
             let firstEngine = CountingLayoutEngine()
@@ -332,6 +371,48 @@ final class LayoutEngineCacheTests: XCTestCase {
             XCTAssertEqual(geometries.count, 2)
             XCTAssertEqual(firstEngine.proposals.count, firstMeasurementCount)
             XCTAssertEqual(secondEngine.proposals.count, secondMeasurementCount)
+        }
+    }
+
+    func testStackReusesMajorAxisRangesWhileCrossAxisProposalIsStable() {
+        withGraph {
+            let firstEngine = CountingLayoutEngine()
+            let secondEngine = CountingLayoutEngine()
+            let graph = try! XCTUnwrap(_AGGraph.current)
+            let children = [
+                LayoutProxyAttributes(
+                    layoutComputer: graph.makeInput(
+                        value: LayoutComputer(box: LayoutEngineBox(engine: firstEngine))
+                    )
+                ),
+                LayoutProxyAttributes(
+                    layoutComputer: graph.makeInput(
+                        value: LayoutComputer(box: LayoutEngineBox(engine: secondEngine))
+                    )
+                ),
+            ]
+            let inputs = makeLayoutContext(
+                children: children,
+                layoutDirection: .leftToRight
+            )
+            var stack = ViewLayoutEngine(
+                layout: HStackLayout(spacing: 0),
+                context: inputs.0,
+                children: inputs.1
+            )
+
+            _ = stack.sizeThatFits(_ProposedSize(width: 100, height: 20))
+            XCTAssertEqual(firstEngine.proposals.count, 3)
+            XCTAssertEqual(secondEngine.proposals.count, 3)
+
+            _ = stack.sizeThatFits(_ProposedSize(width: 120, height: 20))
+            _ = stack.sizeThatFits(_ProposedSize(width: 140, height: 20))
+            XCTAssertEqual(firstEngine.proposals.count, 5)
+            XCTAssertEqual(secondEngine.proposals.count, 5)
+
+            _ = stack.sizeThatFits(_ProposedSize(width: 140, height: 30))
+            XCTAssertEqual(firstEngine.proposals.count, 8)
+            XCTAssertEqual(secondEngine.proposals.count, 8)
         }
     }
 

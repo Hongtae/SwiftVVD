@@ -52,11 +52,14 @@ struct LayoutProxyAttributes: Equatable {
 /// Proxy for a child view in a Layout.
 /// Dependency tracking uses AG thread-local reads.
 struct LayoutProxy: Equatable {
-    var context: AnyRuleContext?
+    var context: AnyRuleContext
     var attributes: LayoutProxyAttributes
 
     init(attributes: LayoutProxyAttributes) {
-        self.context = _AGGraph.currentRuleContextAttribute.map(AnyRuleContext.init(attribute:))
+        let contextAttribute = _AGGraph.currentRuleContextAttribute ??
+            attributes.layoutComputer.attribute?.identifier ??
+            .invalid
+        self.context = AnyRuleContext(attribute: contextAttribute)
         self.attributes = attributes
     }
 
@@ -81,7 +84,7 @@ struct LayoutProxy: Equatable {
         guard let attr = attributes.layoutComputer.attribute else {
             return LayoutComputer.defaultValue
         }
-        return attr.value
+        return context[attr]
     }
 
     func dimensions(in proposal: _ProposedSize) -> ViewDimensions {
@@ -92,7 +95,10 @@ struct LayoutProxy: Equatable {
     /// Reading the traitsList attribute registers a layout dependency.
     /// Returns nil if no traitsList attribute is set.
     var traits: ViewTraitCollection? {
-        guard let viewList = attributes.traitsList.attribute?.value else { return nil }
+        guard let traitsList = attributes.traitsList.attribute else {
+            return nil
+        }
+        let viewList: any ViewList = context[traitsList]
         return viewList.traits
     }
 
@@ -106,7 +112,7 @@ struct LayoutProxy: Equatable {
         in size: CGSize,
         layoutDirection: LayoutDirection
     ) -> ViewGeometry {
-        let proposal = _ProposedSize(placement.proposedSize)
+        let proposal = placement.proposedSize_
         let resolvedDimensions = self.dimensions(in: proposal)
         var origin = CGPoint(
             x: placement.anchorPosition.x - resolvedDimensions.width * placement.anchor.x,
@@ -192,13 +198,21 @@ struct PlacementData {
     }
 }
 
-private extension ViewGeometry {
+extension ViewGeometry {
     static var invalidValue: ViewGeometry {
         ViewGeometry(
-            origin: CGPoint(x: CGFloat.infinity, y: CGFloat.infinity),
-            dimensions: ViewDimensions(guideComputer: LayoutComputer.defaultValue,
-                                       size: ViewSize(width: CGFloat.infinity,
-                                                      height: CGFloat.infinity))
+            origin: CGPoint(x: CGFloat.nan, y: CGFloat.nan),
+            dimensions: ViewDimensions(
+                guideComputer: LayoutComputer.defaultValue,
+                size: ViewSize(
+                    width: -CGFloat.infinity,
+                    height: -CGFloat.infinity,
+                    proposal: _ProposedSize(
+                        width: -CGFloat.infinity,
+                        height: -CGFloat.infinity
+                    )
+                )
+            )
         )
     }
 
@@ -236,17 +250,17 @@ public struct LayoutSubview: Equatable {
     var proxy: LayoutProxy
 
     /// Index used by PlacementData.setGeometry(at:) during placement.
-    var placementIndex: Int32
+    var index: Int32
 
     /// Per-subview layout direction.
-    var layoutDirection: LayoutDirection
+    var containerLayoutDirection: LayoutDirection
 
     init(proxy: LayoutProxy,
-         placementIndex: Int32 = 0,
-         layoutDirection: LayoutDirection = .leftToRight) {
+         index: Int32 = 0,
+         containerLayoutDirection: LayoutDirection = .leftToRight) {
         self.proxy = proxy
-        self.placementIndex = placementIndex
-        self.layoutDirection = layoutDirection
+        self.index = index
+        self.containerLayoutDirection = containerLayoutDirection
     }
 
     // MARK: - Trait access
@@ -276,7 +290,10 @@ public struct LayoutSubview: Equatable {
     }
 
     public var spacing: ViewSpacing {
-        ViewSpacing(proxy.layoutComputer.spacing(), layoutDirection: layoutDirection)
+        ViewSpacing(
+            proxy.layoutComputer.spacing(),
+            layoutDirection: containerLayoutDirection
+        )
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
@@ -297,7 +314,7 @@ public struct LayoutSubview: Equatable {
 
     func place(in geometry: ViewGeometry, layoutDirection: LayoutDirection) {
         if !ThreadLayoutData.setGeometry(geometry,
-                                         at: Int(placementIndex),
+                                         at: Int(index),
                                          layoutDirection: layoutDirection) {
             proxy.layoutComputer.place(at: geometry.origin,
                                        anchor: .topLeading,
@@ -305,9 +322,6 @@ public struct LayoutSubview: Equatable {
         }
     }
 
-    public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        a.proxy.attributes.layoutComputer.base.identifier == b.proxy.attributes.layoutComputer.base.identifier
-    }
 }
 
 @available(*, unavailable)
@@ -317,35 +331,94 @@ extension LayoutSubview: Sendable {
 // MARK: - LayoutSubviews
 
 public struct LayoutSubviews: Equatable, RandomAccessCollection, @unchecked Sendable {
+    private enum Storage: Equatable {
+        struct IndexedAttributes: Equatable {
+            var attributes: LayoutProxyAttributes
+            var index: Int32
+        }
+
+        case direct([LayoutProxyAttributes])
+        case indirect([IndexedAttributes])
+
+        var count: Int {
+            switch self {
+            case .direct(let attributes):
+                return attributes.count
+            case .indirect(let attributes):
+                return attributes.count
+            }
+        }
+
+        subscript(position: Int) -> IndexedAttributes {
+            switch self {
+            case .direct(let attributes):
+                return IndexedAttributes(
+                    attributes: attributes[position],
+                    index: Int32(position)
+                )
+            case .indirect(let attributes):
+                return attributes[position]
+            }
+        }
+    }
+
     public typealias SubSequence = LayoutSubviews
     public typealias Element = LayoutSubview
     public typealias Index = Int
     public typealias Indices = Range<LayoutSubviews.Index>
     public typealias Iterator = IndexingIterator<LayoutSubviews>
 
+    var context: AnyRuleContext
+    private var storage: Storage
     public var layoutDirection: LayoutDirection
-    public var startIndex: Int { subviews.startIndex }
-    public var endIndex: Int { subviews.endIndex }
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { storage.count }
 
-    let subviews: [LayoutSubview]
-    init<S>(subviews: S, layoutDirection: LayoutDirection) where S: Sequence, S.Element == Self.Element {
-        self.subviews = .init(subviews)
+    init(
+        context: AnyRuleContext,
+        attributes: [LayoutProxyAttributes],
+        layoutDirection: LayoutDirection
+    ) {
+        self.context = context
+        self.storage = .direct(attributes)
+        self.layoutDirection = layoutDirection
+    }
+
+    private init(
+        context: AnyRuleContext,
+        indexedAttributes: [Storage.IndexedAttributes],
+        layoutDirection: LayoutDirection
+    ) {
+        self.context = context
+        self.storage = .indirect(indexedAttributes)
         self.layoutDirection = layoutDirection
     }
 
     public subscript(index: Int) -> LayoutSubviews.Element {
-        subviews[index]
+        let item = storage[index]
+        return LayoutSubview(
+            proxy: LayoutProxy(
+                context: context,
+                attributes: item.attributes
+            ),
+            index: item.index,
+            containerLayoutDirection: layoutDirection
+        )
     }
 
     public subscript(bounds: Range<Int>) -> LayoutSubviews {
-        .init(subviews: subviews[bounds], layoutDirection: layoutDirection)
+        LayoutSubviews(
+            context: context,
+            indexedAttributes: bounds.map { storage[$0] },
+            layoutDirection: layoutDirection
+        )
     }
 
     public subscript<S>(indices: S) -> LayoutSubviews where S: Sequence, S.Element == Int {
-        var items: [LayoutSubview] = []
-        for i in indices {
-            items.append(self.subviews[i])
-        }
-        return .init(subviews: items, layoutDirection: layoutDirection)
+        LayoutSubviews(
+            context: context,
+            indexedAttributes: indices.map { storage[$0] },
+            layoutDirection: layoutDirection
+        )
     }
 }

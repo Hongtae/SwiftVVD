@@ -41,6 +41,15 @@ extension View {
 protocol LazyLayoutNamespace {
 }
 
+private struct EnvironmentFetch<Value>: Rule, AsyncAttribute, Hashable {
+    var environment: Attribute<EnvironmentValues>
+    var keyPath: KeyPath<EnvironmentValues, Value>
+
+    var value: Value {
+        environment.value[keyPath: keyPath]
+    }
+}
+
 @dynamicMemberLookup
 struct SizeAndSpacingContext {
     var context: AnyRuleContext
@@ -58,7 +67,13 @@ struct SizeAndSpacingContext {
     }
 
     subscript<Value>(dynamicMember keyPath: KeyPath<EnvironmentValues, Value>) -> Value {
-        _environment.value[keyPath: keyPath]
+        EnvironmentFetch(
+            environment: _environment,
+            keyPath: keyPath
+        ).cachedValue(
+            options: AGCachedValueOptions(rawValue: 1),
+            owner: owner
+        )
     }
 
     mutating func update(_ context: AnyRuleContext) {
@@ -2620,10 +2635,6 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     }
 
     override func reset() {
-        _ = LayoutSubviews(
-            subviews: [],
-            layoutDirection: _layoutDirection.value
-        )
         cacheState.setValue(LayoutType.initialCache)
         super.reset()
     }
@@ -5132,10 +5143,6 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
         let accessibilityEnabled: Attribute<Bool> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.accessibilityEnabled
         }
-        _ = LayoutSubviews(
-            subviews: [],
-            layoutDirection: layoutDirection.value
-        )
         let cacheState = graph.makeInput(
             value: Self.initialCache
         )

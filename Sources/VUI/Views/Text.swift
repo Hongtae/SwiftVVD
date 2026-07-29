@@ -1844,7 +1844,8 @@ extension Text: View {
         } else {
             displayedStyledTextAttr = resolvedStyledTextAttr
             lcAttr = graph.makeRule {
-                let resolved = resolvedStyledTextAttr.value.resolvedText
+                let styledText = resolvedStyledTextAttr.value
+                let resolved = styledText.resolvedText
                 let renderer = textRendererAttr?.value
 
                 func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -1855,35 +1856,19 @@ extension Text: View {
                             text: TextProxy(resolved)
                         )
                     }
-                    if proposal == .zero {
-                        return .zero
-                    }
-                    if proposal.width == 0 {
-                        let measured = resolved.measure(
-                            maxWidth: 0,
-                            maxHeight: proposal.height
-                        )
-                        return CGSize(width: 0, height: measured.height)
-                    }
-                    if proposal == .infinity {
-                        return resolved.measure()
-                    }
-                    return resolved.measure(
-                        maxWidth: proposal.width,
-                        maxHeight: proposal.height
-                    )
+                    return styledText.sizeThatFits(_ProposedSize(proposal))
                 }
 
                 return LayoutComputer(
                     sizeThatFits: { sizeThatFits(ProposedViewSize($0)) },
                     spacing: ViewSpacing.text.spacing,
                     explicitAlignment: { key, size in
-                        guard let resolved else { return nil }
+                        guard resolved != nil else { return nil }
                         if key == VerticalAlignment.firstTextBaseline.key {
-                            return resolved.firstBaseline(in: size.value)
+                            return styledText.firstBaseline(in: size.value)
                         }
                         if key == VerticalAlignment.lastTextBaseline.key {
-                            return resolved.lastBaseline(in: size.value)
+                            return styledText.lastBaseline(in: size.value)
                         }
                         return nil
                     }
@@ -1910,7 +1895,7 @@ extension Text: View {
                 let measuredSize = renderer?.sizeThatFits(
                     proposal: ProposedViewSize(frame.size),
                     text: TextProxy(resolved)
-                ) ?? resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
+                ) ?? styledText.sizeThatFits(_ProposedSize(frame.size))
 
                 if measuredSize.height < frame.height {
                     let offset = frame.height - measuredSize.height

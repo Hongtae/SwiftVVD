@@ -855,7 +855,6 @@ where L.PlacementContextType == PlacementContext {
             )
         }
         let layout = _layout.value
-        _ = _environment.value
         _ = childLayoutComputer.value
         var child = LayoutProxy(
             attributes: LayoutProxyAttributes(

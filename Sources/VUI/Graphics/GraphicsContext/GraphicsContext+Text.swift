@@ -220,16 +220,48 @@ extension GraphicsContext {
             return result
         }
 
+        struct LayoutMetrics: Equatable, Sendable {
+            var size: CGSize
+            var firstBaseline: CGFloat
+            var lastBaseline: CGFloat
+        }
+
+        func layoutMetrics(in size: CGSize) -> LayoutMetrics {
+            let width = max(size.width, 0) * scaleFactor
+            let height = max(size.height, 0) * scaleFactor
+            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
+            let lineGlyphs = makeGlyphs(
+                maxWidth: maxWidth,
+                maxHeight: maxHeight
+            )
+            let pixelSize = lineGlyphs.reduce(CGSize.zero) { result, line in
+                CGSize(
+                    width: max(result.width, line.width),
+                    height: result.height + line.height
+                )
+            }
+            let firstBaseline = lineGlyphs.first?.ascender ?? .zero
+            let lastBaseline: CGFloat
+            if let last = lineGlyphs.last {
+                lastBaseline = lineGlyphs.dropLast().reduce(CGFloat.zero) {
+                    $0 + $1.height
+                } + last.ascender
+            } else {
+                lastBaseline = .zero
+            }
+            let inverseScale = 1 / scaleFactor
+            return LayoutMetrics(
+                size: pixelSize * inverseScale,
+                firstBaseline: firstBaseline * inverseScale,
+                lastBaseline: lastBaseline * inverseScale
+            )
+        }
+
         public var shading: Shading = .foreground
 
         public func measure(in size: CGSize) -> CGSize {
-            let width = max(size.width, 0) * self.scaleFactor
-            let height = max(size.height, 0) * self.scaleFactor
-            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
-            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
-
-            let scale = 1.0 / self.scaleFactor
-            return self.sizeInPixel(maxWidth: maxWidth, maxHeight: maxHeight) * scale
+            layoutMetrics(in: size).size
         }
 
         public func measure(maxWidth: CGFloat? = nil, maxHeight: CGFloat? = nil) -> CGSize {
@@ -246,30 +278,11 @@ extension GraphicsContext {
         }
 
         public func firstBaseline(in size: CGSize) -> CGFloat {
-            let width = max(size.width, 0) * self.scaleFactor
-            let height = max(size.height, 0) * self.scaleFactor
-            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
-            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
-
-            let scale = 1.0 / self.scaleFactor
-            let glyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
-            if let first = glyphs.first {
-                return first.ascender * scale
-            }
-            return .zero
+            layoutMetrics(in: size).firstBaseline
         }
 
         public func lastBaseline(in size: CGSize) -> CGFloat {
-            let width = max(size.width, 0) * self.scaleFactor
-            let height = max(size.height, 0) * self.scaleFactor
-            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
-            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
-
-            let scale = 1.0 / self.scaleFactor
-            let glyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
-            guard let last = glyphs.last else { return .zero }
-            let baseline = glyphs.dropLast().reduce(CGFloat.zero) { $0 + $1.height } + last.ascender
-            return baseline * scale
+            layoutMetrics(in: size).lastBaseline
         }
 
         struct Glyph {  // glyph that baseline aligned. (baseline is 0)
@@ -757,8 +770,10 @@ extension GraphicsContext {
 
                 // Check if there is not enough space to display the next line,
                 // or if a line wrap failed because there was not enough space.
-                let nextLineHeight = lines.first?.height ?? 0
-                if Int(ceil(offset.y + line.height + nextLineHeight)) > maxHeight || Int(ceil(line.width)) > maxWidth {
+                let nextLineExceedsHeight = lines.first.map {
+                    Int(ceil(offset.y + line.height + $0.height)) > maxHeight
+                } ?? false
+                if nextLineExceedsHeight || Int(ceil(line.width)) > maxWidth {
                     // this is the last line, should ends with '...'
                     var glyphs = line.glyphs[...]
                     // Since a valid Typeface is required, at least one glyph must exist.

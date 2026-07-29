@@ -539,6 +539,22 @@ struct StyledTextContentView {
 }
 
 final class ResolvedStyledText: InterpolatableContent {
+    private struct MetricsCacheEntry {
+        var requestedSize: CGSize
+        var metrics: GraphicsContext.ResolvedText.LayoutMetrics
+
+        func canReuse(for size: CGSize) -> Bool {
+            let minimumWidth = min(metrics.size.width, requestedSize.width)
+            let maximumWidth = max(metrics.size.width, requestedSize.width)
+            let minimumHeight = min(metrics.size.height, requestedSize.height)
+            let maximumHeight = max(metrics.size.height, requestedSize.height)
+            return size.width >= minimumWidth &&
+                size.width <= maximumWidth &&
+                size.height >= minimumHeight &&
+                size.height <= maximumHeight
+        }
+    }
+
     var layoutProperties: TextLayoutProperties
     var layoutMargins: EdgeInsets
     var scaleFactorOverride: CGFloat?
@@ -557,6 +573,9 @@ final class ResolvedStyledText: InterpolatableContent {
     private var didResolveAttributedStorage: Bool
     private var _computedMaxFontMetrics: ResolvedFontMetrics?
     private var didComputeMaxFontMetrics: Bool
+    // Each instance belongs to one scene graph. Its serialized update task owns
+    // layout measurement; display-list rendering only reads `resolvedText`.
+    private var metricsCache: [MetricsCacheEntry]
 
     init(
         storage: NSAttributedString? = nil,
@@ -593,6 +612,7 @@ final class ResolvedStyledText: InterpolatableContent {
         self.didResolveAttributedStorage = storage != nil
         self._computedMaxFontMetrics = nil
         self.didComputeMaxFontMetrics = false
+        self.metricsCache = []
     }
 
     deinit {
@@ -637,6 +657,56 @@ final class ResolvedStyledText: InterpolatableContent {
             didComputeMaxFontMetrics = true
         }
         return _computedMaxFontMetrics
+    }
+
+    var metricsCacheEntryCount: Int {
+        metricsCache.count
+    }
+
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        let requestedSize = CGSize(
+            width: proposal.width ?? .infinity,
+            height: proposal.height ?? .infinity
+        )
+        if proposal == .zero {
+            return .zero
+        }
+        guard let measured = cachedLayoutMetrics(in: requestedSize)?.size else {
+            return .zero
+        }
+        let result: CGSize
+        if proposal.width == 0 {
+            result = CGSize(width: 0, height: measured.height)
+        } else {
+            result = measured
+        }
+        return result
+    }
+
+    func firstBaseline(in size: CGSize) -> CGFloat {
+        cachedLayoutMetrics(in: size)?.firstBaseline ?? .zero
+    }
+
+    func lastBaseline(in size: CGSize) -> CGFloat {
+        cachedLayoutMetrics(in: size)?.lastBaseline ?? .zero
+    }
+
+    private func cachedLayoutMetrics(
+        in requestedSize: CGSize
+    ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+        guard let resolvedText else { return nil }
+        if let cached = metricsCache.first(where: {
+            $0.canReuse(for: requestedSize)
+        }) {
+            return cached.metrics
+        }
+
+        let measured = resolvedText.layoutMetrics(in: requestedSize)
+        metricsCache.append(MetricsCacheEntry(
+            requestedSize: requestedSize,
+            metrics: measured
+        ))
+        return measured
     }
 
     var needsDynamicRenderingInArchive: Bool {

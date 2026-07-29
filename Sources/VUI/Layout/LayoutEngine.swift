@@ -372,13 +372,8 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine, LayoutEnginePlacing {
         layoutDirection: LayoutDirection
     ) -> LayoutSubviews {
         LayoutSubviews(
-            subviews: children.indices.map { index in
-                LayoutSubview(
-                    proxy: children[index],
-                    placementIndex: Int32(index),
-                    layoutDirection: layoutDirection
-                )
-            },
+            context: children.context,
+            attributes: children.attributes,
             layoutDirection: layoutDirection
         )
     }
@@ -498,7 +493,7 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine, LayoutEnginePlacing {
                     proxies.context.update {
                         layout.placeSubviews(
                             in: CGRect(origin: origin, size: size.value),
-                            proposal: ProposedViewSize(size.value),
+                            proposal: ProposedViewSize(size.proposal),
                             subviews: subviews,
                             cache: &cache
                         )

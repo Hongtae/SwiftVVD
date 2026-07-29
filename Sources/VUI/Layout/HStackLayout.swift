@@ -21,43 +21,49 @@ public struct HStackLayout: Layout {
     }
 
     public func makeCache(subviews: Subviews) -> Self.Cache {
-        var cache = Self.Cache()
-        self.updateCache(&cache, subviews: subviews)
-        return cache
+        _StackLayoutImplementation.makeCache(
+            axis: .horizontal,
+            uniformSpacing: spacing,
+            minorAxisAlignment: alignment.key,
+            subviews: subviews,
+            resizeChildrenWithTrailingOverflow: Self.resizeChildrenWithTrailingOverflow
+        )
     }
 
     public func updateCache(_ cache: inout Self.Cache, subviews: Subviews) {
-        _StackLayoutImplementation.updateCache(&cache,
-                                               axis: .horizontal,
-                                               explicitSpacing: self.spacing,
-                                               horizontalAlignment: nil,
-                                               verticalAlignment: self.alignment,
-                                               subviews: subviews)
+        _StackLayoutImplementation.updateCache(
+            &cache,
+            axis: .horizontal,
+            uniformSpacing: spacing,
+            minorAxisAlignment: alignment.key,
+            subviews: subviews,
+            resizeChildrenWithTrailingOverflow: Self.resizeChildrenWithTrailingOverflow
+        )
     }
 
     public func sizeThatFits(proposal: ProposedViewSize,
                              subviews: Subviews,
                              cache: inout Self.Cache) -> CGSize {
-        _StackLayoutImplementation.sizeThatFits(axis: .horizontal,
-                                                proposal: proposal,
-                                                subviews: subviews,
-                                                cache: &cache)
+        _StackLayoutImplementation.sizeThatFits(
+            proposal: proposal,
+            cache: &cache
+        )
     }
 
     public func spacing(subviews: Self.Subviews,
                         cache: inout Self.Cache) -> ViewSpacing {
-        _StackLayoutImplementation.spacing(axis: .horizontal, cache: cache)
+        _StackLayoutImplementation.spacing(cache: cache)
     }
 
     public func placeSubviews(in bounds: CGRect,
                               proposal: ProposedViewSize,
                               subviews: Subviews,
                               cache: inout Self.Cache) {
-        _StackLayoutImplementation.placeSubviews(axis: .horizontal,
-                                                 in: bounds,
-                                                 proposal: proposal,
-                                                 subviews: subviews,
-                                                 cache: &cache)
+        _StackLayoutImplementation.placeSubviews(
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
     }
 
     public func explicitAlignment(of guide: HorizontalAlignment,
@@ -65,12 +71,12 @@ public struct HStackLayout: Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        _StackLayoutImplementation.explicitAlignment(axis: .horizontal,
-                                                     guide: guide.key,
-                                                     in: bounds,
-                                                     proposal: proposal,
-                                                     subviews: subviews,
-                                                     cache: &cache)
+        _StackLayoutImplementation.explicitAlignment(
+            guide: guide.key,
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
     }
 
     public func explicitAlignment(of guide: VerticalAlignment,
@@ -78,12 +84,12 @@ public struct HStackLayout: Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        _StackLayoutImplementation.explicitAlignment(axis: .horizontal,
-                                                     guide: guide.key,
-                                                     in: bounds,
-                                                     proposal: proposal,
-                                                     subviews: subviews,
-                                                     cache: &cache)
+        _StackLayoutImplementation.explicitAlignment(
+            guide: guide.key,
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
     }
 
 }

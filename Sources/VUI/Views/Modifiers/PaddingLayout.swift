@@ -63,7 +63,7 @@ extension _PaddingLayout: UnaryLayout {
             height: context.proposedSize.height.map { max(0, $0 - vertical) }
         )
         return _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(),
+            proposedSize: proposal,
             anchoring: .topLeading,
             at: CGPoint(x: insets.leading, y: insets.top)
         )

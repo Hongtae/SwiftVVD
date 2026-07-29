@@ -1580,6 +1580,268 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testStaticButtonLabelsRemainCenteredInsideBorders() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingButtonLabelPlacementRoot(counter: counter, probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingButtonLabelPlacementRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Static button centering test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw,
+            withGC
+        )
+
+        let list = try displayList(in: controller)
+        let borders = shapeStrokeBounds(in: list).sorted { $0.minX < $1.minX }
+        let labels = textBounds(in: list).sorted { $0.minX < $1.minX }
+        XCTAssertEqual(borders.count, 3)
+        XCTAssertEqual(labels.count, 3)
+        for (border, label) in zip(borders, labels) {
+            XCTAssertEqual(label.midX, border.midX, accuracy: 0.001)
+            XCTAssertEqual(label.midY, border.midY, accuracy: 0.001)
+        }
+    }
+
+    @MainActor
+    func testLabButtonGlyphPixelsRemainCenteredAcrossNestedAndDirectLayouts() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let controller = WindowController(
+            content: LayoutSchedulingLabButtonGlyphAlignmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingLabButtonGlyphAlignmentRoot.self)
+            )
+        )
+        let width = 1400
+        let height = 760
+        let scale: CGFloat = 1
+        let resolutionWidth = Int(CGFloat(width) * scale)
+        let resolutionHeight = Int(CGFloat(height) * scale)
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                    contentOffset: .zero,
+                    contentScaleFactor: scale,
+                    resolution: CGSize(
+                        width: resolutionWidth,
+                        height: resolutionHeight
+                    ),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the text resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: width, height: height),
+            shouldDrawFrame: false,
+            withGC
+        )
+        let list = try displayList(in: controller)
+        let titles = [
+            "Animation Lab",
+            "Symbol Effects",
+            "Keyframe & Phase",
+            "Matched Geometry",
+            "Content Transition",
+            "Timeline",
+            "Visual Effect & Mesh",
+            "Custom Animation",
+            "Context Menus",
+            "Modals & Popups",
+            "Images",
+            "Text Variants",
+            "ScrollView Reader",
+            "Open Top-Level Sheet",
+            "Top-Level Alert",
+            "Top-Level Data Alert",
+            "Top-Level Error Alert",
+            "Increment",
+            "Change Text",
+            "Remove View",
+            "Close",
+        ]
+        var labels: [(title: String, frame: CGRect)] = []
+        for title in titles {
+            let samples = renderedResolvedTextSamples(
+                in: list,
+                matching: title,
+                environment: controller.environment
+            )
+            XCTAssertFalse(samples.isEmpty, "missing rendered text for \(title)")
+            labels.append(contentsOf: samples.map {
+                (title: title, frame: $0.frame)
+            })
+        }
+        let allBorders = shapeStrokeBounds(in: list)
+        let borderedLabels = try labels.map { label in
+            let candidates = allBorders.filter { border in
+                border.insetBy(dx: -0.01, dy: -0.01).contains(label.frame)
+            }
+            let border = try XCTUnwrap(
+                candidates.min {
+                    $0.width * $0.height < $1.width * $1.height
+                },
+                "missing containing button border for \(label.title)"
+            )
+            return (title: label.title, label: label.frame, border: border)
+        }
+
+        let commandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: controller.sceneResources,
+            environment: controller.environment,
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: scale,
+            resolution: CGSize(
+                width: resolutionWidth,
+                height: resolutionHeight
+            ),
+            commandBuffer: commandBuffer
+        ))
+        XCTAssertEqual(context.backdrop.width, resolutionWidth)
+        XCTAssertEqual(context.backdrop.height, resolutionHeight)
+        context.clear(with: .white)
+        DisplayList.GraphicsRenderer().render(
+            list: list,
+            at: controller.animationTimestamp,
+            in: context
+        )
+        let condition = NSCondition()
+        var completed = false
+        commandBuffer.addCompletedHandler { _ in
+            condition.lock()
+            completed = true
+            condition.broadcast()
+            condition.unlock()
+        }
+        condition.lock()
+        XCTAssertTrue(commandBuffer.commit())
+        let timeout = Date(timeIntervalSinceNow: 5)
+        while !completed {
+            if !condition.wait(until: timeout) {
+                XCTFail("GPU command buffer timed out")
+                break
+            }
+        }
+        condition.unlock()
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: resolutionWidth * resolutionHeight * 4
+        )
+
+        func glyphBounds(in frame: CGRect) -> CGRect? {
+            let region = frame.standardized.applying(
+                CGAffineTransform(scaleX: scale, y: scale)
+            ).insetBy(dx: -2, dy: -2)
+            let minRegionX = max(Int(floor(region.minX)), 0)
+            let maxRegionX = min(Int(ceil(region.maxX)), resolutionWidth)
+            let minRegionY = max(Int(floor(region.minY)), 0)
+            let maxRegionY = min(Int(ceil(region.maxY)), resolutionHeight)
+            var minX = resolutionWidth
+            var minY = resolutionHeight
+            var maxX = -1
+            var maxY = -1
+            for y in minRegionY..<maxRegionY {
+                for x in minRegionX..<maxRegionX {
+                    let offset = (y * resolutionWidth + x) * 4
+                    let darkness = 255 - max(
+                        Int(bytes[offset]),
+                        Int(bytes[offset + 1]),
+                        Int(bytes[offset + 2])
+                    )
+                    if darkness > 20 {
+                        minX = min(minX, x)
+                        minY = min(minY, y)
+                        maxX = max(maxX, x)
+                        maxY = max(maxY, y)
+                    }
+                }
+            }
+            guard maxX >= minX, maxY >= minY else {
+                return nil
+            }
+            return CGRect(
+                x: minX,
+                y: minY,
+                width: maxX - minX + 1,
+                height: maxY - minY + 1
+            )
+        }
+
+        let samples = borderedLabels.map { sample in
+            let glyph = glyphBounds(in: sample.label)
+            return (
+                title: sample.title,
+                label: sample.label,
+                border: sample.border,
+                glyph: glyph,
+                glyphOffset: glyph.map {
+                    $0.midX / scale - sample.border.midX
+                }
+            )
+        }
+        for sample in samples {
+            XCTAssertNotNil(
+                sample.glyph,
+                "missing glyph pixels for \(sample.title)"
+            )
+            XCTAssertEqual(
+                sample.label.midX,
+                sample.border.midX,
+                accuracy: 0.001,
+                "\(sample.title) logical label is not centered in its border"
+            )
+            XCTAssertEqual(
+                sample.label.midY,
+                sample.border.midY,
+                accuracy: 0.001,
+                "\(sample.title) logical label is not vertically centered in its border"
+            )
+            XCTAssertLessThanOrEqual(
+                abs(try XCTUnwrap(sample.glyphOffset)),
+                1,
+                "\(sample.title) glyph pixels are not centered in their button border"
+            )
+        }
+    }
+
+    @MainActor
     func testAnimationLabConditionalButtonSamplesIntermediateWidthDuringRemoval() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -1819,6 +2081,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let initial = try update(time: 0)
+        XCTAssertEqual(
+            initial.buttonLabel.midX,
+            initial.buttonBorder.midX,
+            accuracy: 0.001,
+            "Change Text label must remain centered inside its button border"
+        )
         try XCTUnwrap(probe.toggle)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
@@ -1843,6 +2111,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let final = try XCTUnwrap(samples.last)
+        XCTAssertEqual(
+            final.buttonLabel.midX,
+            final.buttonBorder.midX,
+            accuracy: 0.001,
+            "Change Text label must remain centered inside its button border"
+        )
         XCTAssertNotEqual(initial.heading.midY, final.heading.midY, accuracy: 0.01)
         XCTAssertNotEqual(initial.buttonLabel.midY, final.buttonLabel.midY, accuracy: 0.01)
         XCTAssertNotEqual(initial.buttonBorder.midY, final.buttonBorder.midY, accuracy: 0.01)
@@ -5786,6 +6060,125 @@ private struct LayoutSchedulingButtonLabelPlacementRoot: View {
             }
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct LayoutSchedulingLabButtonGlyphAlignmentRoot: View {
+    @State private var enabled = true
+
+    var body: some View {
+        HStack(spacing: 20) {
+            contentViewSurface
+            contentTransitionSurface
+        }
+        .frame(width: 1400, height: 760)
+    }
+
+    private var contentViewSurface: some View {
+        VStack(spacing: 14) {
+            Text(verbatim: "TestApp1 Labs")
+                .font(.system(size: 24, weight: .semibold))
+            Text(verbatim: "Open a focused smoke surface. New parity work can add another category here.")
+                .font(.system(.callout))
+                .foregroundColor(.secondary)
+
+            VStack(spacing: 10) {
+                Toggle(
+                    "Open Labs in Platform Windows",
+                    isOn: $enabled
+                )
+                Text(verbatim: "Animation Comparison")
+                    .font(.system(.headline))
+                HStack(spacing: 10) {
+                    categoryButton("Animation Lab")
+                    categoryButton("Symbol Effects")
+                    categoryButton("Keyframe & Phase")
+                    categoryButton("Matched Geometry")
+                }
+                HStack(spacing: 10) {
+                    categoryButton("Content Transition")
+                    categoryButton("Timeline")
+                    categoryButton("Visual Effect & Mesh")
+                    categoryButton("Custom Animation")
+                }
+                Text(verbatim: "Other Labs")
+                    .font(.system(.headline))
+                HStack(spacing: 10) {
+                    categoryButton("Context Menus")
+                    categoryButton("Modals & Popups")
+                    categoryButton("Images")
+                    categoryButton("Text Variants")
+                }
+                categoryButton("ScrollView Reader")
+            }
+
+            Divider()
+            Text(verbatim: "Top-Level Presentation Tests")
+                .font(.system(.headline))
+            Button("Open Top-Level Sheet", action: {})
+            HStack(spacing: 10) {
+                Button("Top-Level Alert", action: {})
+                Button("Top-Level Data Alert", action: {})
+                Button("Top-Level Error Alert", action: {})
+            }
+            Text(verbatim: "Result: none")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+        }
+        .padding(24)
+        .frame(width: 680, height: 650)
+    }
+
+    private var contentTransitionSurface: some View {
+        VStack(spacing: 24) {
+            Text(verbatim: "Content & View Transition Lab")
+                .font(.system(size: 22, weight: .semibold))
+            HStack(spacing: 70) {
+                VStack(spacing: 12) {
+                    Text(verbatim: "Numeric Text")
+                        .font(.system(.headline))
+                    Text(verbatim: "0")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                    Button("Increment", action: {})
+                }
+                .frame(width: 200)
+                VStack(spacing: 12) {
+                    Text(verbatim: "Interpolate")
+                        .font(.system(.headline))
+                    Text(verbatim: "Compact")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.blue)
+                    Button("Change Text", action: {})
+                }
+                .frame(width: 240)
+            }
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.green)
+                    .frame(width: 180, height: 82)
+                    .overlay {
+                        Text(verbatim: "Transitioned view")
+                            .font(.system(.headline))
+                            .foregroundColor(.white)
+                    }
+            }
+            .frame(width: 430, height: 125)
+            Button("Remove View", action: {})
+            Text(verbatim: "Compare numeric direction, interpolated glyph/style changes, retained removal, asymmetric motion, and final layout.")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Close", action: {})
+        }
+        .padding(24)
+        .frame(width: 680, height: 540)
+    }
+
+    private func categoryButton(_ title: String) -> some View {
+        Button(title, action: {})
+            .frame(width: 145)
     }
 }
 

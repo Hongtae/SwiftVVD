@@ -2446,6 +2446,35 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testInitialAndNonanimatedRemovalDoNotRequireGraphHost() {
+        // ASSERTIONS dynamicContainerRemovalHostLazinessObserved
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+            let source = graph.makeInput(value: makeTransitionList(inputs: inputs))
+            let infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(graph: graph, base: inputs, maxUnusedItems: 1)
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.removedCount, 0)
+            XCTAssertEqual(initial.unusedCount, 0)
+
+            source.setValue(EmptyViewList(), transaction: Transaction(animation: nil))
+
+            let inactive = infoAttr.value
+            XCTAssertEqual(inactive.activeItems.count, 0)
+            XCTAssertEqual(inactive.removedCount, 0)
+            XCTAssertEqual(inactive.unusedCount, 1)
+            XCTAssertNil(inactive.items.first?.listener)
+        }
+    }
+
     func testRetainedUnusedReinsertRunsDisappearAndAppearLifecycle() throws {
         let host = GraphHost()
         let graph = host.data.graph

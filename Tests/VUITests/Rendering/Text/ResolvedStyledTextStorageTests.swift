@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import VVD
 @testable import VUI
 
 final class ResolvedStyledTextStorageTests: XCTestCase {
@@ -94,13 +95,16 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         let storage = resolved.attributedStorage
         XCTAssertEqual(storage.string, "styled")
         let attributes = storage.attributes(at: 0, effectiveRange: nil)
-        XCTAssertEqual(attributes[NSAttributedString.Key("VUI.Font")] as? Font, style.font)
         XCTAssertEqual(
-            attributes[NSAttributedString.Key("VUI.ForegroundColor")] as? Color,
+            attributes[NSAttributedString.Key("VUI.Font")] as? VUI.Font,
+            style.font
+        )
+        XCTAssertEqual(
+            attributes[NSAttributedString.Key("VUI.ForegroundColor")] as? VUI.Color,
             .red
         )
         XCTAssertEqual(
-            attributes[NSAttributedString.Key("VUI.BackgroundColor")] as? Color,
+            attributes[NSAttributedString.Key("VUI.BackgroundColor")] as? VUI.Color,
             .blue
         )
         XCTAssertEqual(
@@ -152,6 +156,140 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertEqual(metrics.descender, -1)
         XCTAssertEqual(metrics.leading, 0)
         XCTAssertEqual(metrics.outsets, EdgeInsets())
+    }
+
+    func testResolvedStyledTextReusesMetricsWithinMeasuredProposalRange() {
+        let face = ResolvedMetricsCacheTestTypeface()
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "metrics")],
+            scaleFactor: 1
+        )
+        let styled = ResolvedStyledText(resolvedText: resolved)
+
+        XCTAssertEqual(styled.metricsCacheEntryCount, 0)
+        let base = styled.sizeThatFits(
+            _ProposedSize(width: 100, height: 100)
+        )
+        XCTAssertEqual(base, CGSize(width: 56, height: 10))
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+
+        XCTAssertEqual(
+            styled.firstBaseline(in: CGSize(width: 100, height: 100)),
+            8
+        )
+        XCTAssertEqual(
+            styled.lastBaseline(in: CGSize(width: 100, height: 100)),
+            8
+        )
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+
+        let inner = styled.sizeThatFits(
+            _ProposedSize(width: 90, height: 90)
+        )
+        XCTAssertEqual(inner, base)
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+
+        let outside = styled.sizeThatFits(
+            _ProposedSize(width: 110, height: 110)
+        )
+        XCTAssertEqual(outside, base)
+        XCTAssertEqual(styled.metricsCacheEntryCount, 2)
+    }
+
+    func testResolvedStyledTextNormalizesUnspecifiedProposalToInfinity() {
+        let face = ResolvedMetricsCacheTestTypeface()
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "metrics")],
+            scaleFactor: 1
+        )
+        let styled = ResolvedStyledText(resolvedText: resolved)
+
+        let ideal = styled.sizeThatFits(.unspecified)
+        XCTAssertEqual(ideal, CGSize(width: 56, height: 10))
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+        XCTAssertEqual(
+            styled.sizeThatFits(_ProposedSize(width: 100, height: 100)),
+            ideal
+        )
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+    }
+
+    func testResolvedStyledTextPreservesZeroWidthProposalSemantics() {
+        let face = ResolvedMetricsCacheTestTypeface()
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "metrics")],
+            scaleFactor: 1
+        )
+        let styled = ResolvedStyledText(resolvedText: resolved)
+
+        XCTAssertEqual(styled.sizeThatFits(.zero), .zero)
+        XCTAssertEqual(styled.metricsCacheEntryCount, 0)
+
+        let collapsed = styled.sizeThatFits(
+            _ProposedSize(width: 0, height: 100)
+        )
+        XCTAssertEqual(collapsed.width, 0)
+        XCTAssertGreaterThan(collapsed.height, 0)
+        XCTAssertEqual(styled.metricsCacheEntryCount, 1)
+    }
+
+    func testHeightConstraintOnlyTruncatesWhenTextHasOverflowingContent() {
+        let face = ResolvedMetricsCacheTestTypeface()
+
+        let singleLine = ResolvedStyledText(
+            resolvedText: GraphicsContext.ResolvedText(
+                runs: [.text([face], "metrics")],
+                scaleFactor: 1
+            )
+        )
+        let singleLineIdeal = singleLine.sizeThatFits(
+            _ProposedSize(width: 100, height: .infinity)
+        )
+        XCTAssertEqual(singleLineIdeal, CGSize(width: 56, height: 10))
+        XCTAssertEqual(
+            singleLine.sizeThatFits(
+                _ProposedSize(width: 100, height: 0)
+            ),
+            singleLineIdeal
+        )
+
+        let explicitLines = ResolvedStyledText(
+            resolvedText: GraphicsContext.ResolvedText(
+                runs: [.text([face], "AA\nBB")],
+                scaleFactor: 1
+            )
+        )
+        XCTAssertEqual(
+            explicitLines.sizeThatFits(
+                _ProposedSize(width: 100, height: .infinity)
+            ),
+            CGSize(width: 16, height: 20)
+        )
+        XCTAssertEqual(
+            explicitLines.sizeThatFits(
+                _ProposedSize(width: 100, height: 0)
+            ),
+            CGSize(width: 40, height: 10)
+        )
+
+        let wrappedLine = ResolvedStyledText(
+            resolvedText: GraphicsContext.ResolvedText(
+                runs: [.text([face], "AAAA")],
+                scaleFactor: 1
+            )
+        )
+        XCTAssertEqual(
+            wrappedLine.sizeThatFits(
+                _ProposedSize(width: 24, height: .infinity)
+            ),
+            CGSize(width: 24, height: 20)
+        )
+        XCTAssertEqual(
+            wrappedLine.sizeThatFits(
+                _ProposedSize(width: 24, height: 0)
+            ),
+            CGSize(width: 24, height: 10)
+        )
     }
 
     func testResolvedPropertiesFeatureBitsMatchObservedSurface() {
@@ -317,7 +455,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                 layoutDirection: .leftToRight
             ).first
         )
-        let color = Color.Resolved(red: 0.25, green: 0.5, blue: 0.75)
+        let color = VUI.Color.Resolved(red: 0.25, green: 0.5, blue: 0.75)
         let style = _ShapeStyle_Pack.Style(.color(color))
 
         XCTAssertEqual(style.fill, .color(color))
@@ -348,4 +486,33 @@ private final class ResolvedStorageTestTypeface: Typeface {
     var identifier: String { "resolved-storage-test" }
     func isEqual(to other: any Typeface) -> Bool { self === (other as AnyObject) }
     func hashIdentity(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+}
+
+private final class ResolvedMetricsCacheTestTypeface: Typeface {
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
+        .texture(TextureFont.GlyphData(
+            texture: nil,
+            offset: CGPoint(x: 0, y: 8),
+            advance: CGSize(width: 8, height: 10),
+            frame: CGRect(x: 0, y: 0, width: 8, height: 10),
+            ascender: 8,
+            descender: -2
+        ))
+    }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        .zero
+    }
+
+    func hasGlyph(for: UnicodeScalar) -> Bool { true }
+    var lineHeight: CGFloat { 10 }
+    var ascender: CGFloat { 8 }
+    var descender: CGFloat { -2 }
+    var identifier: String { "resolved-metrics-cache-test" }
+    func isEqual(to other: any Typeface) -> Bool {
+        self === (other as AnyObject)
+    }
+    func hashIdentity(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
 }

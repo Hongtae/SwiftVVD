@@ -371,17 +371,7 @@ struct StyledTextLayoutEngine: LayoutEngine {
         if let renderer {
             return renderer.sizeThatFits(proposal: proposal, text: TextProxy(resolved))
         }
-        if proposal == .zero {
-            return .zero
-        }
-        if proposal.width == 0 {
-            let measured = resolved.measure(maxWidth: 0, maxHeight: proposal.height)
-            return CGSize(width: 0, height: measured.height)
-        }
-        if proposal == .infinity {
-            return resolved.measure()
-        }
-        return resolved.measure(maxWidth: proposal.width, maxHeight: proposal.height)
+        return text.sizeThatFits(_ProposedSize(proposal))
     }
 
     func truncates(_ proposal: _ProposedSize) -> Bool {
@@ -411,12 +401,12 @@ struct StyledTextLayoutEngine: LayoutEngine {
     }
 
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
-        guard let resolved = text.resolvedText else { return nil }
+        guard text.resolvedText != nil else { return nil }
         if key == VerticalAlignment.firstTextBaseline.key {
-            return resolved.firstBaseline(in: size.value)
+            return text.firstBaseline(in: size.value)
         }
         if key == VerticalAlignment.lastTextBaseline.key {
-            return resolved.lastBaseline(in: size.value)
+            return text.lastBaseline(in: size.value)
         }
         return nil
     }

@@ -995,11 +995,16 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
         var unusedItems: [DynamicContainer.ItemInfo] = []
         let maxUnusedItems = max(inputs[DynamicContainerMaxUnusedItems.self], 0)
         let retainCompletedUnusedRemovals = inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
-        guard let currentAttribute = _AGGraph.currentRuleContextAttribute,
-              let invalidationTarget = graph.weakAttributeIfValid(for: currentAttribute) else {
-            fatalError("DynamicContainerInfo retained removal requires a live rule attribute.")
+        func makeTransitionRemovalListener() -> DynamicContainer.TransitionRemovalListener {
+            guard let currentAttribute = _AGGraph.currentRuleContextAttribute,
+                  let invalidationTarget = graph.weakAttributeIfValid(for: currentAttribute) else {
+                fatalError("DynamicContainerInfo retained removal requires a live rule attribute.")
+            }
+            return DynamicContainer.TransitionRemovalListener(
+                host: GraphHost.currentHost,
+                invalidationTarget: invalidationTarget
+            )
         }
-        let host = GraphHost.currentHost
         func positiveRemovalTransition(
             for item: DynamicContainer.ItemInfo
         ) -> Transaction? {
@@ -1067,10 +1072,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                 if removedItems.isEmpty,
                    !didIgnoreObserver,
                    let transition {
-                    let listener = DynamicContainer.TransitionRemovalListener(
-                        host: host,
-                        invalidationTarget: invalidationTarget
-                    )
+                    let listener = makeTransitionRemovalListener()
                     item.listener = listener
                     item.ignoredRetainedUnusedRemovalObserver = nil
                     item.retainAfterRemovalCompletion = retainCompletedUnusedRemovals
@@ -1113,10 +1115,7 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                 continue
             }
 
-            let listener = DynamicContainer.TransitionRemovalListener(
-                host: host,
-                invalidationTarget: invalidationTarget
-            )
+            let listener = makeTransitionRemovalListener()
             item.listener = listener
             listener.beginTrackingAnimations()
 
