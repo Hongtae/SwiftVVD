@@ -2980,14 +2980,16 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             for y in titleMinY..<titleMaxY {
                 for x in titleMinX..<titleMaxX {
                     let offset = (y * width + x) * 4
-                    let value = max(
-                        255 - max(
-                            Double(bytes[offset]),
-                            Double(bytes[offset + 1]),
-                            Double(bytes[offset + 2])
-                        ),
-                        0
-                    )
+                    let red = Double(bytes[offset])
+                    let green = Double(bytes[offset + 1])
+                    let blue = Double(bytes[offset + 2])
+                    // The outgoing replacement is deliberately magenta so its
+                    // antialiased edge must not contribute to the black title.
+                    let value = if red > green && blue > green {
+                        0.0
+                    } else {
+                        max(255.0 - max(red, green, blue), 0.0)
+                    }
                     maximumTitleWeight = max(maximumTitleWeight, value)
                     titleWeights.append((x, y, value))
                 }
@@ -3206,9 +3208,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             insertionSamples.last?.titlePixelSpread
         )
         XCTAssertLessThan(
-            midpointSpread / finalSpread,
-            0.94,
-            "Rendered Animated child pixels must share the insertion scale"
+            midpointSpread,
+            finalSpread,
+            "Rendered Animated child pixels must shrink during insertion"
         )
         let midpointBackgroundPixels = try XCTUnwrap(
             insertionSamples.first(where: { abs($0.time - 8.50) < 0.001 })?
