@@ -1107,7 +1107,12 @@ extension _AGGraph {
     }
 
     @discardableResult
-    func setValue<Value: Equatable>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) -> Bool {
+    func setValue<Value: Equatable>(
+        for attribute: Attribute<Value>,
+        to newValue: Value,
+        transaction: Transaction = Transaction(),
+        evaluateSideEffects: Bool = true
+    ) -> Bool {
         assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
@@ -1129,6 +1134,7 @@ extension _AGGraph {
         // node before its direct changed-input edge has been recorded.
         markOutputsNeedEvaluation(
             outputs,
+            evaluateSideEffects: evaluateSideEffects,
             transaction: transactionToPropagate,
             propagateTransaction: true,
             changedInput: attribute.identifier.rawValue,
@@ -1143,7 +1149,12 @@ extension _AGGraph {
     }
 
     @discardableResult
-    func setValue<Value>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) -> Bool {
+    func setValue<Value>(
+        for attribute: Attribute<Value>,
+        to newValue: Value,
+        transaction: Transaction = Transaction(),
+        evaluateSideEffects: Bool = true
+    ) -> Bool {
         assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard let node = slots[index].node else {
@@ -1162,6 +1173,7 @@ extension _AGGraph {
         let outputs = slots[index].node!.outputs
         markOutputsNeedEvaluation(
             outputs,
+            evaluateSideEffects: evaluateSideEffects,
             transaction: transactionToPropagate,
             propagateTransaction: true,
             changedInput: attribute.identifier.rawValue,
@@ -1685,11 +1697,10 @@ extension _AGGraph {
 
     /// Marks `startID` and all its transitive dependents as needing re-evaluation.
     ///
-    /// - Parameter evaluateSideEffects: When `true` (default, used by `setValue`),
-    ///   side-effect nodes are evaluated eagerly within this call so that callbacks
-    ///   fire synchronously. When `false` (used by `removeNode`), side-effect nodes
-    ///   are only marked dirty. They must NOT be evaluated because an input node
-    ///   they depend on may have already been freed.
+    /// - Parameter evaluateSideEffects: When `true`, side-effect nodes are evaluated
+    ///   eagerly within this call so that callbacks fire synchronously. When `false`,
+    ///   side-effect nodes are only marked dirty for later graph evaluation. Node
+    ///   removal also uses the deferred form because an input may already be freed.
     func markNeedsEvaluation(
         _ startID: AGAttribute,
         evaluateSideEffects: Bool = true,

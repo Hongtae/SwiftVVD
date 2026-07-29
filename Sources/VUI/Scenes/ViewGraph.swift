@@ -992,17 +992,16 @@ class ViewGraph: ViewGraphHost {
 
     /// Flushes queued graph transactions around host output evaluation.
     override func updateOutputs(at time: Time) {
+        beginNextUpdate(at: time)
         flushTransactions()
         while data.graph.inbox.hasPendingWork {
             let pendingTransaction = data.graph.inbox.nextTransaction
             runTransaction(pendingTransaction, do: {
-                beginNextUpdate(at: time)
                 _ = data.graph.inbox.drainOne()
                 data.graph.drainActions()
             }, id: nil)
         }
         runTransaction(nil, do: {
-            beginNextUpdate(at: time)
             super.updateOutputs(at: time)
         }, id: nil)
         flushTransactions()
@@ -1016,7 +1015,13 @@ class ViewGraph: ViewGraphHost {
                 return
             }
             if !(timeAttr.value == time) {
-                timeAttr.setValue(time)
+                // Preserve dirty time dependents until normal output evaluation.
+                // They must schedule into the freshly reset update lanes below.
+                data.graph.setValue(
+                    for: timeAttr,
+                    to: time,
+                    evaluateSideEffects: false
+                )
                 nextUpdate = (NextUpdate(), NextUpdate())
             }
             data.updateSeed &+= 1

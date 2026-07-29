@@ -50,4 +50,72 @@ final class ViewGraphNextUpdateTests: XCTestCase {
         XCTAssertEqual(nextUpdate.interval, 1.0 / 120.0, accuracy: 0.000_001)
         XCTAssertEqual(nextUpdate.reasons, [2_555_904])
     }
+
+    func testUpdateOutputsResetsBeforeFlushingTransactionScheduledWork() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        _ = viewGraph.asyncTransaction {
+            viewGraph.nextUpdate.views.at(Time(seconds: 2))
+        }
+        XCTAssertTrue(viewGraph.hasPendingTransactions)
+
+        viewGraph.updateOutputs(at: Time(seconds: 1))
+
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+        XCTAssertEqual(
+            viewGraph.nextUpdate.views.time.seconds,
+            2,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testTimeInputSideEffectSchedulesAfterNextUpdateReset() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        var evaluatedTimes: [Time] = []
+        var timeConsumer: Attribute<Void>?
+        viewGraph.data.withCurrent {
+            guard let timeAttr = viewGraph.timeAttr else {
+                return XCTFail("Expected the instantiated view graph to have a time input.")
+            }
+            AGSubgraphRef.withCurrent(viewGraph.data.rootSubgraph) {
+                timeConsumer = viewGraph.data.graph.makeSideEffectRule {
+                    let time = timeAttr.value
+                    evaluatedTimes.append(time)
+                    viewGraph.nextUpdate.views.at(time + 1)
+                    return ()
+                }
+            }
+        }
+        XCTAssertEqual(evaluatedTimes.count, 1)
+        guard let timeConsumer else {
+            return XCTFail("Expected the time-dependent output to be created.")
+        }
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+
+        viewGraph.updateOutputs(at: Time(seconds: 1))
+        XCTAssertEqual(evaluatedTimes.map(\.seconds), [0])
+        viewGraph.data.withCurrent {
+            _ = timeConsumer.value
+        }
+
+        XCTAssertEqual(evaluatedTimes.map(\.seconds), [0, 1])
+        XCTAssertEqual(
+            viewGraph.nextUpdate.views.time.seconds,
+            2,
+            accuracy: 0.000_001
+        )
+    }
 }
