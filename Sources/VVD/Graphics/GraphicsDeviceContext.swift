@@ -59,9 +59,11 @@ public class GraphicsDeviceContext: @unchecked Sendable {
         commandQueue(flags: .copy)
     }
 
-    let deviceWaitTimeout = 2.0
+    public func makeCPUAccessible(buffer: GPUBuffer,
+                                  timeout: TimeInterval = 2.0) -> GPUBuffer? {
+        precondition(timeout.isFinite, "timeout must be finite")
+        let timeout = max(timeout, 0.0)
 
-    public func makeCPUAccessible(buffer: GPUBuffer) -> GPUBuffer? {
         if buffer.contents() != nil {
             return buffer
         }
@@ -76,6 +78,7 @@ public class GraphicsDeviceContext: @unchecked Sendable {
                let encoder = cbuffer.makeCopyCommandEncoder() {
 
                 let cond = NSCondition()
+                var completed = false
 
                 encoder.copy(from: buffer, sourceOffset: 0,
                              to: stgBuffer, destinationOffset: 0,
@@ -84,18 +87,25 @@ public class GraphicsDeviceContext: @unchecked Sendable {
                 cbuffer.addCompletedHandler { _ in
                     cond.lock()
                     defer { cond.unlock() }
-                    cond.broadcast()
+                    completed = true
+                    cond.signal()
                 }
 
                 cond.lock()
                 defer { cond.unlock() }
 
-                cbuffer.commit()
+                guard cbuffer.commit() else {
+                    Log.error("Failed to commit command buffer.")
+                    return nil
+                }
 
-                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
-                    // timeout
-                    Log.error("The operation timed out. Device did not respond to the command.")
-                    return nil                    
+                let deadline = Date(timeIntervalSinceNow: timeout)
+                while completed == false {
+                    if cond.wait(until: deadline) == false &&
+                       completed == false {
+                        Log.error("The operation timed out. Device did not respond to the command.")
+                        return nil
+                    }
                 }
                 if stgBuffer.contents() != nil {
                     return stgBuffer
@@ -105,7 +115,11 @@ public class GraphicsDeviceContext: @unchecked Sendable {
         return nil
     }
 
-    public func makeCPUAccessible(texture: Texture) -> GPUBuffer? {
+    public func makeCPUAccessible(texture: Texture,
+                                  timeout: TimeInterval = 2.0) -> GPUBuffer? {
+        precondition(timeout.isFinite, "timeout must be finite")
+        let timeout = max(timeout, 0.0)
+
         guard let queue = copyQueue() else {
             fatalError("Unable to make command queue")
         }
@@ -123,6 +137,7 @@ public class GraphicsDeviceContext: @unchecked Sendable {
                let encoder = cbuffer.makeCopyCommandEncoder() {
 
                 let cond = NSCondition()
+                var completed = false
 
                 encoder.copy(from: texture,
                              sourceOffset: TextureOrigin(layer: 0, level: 0, x: 0, y: 0, z: 0),
@@ -133,18 +148,25 @@ public class GraphicsDeviceContext: @unchecked Sendable {
                 cbuffer.addCompletedHandler { _ in
                     cond.lock()
                     defer { cond.unlock() }
-                    cond.broadcast()
+                    completed = true
+                    cond.signal()
                 }
 
                 cond.lock()
                 defer { cond.unlock() }
 
-                cbuffer.commit()
+                guard cbuffer.commit() else {
+                    Log.error("Failed to commit command buffer.")
+                    return nil
+                }
 
-                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
-                    // timeout
-                    Log.error("The operation timed out. Device did not respond to the command.")
-                    return nil                    
+                let deadline = Date(timeIntervalSinceNow: timeout)
+                while completed == false {
+                    if cond.wait(until: deadline) == false &&
+                       completed == false {
+                        Log.error("The operation timed out. Device did not respond to the command.")
+                        return nil
+                    }
                 }
                 if stgBuffer.contents() != nil {
                     return stgBuffer
