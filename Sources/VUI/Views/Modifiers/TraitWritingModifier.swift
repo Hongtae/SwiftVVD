@@ -28,6 +28,8 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
         let parentTraitAttr = inputs._traits
+        // Keep the merged collection in the graph. Descendant list values read
+        // this node, so changing only the written value invalidates them.
         let newTraitAttr: Attribute<ViewTraitCollection> = graph.makeRule {
             var collection = parentTraitAttr.attribute?.value ?? ViewTraitCollection()
             collection[Trait.self] = modifier._attribute.value.value
@@ -37,11 +39,13 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
         modifiedInputs._traits = OptionalAttribute(newTraitAttr)
         let bodyOut = body(_Graph(), modifiedInputs)
 
-        // Convert the static body output to a dynamicList so the parent
-        // Layout receives an Attribute<ViewList> as _traitsList for each child.
+        // A static element tree cannot carry a live trait dependency by value.
+        // Wrap it in a list attribute whose identity is retained by each
+        // LayoutProxyAttributes value. LayoutProxy then reads that list
+        // relative to the layout rule that owns the proxy.
         if case .staticList(let elements) = bodyOut.views {
             let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-                let traits = newTraitAttr.value   // re-evaluate when trait value changes
+                let traits = newTraitAttr.value
                 return BaseViewList(elements: elements, traits: traits)
             }
             return _ViewListOutputs(views: .dynamicList(viewListAttr, nil),

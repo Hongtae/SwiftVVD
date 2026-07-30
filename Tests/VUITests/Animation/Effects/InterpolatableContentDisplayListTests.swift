@@ -7262,9 +7262,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         try _AGGraph.withCurrent(graph) {
             let image = graph.makeInput(value: Image(systemName: "draw"))
+            var inputs = makeViewInputs(graph: graph)
+            inputs.requestsLayoutComputer = true
             let outputs = Image._makeView(
                 view: _GraphValue(_attribute: image),
-                inputs: makeViewInputs(graph: graph)
+                inputs: inputs
             )
 
             let resourceID = try XCTUnwrap(

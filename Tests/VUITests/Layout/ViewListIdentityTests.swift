@@ -2,6 +2,30 @@ import XCTest
 @testable import VUI
 
 final class ViewListIdentityTests: XCTestCase {
+    func testSubviewIDStoresFullViewListIDAndForwardsTypedLookup() {
+        var base = _ViewList_ID(implicitID: 3)
+        base.bind(
+            explicitID: "row",
+            owner: .invalid,
+            isUnary: true,
+            reuseID: 17
+        )
+        base.bind(
+            explicitID: 42,
+            owner: .invalid,
+            isUnary: false,
+            reuseID: 18
+        )
+
+        let id = Subview.ID(base)
+
+        XCTAssertEqual(id.base, base)
+        XCTAssertTrue(id.containsID("row"))
+        XCTAssertTrue(id.containsID(42))
+        XCTAssertFalse(id.containsID("missing"))
+        XCTAssertTrue(Mirror(reflecting: id).children.first?.value is _ViewList_ID)
+    }
+
     func testViewListIDElementIDReplacesIndexAndPreservesIdentityLanes() {
         let base = _ViewList_ID(explicitID: AnyHashable("row"), implicitID: 42)
 
@@ -228,6 +252,177 @@ final class ViewListIdentityTests: XCTestCase {
         XCTAssertEqual(ids.map(\.canonicalID.implicitID), [7, 7])
     }
 
+    func testViewListCanonicalFirstOffsetFallsBackToTransformedSublists() {
+        let list = BaseViewList(
+            elements: FixedCountViewListElements(count: 4),
+            implicitID: 7
+        )
+        let target = _ViewList_ID(implicitID: 7).elementID(at: 2).canonicalID
+
+        XCTAssertEqual(list.firstOffset(of: target), 2)
+        XCTAssertNil(
+            list.firstOffset(
+                of: _ViewList_ID.Canonical(
+                    _index: 2,
+                    implicitID: 8,
+                    explicitID: nil
+                )
+            )
+        )
+    }
+
+    func testViewListCanonicalFirstOffsetUsesPublishedViewIDs() {
+        let ids = _ViewList_ID._Views(
+            ContiguousArray([
+                _ViewList_ID(explicitID: AnyHashable("first"), implicitID: 4),
+                _ViewList_ID(explicitID: AnyHashable("second"), implicitID: 9),
+            ]),
+            isDataDependent: true
+        )
+        let list = CanonicalIDsOnlyViewList(ids: ids)
+
+        XCTAssertEqual(list.firstOffset(of: ids[1].canonicalID), 1)
+        XCTAssertNil(
+            list.firstOffset(
+                of: _ViewList_ID.Canonical(
+                    _index: 9,
+                    implicitID: -1,
+                    explicitID: AnyHashable("missing")
+                )
+            )
+        )
+    }
+
+    func testBaseViewListAppendViewIDsUsesStoredImplicitLane() {
+        let list = BaseViewList(
+            elements: FixedCountViewListElements(count: 2),
+            implicitID: 7
+        )
+        var accumulator = HeterogeneousViewIDsAccumulator()
+
+        list.appendViewIDs(into: &accumulator)
+        let ids = accumulator.finalize().asCanonical()
+
+        XCTAssertEqual(ids.map(\._index), [0, 1])
+        XCTAssertEqual(ids.map(\.implicitID), [7, 7])
+        XCTAssertEqual(ids.map(\.explicitID), [nil, nil])
+    }
+
+    func testSublistAppendViewIDsUsesStoredUpperBoundAndUnarySentinel() {
+        let elements = _ViewList_SubgraphElements(
+            base: FixedCountViewListElements(count: 2)
+        )
+        let explicit = _ViewList_Sublist(
+            start: 1,
+            count: 3,
+            id: _ViewList_ID(explicitID: AnyHashable("row"), implicitID: 41),
+            elements: elements,
+            traits: ViewTraitCollection(),
+            list: nil
+        )
+        var explicitAccumulator = HeterogeneousViewIDsAccumulator()
+
+        explicit.appendViewIDs(into: &explicitAccumulator)
+        let explicitIDs = explicitAccumulator.finalize().asCanonical()
+
+        XCTAssertEqual(explicitIDs.map(\._index), [1, 2])
+        XCTAssertEqual(explicitIDs.map(\.implicitID), [-1, -1])
+        XCTAssertEqual(explicitIDs.map(\.explicitID), [
+            AnyHashable("row"),
+            AnyHashable("row"),
+        ])
+
+        let generated = _ViewList_Sublist(
+            start: 1,
+            count: 3,
+            id: _ViewList_ID(implicitID: 41),
+            elements: elements,
+            traits: ViewTraitCollection(),
+            list: nil
+        )
+        var generatedAccumulator = HeterogeneousViewIDsAccumulator()
+
+        generated.appendViewIDs(into: &generatedAccumulator)
+        let generatedIDs = generatedAccumulator.finalize().asCanonical()
+
+        XCTAssertEqual(generatedIDs.map(\._index), [1, 2])
+        XCTAssertEqual(generatedIDs.map(\.implicitID), [-1, -1])
+        XCTAssertEqual(generatedIDs.map(\.explicitID), [nil, nil])
+    }
+
+    func testViewListGroupAppendViewIDsForwardsStoredListsInOrder() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let first: Attribute<any ViewList> = graph.makeInput(
+                value: BaseViewList(
+                    elements: FixedCountViewListElements(count: 2),
+                    implicitID: 7
+                ) as any ViewList
+            )
+            let second: Attribute<any ViewList> = graph.makeInput(
+                value: BaseViewList(
+                    elements: FixedCountViewListElements(count: 1),
+                    implicitID: 9
+                ) as any ViewList
+            )
+            let group = _ViewList_Group(lists: [
+                (first.value, first),
+                (second.value, second),
+            ])
+            var accumulator = HeterogeneousViewIDsAccumulator()
+
+            group.appendViewIDs(into: &accumulator)
+            let ids = accumulator.finalize().asCanonical()
+
+            XCTAssertEqual(ids.map(\._index), [0, 1, 0])
+            XCTAssertEqual(ids.map(\.implicitID), [7, 7, 9])
+        }
+    }
+
+    func testViewListSectionAppendViewIDsSelectsHierarchicalLeadingRegion() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func region(count: Int, implicitID: Int) -> (
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            ) {
+                let attribute: Attribute<any ViewList> = graph.makeInput(
+                    value: BaseViewList(
+                        elements: FixedCountViewListElements(count: count),
+                        implicitID: implicitID
+                    ) as any ViewList
+                )
+                return (attribute.value, attribute)
+            }
+
+            let base = _ViewList_Group(lists: [
+                region(count: 1, implicitID: 10),
+                region(count: 2, implicitID: 20),
+                region(count: 1, implicitID: 30),
+            ])
+            var flatAccumulator = HeterogeneousViewIDsAccumulator()
+            _ViewList_Section(base: base).appendViewIDs(into: &flatAccumulator)
+            let flatIDs = flatAccumulator.finalize().asCanonical()
+
+            XCTAssertEqual(flatIDs.map(\._index), [0, 0, 1, 0])
+            XCTAssertEqual(flatIDs.map(\.implicitID), [10, 20, 20, 30])
+
+            var hierarchicalAccumulator = HeterogeneousViewIDsAccumulator()
+            _ViewList_Section(
+                base: base,
+                isHierarchical: true
+            ).appendViewIDs(into: &hierarchicalAccumulator)
+            let hierarchicalIDs = hierarchicalAccumulator.finalize().asCanonical()
+
+            XCTAssertEqual(hierarchicalIDs.map(\._index), [0])
+            XCTAssertEqual(hierarchicalIDs.map(\.implicitID), [10])
+        }
+    }
+
     func testViewListGroupAddsEntryIdentityForSiblingLists() {
         let host = GraphHost()
 
@@ -429,6 +624,14 @@ final class ViewListIdentityTests: XCTestCase {
             AnyHashable("row"),
             AnyHashable("row"),
         ])
+    }
+}
+
+private struct CanonicalIDsOnlyViewList: ViewList {
+    var ids: _ViewList_ID_Views
+
+    var viewIDs: _ViewList_ID_Views? {
+        ids
     }
 }
 

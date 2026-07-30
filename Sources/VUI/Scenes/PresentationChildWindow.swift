@@ -394,11 +394,6 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
         viewGraph.data.withCurrent {
             viewGraph.sizeAttr?.setValue(ViewSize(size))
-            let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-            layoutComputer.value.place(at: center,
-                                       anchor: .center,
-                                       proposal: ProposedViewSize(width: size.width,
-                                                                  height: size.height))
         }
 
         if let platformWindow = window {

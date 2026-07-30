@@ -612,7 +612,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
             let attributes = [CGFloat(3), CGFloat(5)].map { explicitValue in
                 LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(
+                        value: testLayoutComputer(
                             sizeThatFits: { _ in
                                 CGSize(width: 20, height: 10)
                             },
@@ -686,9 +686,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
             attributes: engines.map { engine in
                 LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(
-                            box: LayoutEngineBox(engine: engine)
-                        )
+                        value: LayoutComputer(engine)
                     )
                 )
             },
@@ -732,7 +730,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
             attributes: (0..<count).map { _ in
                 LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(
+                        value: testLayoutComputer(
                             sizeThatFits: { _ in size },
                             explicitAlignment: { requested, _ in
                                 requested == guide ? value : nil
@@ -767,7 +765,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 ])
                 return LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(
+                        value: testLayoutComputer(
                             sizeThatFits: { _ in
                                 CGSize(width: 20, height: 10)
                             },

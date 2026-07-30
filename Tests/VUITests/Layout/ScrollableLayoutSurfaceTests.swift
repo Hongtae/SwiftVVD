@@ -108,6 +108,12 @@ private struct ScrollableGeometryInputRecord: Equatable {
     var requestsLayoutComputer: Bool
 }
 
+private struct ScrollableGeometryProbe {
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var requestsLayoutComputer: Bool
+}
+
 private struct ScrollableProxyInputRecord: Equatable {
     var size: CGSize
     var visibleRect: CGRect
@@ -123,6 +129,7 @@ private final class ScrollableLayoutRecorder {
     var currentPlacement: [Int] = []
     var itemSubgraphs: [Int: AGSubgraph] = [:]
     var lifecycleEvents: [String] = []
+    var geometryProbes: [Int: ScrollableGeometryProbe] = [:]
 
     func beginPlacement() {
         currentPlacement = []
@@ -130,6 +137,27 @@ private final class ScrollableLayoutRecorder {
 
     func finishPlacement() {
         placements.append(currentPlacement)
+    }
+
+    func sampleGeometry(for ids: [Int], recordingInputs: Bool = true) {
+        beginPlacement()
+        for id in ids {
+            guard let probe = geometryProbes[id] else { continue }
+            currentPlacement.append(id)
+            let position = probe.position.value
+            let size = probe.size.value.value
+            if recordingInputs {
+                geometryInputs.append(
+                    ScrollableGeometryInputRecord(
+                        id: id,
+                        position: position,
+                        size: size,
+                        requestsLayoutComputer: probe.requestsLayoutComputer
+                    )
+                )
+            }
+        }
+        finishPlacement()
     }
 }
 
@@ -179,21 +207,15 @@ private struct ScrollableRecordingRow: View, TestPrimitiveView {
         if let subgraph = AGSubgraph.current {
             row.recorder.itemSubgraphs[row.id] = subgraph
         }
+        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+            position: inputs.position,
+            size: inputs.size,
+            requestsLayoutComputer: inputs.requestsLayoutComputer
+        )
         let layout = graph.makeRule {
-            LayoutComputer(
+            testLayoutComputer(
                 sizeThatFits: { proposal in
                     proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
-                },
-                place: { _, _, _ in
-                    row.recorder.currentPlacement.append(row.id)
-                    row.recorder.geometryInputs.append(
-                        ScrollableGeometryInputRecord(
-                            id: row.id,
-                            position: inputs.position.value,
-                            size: inputs.size.value.value,
-                            requestsLayoutComputer: inputs.requestsLayoutComputer
-                        )
-                    )
                 }
             )
         }
@@ -216,6 +238,11 @@ private struct ScrollableLifecycleRow: View, TestPrimitiveView {
         if let subgraph = AGSubgraph.current {
             row.recorder.itemSubgraphs[row.id] = subgraph
         }
+        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+            position: inputs.position,
+            size: inputs.size,
+            requestsLayoutComputer: inputs.requestsLayoutComputer
+        )
         let modifier = graph.makeRule {
             let value = view._attribute.value
             return _AppearanceActionModifier(
@@ -231,20 +258,9 @@ private struct ScrollableLifecycleRow: View, TestPrimitiveView {
             return ()
         }
         let layout = graph.makeRule {
-            LayoutComputer(
+            testLayoutComputer(
                 sizeThatFits: { proposal in
                     proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
-                },
-                place: { _, _, _ in
-                    row.recorder.currentPlacement.append(row.id)
-                    row.recorder.geometryInputs.append(
-                        ScrollableGeometryInputRecord(
-                            id: row.id,
-                            position: inputs.position.value,
-                            size: inputs.size.value.value,
-                            requestsLayoutComputer: inputs.requestsLayoutComputer
-                        )
-                    )
                 }
             )
         }
@@ -345,6 +361,14 @@ private struct ScrollableOrdinaryPreferenceKey: PreferenceKey {
     }
 }
 
+private struct ScrollableMaterializationPreferenceKey: PreferenceKey {
+    static let defaultValue = 0
+
+    static func reduce(value: inout Int, nextValue: () -> Int) {
+        value += nextValue()
+    }
+}
+
 private struct ScrollableOrdinaryPreferenceRow: View, TestPrimitiveView {
     var id: Int
     var recorder: ScrollableLayoutRecorder
@@ -358,7 +382,7 @@ private struct ScrollableOrdinaryPreferenceRow: View, TestPrimitiveView {
         let row = view._attribute.value
         row.recorder.makeViewIDs.append(row.id)
         let layout = graph.makeRule {
-            LayoutComputer(
+            testLayoutComputer(
                 sizeThatFits: { proposal in
                     proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 }
@@ -628,19 +652,14 @@ private struct FixedSizeRecordingRow: View, TestPrimitiveView {
             fatalError("FixedSizeRecordingRow._makeView called outside an active _AGGraph context.")
         }
         let row = view._attribute.value
+        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+            position: inputs.position,
+            size: inputs.size,
+            requestsLayoutComputer: inputs.requestsLayoutComputer
+        )
         let layout = graph.makeRule {
-            LayoutComputer(
-                sizeThatFits: { _ in row.size },
-                place: { _, _, _ in
-                    row.recorder.geometryInputs.append(
-                        ScrollableGeometryInputRecord(
-                            id: row.id,
-                            position: inputs.position.value,
-                            size: inputs.size.value.value,
-                            requestsLayoutComputer: inputs.requestsLayoutComputer
-                        )
-                    )
-                }
+            testLayoutComputer(
+                sizeThatFits: { _ in row.size }
             )
         }
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
@@ -658,7 +677,7 @@ private struct ScrollableMeasuringRow: View, TestPrimitiveView {
             fatalError("ScrollableMeasuringRow._makeView called outside an active _AGGraph context.")
         }
         let layout = graph.makeRule {
-            LayoutComputer(
+            testLayoutComputer(
                 sizeThatFits: { proposal in
                     let row = view._attribute.value
                     let resolved = proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
@@ -759,7 +778,7 @@ private struct ScrollablePreferenceRow: View, TestPrimitiveView {
         }
 
         let layout = graph.makeRule {
-            LayoutComputer(
+            testLayoutComputer(
                 sizeThatFits: { proposal in
                     proposal.fixingUnspecifiedDimensions(at: CGSize(width: 30, height: 20))
                 }
@@ -3261,7 +3280,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testScrollableLayoutComputerPublishesVisibleChildGeometries() throws {
+    func testScrollableLayoutComputerPublishesContentSizeWhileItemsOwnGeometry() throws {
         let host = GraphHost()
         let recorder = ScrollableLayoutRecorder()
         var scrollablesID: AGAttribute!
@@ -3276,28 +3295,34 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.position = graph.makeInput(value: CGPoint(x: 5, y: 7))
+            inputs.needsGeometry = true
+            inputs.requestsLayoutComputer = true
             inputs.preferences.keys.add(ScrollablePreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
             let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
-            let geometries = layoutAttr.value.childGeometries(
+            XCTAssertEqual(
+                layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80))),
+                CGSize(width: 100, height: 72)
+            )
+            XCTAssertTrue(layoutAttr.value.childGeometries(
                 at: ViewSize(width: 100, height: 80),
                 origin: CGPoint(x: 5, y: 7)
-            )
-            geometryFrames = geometries.map {
-                CGRect(origin: $0.origin, size: $0.dimensions.size.value)
+            ).isEmpty)
+
+            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
+            scrollablesID = scrollablesAttr
+            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            recorder.sampleGeometry(for: [0, 1, 2])
+            geometryFrames = recorder.geometryInputs.map {
+                CGRect(origin: $0.position, size: $0.size)
             }
             XCTAssertEqual(geometryFrames, [
                 CGRect(x: 5, y: 7, width: 40, height: 20),
                 CGRect(x: 5, y: 31, width: 40, height: 20),
                 CGRect(x: 5, y: 55, width: 40, height: 20),
             ])
-
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
             XCTAssertTrue(host.hasPendingTransactions)
         }
 
@@ -3306,7 +3331,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
             let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            XCTAssertEqual(collection.visibleSubviews.map(\.frame), geometryFrames)
+            XCTAssertEqual(collection.visibleSubviews.map(\.frame), [
+                CGRect(x: 0, y: 0, width: 40, height: 20),
+                CGRect(x: 0, y: 24, width: 40, height: 20),
+                CGRect(x: 0, y: 48, width: 40, height: 20),
+            ])
         }
     }
 
@@ -3656,7 +3685,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 value: _ScrollableLayoutView(data: rows, layout: MeasuringScrollableLayout(recorder: recorder))
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            let inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.requestsLayoutComputer = true
 
             let outputs = _ScrollableLayoutView<[ScrollableMeasuringRow], MeasuringScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
@@ -3684,7 +3714,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 value: _ScrollableLayoutView(data: rows, layout: MeasuringScrollableLayout(recorder: recorder))
             )
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            let inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.requestsLayoutComputer = true
 
             let outputs = _ScrollableLayoutView<[ScrollableMeasuringRow], MeasuringScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
@@ -3858,24 +3889,21 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
             let timeAttr = inputs.base.time
 
             let outputs = Scroll.Main._makeView(
                 view: _GraphValue(_attribute: mainAttr),
                 inputs: inputs
             )
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            let materialization = try materializeDynamicItems(in: outputs)
 
-            func place() {
-                recorder.beginPlacement()
-                layoutAttr.value.place(
-                    at: .zero,
-                    proposal: ProposedViewSize(CGSize(width: 100, height: 80))
-                )
-                recorder.finishPlacement()
+            func sampleVisibleGeometry() {
+                _ = materialization.value
+                recorder.sampleGeometry(for: [0, 1, 2], recordingInputs: false)
             }
 
-            place()
+            sampleVisibleGeometry()
             XCTAssertEqual(recorder.proxyInputs, [
                 ScrollableProxyInputRecord(
                     size: CGSize(width: 100, height: 80),
@@ -3886,7 +3914,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
             storedOffset = CGPoint(x: 0, y: 48)
             timeAttr.setValue(Time(seconds: 1))
-            place()
+            sampleVisibleGeometry()
 
             XCTAssertEqual(recorder.proxyInputs.count, 1)
             XCTAssertEqual(recorder.placements, [
@@ -3910,24 +3938,21 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            let materialization = try materializeDynamicItems(in: outputs)
 
-            recorder.beginPlacement()
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
-            recorder.finishPlacement()
+            recorder.sampleGeometry(for: [0, 1, 2])
 
             sizeAttr.setValue(ViewSize(width: 100, height: 40))
-            recorder.beginPlacement()
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
-            recorder.finishPlacement()
+            _ = materialization.value
+            recorder.sampleGeometry(for: [0])
 
             sizeAttr.setValue(ViewSize(width: 100, height: 80))
-            recorder.beginPlacement()
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
-            recorder.finishPlacement()
+            _ = materialization.value
+            recorder.sampleGeometry(for: [0, 1, 2])
         }
 
         XCTAssertEqual(recorder.placements, [
@@ -3996,26 +4021,26 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableLifecycleRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            let materialization = try materializeDynamicItems(in: outputs)
 
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(
                 recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
                 ["1 appear", "2 appear"]
             )
 
             sizeAttr.setValue(ViewSize(width: 100, height: 40))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
+            _ = materialization.value
             XCTAssertEqual(
                 recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
                 ["1 appear", "2 appear", "1 disappear", "2 disappear"]
             )
 
             sizeAttr.setValue(ViewSize(width: 100, height: 80))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = materialization.value
             XCTAssertEqual(
                 recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
                 [
@@ -4047,20 +4072,20 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableLifecycleRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            let materialization = try materializeDynamicItems(in: outputs)
 
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(delegate.events, [])
 
             sizeAttr.setValue(ViewSize(width: 100, height: 40))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
+            _ = materialization.value
             XCTAssertEqual(delegate.events, [])
 
             sizeAttr.setValue(ViewSize(width: 100, height: 80))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = materialization.value
             XCTAssertEqual(delegate.events, ["change"])
         }
     }
@@ -4080,7 +4105,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         var graphInputs: _GraphInputs!
         var source: Attribute<_ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>>!
         var sizeAttr: Attribute<ViewSize>!
-        var layoutAttr: Attribute<LayoutComputer>!
+        var materialization: Attribute<ScrollableMaterializationPreferenceKey.Value>!
         var animatedValue: Attribute<_OpacityEffect>!
 
         func rows(count: Int, target: Double) -> [ScrollableTransitionForkRetargetRow] {
@@ -4100,10 +4125,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         func place(height: CGFloat) {
             sizeAttr.setValue(ViewSize(width: 100, height: height))
-            layoutAttr.value.place(
-                at: .zero,
-                proposal: ProposedViewSize(CGSize(width: 100, height: height))
-            )
+            _ = materialization.value
         }
 
         try viewGraph.data.withCurrent {
@@ -4111,11 +4133,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             graphInputs = inputs.base
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
             source = graph.makeInput(value: view(count: 2, target: 0))
 
             let outputs = _ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: source), inputs: inputs)
-            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            materialization = try materializeDynamicItems(in: outputs)
             place(height: 80)
 
             animatedValue = try XCTUnwrap(capture.animated)
@@ -4193,6 +4216,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 "removal logical",
             ]
         )
+        viewGraph.flushTransactions()
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
@@ -4232,20 +4256,17 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
             let outputs = _ScrollableLayoutView<[ScrollableOrdinaryPreferenceRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            XCTAssertNil(outputs._layoutComputer.attribute)
             let ordinaryAttr = Attribute<String>(
                 try XCTUnwrap(outputs.preferences.value(for: ScrollableOrdinaryPreferenceKey.self))
             )
 
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(ordinaryAttr.value, "0,1,2,")
 
             sizeAttr.setValue(ViewSize(width: 100, height: 40))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 40)))
             XCTAssertEqual(ordinaryAttr.value, "0,")
 
             sizeAttr.setValue(ViewSize(width: 100, height: 80))
-            layoutAttr.value.place(at: .zero, proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
             XCTAssertEqual(ordinaryAttr.value, "0,1,2,")
         }
 
@@ -4272,11 +4293,12 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph, size: sizeAttr)
             inputs.position = graph.makeInput(value: CGPoint(x: 7, y: 11))
             inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[FixedSizeRecordingRow], CenteredScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
-            layoutAttr.value.place(at: CGPoint(x: 7, y: 11), proposal: ProposedViewSize(CGSize(width: 100, height: 80)))
+            _ = try materializeDynamicItems(in: outputs)
+            recorder.sampleGeometry(for: [0])
         }
 
         XCTAssertEqual(recorder.geometryInputs, [
@@ -4314,11 +4336,9 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     func testScrollableIdentifierContextUsesDynamicContainerInfo() {
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
-            let layoutDirection = graph.makeInput(value: LayoutDirection.leftToRight)
-            let context = ScrollableLayoutItemGeometryContext(
-                layoutDirection: layoutDirection,
-                placement: { _ in nil }
-            )
+            let context = ScrollableLayoutItemGeometryContext { _, _, _, _, _ in
+                fatalError("Geometry construction is outside this identity-only test.")
+            }
             let rowID = _ViewList_ID(explicitID: AnyHashable("row")).canonicalID
             let recoveredIndex = AnyHashable(3)
 
@@ -4340,6 +4360,30 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertEqual(context.identifier(for: rowID), recoveredIndex)
             XCTAssertNil(context.identifier(for: _ViewList_ID(explicitID: AnyHashable("missing")).canonicalID))
         }
+    }
+
+    @discardableResult
+    private func materializeScrollableItems(
+        in outputs: _ViewOutputs
+    ) throws -> Attribute<ScrollablePreferenceKey.Value> {
+        let identifier = try XCTUnwrap(
+            outputs.preferences.value(for: ScrollablePreferenceKey.self)
+        )
+        let scrollables = Attribute<ScrollablePreferenceKey.Value>(identifier)
+        _ = scrollables.value
+        return scrollables
+    }
+
+    @discardableResult
+    private func materializeDynamicItems(
+        in outputs: _ViewOutputs
+    ) throws -> Attribute<ScrollableMaterializationPreferenceKey.Value> {
+        let identifier = try XCTUnwrap(
+            outputs.preferences.value(for: ScrollableMaterializationPreferenceKey.self)
+        )
+        let value = Attribute<ScrollableMaterializationPreferenceKey.Value>(identifier)
+        _ = value.value
+        return value
     }
 
     private func makeViewInputs(

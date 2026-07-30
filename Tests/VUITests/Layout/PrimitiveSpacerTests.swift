@@ -40,7 +40,7 @@ final class PrimitiveSpacerTests: XCTestCase {
                 CGSize(width: 100, height: 0)
             )
             XCTAssertEqual(horizontal.layoutPriority(), -.infinity)
-            XCTAssertTrue(horizontal.box.requiresSpacingProjection_())
+            XCTAssertTrue(horizontal.box.requiresSpacingProjection())
             XCTAssertEqual(spacingDistance(horizontal.spacing(), at: .left), 0)
             XCTAssertEqual(spacingDistance(horizontal.spacing(), at: .right), 0)
             XCTAssertNil(spacingDistance(horizontal.spacing(), at: .top))
@@ -146,7 +146,7 @@ final class PrimitiveSpacerTests: XCTestCase {
                 stackOrientation: .horizontal
             )
             XCTAssertEqual(disabled.sizeThatFits(.unspecified), .zero)
-            XCTAssertFalse(disabled.box.requiresSpacingProjection_())
+            XCTAssertFalse(disabled.box.requiresSpacingProjection())
             XCTAssertNil(spacingDistance(disabled.spacing(), at: .left))
             XCTAssertNil(spacingDistance(disabled.spacing(), at: .right))
 
@@ -156,7 +156,7 @@ final class PrimitiveSpacerTests: XCTestCase {
                 stackOrientation: .horizontal
             )
             XCTAssertEqual(enabled.sizeThatFits(.unspecified), CGSize(width: 12, height: 0))
-            XCTAssertTrue(enabled.box.requiresSpacingProjection_())
+            XCTAssertTrue(enabled.box.requiresSpacingProjection())
         }
     }
 

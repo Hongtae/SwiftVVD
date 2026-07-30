@@ -368,7 +368,7 @@ final class DynamicViewContainerTests: XCTestCase {
             XCTAssertEqual(recorder.events, ["A"])
 
             source.setValue(nil)
-            XCTAssertEqual(size(of: outputs), .zero)
+            XCTAssertEqual(size(of: outputs), CGSize(width: 10, height: 10))
             XCTAssertEqual(Attribute<String>(preferenceID).value, "")
             XCTAssertEqual(outputs._layoutComputer.attribute?.identifier, layoutID)
 

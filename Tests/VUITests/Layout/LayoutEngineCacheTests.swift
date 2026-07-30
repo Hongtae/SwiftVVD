@@ -118,7 +118,7 @@ final class LayoutEngineCacheTests: XCTestCase {
         withGraph {
             var computer: LayoutComputer!
             var measuredSize: CGSize?
-            computer = LayoutComputer(
+            computer = testLayoutComputer(
                 sizeThatFits: { _ in CGSize(width: 24, height: 18) },
                 place: { _, _, proposal in
                     measuredSize = computer.sizeThatFits(_ProposedSize(proposal))
@@ -333,14 +333,12 @@ final class LayoutEngineCacheTests: XCTestCase {
         withGraph {
             let firstEngine = CountingLayoutEngine()
             let secondEngine = CountingLayoutEngine()
-            let firstBox = LayoutEngineBox(engine: firstEngine)
-            let secondBox = LayoutEngineBox(engine: secondEngine)
             let graph = try! XCTUnwrap(_AGGraph.current)
             let firstComputer = graph.makeInput(
-                value: LayoutComputer(box: firstBox)
+                value: LayoutComputer(firstEngine)
             )
             let secondComputer = graph.makeInput(
-                value: LayoutComputer(box: secondBox)
+                value: LayoutComputer(secondEngine)
             )
             let proposal = _ProposedSize(width: 100, height: 20)
             let children = [
@@ -382,12 +380,12 @@ final class LayoutEngineCacheTests: XCTestCase {
             let children = [
                 LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(box: LayoutEngineBox(engine: firstEngine))
+                        value: LayoutComputer(firstEngine)
                     )
                 ),
                 LayoutProxyAttributes(
                     layoutComputer: graph.makeInput(
-                        value: LayoutComputer(box: LayoutEngineBox(engine: secondEngine))
+                        value: LayoutComputer(secondEngine)
                     )
                 ),
             ]

@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+/// Selects the first child whose natural size fits the proposed dimensions.
 public struct ViewThatFits<Content>: View where Content: View {
     var _tree: _VariadicView.Tree<_SizeFittingRoot, Content>
     public init(in axes: Axis.Set = [.horizontal, .vertical], @ViewBuilder content: () -> Content) {
@@ -21,6 +22,7 @@ public struct ViewThatFits<Content>: View where Content: View {
 extension ViewThatFits: PrimitiveView, UnaryView {
 }
 
+/// Bridges a variadic child list into retained fitting candidates and indirect outputs.
 public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {
     var axes: Axis.Set
     init(axes: Axis.Set) { self.axes = axes }
@@ -29,316 +31,377 @@ public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-
-        let childListOutputs = body(_Graph(), inputs)
-        let viewListAttr: Attribute<any ViewList>
-        switch childListOutputs.views {
-        case .staticList(let elements):
-            viewListAttr = graph.makeInput(value: BaseViewList(elements: elements))
-        case .dynamicList(let dynamicListAttr, _):
-            viewListAttr = dynamicListAttr
+        guard let parentSubgraph = AGSubgraph.current else {
+            fatalError("\(self)._makeView requires a current parent subgraph.")
         }
 
-        let state = SizeFittingState(root: root._attribute, list: viewListAttr, inputs: inputs)
-        let layoutComputerAttr: Attribute<LayoutComputer> = graph.makeStatefulRule(
-            SizeFittingLayoutComputer(state: state)
+        let childListOutputs = body(_Graph(), inputs)
+        let viewList = childListOutputs.makeAttribute(inputs: inputs.listInputs)
+
+        // The returned channels remain indirect so selecting a candidate only
+        // rewires targets. Candidate materialization still receives the original
+        // request bits and therefore produces its own layout computer.
+        var placeholderInputs = inputs
+        placeholderInputs.requestsLayoutComputer = false
+        var outputs = placeholderInputs.makeIndirectOutputs()
+        let state = SizeFittingState(
+            root: root._attribute,
+            list: viewList,
+            inputs: inputs,
+            outputs: outputs,
+            parentSubgraph: parentSubgraph
         )
 
-        return _ViewOutputs(
-            preferences: PreferencesOutputs(),
-            layoutComputer: OptionalAttribute(layoutComputerAttr)
+        let mux: Attribute<()> = graph.makeStatefulRule(
+            SizeFittingMux(state: state)
         )
+        outputs.setIndirectDependency(mux.identifier)
+
+        if inputs.requestsLayoutComputer {
+            let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                SizeFittingLayoutComputer(state: state)
+            )
+            outputs._layoutComputer = OptionalAttribute(layoutComputer)
+        }
+        return outputs
     }
 
     public typealias Body = Never
 }
 
+/// Owns fitting-candidate subgraphs and connects the selected child's outputs.
 private final class SizeFittingState {
-    let root: Attribute<_SizeFittingRoot>
-    let list: Attribute<any ViewList>
-    let inputs: _ViewInputs
-    var children: [_ViewList_ID.Canonical: Child] = [:]
-
-    // Placeholder outputs are created separately inside _SizeFittingRoot._makeView.
-    // Revisit this initializer shape if size-fitting needs to retain placeholders.
-    init(root: Attribute<_SizeFittingRoot>, list: Attribute<any ViewList>, inputs: _ViewInputs) {
-        self.root = root
-        self.list = list
-        self.inputs = inputs
-    }
-
-    final class Child {
-        let id: _ViewList_ID.Canonical
-        let subgraph: AGSubgraph
-        let selectedInput: Attribute<Bool>
-        var releaseElements: _ViewList_SubgraphRelease?
+    /// Retains one materialized candidate and its current traversal state.
+    struct Child {
+        var subgraph: AGSubgraph
+        var release: _ViewList_SubgraphRelease?
         var outputs: _ViewOutputs
-        var layoutComputer: Attribute<LayoutComputer>?
-        var isSelected = false
-
-        init(
-            id: _ViewList_ID.Canonical,
-            subgraph: AGSubgraph,
-            selectedInput: Attribute<Bool>,
-            releaseElements: _ViewList_SubgraphRelease?,
-            outputs: _ViewOutputs,
-            layoutComputer: Attribute<LayoutComputer>?
-        ) {
-            self.id = id
-            self.subgraph = subgraph
-            self.selectedInput = selectedInput
-            self.releaseElements = releaseElements
-            self.outputs = outputs
-            self.layoutComputer = layoutComputer
-        }
-
-        func setSelected(_ selected: Bool) {
-            guard isSelected != selected else { return }
-            if selected {
-                subgraph.didReinsert()
-            } else {
-                subgraph.willRemove()
-            }
-            isSelected = selected
-            selectedInput.setValue(selected)
-        }
-
-        func invalidate() {
-            setSelected(false)
-            subgraph.invalidate()
-            subgraph.removeFromParent()
-        }
+        var seed: UInt32
+        var order: UInt32
+        var isInserted: Bool
     }
 
-    var selectedID: _ViewList_ID.Canonical?
+    var _root: Attribute<_SizeFittingRoot>
+    var _list: Attribute<any ViewList>
+    var inputs: _ViewInputs
+    var outputs: _ViewOutputs
+    var parentSubgraph: AGSubgraph
+    var children: [_ViewList_ID.Canonical: Child]
+    var seed: UInt32
 
-    // applyChildren currently passes child outputs by value.
-    // Revisit the callback shape before wiring engine-level size-fitting callbacks.
+    init(
+        root: Attribute<_SizeFittingRoot>,
+        list: Attribute<any ViewList>,
+        inputs: _ViewInputs,
+        outputs: _ViewOutputs,
+        parentSubgraph: AGSubgraph
+    ) {
+        self._root = root
+        self._list = list
+        self.inputs = inputs
+        self.outputs = outputs
+        self.parentSubgraph = parentSubgraph
+        self.children = [:]
+        self.seed = 0
+    }
+
+    /// Reconciles candidate identities and optionally commits the first match.
+    ///
+    /// Traversal continues after a match so an already-inserted later candidate
+    /// remains live until the commit pass removes it. Detached or unmaterialized
+    /// later candidates are skipped and generation pruning releases them.
     func applyChildren(selectLast: Bool, to body: (_ViewOutputs, Bool) -> Bool) {
-        let children = materializedChildren()
-        guard !children.isEmpty else { return }
-        for (index, child) in children.enumerated() {
-            let isLast = index == children.index(before: children.endIndex)
-            let selected = body(child.outputs, isLast)
-            if selected && !selectLast { return }
-        }
-    }
-
-    func materializedChildren() -> [Child] {
-        guard let graph = _AGGraph.current else {
-            fatalError("SizeFittingState.materializedChildren called outside AG context.")
+        guard _AGGraph.current != nil else {
+            fatalError("SizeFittingState.applyChildren called outside AG context.")
         }
 
+        seed &+= 1
+        let currentSeed = seed
+        let currentList = _list.value
+        let count = currentList.count(style: _ViewList_IteratorStyle())
         var from = 0
-        var ordered: [Child] = []
-        var liveIDs = Set<_ViewList_ID.Canonical>()
-        let currentList = list.value
-        _ = _applySublists(in: currentList, from: &from, listAttribute: list) { sublist in
+        var order: UInt32 = 0
+        var selectedOrder: UInt32?
+
+        _ = _applySublists(in: currentList, from: &from, listAttribute: _list) { sublist in
             for offset in 0..<sublist.count {
                 let elementIndex = sublist.start + offset
                 let id = sublist.id.elementID(at: elementIndex).canonicalID
-                liveIDs.insert(id)
-                let child = children[id] ?? makeChild(
-                    id: id,
-                    sublist: sublist,
-                    offset: offset,
-                    in: graph
-                )
-                children[id] = child
-                ordered.append(child)
+
+                // Once a candidate matches, only the branch that is currently
+                // inserted is refreshed. This allows a later displayed branch
+                // to survive until commit without materializing every fallback.
+                let existing = children[id]
+                if existing?.isInserted == true || selectedOrder == nil {
+                    var child = existing ?? makeChild(
+                        sublist: sublist,
+                        offset: offset
+                    )
+                    child.seed = currentSeed
+                    child.order = order
+                    children[id] = child
+
+                    if selectedOrder == nil {
+                        let isLast = Int(order) == count - 1
+                        if body(child.outputs, isLast) {
+                            selectedOrder = order
+                        }
+                    }
+                }
+                order &+= 1
             }
             return true
         }
 
-        let staleIDs = children.keys.filter { !liveIDs.contains($0) }
-        for id in staleIDs {
-            guard let child = children[id] else { continue }
-            if selectedID == id {
-                selectedID = nil
-            }
-            child.invalidate()
-            children.removeValue(forKey: id)
+        let staleIDs = children.compactMap { id, child in
+            child.seed == currentSeed ? nil : id
         }
-        return ordered
+        for id in staleIDs {
+            eraseChild(id, invalidating: true)
+        }
+
+        // Measurement and preference folds use selectLast == false. They may
+        // populate the cache but must not retarget the displayed output.
+        if selectLast, let selectedOrder {
+            commitSelection(selectedOrder)
+        }
     }
 
     func invalidate() {
-        for child in children.values {
-            child.invalidate()
+        guard _AGGraph.current != nil else {
+            fatalError("SizeFittingState.invalidate called outside AG context.")
         }
-        selectedID = nil
-        children.removeAll()
-    }
-
-    func updateSelection(to id: _ViewList_ID.Canonical?) {
-        guard selectedID != id else { return }
-        let previousID = selectedID
-        selectedID = id
-        if let previousID, let previous = children[previousID] {
-            previous.setSelected(false)
-        }
-        if let id, let selected = children[id] {
-            selected.setSelected(true)
+        outputs.detachIndirectOutputs()
+        for id in Array(children.keys) {
+            eraseChild(id, invalidating: true)
         }
     }
 
+    /// Applies the selected order to each retained child and rewires outputs.
+    private func commitSelection(_ selectedOrder: UInt32) {
+        for id in Array(children.keys) {
+            guard var child = children[id] else {
+                continue
+            }
+            let shouldInsert = child.order == selectedOrder
+            guard child.isInserted != shouldInsert else {
+                continue
+            }
+
+            child.isInserted = shouldInsert
+            children[id] = child
+            if shouldInsert {
+                parentSubgraph.addSecondaryChild(child.subgraph)
+                child.subgraph.didReinsert()
+                child.outputs.attachIndirectOutputs(to: outputs)
+            } else {
+                child.subgraph.willRemove()
+                child.subgraph.removeFromParent()
+            }
+        }
+    }
+
+    /// Materializes one candidate in a detached subgraph for later selection.
     private func makeChild(
-        id: _ViewList_ID.Canonical,
         sublist: _ViewList_Sublist,
-        offset: Int,
-        in graph: _AGGraph
+        offset: Int
     ) -> Child {
-        let subgraph = AGSubgraph()
-        let posAttr = graph.makeInput(value: CGPoint.zero)
-        let sizeAttr = graph.makeInput(value: ViewSize(.zero))
-        let selectedInput = graph.makeInput(value: false)
-        let phaseAttr: Attribute<Phase> = graph.makeRule(
-            SizeFittingChildPhase(parentPhase: inputs.base.phase, selected: selectedInput)
-        )
+        // Candidate nodes are born detached. Only the chosen candidate is added
+        // to the parent subgraph; detached candidates remain measurable.
+        let subgraph = AGSubgraph(parent: nil)
         let release = sublist.elements.retain()
-        var baseInputs = inputs
-        baseInputs.copyCaches()
-        baseInputs.base[ViewPhaseOverride.self] = OptionalAttribute(phaseAttr)
-
+        var childInputs = inputs
+        childInputs.copyCaches()
         let outputs = AGSubgraph.withCurrent(subgraph) {
-            sublist.elements.makeOneElement(at: offset, inputs: baseInputs) { elementInputs, makeView in
-                var childInputs = elementInputs
-                childInputs.position = posAttr
-                childInputs.size = sizeAttr
-                childInputs.transform = inputs.transform
-                childInputs.containerPosition = inputs.position
-                childInputs.safeAreaInsets = inputs.safeAreaInsets
-                childInputs.containerSize = OptionalAttribute(inputs.size)
-                return makeView(childInputs)
+            sublist.elements.makeOneElement(at: offset, inputs: childInputs) { elementInputs, makeView in
+                makeView(elementInputs)
             }
-        } ?? _ViewOutputs()
-
-        let wrappedLC: Attribute<LayoutComputer>?
-        if let lcAttr = outputs._layoutComputer.attribute {
-            wrappedLC = graph.makeRule {
-                let innerLC = lcAttr.value
-                return LayoutComputer(
-                    sizeThatFits: { innerLC.sizeThatFits($0) },
-                    spacing: innerLC.spacing(),
-                    place: { position, anchor, proposal in
-                        let resolvedSize = innerLC.sizeThatFits(_ProposedSize(proposal))
-                        let origin = CGPoint(
-                            x: position.x - resolvedSize.width * anchor.x,
-                            y: position.y - resolvedSize.height * anchor.y
-                        )
-                        posAttr.setValue(origin)
-                        sizeAttr.setValue(ViewSize(resolvedSize))
-                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                    },
-                    explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
-                )
-            }
-        } else {
-            wrappedLC = nil
+        }
+        guard let outputs else {
+            fatalError("ViewThatFits requires each fitting candidate to materialize one element.")
         }
 
-        var wrappedOutputs = outputs
-        if let wrappedLC {
-            wrappedOutputs._layoutComputer = OptionalAttribute(wrappedLC)
-        }
         return Child(
-            id: id,
             subgraph: subgraph,
-            selectedInput: selectedInput,
-            releaseElements: release,
-            outputs: wrappedOutputs,
-            layoutComputer: wrappedLC
+            release: release,
+            outputs: outputs,
+            seed: seed,
+            order: 0,
+            isInserted: false
         )
     }
-}
 
-private struct SizeFittingChildPhase: Rule {
-    typealias Value = Phase
-    var parentPhase: Attribute<Phase>
-    var selected: Attribute<Bool>
-
-    var value: Phase {
-        var phase = parentPhase.value
-        phase.isBeingRemoved = !selected.value
-        return phase
+    private func eraseChild(
+        _ id: _ViewList_ID.Canonical,
+        invalidating: Bool
+    ) {
+        guard var child = children.removeValue(forKey: id) else {
+            return
+        }
+        if child.isInserted {
+            child.subgraph.willRemove()
+            child.subgraph.removeFromParent()
+            child.isInserted = false
+        }
+        if invalidating, AGSubgraphIsValid(child.subgraph) {
+            child.subgraph.invalidate()
+        }
+        child.release = nil
     }
 }
 
-private struct SizeFittingLayoutComputer: StatefulRule {
-    typealias Value = LayoutComputer
+/// Observes the outer proposal and selects the rendered fitting candidate.
+private struct SizeFittingMux: StatefulRule, ObservedAttribute, AsyncAttribute {
+    typealias Value = ()
     var state: SizeFittingState
 
     mutating func updateValue() {
-        let capturedState = state
-        let axes = capturedState.root.value.axes
-        let initialChildren = capturedState.materializedChildren()
-        if capturedState.selectedID == nil {
-            capturedState.updateSelection(to: initialChildren.first?.id)
+        let proposal = state.inputs.size.value.proposal
+        state.applyChildren(selectLast: true) { outputs, isLast in
+            let layoutComputer = sizeFittingLayoutComputer(in: outputs)
+            let axes = state._root.value.axes
+            let measured = layoutComputer.sizeThatFits(
+                sizeFittingNaturalProposal(proposal, axes: axes)
+            )
+            return sizeFittingMeasurement(
+                measured,
+                fits: proposal,
+                axes: axes,
+                orIsLast: isLast
+            )
         }
-        let computer = LayoutComputer(
-            sizeThatFits: { proposal in
-                guard let child = SizeFittingLayoutComputer.selectChild(
-                    state: capturedState,
-                    axes: axes,
-                    proposal: proposal
-                ),
-                      let lc = child.layoutComputer?.value else { return .zero }
-                return lc.sizeThatFits(proposal)
-            },
-            spacing: {
-                initialChildren.first?.layoutComputer?.value.spacing() ?? Spacing()
-            }(),
-            place: { position, anchor, proposal in
-                guard let child = SizeFittingLayoutComputer.selectChild(
-                    state: capturedState,
-                    axes: axes,
-                    proposal: _ProposedSize(proposal)
-                ),
-                      let lc = child.layoutComputer?.value else { return }
-                lc.place(at: position, anchor: anchor, proposal: proposal)
-            },
-            explicitAlignment: { key, size in
-                guard let child = SizeFittingLayoutComputer.selectChild(
-                    state: capturedState,
-                    axes: axes,
-                    proposal: size.proposal
-                ),
-                      let lc = child.layoutComputer?.value else { return nil }
-                return lc.explicitAlignment(key, at: size)
+        _AGGraph.setStatefulOutput(())
+    }
+
+    mutating func destroy() {
+        state.invalidate()
+    }
+}
+
+/// Publishes the proposal-cached layout engine for a size-fitting root.
+private struct SizeFittingLayoutComputer: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+    var state: SizeFittingState
+
+    /// Measures candidates and forwards spacing/alignment from the selected one.
+    struct Engine: LayoutEngine {
+        var root: _SizeFittingRoot
+        var ctx: RuleContext<LayoutComputer>
+        var state: SizeFittingState
+        var sizeCache: ViewSizeCache
+
+        mutating func spacing() -> Spacing {
+            var result = Spacing()
+            ctx.update {
+                state.applyChildren(selectLast: false) { outputs, _ in
+                    result = sizeFittingLayoutComputer(in: outputs).spacing()
+                    return true
+                }
             }
+            return result
+        }
+
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            var result = CGSize.zero
+            ctx.update {
+                result = sizeCache.get(proposal) {
+                    var measured = CGSize.zero
+                    state.applyChildren(selectLast: false) { outputs, isLast in
+                        let computer = sizeFittingLayoutComputer(in: outputs)
+                        measured = computer.sizeThatFits(
+                            sizeFittingNaturalProposal(proposal, axes: root.axes)
+                        )
+                        return sizeFittingMeasurement(
+                            measured,
+                            fits: proposal,
+                            axes: root.axes,
+                            orIsLast: isLast
+                        )
+                    }
+                    return measured
+                }
+            }
+            return result
+        }
+
+        mutating func explicitAlignment(
+            _ key: AlignmentKey,
+            at size: ViewSize
+        ) -> CGFloat? {
+            var result: CGFloat?
+            ctx.update {
+                let proposal = size.proposal
+                state.applyChildren(selectLast: false) { outputs, isLast in
+                    let computer = sizeFittingLayoutComputer(in: outputs)
+                    let measured = computer.sizeThatFits(
+                        sizeFittingNaturalProposal(proposal, axes: root.axes)
+                    )
+                    let fits = sizeFittingMeasurement(
+                        measured,
+                        fits: proposal,
+                        axes: root.axes,
+                        orIsLast: isLast
+                    )
+                    if fits {
+                        result = computer.explicitAlignment(key, at: size)
+                    }
+                    return fits
+                }
+            }
+            return result
+        }
+    }
+
+    mutating func updateValue() {
+        update(
+            to: Engine(
+                root: state._root.value,
+                ctx: context,
+                state: state,
+                sizeCache: ViewSizeCache()
+            )
         )
-        _AGGraph.setStatefulOutput(computer)
     }
+}
 
-    private static func selectChild(
-        state: SizeFittingState,
-        axes: Axis.Set,
-        proposal: _ProposedSize
-    ) -> SizeFittingState.Child? {
-        let children = state.materializedChildren()
-        guard !children.isEmpty else { return nil }
-        var naturalProposal = proposal
-        if axes.contains(.horizontal) { naturalProposal.width = nil }
-        if axes.contains(.vertical) { naturalProposal.height = nil }
+private func sizeFittingLayoutComputer(
+    in outputs: _ViewOutputs
+) -> LayoutComputer {
+    outputs._layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
+}
 
-        var selectedChild: SizeFittingState.Child?
-        for child in children {
-            guard let lc = child.layoutComputer?.value else { continue }
-            let size = lc.sizeThatFits(naturalProposal)
-            var fits = true
-            if axes.contains(.horizontal), let width = proposal.width, size.width > width + 1e-6 {
-                fits = false
-            }
-            if axes.contains(.vertical), let height = proposal.height, size.height > height + 1e-6 {
-                fits = false
-            }
-            if fits {
-                selectedChild = child
-                break
-            }
-        }
-        let result = selectedChild ?? children.last
-        state.updateSelection(to: result?.id)
-        return result
+private func sizeFittingNaturalProposal(
+    _ proposal: _ProposedSize,
+    axes: Axis.Set
+) -> _ProposedSize {
+    var result = proposal
+    if axes.contains(.horizontal) {
+        result.width = nil
     }
+    if axes.contains(.vertical) {
+        result.height = nil
+    }
+    return result
+}
+
+private func sizeFittingMeasurement(
+    _ size: CGSize,
+    fits proposal: _ProposedSize,
+    axes: Axis.Set,
+    orIsLast isLast: Bool
+) -> Bool {
+    if isLast {
+        return true
+    }
+    if axes.contains(.horizontal),
+       let width = proposal.width,
+       size.width > width {
+        return false
+    }
+    if axes.contains(.vertical),
+       let height = proposal.height,
+       size.height > height {
+        return false
+    }
+    return true
 }

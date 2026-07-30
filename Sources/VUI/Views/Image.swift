@@ -270,9 +270,10 @@ final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
-// Backend image resolution can begin with a nil value, while the display-list interpolation
-// lane requires stable non-optional endpoints. This adapter ignores unresolved publication
-// boundaries and delegates resolved image changes to the image transition contract.
+/// Adapts optional backend image resolution to the display-list transition contract.
+///
+/// Resolution can begin with a nil value, while interpolation requires stable
+/// non-optional endpoints. Unresolved publication boundaries are ignored.
 private struct ResolvedImageTransitionContent: InterpolatableContent {
     var image: GraphicsContext.ResolvedImage?
 
@@ -288,6 +289,39 @@ private struct ResolvedImageTransitionContent: InterpolatableContent {
     func modifyTransition(state: inout ContentTransition.State, to target: Self) {
         guard let image, let targetImage = target.image else { return }
         image.modifyTransition(state: &state, to: targetImage)
+    }
+}
+
+/// Publishes the specialized layout engine for a resolved image attribute.
+private struct ResolvedImageLayoutComputer: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+
+    var _image: Attribute<GraphicsContext.ResolvedImage?>
+
+    mutating func updateValue() {
+        update(to: ResolvedImageLayoutEngine(image: _image.value))
+    }
+}
+
+/// Measures a resolved image and exposes its direct layout characteristics.
+private struct ResolvedImageLayoutEngine: LayoutEngine {
+    var image: GraphicsContext.ResolvedImage?
+
+    func spacing() -> Spacing {
+        Spacing()
+    }
+
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        image?.sizeThatFits(proposal) ?? .zero
+    }
+
+    func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
+        let size = sizeThatFits(proposal)
+        return axis == .horizontal ? size.width : size.height
+    }
+
+    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+        nil
     }
 }
 
@@ -2355,12 +2389,14 @@ extension Image: View {
         }
 
         // 3. Layout pass (Layout Rule)
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            let resolved = intrinsicImageAttr.value
-
-            return LayoutComputer(
-                sizeThatFits: { resolved?.sizeThatFits($0) ?? .zero }
+        let lcAttr: OptionalAttribute<LayoutComputer>
+        if inputs.requestsLayoutComputer {
+            let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                ResolvedImageLayoutComputer(_image: intrinsicImageAttr)
             )
+            lcAttr = OptionalAttribute(layoutComputer)
+        } else {
+            lcAttr = OptionalAttribute()
         }
 
         // 4. Drawing pass (DisplayList Rule)
@@ -2406,7 +2442,7 @@ extension Image: View {
         }
 
         var outputs = _ViewOutputs()
-        outputs._layoutComputer = OptionalAttribute(lcAttr)
+        outputs._layoutComputer = lcAttr
 
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)

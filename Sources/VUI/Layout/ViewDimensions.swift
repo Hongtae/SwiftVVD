@@ -63,7 +63,7 @@ public struct ViewDimensions: Equatable {
     /// Creates a stub ClosureLayoutEngine that returns the given size.
     public init(width: CGFloat, height: CGFloat) {
         let cgSize = CGSize(width: width, height: height)
-        let lc = LayoutComputer(sizeThatFits: { _ in cgSize })
+        let lc = LayoutComputer.fixed(cgSize)
         self.guideComputer = lc
         self.size = ViewSize(cgSize)
     }

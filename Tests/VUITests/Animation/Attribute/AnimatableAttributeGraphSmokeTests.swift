@@ -1005,6 +1005,10 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             size: ViewSize(width: 50, height: 60),
             transaction: sameTargetTransaction
         )
+        // The active no-change branch no longer depends on the transaction
+        // input. Advance time to evaluate that branch without manufacturing a
+        // target change.
+        harness.setTime(0.7)
         _ = harness.currentFrame()
         XCTAssertEqual(listener.addedCount, 0)
         XCTAssertEqual(listener.removedCount, 0)
@@ -1057,6 +1061,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             size: ViewSize(width: 50, height: 60),
             transaction: sameTargetTransaction
         )
+        harness.setTime(0.7)
         _ = harness.currentFrame()
         harness.flushCompletionActions()
 
@@ -1107,6 +1112,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             size: ViewSize(width: 50, height: 60),
             transaction: sameTargetTransaction
         )
+        harness.setTime(0.7)
         _ = harness.currentFrame()
 
         XCTAssertEqual(listener.addedCount, 0)
@@ -1161,6 +1167,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             size: ViewSize(width: 50, height: 60),
             transaction: sameTargetTransaction
         )
+        harness.setTime(0.7)
         _ = harness.currentFrame()
         harness.flushCompletionActions()
 

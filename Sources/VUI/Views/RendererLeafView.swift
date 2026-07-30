@@ -25,17 +25,6 @@ extension RendererLeafView {
         }
 
         var outputs = _ViewOutputs()
-        if inputs.requestsLayoutComputer {
-            let layoutComputer = graph.makeRule {
-                LayoutComputer { proposal in
-                    CGSize(
-                        width: proposal.width ?? 0,
-                        height: proposal.height ?? 0
-                    )
-                }
-            }
-            outputs._layoutComputer = OptionalAttribute(layoutComputer)
-        }
 
         let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
         var cachedEnvironment = cachedEnvironmentAttribute.value

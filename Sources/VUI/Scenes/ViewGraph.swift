@@ -452,8 +452,20 @@ class ViewGraph: ViewGraphHost {
         (rendererHost as? WindowController)?.parentWindow?.viewGraph
     }
 
+    var centersRootView: Bool = true {
+        didSet {
+            guard centersRootView != oldValue, let rootGeometry else {
+                return
+            }
+            data.withCurrent {
+                rootGeometry.invalidateValue()
+            }
+        }
+    }
+
     // AG input attributes updated by WindowController's root-value updater.
     private(set) var sizeAttr: Attribute<ViewSize>?
+    private(set) var safeAreaInsetsAttr: Attribute<_SafeAreaInsetsModifier>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
     private(set) var transactionAttr: Attribute<Transaction>?
@@ -461,6 +473,7 @@ class ViewGraph: ViewGraphHost {
 
     // AG output attributes collected after V._makeView.
     private(set) var rootAnyViewContentInput: Attribute<AnyView>?
+    private(set) var rootGeometry: Attribute<ViewGeometry>?
     private(set) var rootLayoutComputer: Attribute<LayoutComputer>?
     private(set) var rootFittedSize: Attribute<CGSize>?
     private(set) var rootDisplayList: Attribute<DisplayList>?
@@ -805,10 +818,12 @@ class ViewGraph: ViewGraphHost {
         let time = Time(seconds: 0)
 
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
+        var safeAreaInsetsAttrResult: Attribute<_SafeAreaInsetsModifier>? = nil
         var envAttrResult:   Attribute<EnvironmentValues>? = nil
         var timeAttrResult:  Attribute<Time>?              = nil
         var transactionAttrResult: Attribute<Transaction>? = nil
         var phaseAttrResult: Attribute<_GraphInputs.Phase>? = nil
+        var rootGeometryResult: Attribute<ViewGeometry>?   = nil
         var rootLCResult:    Attribute<LayoutComputer>?    = nil
         var rootSizeResult:  Attribute<CGSize>?            = nil
         var rootDLResult:    Attribute<DisplayList>?       = nil
@@ -845,9 +860,19 @@ class ViewGraph: ViewGraphHost {
             hostPreferenceKeys = hostKeysAttr
 
             let transformAttr    = g.makeInput(value: ViewTransform.identity)
-            let positionAttr     = g.makeInput(value: CGPoint.zero)
             let containerPosAttr = g.makeInput(value: CGPoint.zero)
             let sizeAttr         = g.makeInput(value: ViewSize(.zero))
+            let safeAreaInsetsAttr = g.makeInput(
+                value: _SafeAreaInsetsModifier()
+            )
+            let rootGeometry = g.makeRule(
+                RootGeometry(
+                    proposedSize: sizeAttr,
+                    safeAreaInsets: OptionalAttribute(safeAreaInsetsAttr)
+                )
+            )
+            let positionAttr = rootGeometry.origin()
+            let rootSizeAttr = rootGeometry.size()
             var viewInputs = _ViewInputs(
                 base: graphInputs,
                 customInputs: PropertyList(),
@@ -855,7 +880,7 @@ class ViewGraph: ViewGraphHost {
                 transform: transformAttr,
                 position: positionAttr,
                 containerPosition: containerPosAttr,
-                size: sizeAttr,
+                size: rootSizeAttr,
                 safeAreaInsets: OptionalAttribute(),
                 containerSize: OptionalAttribute(),
                 stackOrientation: nil
@@ -865,8 +890,26 @@ class ViewGraph: ViewGraphHost {
             featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
             viewInputs.makeRootMatchedGeometryScope()
 
+            let layoutDirection = viewInputs.base.cachedEnvironment.value.attribute(
+                id: .layoutDirection
+            ) {
+                $0.layoutDirection
+            }
+            rootGeometry.mutateBody(
+                as: RootGeometry.self,
+                invalidating: true
+            ) {
+                $0.layoutDirection = OptionalAttribute(layoutDirection)
+            }
+
             // GestureResponder.init reads the shared gesture graph from ViewGraph.
             var outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
+            rootGeometry.mutateBody(
+                as: RootGeometry.self,
+                invalidating: true
+            ) {
+                $0.childLayoutComputer = outputs._layoutComputer
+            }
             featureBuffer.modifyViewOutputs(outputs: &outputs, inputs: viewInputs, graph: self)
             makePreferenceOutlets(outputs: outputs)
 
@@ -971,18 +1014,22 @@ class ViewGraph: ViewGraphHost {
             }
 
             sizeAttrResult  = sizeAttr
+            safeAreaInsetsAttrResult = safeAreaInsetsAttr
             envAttrResult   = envAttr
             timeAttrResult  = timeAttr
             transactionAttrResult = transactionAttr
             phaseAttrResult = phaseAttr
+            rootGeometryResult = rootGeometry
             }
         }
 
         self.sizeAttr           = sizeAttrResult
+        self.safeAreaInsetsAttr = safeAreaInsetsAttrResult
         self.envAttr            = envAttrResult
         self.timeAttr           = timeAttrResult
         self.transactionAttr    = transactionAttrResult
         self.phaseAttr          = phaseAttrResult
+        self.rootGeometry       = rootGeometryResult
         self.rootLayoutComputer = rootLCResult
         self.rootFittedSize     = rootSizeResult
         self.rootDisplayList    = rootDLResult

@@ -27,6 +27,25 @@ private struct TextVariantTestLayoutEngine: LayoutEngine {
     }
 }
 
+private final class TextVariantTestRendererBox: TextRendererBoxBase {
+    override var environment: EnvironmentValues { EnvironmentValues() }
+
+    override func draw(layout: Text.Layout, in context: inout GraphicsContext) {}
+
+    override func textLayoutBounds(size: CGSize, text: TextProxy) -> CGRect {
+        CGRect(origin: .zero, size: size)
+    }
+
+    override func sizeThatFits(
+        proposal: ProposedViewSize,
+        text: TextProxy
+    ) -> CGSize {
+        text.sizeThatFits(proposal)
+    }
+
+    override var displayPadding: EdgeInsets { EdgeInsets() }
+}
+
 private struct TextVariantTestResolver: SizeFittingTextResolver {
     struct Input {
         var markers: [Int]
@@ -46,7 +65,7 @@ private struct TextVariantTestResolver: SizeFittingTextResolver {
         return SizeFittingTextCacheValue(
             text: input.texts[index],
             engine: TextVariantTestLayoutEngine(marker: input.markers[index]),
-            renderer: nil
+            renderer: TextVariantTestRendererBox()
         )
     }
 }
@@ -145,7 +164,10 @@ private struct TestDateRangeDiscreteStringStyle: DiscreteFormatStyle {
 }
 
 private func makeVariantText(unique: Bool = true) -> ResolvedStyledText {
-    ResolvedStyledText(features: unique ? [.isUniqueSizeVariant] : [])
+    ResolvedStyledText(
+        features: unique ? [.isUniqueSizeVariant] : [],
+        resolvedText: GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+    )
 }
 
 final class TextVariantPreferenceTests: XCTestCase {
@@ -930,7 +952,9 @@ final class TextVariantPreferenceTests: XCTestCase {
                 inputs: ordinaryInputs
             )
             let ordinaryComputer = ordinary._layoutComputer.attribute!.value
-            XCTAssertTrue(ordinaryComputer.box is LayoutEngineBox<ClosureLayoutEngine>)
+            XCTAssertTrue(
+                ordinaryComputer.box is LayoutEngineBox<StyledTextLayoutEngine>
+            )
 
             var sizeDependentInputs = makeViewInputs(graph: graph)
             sizeDependentInputs.base[VariantThatFitsFlag.self] = true

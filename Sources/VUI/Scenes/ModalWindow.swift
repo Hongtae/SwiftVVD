@@ -291,9 +291,7 @@ final class ModalPresentationContext: @unchecked Sendable {
 
         let sizeChanged = fittedSize != windowSize
         windowSize = fittedSize
-        placeRoot(controller: controller,
-                  layoutComputer: layoutComputer,
-                  fittedSize: fittedSize)
+        setRootSize(controller: controller, fittedSize: fittedSize)
         needsInputPlacement = false
 
         if let platformWindow = controller.window {
@@ -333,9 +331,7 @@ final class ModalPresentationContext: @unchecked Sendable {
             windowSize = fittedContentSize(controller: controller,
                                            layoutComputer: layoutComputer)
         }
-        placeRoot(controller: controller,
-                  layoutComputer: layoutComputer,
-                  fittedSize: windowSize)
+        setRootSize(controller: controller, fittedSize: windowSize)
         needsInputPlacement = false
     }
 
@@ -356,16 +352,14 @@ final class ModalPresentationContext: @unchecked Sendable {
         return fittedSize
     }
 
-    private func placeRoot(controller: WindowController,
-                           layoutComputer: Attribute<LayoutComputer>,
-                           fittedSize: CGSize) {
+    /// Publishes the fitted host size as the root proposal. `RootGeometry`
+    /// owns content measurement and positioning through graph invalidation.
+    private func setRootSize(
+        controller: WindowController,
+        fittedSize: CGSize
+    ) {
         controller.viewGraph.data.withCurrent {
             controller.viewGraph.sizeAttr?.setValue(ViewSize(fittedSize))
-            let center = CGPoint(x: fittedSize.width * 0.5,
-                                 y: fittedSize.height * 0.5)
-            layoutComputer.value.place(at: center,
-                                       anchor: .center,
-                                       proposal: ProposedViewSize(fittedSize))
         }
     }
 

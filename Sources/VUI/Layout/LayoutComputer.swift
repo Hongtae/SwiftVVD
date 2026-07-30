@@ -49,30 +49,24 @@ extension Attribute {
 }
 
 /// Encapsulates a view's layout logic via a boxed layout engine.
-/// `changeCount` participates in equality and graph dependency tracking.
 struct LayoutComputer: Defaultable {
-    /// The boxed layout engine. Holds a LayoutEngineBox<E> for some concrete E.
-    /// Typed as a class-bound layout-engine dispatch existential.
-    var box: any _AnyLayoutEngineBoxDispatch
-
-    /// Monotonically increasing counter; incremented each time the engine value changes.
-    /// Used for equality testing and AG dependency tracking.
-    var changeCount: UInt
+    var box: AnyLayoutEngineBox
+    var seed: Int
 
     // MARK: - Forwarding methods
 
     func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-        box.sizeThatFits_(proposal)
+        box.sizeThatFits(proposal)
     }
 
     func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
-        box.lengthThatFits_(proposal, in: axis)
+        box.lengthThatFits(proposal, in: axis)
     }
 
-    func spacing() -> Spacing { box.spacing_() }
-    func layoutPriority() -> Double { box.layoutPriority_() }
-    func ignoresAutomaticPadding() -> Bool { box.ignoresAutomaticPadding_() }
-    func requiresSpacingProjection() -> Bool { box.requiresSpacingProjection_() }
+    func spacing() -> Spacing { box.spacing() }
+    func layoutPriority() -> Double { box.layoutPriority() }
+    func ignoresAutomaticPadding() -> Bool { box.ignoresAutomaticPadding() }
+    func requiresSpacingProjection() -> Bool { box.requiresSpacingProjection() }
 
     /// Returns layout dimensions for the given proposal.
     /// Creates ViewDimensions with self as guideComputer.
@@ -86,75 +80,86 @@ struct LayoutComputer: Defaultable {
     }
 
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
-        box.childGeometries_(at: size, origin: origin)
+        box.childGeometries(at: size, origin: origin)
     }
 
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
-        box.explicitAlignment_(key, at: size)
+        box.explicitAlignment(key, at: size)
     }
 
     func childPlacement(at size: ViewSize) -> _Placement {
-        box.childPlacement_(at: size)
+        box.childPlacement(at: size)
     }
 
     func childPlacement(
         at size: ViewSize,
         placementContext: _PositionAwarePlacementContext
     ) -> _Placement {
-        box.childPlacement_(at: size, placementContext: placementContext)
-    }
-
-    /// Places this view at position relative to anchor.
-    /// Writes resolved origin/size into the child's AG position/size attributes.
-    func place(at position: CGPoint,
-               anchor: UnitPoint = .topLeading,
-               proposal: ProposedViewSize) {
-        box.place_(position, anchor, proposal)
+        box.childPlacement(at: size, placementContext: placementContext)
     }
 
     // MARK: - Initializers
 
-    init(
-        sizeThatFits: @escaping (_ProposedSize) -> CGSize,
-        spacing: Spacing = Spacing(),
-        place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
-        childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
-        priority: Double = 0,
-        explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil,
-        changeCount: UInt = 0
-    ) {
-        let engine = ClosureLayoutEngine(
-            sizeThatFits: sizeThatFits,
-            spacing: spacing,
-            place: place,
-            childGeometries: childGeometries,
-            priority: priority,
-            explicitAlignment: explicitAlignment
-        )
-        self.box = LayoutEngineBox(engine: engine)
-        self.changeCount = changeCount
-    }
-
-    init(box: some _AnyLayoutEngineBoxDispatch, changeCount: UInt = 0) {
-        self.box = box
-        self.changeCount = changeCount
+    init<Engine: LayoutEngine>(_ engine: Engine) {
+        if LayoutTrace.recorder != nil {
+            box = TracingLayoutEngineBox(engine)
+        } else {
+            box = LayoutEngineBox(engine)
+        }
+        seed = 0
     }
 
     // MARK: - Static helpers
 
     static func fixed(_ size: CGSize) -> LayoutComputer {
-        LayoutComputer(sizeThatFits: { _ in size })
+        LayoutComputer(FixedEngine(size: size))
     }
 
-    // Shared zero-size sentinel used by layout proxy and subview fallback paths.
-    nonisolated(unsafe) private static let _defaultValue = LayoutComputer(sizeThatFits: { _ in .zero })
+    /// Local fixed-size adapter for surfaces that do not yet own a concrete
+    /// layout engine.
+    ///
+    /// Keep this private and keep production call sites narrow. It can be
+    /// removed once each caller publishes its own role-specific layout engine;
+    /// it must not become part of the shared layout-engine hierarchy.
+    private struct FixedEngine: LayoutEngine {
+        var size: CGSize
+
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            size
+        }
+    }
+
+    /// Supplies proposal-derived fallback sizing when no concrete engine is connected.
+    struct DefaultEngine: LayoutEngine {
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            proposal.fixingUnspecifiedDimensions()
+        }
+
+        mutating func lengthThatFits(
+            _ proposal: _ProposedSize,
+            in axis: Axis
+        ) -> CGFloat {
+            let size = proposal.fixingUnspecifiedDimensions()
+            return axis == .horizontal ? size.width : size.height
+        }
+
+        mutating func childGeometries(
+            at size: ViewSize,
+            origin: CGPoint
+        ) -> [ViewGeometry] {
+            []
+        }
+    }
+
+    nonisolated(unsafe) private static let _defaultValue =
+        LayoutComputer(DefaultEngine())
 
     static var defaultValue: LayoutComputer { _defaultValue }
 }
 
 extension LayoutComputer: Equatable {
     static func == (lhs: LayoutComputer, rhs: LayoutComputer) -> Bool {
-        lhs.box === rhs.box && lhs.changeCount == rhs.changeCount
+        lhs.box === rhs.box && lhs.seed == rhs.seed
     }
 }
 
@@ -162,10 +167,7 @@ extension LayoutComputer {
     mutating func withMutableEngine<Engine: LayoutEngine, Result>(
         type: Engine.Type,
         do body: (inout Engine) -> Result
-    ) -> Result? {
-        guard let box = box as? LayoutEngineBox<Engine> else {
-            return nil
-        }
-        return body(&box.engine)
+    ) -> Result {
+        box.mutateEngine(as: type, do: body)
     }
 }

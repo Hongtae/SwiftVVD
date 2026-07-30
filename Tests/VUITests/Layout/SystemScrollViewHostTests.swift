@@ -7,7 +7,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         _AGGraph.withCurrent(graph) {
             _ = graph.makeInput(value: ())
             var observedProposal: _ProposedSize?
-            let contentComputer = LayoutComputer(sizeThatFits: { proposal in
+            let contentComputer = testLayoutComputer(sizeThatFits: { proposal in
                 observedProposal = proposal
                 return CGSize(width: 240, height: 30)
             })
@@ -36,7 +36,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         _AGGraph.withCurrent(graph) {
             _ = graph.makeInput(value: ())
             var observedProposal: _ProposedSize?
-            let contentComputer = LayoutComputer(sizeThatFits: { proposal in
+            let contentComputer = testLayoutComputer(sizeThatFits: { proposal in
                 observedProposal = proposal
                 return CGSize(width: 75, height: 260)
             })

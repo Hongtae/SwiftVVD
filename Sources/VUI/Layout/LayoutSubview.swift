@@ -15,7 +15,8 @@ struct LayoutProxyAttributes: Equatable {
     /// Optional AG attribute for the child's layout computation.
     var layoutComputer: OptionalAttribute<LayoutComputer>
     /// Optional AG attribute for this child's ViewList (used for trait access).
-    /// Reading `.value.traits` inside a layout rule registers a re-layout dependency.
+    /// LayoutProxy reads it through the explicit owner context so trait changes
+    /// invalidate the layout rule that constructed the proxy.
     var traitsList: OptionalAttribute<any ViewList>
 
     init(
@@ -49,19 +50,14 @@ struct LayoutProxyAttributes: Equatable {
 
 // MARK: - LayoutProxy
 
-/// Proxy for a child view in a Layout.
-/// Dependency tracking uses AG thread-local reads.
+/// Child-layout carrier whose context identifies the rule that owns its reads.
+///
+/// The context is supplied by the caller rather than inferred from the child
+/// computer. Reading the child's computer or trait list relative to that owner
+/// makes invalidation return to the rule that created the proxy.
 struct LayoutProxy: Equatable {
     var context: AnyRuleContext
     var attributes: LayoutProxyAttributes
-
-    init(attributes: LayoutProxyAttributes) {
-        let contextAttribute = _AGGraph.currentRuleContextAttribute ??
-            attributes.layoutComputer.attribute?.identifier ??
-            .invalid
-        self.context = AnyRuleContext(attribute: contextAttribute)
-        self.attributes = attributes
-    }
 
     init(context: AnyRuleContext, attributes: LayoutProxyAttributes) {
         self.context = context
@@ -79,7 +75,7 @@ struct LayoutProxy: Equatable {
         )
     }
 
-    /// The child's LayoutComputer value (reads AG attribute; registers dependency).
+    /// Reads the child computer relative to the rule that owns this proxy.
     var layoutComputer: LayoutComputer {
         guard let attr = attributes.layoutComputer.attribute else {
             return LayoutComputer.defaultValue
@@ -91,9 +87,10 @@ struct LayoutProxy: Equatable {
         layoutComputer.dimensions(in: proposal)
     }
 
-    /// The child's ViewTraitCollection if a traitsList attribute is present.
-    /// Reading the traitsList attribute registers a layout dependency.
-    /// Returns nil if no traitsList attribute is set.
+    /// Reads the list-level trait collection relative to the proxy owner.
+    ///
+    /// The list attribute, rather than a copied collection, is retained so a
+    /// trait-only change invalidates the same layout rule on its next read.
     var traits: ViewTraitCollection? {
         guard let traitsList = attributes.traitsList.attribute else {
             return nil
@@ -125,6 +122,7 @@ struct LayoutProxy: Equatable {
     }
 }
 
+/// Child attributes that all inherit one evaluating-rule context.
 struct LayoutProxyCollection: RandomAccessCollection {
     typealias Index = Int
     typealias Element = LayoutProxy
@@ -221,6 +219,10 @@ extension ViewGeometry {
     }
 }
 
+/// Locally scopes the placement buffer installed for one layout pass.
+///
+/// The thread-local slot prevents concurrent passes from sharing a pointer,
+/// while `setGeometry` centralizes bounds, lock, and direction checks.
 enum ThreadLayoutData {
     private static let placementData = _AGThreadLocal<UnsafeMutablePointer<PlacementData>?>(nil)
 
@@ -313,12 +315,12 @@ public struct LayoutSubview: Equatable {
     }
 
     func place(in geometry: ViewGeometry, layoutDirection: LayoutDirection) {
-        if !ThreadLayoutData.setGeometry(geometry,
-                                         at: Int(index),
-                                         layoutDirection: layoutDirection) {
-            proxy.layoutComputer.place(at: geometry.origin,
-                                       anchor: .topLeading,
-                                       proposal: ProposedViewSize(geometry.dimensions.size.proposal))
+        guard ThreadLayoutData.setGeometry(
+            geometry,
+            at: Int(index),
+            layoutDirection: layoutDirection
+        ) else {
+            fatalError("LayoutSubview.place called outside an active placement pass.")
         }
     }
 

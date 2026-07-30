@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Synchronization
 
 protocol LeafViewLayout {
     func spacing() -> Spacing
@@ -29,7 +28,7 @@ extension LeafViewLayout {
         }
 
         let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
-            LeafLayoutComputer(view: view._attribute)
+            LeafLayoutComputer(_view: view._attribute)
         )
         outputs._layoutComputer = OptionalAttribute(layoutComputer)
     }
@@ -38,25 +37,30 @@ extension LeafViewLayout {
 private struct LeafLayoutComputer<Leaf: LeafViewLayout>: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
-    var view: Attribute<Leaf>
+    var _view: Attribute<Leaf>
 
     mutating func updateValue() {
-        let engine = LeafLayoutEngine(view: view.value)
-        _AGGraph.setStatefulOutput(
-            LayoutComputer(box: LayoutEngineBox(engine: engine))
+        update(
+            to: LeafLayoutEngine(
+                view: _view.value,
+                cache: ViewSizeCache()
+            )
         )
     }
 }
 
 struct LeafLayoutEngine<Leaf: LeafViewLayout>: LayoutEngine {
     var view: Leaf
+    var cache: ViewSizeCache
 
     func spacing() -> Spacing {
         view.spacing()
     }
 
-    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-        view.sizeThatFits(in: proposal)
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        cache.get(proposal) {
+            view.sizeThatFits(in: proposal)
+        }
     }
 }
 
@@ -71,7 +75,10 @@ struct LayoutChildGeometries: Rule, AsyncAttribute {
     var layoutComputer: Attribute<LayoutComputer>
     var value: [ViewGeometry] {
         let lc = layoutComputer.value
-        return lc.box.childGeometries_(at: parentSize.value, origin: parentPosition.value)
+        return lc.childGeometries(
+            at: parentSize.value,
+            origin: parentPosition.value
+        )
     }
 }
 
@@ -170,18 +177,47 @@ private struct LayoutGeometryPlacementState: Rule {
     }
 }
 
-/// Shared bridge from dynamic-container item identity back to scroll item geometry.
+/// Type-erased construction bridge used while a dynamic container materializes
+/// a child owned by a concrete scrollable layout.
+///
+/// The factory itself does not calculate geometry. It preserves the generic
+/// `Data.Index` and layout-state types inside the concrete rule created by the
+/// scrollable layout adaptor.
 final class ScrollableLayoutItemGeometryContext {
-    var layoutDirection: Attribute<LayoutDirection>
-    var containerInfo: Attribute<DynamicContainer.Info>?
-    var placement: (AnyHashable) -> _Placement?
+    /// Locally erases construction while preserving the concrete collection
+    /// index and layout-state types inside the scroll adaptor.
+    ///
+    /// This alias owns no measurement or placement algorithm. Revisit it only
+    /// if this context becomes generic or geometry construction moves entirely
+    /// into the concrete adaptor.
+    typealias GeometryFactory = (
+        _ context: ScrollableLayoutItemGeometryContext,
+        _ uniqueId: _ViewList_ID.Canonical,
+        _ parentPosition: Attribute<CGPoint>,
+        _ parentSize: Attribute<ViewSize>,
+        _ childLayoutComputer: OptionalAttribute<LayoutComputer>
+    ) -> Attribute<ViewGeometry>
 
-    init(
-        layoutDirection: Attribute<LayoutDirection>,
-        placement: @escaping (AnyHashable) -> _Placement?
-    ) {
-        self.layoutDirection = layoutDirection
-        self.placement = placement
+    var containerInfo: Attribute<DynamicContainer.Info>?
+    private var geometryFactory: GeometryFactory
+
+    init(makeGeometry: @escaping GeometryFactory) {
+        self.geometryFactory = makeGeometry
+    }
+
+    func makeGeometry(
+        uniqueId: _ViewList_ID.Canonical,
+        parentPosition: Attribute<CGPoint>,
+        parentSize: Attribute<ViewSize>,
+        childLayoutComputer: OptionalAttribute<LayoutComputer>
+    ) -> Attribute<ViewGeometry> {
+        geometryFactory(
+            self,
+            uniqueId,
+            parentPosition,
+            parentSize,
+            childLayoutComputer
+        )
     }
 
     func identifier(for uniqueId: _ViewList_ID.Canonical) -> AnyHashable? {
@@ -204,72 +240,16 @@ struct ScrollableLayoutItemGeometryContextKey: ViewInput {
     }
 }
 
-/// Resolves a dynamic list unique id to the scroll layout's item identifier.
-private struct ScrollableItemIdentifier: Rule {
-    typealias Value = AnyHashable?
+/// Resolves a dynamic-container identity to the concrete collection index used
+/// as the key in a scrollable layout's placement state.
+struct ScrollableItemIdentifier<Index: Hashable>: Rule {
+    typealias Value = Index?
 
     var uniqueId: _ViewList_ID.Canonical
     var context: ScrollableLayoutItemGeometryContext
 
-    var value: AnyHashable? {
-        context.identifier(for: uniqueId)
-    }
-}
-
-/// Publishes geometry that keeps scroll item placement and child layout in sync.
-private struct ScrollableItemGeometry: Rule {
-    typealias Value = ViewGeometry
-
-    var identifier: Attribute<AnyHashable?>
-    var context: ScrollableLayoutItemGeometryContext
-    var position: Attribute<CGPoint>
-    var size: Attribute<ViewSize>
-    var layoutComputer: Attribute<LayoutComputer>
-
-    var value: ViewGeometry {
-        guard let identifier = identifier.value,
-              let placement = context.placement(identifier) else {
-            return ViewGeometry(
-                origin: .zero,
-                dimensions: ViewDimensions(guideComputer: .defaultValue, size: .zero)
-            )
-        }
-        let layoutDirection = context.layoutDirection.value
-        let resolvedSize = size.value
-        let proxy = LayoutProxy(
-            attributes: LayoutProxyAttributes(layoutComputer: layoutComputer)
-        )
-        var geometry = proxy.finallyPlaced(
-            at: placement,
-            in: resolvedSize.value,
-            layoutDirection: layoutDirection
-        )
-        let origin = position.value
-        geometry.origin.x += origin.x
-        geometry.origin.y += origin.y
-        return geometry
-    }
-}
-
-/// Projection rule for child-facing position inputs rewritten by scroll layout.
-private struct ScrollableItemGeometryPosition: Rule {
-    typealias Value = CGPoint
-
-    var geometry: Attribute<ViewGeometry>
-
-    var value: CGPoint {
-        geometry.value.origin
-    }
-}
-
-/// Projection rule for child-facing size inputs rewritten by scroll layout.
-private struct ScrollableItemGeometrySize: Rule {
-    typealias Value = ViewSize
-
-    var geometry: Attribute<ViewGeometry>
-
-    var value: ViewSize {
-        geometry.value.dimensions.size
+    var value: Index? {
+        context.identifier(for: uniqueId)?.base as? Index
     }
 }
 
@@ -297,20 +277,21 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, Cu
 
 /// Dynamic container storage used by DynamicContainerInfo.
 enum DynamicContainer {
+    /// Counts the removal baseline and registered animations for one retained item.
+    ///
+    /// Registration, baseline release, and completion are serialized by the
+    /// owning graph/update lane. Keep the counter and completion flags as plain
+    /// state so the zero-count transition stays ordered with graph invalidation.
     final class TransitionRemovalListener: AnimationListener, @unchecked Sendable {
-        private struct State {
-            var seedValue: UInt32 = 0
-            var animationCount = 0
-            var completionInstalled = false
-            var completed = false
-            var completionPublished = false
-        }
-
         private weak var host: GraphHost?
         private let invalidationTarget: AGWeakAttribute?
         private let seed: Attribute<UInt32>?
         private let inbox: AGInbox?
-        private let state = Mutex(State())
+        private var seedValue: UInt32 = 0
+        private var animationCount = 0
+        private var completionInstalled = false
+        private var completed = false
+        private var completionPublished = false
 
         init(host: GraphHost, invalidationTarget: AGWeakAttribute) {
             self.host = host
@@ -319,6 +300,9 @@ enum DynamicContainer {
             self.inbox = nil
         }
 
+        /// Test-only adapter for exercising no-registration completion
+        /// scheduling without a graph host. Production dynamic-container
+        /// removal uses the weak-host/weak-target initializer above.
         init(seed: Attribute<UInt32>, inbox: AGInbox) {
             self.host = nil
             self.invalidationTarget = nil
@@ -327,11 +311,11 @@ enum DynamicContainer {
         }
 
         var isComplete: Bool {
-            state.withLock { $0.completed }
+            completed
         }
 
         var isCompletionPublished: Bool {
-            state.withLock { $0.completionPublished }
+            completionPublished
         }
 
         func readSeed() {
@@ -343,20 +327,15 @@ enum DynamicContainer {
         }
 
         override func animationWasAdded() {
-            state.withLock { state in
-                state.animationCount += 1
-            }
+            animationCount += 1
         }
 
         override func animationWasRemoved() -> [() -> Void] {
-            let shouldComplete = state.withLock { state in
-                guard state.animationCount > 0 else {
-                    return false
-                }
-                state.animationCount -= 1
-                return state.animationCount == 0 && !state.completed
+            guard animationCount > 0 else {
+                return []
             }
-            guard shouldComplete else {
+            animationCount -= 1
+            guard animationCount == 0, !completed else {
                 return []
             }
             return [{ [weak self] in
@@ -372,16 +351,10 @@ enum DynamicContainer {
         }
 
         func installCompletion(into transaction: inout Transaction) -> AnimationCompletionObserver? {
-            let shouldInstall = state.withLock { state in
-                guard !state.completionInstalled else {
-                    return false
-                }
-                state.completionInstalled = true
-                return true
-            }
-            guard shouldInstall else {
+            guard !completionInstalled else {
                 return transaction.animationCompletionObserver
             }
+            completionInstalled = true
 
             transaction.addAnimationCompletion(
                 criteria: .removed,
@@ -393,16 +366,10 @@ enum DynamicContainer {
         }
 
         private func complete() {
-            let shouldComplete = state.withLock { state in
-                guard !state.completed else {
-                    return false
-                }
-                state.completed = true
-                return true
-            }
-            guard shouldComplete else {
+            guard !completed else {
                 return
             }
+            completed = true
 
             if let host, let invalidationTarget {
                 host.continueTransaction(invalidating: invalidationTarget)
@@ -412,14 +379,10 @@ enum DynamicContainer {
             guard let seed, let inbox else {
                 return
             }
-            let nextSeed = state.withLock { state in
-                state.seedValue &+= 1
-                return state.seedValue
-            }
+            seedValue &+= 1
+            let nextSeed = seedValue
             inbox.enqueue { [weak self] in
-                self?.state.withLock { state in
-                    state.completionPublished = true
-                }
+                self?.completionPublished = true
                 seed.setValue(nextSeed)
             }
         }
@@ -1232,37 +1195,31 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                             graph.makeRule(LayoutGeometryPlacementState(geometry: geometryAttr))
                         )
                     }
-                    let childTransform: Attribute<ViewTransform> = graph.makeRule {
-                        var t = parentTransform.value
-                        t.appendPosition(posAttr.value)
-                        return t
-                    }
-                    childInputs.position = posAttr
-                    childInputs.size = sizeAttr
+                    var childPosition = posAttr
+                    var childSize = sizeAttr
                     if let scrollContext, let scrollLayoutComputer {
-                        let identifierAttr = graph.makeRule(
-                            ScrollableItemIdentifier(uniqueId: uniqueId, context: scrollContext)
-                        )
-                        let geometryAttr = graph.makeRule(
-                            ScrollableItemGeometry(
-                                identifier: identifierAttr,
-                                context: scrollContext,
-                                position: fallbackPosAttr,
-                                size: fallbackSizeAttr,
-                                layoutComputer: scrollLayoutComputer
-                            )
+                        let geometryAttr = scrollContext.makeGeometry(
+                            uniqueId: uniqueId,
+                            parentPosition: fallbackPosAttr,
+                            parentSize: fallbackSizeAttr,
+                            childLayoutComputer: OptionalAttribute(scrollLayoutComputer)
                         )
                         if childInputs.needsGeometry {
-                            childInputs.size = graph.makeRule(
-                                ScrollableItemGeometrySize(geometry: geometryAttr)
-                            )
-                            childInputs.position = graph.makeRule(
-                                ScrollableItemGeometryPosition(geometry: geometryAttr)
-                            )
+                            // Both fields project from one placement rule so a
+                            // child cannot observe position from one scroll
+                            // state and size from another.
+                            childSize = geometryAttr.size()
+                            childPosition = geometryAttr.origin()
                             childInputs.requestsLayoutComputer = true
                         }
                     }
-                    childInputs.transform = childTransform
+                    childInputs.position = childPosition
+                    childInputs.size = childSize
+                    childInputs.transform = graph.makeRule {
+                        var transform = parentTransform.value
+                        transform.appendPosition(childPosition.value)
+                        return transform
+                    }
                     childInputs.containerPosition = capturedInputs.position
                     childInputs.safeAreaInsets = capturedInputs.safeAreaInsets
                     childInputs.containerSize = OptionalAttribute(capturedInputs.size)
@@ -1440,7 +1397,7 @@ private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContaine
     }
 
     func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
-        viewList.value.firstOffset(forID: id, style: _ViewList_IteratorStyle())
+        viewList.value.firstOffset(of: id)
     }
 
     func applyCollectionViewIDs(

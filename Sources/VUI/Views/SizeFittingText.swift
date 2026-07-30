@@ -170,7 +170,30 @@ struct SizeFittingTextCacheValue<Engine: LayoutEngine> {
     var renderer: TextRendererBoxBase?
 
     mutating func truncates(in proposal: ProposedViewSize) -> Bool {
-        engine.truncates(_ProposedSize(proposal))
+        guard let resolved = text.resolvedText else { return false }
+        if renderer != nil {
+            let ideal = engine.sizeThatFits(.unspecified)
+            return proposal.width.map { ideal.width > $0 } == true ||
+                proposal.height.map { ideal.height > $0 } == true
+        }
+        if proposal.width == nil, proposal.height == nil {
+            return false
+        }
+        let layout = resolved.makeLayout(
+            in: CGSize(
+                width: proposal.width ?? .infinity,
+                height: proposal.height ?? .infinity
+            ),
+            layoutDirection: .leftToRight
+        )
+        if layout.isTruncated {
+            return true
+        }
+        if let lineLimit = text.layoutProperties.lineLimit,
+           layout.count > lineLimit {
+            return true
+        }
+        return false
     }
 
     mutating func fits(_ proposal: ProposedViewSize) -> Bool {
@@ -357,6 +380,7 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
     }
 }
 
+/// Measures resolved styled text and answers its baseline alignment guides.
 struct StyledTextLayoutEngine: LayoutEngine {
     var text: ResolvedStyledText
     var renderer: TextRendererBoxBase?
@@ -374,30 +398,12 @@ struct StyledTextLayoutEngine: LayoutEngine {
         return text.sizeThatFits(_ProposedSize(proposal))
     }
 
-    func truncates(_ proposal: _ProposedSize) -> Bool {
-        let proposal = ProposedViewSize(proposal)
-        guard let resolved = text.resolvedText else { return false }
-        if renderer != nil {
-            let ideal = sizeThatFits(.unspecified)
-            return proposal.width.map { ideal.width > $0 } == true ||
-                proposal.height.map { ideal.height > $0 } == true
+    func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
+        if axis == .horizontal, proposal.width == 0 {
+            return 0
         }
-
-        let layout = resolved.makeLayout(
-            in: CGSize(
-                width: proposal.width ?? .greatestFiniteMagnitude,
-                height: proposal.height ?? .greatestFiniteMagnitude
-            ),
-            layoutDirection: .leftToRight
-        )
-        if layout.isTruncated {
-            return true
-        }
-        if let lineLimit = text.layoutProperties.lineLimit,
-           layout.count > lineLimit {
-            return true
-        }
-        return false
+        let size = sizeThatFits(proposal)
+        return axis == .horizontal ? size.width : size.height
     }
 
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
@@ -410,8 +416,30 @@ struct StyledTextLayoutEngine: LayoutEngine {
         }
         return nil
     }
+
+    var debugContentDescription: String? {
+        text.resolvedText?.attributedStorage.string
+    }
 }
 
+/// Publishes a styled-text layout engine from the current content view.
+struct StyledTextLayoutComputer: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+
+    var _textView: Attribute<StyledTextContentView>
+
+    mutating func updateValue() {
+        let textView = _textView.value
+        update(
+            to: StyledTextLayoutEngine(
+                text: textView.text,
+                renderer: textView.renderer
+            )
+        )
+    }
+}
+
+/// Selects and relinks the text variant that best fits the current view size.
 struct SizeFittingTextFilter: StatefulRule, AsyncAttribute {
     typealias Value = ResolvedStyledText
 
@@ -460,9 +488,11 @@ struct SizeFittingTextFilter: StatefulRule, AsyncAttribute {
     }
 }
 
+/// Publishes a layout computer that resolves the fitting text variant per proposal.
 struct SizeFittingTextLayoutComputer: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
+    /// Dispatches each layout query through the proposal-specific text cache value.
     struct Engine: LayoutEngine {
         var ctx: RuleContext<LayoutComputer>
         var cache: SizeFittingTextCache<ResolvedTextHelper, StickyTextSizeFittingLogic>
@@ -507,25 +537,25 @@ struct SizeFittingTextLayoutComputer: StatefulRule, AsyncAttribute {
         }
     }
 
-    var text: Attribute<ResolvedStyledText>
-    var environment: Attribute<EnvironmentValues>
-    var renderer: WeakAttribute<TextRendererBoxBase>
+    var _text: Attribute<ResolvedStyledText>
+    var _environment: Attribute<EnvironmentValues>
+    var _renderer: WeakAttribute<TextRendererBoxBase>
     var cache: SizeFittingTextCache<ResolvedTextHelper, StickyTextSizeFittingLogic>
 
     mutating func updateValue() {
-        let text = text.value
-        _ = environment.value
+        let text = _text.value
+        _ = _environment.value
         let rendererValue: TextRendererBoxBase?
-        if let graph = _AGGraph.current, renderer.isValid(in: graph) {
-            rendererValue = renderer.toStrong().value
+        if let graph = _AGGraph.current, _renderer.isValid(in: graph) {
+            rendererValue = _renderer.toStrong().value
         } else {
             rendererValue = nil
         }
-        let textChanged = _AGGraph.currentStatefulInputChanged(self.text.identifier)
+        let textChanged = _AGGraph.currentStatefulInputChanged(_text.identifier)
         let rendererChanged: Bool
-        if let graph = _AGGraph.current, renderer.isValid(in: graph) {
+        if let graph = _AGGraph.current, _renderer.isValid(in: graph) {
             rendererChanged = _AGGraph.currentStatefulInputChanged(
-                renderer.toStrong().identifier
+                _renderer.toStrong().identifier
             )
         } else {
             rendererChanged = false
@@ -536,15 +566,6 @@ struct SizeFittingTextLayoutComputer: StatefulRule, AsyncAttribute {
         }
 
         let engine = Engine(ctx: context, cache: cache)
-        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
-           let box = current.box as? LayoutEngineBox<Engine> {
-            box.engine = engine
-            current.changeCount &+= 1
-            _AGGraph.setStatefulOutput(current)
-        } else {
-            _AGGraph.setStatefulOutput(
-                LayoutComputer(box: LayoutEngineBox(engine: engine))
-            )
-        }
+        update(to: engine)
     }
 }

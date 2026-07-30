@@ -2394,12 +2394,26 @@ public struct _ScrollableLayoutView<Data, Layout>: View
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.layoutDirection
         }
-        dynamicInputs[ScrollableLayoutItemGeometryContextKey.self] = ScrollableLayoutItemGeometryContext(
-            layoutDirection: layoutDirection,
-            placement: { identifier in
-                layoutState.value.placement(for: identifier)
+        dynamicInputs[ScrollableLayoutItemGeometryContextKey.self] =
+            ScrollableLayoutItemGeometryContext { context, uniqueId, parentPosition,
+                parentSize, childLayoutComputer in
+                let identifier: Attribute<Data.Index?> = graph.makeRule(
+                    ScrollableItemIdentifier<Data.Index>(
+                        uniqueId: uniqueId,
+                        context: context
+                    )
+                )
+                return graph.makeRule(
+                    ScrollableItemGeometry<Data, Layout>(
+                        _identifier: identifier,
+                        _state: layoutState,
+                        _layoutDirection: layoutDirection,
+                        _parentPosition: parentPosition,
+                        _parentSize: parentSize,
+                        _childLayoutComputer: childLayoutComputer
+                    )
+                )
             }
-        )
         let geometryContext = dynamicInputs[ScrollableLayoutItemGeometryContextKey.self]
         let containerInfo: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
             DynamicContainerInfo(
@@ -2409,16 +2423,6 @@ public struct _ScrollableLayoutView<Data, Layout>: View
             )
         )
         geometryContext?.containerInfo = containerInfo
-        let layoutComputer: Attribute<LayoutComputer> = graph.makeRule(
-            ScrollableLayoutComputerRule(layoutState: layoutState, containerInfo: containerInfo)
-        )
-        let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
-            LayoutChildGeometries(
-                parentSize: inputs.size,
-                parentPosition: inputs.position,
-                layoutComputer: layoutComputer
-            )
-        )
 
         var preferences = PreferencesOutputs()
         var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
@@ -2447,7 +2451,6 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 data: data,
                 layoutState: layoutState,
                 containerInfo: containerInfo,
-                childGeometries: childGeometries,
                 transform: inputs.transform,
                 parentScrollable: parentScrollable,
                 childScrollables: childScrollables
@@ -2505,9 +2508,23 @@ public struct _ScrollableLayoutView<Data, Layout>: View
             )
         }
 
+        let outputLayoutComputer: OptionalAttribute<LayoutComputer>
+        if inputs.requestsLayoutComputer {
+            let contentSize = graph.subscriptNode(
+                parent: layoutState,
+                keyPath: \ScrollableLayoutStateValue<Data, Layout>.contentSize
+            )
+            let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+                ScrollableItemLayoutComputer(_contentSize: contentSize)
+            )
+            outputLayoutComputer = OptionalAttribute(layoutComputer)
+        } else {
+            outputLayoutComputer = OptionalAttribute()
+        }
+
         return _ViewOutputs(
             preferences: preferences,
-            layoutComputer: OptionalAttribute(layoutComputer)
+            layoutComputer: outputLayoutComputer
         )
     }
 }
@@ -2580,6 +2597,73 @@ private struct ScrollableLayoutStateValue<Data, Layout>
     }
 }
 
+/// Publishes only a scrollable layout's resolved content size to its parent.
+///
+/// Dynamic item placement is intentionally absent from this engine; each
+/// materialized item owns a separate `ScrollableItemGeometry` dependency.
+private struct ScrollableItemLayoutComputer: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+
+    var _contentSize: Attribute<CGSize>
+
+    /// Returns the content extent already resolved by the scrollable layout state.
+    struct _LayoutEngine: LayoutEngine {
+        var contentSize: CGSize
+
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            contentSize
+        }
+    }
+
+    mutating func updateValue() {
+        update(to: _LayoutEngine(contentSize: _contentSize.value))
+    }
+}
+
+/// Resolves one materialized scroll item from collection identity and shared
+/// layout state into the geometry consumed by that item's child graph.
+private struct ScrollableItemGeometry<Data, Layout>: Rule, AsyncAttribute
+    where Data: RandomAccessCollection,
+          Layout: _ScrollableLayout,
+          Data.Index: Hashable {
+
+    var _identifier: Attribute<Data.Index?>
+    var _state: Attribute<ScrollableLayoutStateValue<Data, Layout>>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _parentPosition: Attribute<CGPoint>
+    var _parentSize: Attribute<ViewSize>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
+
+    var value: ViewGeometry {
+        guard let identifier = _identifier.value,
+              let placement = _state.value.placements[identifier] else {
+            return .zero
+        }
+
+        guard let currentAttribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError(
+                "ScrollableItemGeometry evaluated outside an active rule context."
+            )
+        }
+        // The materialized item's geometry rule owns final measurement. The
+        // child computer must never be promoted into an inferred rule context.
+        let proxy = LayoutProxy(
+            context: AnyRuleContext(attribute: currentAttribute),
+            layoutComputer: _childLayoutComputer.attribute
+        )
+        var geometry = proxy.finallyPlaced(
+            at: placement,
+            in: _parentSize.value.value,
+            layoutDirection: _layoutDirection.value
+        )
+        let parentPosition = _parentPosition.value
+        geometry.origin.x += parentPosition.x
+        geometry.origin.y += parentPosition.y
+        return geometry
+    }
+}
+
+/// Exposes resolved dynamic layout items and nested scrollables to the scroll host.
 private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, ScrollableContainer
     where Data: RandomAccessCollection,
           Layout: _ScrollableLayout,
@@ -2588,7 +2672,6 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
     var data: Attribute<Data>
     var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
     var containerInfo: Attribute<DynamicContainer.Info>
-    var childGeometries: Attribute<[ViewGeometry]>
     var transform: Attribute<ViewTransform>
     var parentScrollable: WeakAttribute<any Scrollable>
     var childScrollables: Attribute<[any Scrollable]>?
@@ -2599,12 +2682,11 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
 
     func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
         let state = layoutState.value
-        let geometries = childGeometries.value
         let transform = transform.value
-        for (offset, index) in state.identifiers.enumerated() {
+        for index in state.identifiers {
             guard let placement = state.placements[index] else { continue }
             var stop = false
-            let frame = frame(for: geometries, at: offset) ?? frame(for: placement)
+            let frame = frame(for: placement)
             body(
                 ScrollableCollectionSubview(
                     id: _ViewList_ID(explicitID: AnyHashable(index)),
@@ -2721,15 +2803,6 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
             y: placement.anchorPosition.y - size.height * placement.anchor.y,
             width: size.width,
             height: size.height
-        )
-    }
-
-    private func frame(for geometries: [ViewGeometry], at offset: Int) -> CGRect? {
-        guard geometries.indices.contains(offset) else { return nil }
-        let geometry = geometries[offset]
-        return CGRect(
-            origin: geometry.origin,
-            size: geometry.dimensions.size.value
         )
     }
 
@@ -2937,7 +3010,7 @@ private final class ScrollableLayoutViewListState<Data, Layout>
     struct Item {
         var content: Attribute<RowContent>
         var elements: _ViewList_SubgraphElements
-        var subgraph: AGSubgraph
+        var subgraphOwner: _ViewList_Subgraph
         var traitListAttr: OptionalAttribute<ViewTraitCollection>
 
         var traits: ViewTraitCollection {
@@ -2945,8 +3018,9 @@ private final class ScrollableLayoutViewListState<Data, Layout>
         }
 
         func invalidate() {
-            subgraph.invalidate()
-            subgraph.removeFromParent()
+            // Release the source-list ownership without bypassing retain tokens
+            // held by a materialized dynamic item.
+            subgraphOwner.release()
         }
     }
 
@@ -2955,6 +3029,7 @@ private final class ScrollableLayoutViewListState<Data, Layout>
     var inputs: _ViewListInputs
     var items: [AnyHashable: Item] = [:]
     var order: [AnyHashable] = []
+    var retainedOrder: [AnyHashable] = []
     var seed: UInt32 = 0
 
     init(
@@ -3020,24 +3095,33 @@ private final class ScrollableLayoutViewListState<Data, Layout>
                     inputs: inputs
                 )
                 var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
-                elements.wrap(subgraph: _ViewList_Subgraph(subgraph: subgraph))
+                let subgraphOwner = _ViewList_Subgraph(subgraph: subgraph)
+                elements.wrap(subgraph: subgraphOwner)
                 items[id] = Item(
                     content: contentAttr,
                     elements: elements,
-                    subgraph: subgraph,
+                    subgraphOwner: subgraphOwner,
                     traitListAttr: traitListAttr
                 )
             }
         }
 
-        var retainedUnused = Set<AnyHashable>()
-        for id in order where !liveIDs.contains(id) && retainedUnused.count < 1 {
-            retainedUnused.insert(id)
+        let sourceIDs = Set(current.data.indices.map(AnyHashable.init))
+        var retainedUnused: [AnyHashable] = []
+        for id in order + retainedOrder
+            where !liveIDs.contains(id) &&
+                sourceIDs.contains(id) &&
+                !retainedUnused.contains(id) &&
+                retainedUnused.count < 1 {
+            retainedUnused.append(id)
         }
-        for id in Array(items.keys) where !liveIDs.contains(id) && !retainedUnused.contains(id) {
+        let retainedUnusedSet = Set(retainedUnused)
+        for id in Array(items.keys)
+            where !liveIDs.contains(id) && !retainedUnusedSet.contains(id) {
             items[id]?.invalidate()
             items.removeValue(forKey: id)
         }
+        retainedOrder = retainedUnused
 
         if nextOrder != order {
             seed &+= 1
@@ -3111,78 +3195,5 @@ private struct ScrollableLayoutViewList<Data, Layout>: ViewList
             if !shouldContinue { return false }
         }
         return true
-    }
-}
-
-/// Builds a layout computer that places retained dynamic item layout computers.
-private struct ScrollableLayoutComputerRule<Data, Layout>: Rule
-    where Data: RandomAccessCollection,
-          Layout: _ScrollableLayout,
-          Data.Index: Hashable {
-
-    typealias Value = LayoutComputer
-
-    var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
-    var containerInfo: Attribute<DynamicContainer.Info>
-
-    var value: LayoutComputer {
-        let state = layoutState.value
-        let info = containerInfo.value
-        let activeItems = Array(info.activeItems)
-        let contentSize = state.contentSize
-        let placements = state.placements
-
-        for item in activeItems {
-            _ = item.layoutAttributes.first?.layoutComputer.attribute?.value
-        }
-
-        return LayoutComputer(
-            sizeThatFits: { proposal in
-                contentSize == .zero ? proposal.fixingUnspecifiedDimensions() : contentSize
-            },
-            place: { position, anchor, proposal in
-                let origin = CGPoint(
-                    x: position.x - contentSize.width * anchor.x,
-                    y: position.y - contentSize.height * anchor.y
-                )
-                for item in activeItems {
-                    guard let index = item.item?.base as? Data.Index,
-                          let placement = placements[index],
-                          let childComputer = item.layoutAttributes.first?.layoutComputer.attribute?.value else {
-                        continue
-                    }
-                    let anchorPosition = CGPoint(
-                        x: origin.x + placement.anchorPosition.x,
-                        y: origin.y + placement.anchorPosition.y
-                    )
-                    childComputer.place(
-                        at: anchorPosition,
-                        anchor: placement.anchor,
-                        proposal: ProposedViewSize(placement.proposedSize)
-                    )
-                }
-            },
-            childGeometries: { _, origin in
-                activeItems.compactMap { item in
-                    guard let index = item.item?.base as? Data.Index,
-                          let placement = placements[index],
-                          let childComputer = item.layoutAttributes.first?.layoutComputer.attribute?.value else {
-                        return nil
-                    }
-                    let proposedSize = placement.proposedSize
-                    let childOrigin = CGPoint(
-                        x: origin.x + placement.anchorPosition.x - proposedSize.width * placement.anchor.x,
-                        y: origin.y + placement.anchorPosition.y - proposedSize.height * placement.anchor.y
-                    )
-                    return ViewGeometry(
-                        origin: childOrigin,
-                        dimensions: ViewDimensions(
-                            guideComputer: childComputer,
-                            size: ViewSize(proposedSize, proposal: _ProposedSize(proposedSize))
-                        )
-                    )
-                }
-            }
-        )
     }
 }

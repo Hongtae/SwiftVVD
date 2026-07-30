@@ -53,13 +53,6 @@ extension Canvas {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            LayoutComputer(
-                sizeThatFits: { proposal in
-                    CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
-                }
-            )
-        }
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
@@ -86,7 +79,7 @@ extension Canvas {
             return list
         }
 
-        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        var outputs = _ViewOutputs()
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         return outputs
     }

@@ -93,10 +93,14 @@ final class GraphHostRemovedStateTests: XCTestCase {
             requestedOutputs: []
         )
         rendererHost.storage = viewGraph
+        let baselineFeatureCount = viewGraph.viewGraphFeatureCount
         let feature = RecordingViewGraphFeature()
         viewGraph.addFeature(feature)
 
-        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+        XCTAssertEqual(
+            viewGraph.viewGraphFeatureCount,
+            baselineFeatureCount + 1
+        )
 
         viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: true)
 
@@ -121,6 +125,7 @@ final class GraphHostRemovedStateTests: XCTestCase {
         )
         rendererHost.storage = viewGraph
         let feature = DefaultOnlyViewGraphFeature()
+        let baselineFeatureCount = viewGraph.viewGraphFeatureCount
 
         XCTAssertEqual(feature.allowsAsyncUpdate(graph: viewGraph), true)
         XCTAssertFalse(feature.needsUpdate(graph: viewGraph))
@@ -131,7 +136,10 @@ final class GraphHostRemovedStateTests: XCTestCase {
 
         viewGraph.addFeature(feature)
         viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: true)
-        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+        XCTAssertEqual(
+            viewGraph.viewGraphFeatureCount,
+            baselineFeatureCount + 1
+        )
     }
 
     func testViewGraphFeatureBufferModifiesRootInputsAndOutputs() {
@@ -147,7 +155,11 @@ final class GraphHostRemovedStateTests: XCTestCase {
         )
         rendererHost.storage = viewGraph
 
-        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+        XCTAssertEqual(
+            viewGraph.viewGraphFeatureCount,
+            2,
+            "the root hit-test feature precedes the supplied feature"
+        )
         XCTAssertEqual(recorder.events, ["inputs", "root", "outputs"])
         XCTAssertTrue(recorder.rootUsingGraphicsRenderer)
         XCTAssertTrue(recorder.rootAnimationsDisabled)

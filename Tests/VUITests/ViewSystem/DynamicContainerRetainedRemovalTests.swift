@@ -1686,37 +1686,61 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let recorder = DynamicContainerLifecycleRecorder()
         var source: Attribute<DynamicContainerViewThatFitsFallbackRoot>!
         var layoutAttr: Attribute<LayoutComputer>!
+        var selectionAttr: Attribute<Int>!
 
         ref.withCurrent {
-            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: inputs)
-            source = graph.makeInput(
-                value: DynamicContainerViewThatFitsFallbackRoot(
-                    primaryWidth: 10,
-                    recorder: recorder
+            AGSubgraph.withCurrent(graphHost.data.rootSubgraph) {
+                let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                var keys = PreferenceKeys()
+                keys.add(DynamicContainerViewThatFitsSelectionKey.self)
+                let viewInputs = makeViewInputs(
+                    graph: graph,
+                    base: inputs,
+                    preferenceKeys: keys
                 )
-            )
-            let outputs = DynamicContainerViewThatFitsFallbackRoot._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: viewInputs
-            )
-            guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
-                XCTFail("ViewThatFits fallback root should produce a layout computer")
-                return
-            }
-            layoutAttr = initialLayoutAttr
+                viewInputs.size.setValue(
+                    ViewSize(
+                        width: 20,
+                        height: 20,
+                        proposal: _ProposedSize(width: 20, height: 20)
+                    )
+                )
+                source = graph.makeInput(
+                    value: DynamicContainerViewThatFitsFallbackRoot(
+                        primaryWidth: 10,
+                        recorder: recorder
+                    )
+                )
+                let outputs = DynamicContainerViewThatFitsFallbackRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: viewInputs
+                )
+                guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
+                    XCTFail("ViewThatFits fallback root should produce a layout computer")
+                    return
+                }
+                layoutAttr = initialLayoutAttr
+                selectionAttr = Attribute<Int>(
+                    try! XCTUnwrap(
+                        outputs.preferences.value(
+                            for: DynamicContainerViewThatFitsSelectionKey.self
+                        )
+                    )
+                )
 
-            let layout = layoutAttr.value
-            XCTAssertEqual(
-                layout.sizeThatFits(_ProposedSize(width: 20, height: 20)),
-                CGSize(width: 10, height: 10)
-            )
-            layout.place(
-                at: .zero,
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: 20, height: 20)
-            )
-            XCTAssertEqual(recorder.events, ["primary appear"])
+                _ = selectionAttr.value
+                let layout = layoutAttr.value
+                XCTAssertEqual(
+                    layout.sizeThatFits(_ProposedSize(width: 20, height: 20)),
+                    CGSize(width: 10, height: 10)
+                )
+                layout.place(
+                    at: .zero,
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: 20, height: 20)
+                )
+                XCTAssertEqual(recorder.events, ["primary appear"])
+            }
         }
 
         ref.withCurrent {
@@ -1728,6 +1752,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 transaction: Transaction(animation: .linear(duration: 0.02))
             )
 
+            _ = selectionAttr.value
             let layout = layoutAttr.value
             XCTAssertEqual(
                 layout.sizeThatFits(_ProposedSize(width: 20, height: 20)),
@@ -1794,29 +1819,31 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
 
         viewGraph.data.withCurrent {
-            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: inputs)
-            source = graph.makeInput(
-                value: DynamicContainerMoveLayoutCustomLayoutRoot(
-                    rows: ["removed", "sibling"],
-                    recorder: recorder
+            AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                let viewInputs = makeViewInputs(graph: graph, base: inputs)
+                source = graph.makeInput(
+                    value: DynamicContainerMoveLayoutCustomLayoutRoot(
+                        rows: ["removed", "sibling"],
+                        recorder: recorder
+                    )
                 )
-            )
-            let outputs = DynamicContainerMoveLayoutCustomLayoutRoot._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: viewInputs
-            )
-            guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
-                XCTFail("custom Layout root should produce a layout computer")
-                return
-            }
-            layoutAttr = initialLayoutAttr
+                let outputs = DynamicContainerMoveLayoutCustomLayoutRoot._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: viewInputs
+                )
+                guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
+                    XCTFail("custom Layout root should produce a layout computer")
+                    return
+                }
+                layoutAttr = initialLayoutAttr
 
-            let initial = childGeometries()
-            XCTAssertEqual(initial.count, 2)
-            XCTAssertEqual(initial[0].origin.x, 0, accuracy: 0.000_001)
-            XCTAssertEqual(initial[1].origin.x, 80, accuracy: 0.000_001)
-            XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+                let initial = childGeometries()
+                XCTAssertEqual(initial.count, 2)
+                XCTAssertEqual(initial[0].origin.x, 0, accuracy: 0.000_001)
+                XCTAssertEqual(initial[1].origin.x, 80, accuracy: 0.000_001)
+                XCTAssertEqual(recorder.events, ["removed appear", "sibling appear"])
+            }
         }
 
         viewGraph.data.withCurrent {
@@ -1874,29 +1901,31 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var removalEvents: [String] = []
 
         ref.withCurrent {
-            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: inputs)
-            source = graph.makeInput(value: makeRoot(["row"], recorder))
-            let outputs = Root._makeViewList(
-                view: _GraphValue(_attribute: source),
-                inputs: _ViewListInputs(from: viewInputs)
-            )
-            guard case .dynamicList(let viewListAttr, _) = outputs.views else {
-                XCTFail("\(Root.self) with transition ForEach should produce a dynamic list")
-                return
-            }
-            infoAttr = graph.makeStatefulRule(
-                DynamicContainerInfo(
-                    viewListAttr: viewListAttr,
-                    inputs: viewInputs
+            AGSubgraph.withCurrent(graphHost.data.rootSubgraph) {
+                let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                let viewInputs = makeViewInputs(graph: graph, base: inputs)
+                source = graph.makeInput(value: makeRoot(["row"], recorder))
+                let outputs = Root._makeViewList(
+                    view: _GraphValue(_attribute: source),
+                    inputs: _ViewListInputs(from: viewInputs)
                 )
-            )
+                guard case .dynamicList(let viewListAttr, _) = outputs.views else {
+                    XCTFail("\(Root.self) with transition ForEach should produce a dynamic list")
+                    return
+                }
+                infoAttr = graph.makeStatefulRule(
+                    DynamicContainerInfo(
+                        viewListAttr: viewListAttr,
+                        inputs: viewInputs
+                    )
+                )
 
-            let initial = infoAttr.value
-            XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.removedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
-            XCTAssertEqual(recorder.events, ["row appear"])
+                let initial = infoAttr.value
+                XCTAssertEqual(initial.activeItems.count, 1)
+                XCTAssertEqual(initial.removedCount, 0)
+                XCTAssertEqual(initial.items.first?.phase, 1)
+                XCTAssertEqual(recorder.events, ["row appear"])
+            }
         }
 
         let retainedItem = try ref.withCurrent {
@@ -1958,21 +1987,23 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var removalEvents: [String] = []
 
         viewGraph.data.withCurrent {
-            let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: inputs)
-            source = graph.makeInput(value: makeRoot(["row"], recorder))
-            let outputs = Root._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: viewInputs
-            )
-            guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
-                XCTFail("\(Root.self) should produce a layout computer")
-                return
-            }
-            layoutAttr = initialLayoutAttr
+            AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                let viewInputs = makeViewInputs(graph: graph, base: inputs)
+                source = graph.makeInput(value: makeRoot(["row"], recorder))
+                let outputs = Root._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: viewInputs
+                )
+                guard let initialLayoutAttr = outputs._layoutComputer.attribute else {
+                    XCTFail("\(Root.self) should produce a layout computer")
+                    return
+                }
+                layoutAttr = initialLayoutAttr
 
-            _ = layoutAttr.value
-            XCTAssertEqual(recorder.events, ["row appear"])
+                _ = layoutAttr.value
+                XCTAssertEqual(recorder.events, ["row appear"])
+            }
         }
 
         viewGraph.data.withCurrent {
@@ -2025,27 +2056,71 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var graphInputs: _GraphInputs!
         var source: Attribute<Root>!
         var layoutAttr: Attribute<LayoutComputer>!
+        var displayOutput: Attribute<DisplayList>!
+        var scrollablesOutput: Attribute<ScrollablePreferenceKey.Value>!
         var animatedValue: Attribute<_OpacityEffect>!
 
         func sampleLayout() {
-            _ = layoutAttr.value.sizeThatFits(.unspecified)
+            let layout = layoutAttr.value
+            let size = layout.sizeThatFits(.unspecified)
+            layout.place(
+                at: .zero,
+                proposal: ProposedViewSize(size)
+            )
+            _ = displayOutput.value
+            for scrollable in scrollablesOutput.value {
+                if let collection = scrollable as? any ScrollableCollection {
+                    (collection as? DynamicContainerLazyPlacementSampler)?
+                        .resampleCollectedPlacements()
+                    _ = collection.visibleCollectionViewIDs
+                }
+                _ = scrollable.mapFirstChild(
+                    ofType: (any ScrollableCollection).self
+                ) { collection in
+                    (collection as? DynamicContainerLazyPlacementSampler)?
+                        .resampleCollectedPlacements()
+                    _ = collection.visibleCollectionViewIDs.count
+                }
+            }
         }
 
         try viewGraph.data.withCurrent {
-            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
-            source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
-            let outputs = Root._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: viewInputs
-            )
-            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                var keys = PreferenceKeys()
+                keys.add(DisplayList.Key.self)
+                keys.add(ScrollablePreferenceKey.self)
+                let viewInputs = makeViewInputs(
+                    graph: graph,
+                    base: graphInputs,
+                    preferenceKeys: keys
+                )
+                source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
+                let outputs = Root._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: viewInputs
+                )
+                layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
+                displayOutput = Attribute<DisplayList>(
+                    try XCTUnwrap(
+                        outputs.preferences.value(for: DisplayList.Key.self)
+                    )
+                )
+                scrollablesOutput = Attribute<ScrollablePreferenceKey.Value>(
+                    try XCTUnwrap(
+                        outputs.preferences.value(for: ScrollablePreferenceKey.self)
+                    )
+                )
 
-            sampleLayout()
-            animatedValue = try XCTUnwrap(capture.animated)
-            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
-            XCTAssertEqual(recorder.events, ["row appear"])
+                sampleLayout()
+                animatedValue = try XCTUnwrap(capture.animated)
+                XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+                XCTAssertEqual(recorder.events, ["row appear"])
+            }
         }
+        // A real host performs another collected-placement transaction before
+        // accepting the next user mutation, settling the initial will-appear phase.
+        viewGraph.runTransaction(Transaction(), do: sampleLayout, id: nil)
 
         func transaction(label: String) -> Transaction {
             completionTransaction(
@@ -2063,8 +2138,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
 
         func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
-            viewGraph.data.withCurrent {
-                let transaction = transaction(label: label)
+            let transaction = transaction(label: label)
+            let update = {
                 graphInputs.transaction.setValue(transaction)
                 source.setValue(
                     makeRoot(["row"], target, recorder, capture),
@@ -2072,7 +2147,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 )
                 sampleLayout()
                 _ = animatedValue.value
-                Transaction.dispatchPendingListeners().forEach { $0() }
+                if !disappearBeforeRetainedCompletions {
+                    Transaction.dispatchPendingListeners().forEach { $0() }
+                }
                 graphInputs.time.setValue(Time(seconds: firstSample))
                 sampleLayout()
                 _ = animatedValue.value
@@ -2081,6 +2158,13 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 _ = animatedValue.value
                 Self.flushGraphActions(graph)
             }
+            if disappearBeforeRetainedCompletions {
+                viewGraph.runTransaction(transaction, do: update, id: nil)
+                let actions = Transaction.dispatchPendingListeners()
+                actions.forEach { $0() }
+            } else {
+                viewGraph.data.withCurrent(update)
+            }
         }
 
         retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
@@ -2088,24 +2172,43 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
         XCTAssertEqual(recorder.events, ["row appear"])
 
-        Update.ensure {
-            viewGraph.data.withCurrent {
-                var removal = completionTransaction(
-                    animation: .linear(duration: 0.02),
-                    label: "removal",
-                    recorder: recorder
-                )
-                removal.animationFrameInterval = 1.0 / 120.0
-                graphInputs.transaction.setValue(removal)
-                source.setValue(makeRoot([], 3, recorder, capture), transaction: removal)
-                sampleLayout()
-                _ = animatedValue.value
+        var removal = completionTransaction(
+            animation: .linear(duration: 0.02),
+            label: "removal",
+            recorder: recorder
+        )
+        removal.animationFrameInterval = 1.0 / 120.0
+        let remove = {
+            graphInputs.transaction.setValue(removal)
+            source.setValue(makeRoot([], 3, recorder, capture), transaction: removal)
+            sampleLayout()
+            _ = animatedValue.value
+            if !disappearBeforeRetainedCompletions {
                 Transaction.dispatchPendingListeners().forEach { $0() }
-                XCTAssertEqual(recorder.events, ["row appear"])
+            }
+            XCTAssertEqual(recorder.events, ["row appear"])
+        }
+        if disappearBeforeRetainedCompletions {
+            viewGraph.runTransaction(removal, do: remove, id: nil)
+            let actions = Transaction.dispatchPendingListeners()
+            actions.forEach { $0() }
+        } else {
+            Update.ensure {
+                viewGraph.data.withCurrent {
+                    remove()
+                }
             }
         }
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        if disappearBeforeRetainedCompletions {
+            viewGraph.data.withCurrent {
+                graphInputs.time.setValue(Time(seconds: 1.35))
+                viewGraph.data.rootSubgraph.update(flags: 1)
+                sampleLayout()
+                _ = animatedValue.value
+            }
+        }
         Self.flushGraphActions(graph)
         XCTAssertEqual(
             recorder.events,
@@ -2122,6 +2225,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         Update.ensure {
             viewGraph.data.withCurrent {
                 graph.inbox.drain()
+                if disappearBeforeRetainedCompletions {
+                    viewGraph.flushTransactions()
+                    layoutAttr.invalidateValue()
+                }
                 sampleLayout()
                 Self.flushGraphActions(graph)
             }
@@ -2138,9 +2245,13 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             )
             Update.ensure {
                 viewGraph.data.withCurrent {
-                    graph.inbox.drain()
-                    sampleLayout()
-                    Self.flushGraphActions(graph)
+                    for sampleTime in [20.1, 20.7, 21.1, 21.2] {
+                        graphInputs.time.setValue(Time(seconds: sampleTime))
+                        graph.inbox.drain()
+                        sampleLayout()
+                        _ = animatedValue.value
+                        Self.flushGraphActions(graph)
+                    }
                 }
             }
             XCTAssertEqual(
@@ -2206,28 +2317,30 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
 
         try viewGraph.data.withCurrent {
-            graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
-            let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
-            source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
-            let outputs = Root._makeViewList(
-                view: _GraphValue(_attribute: source),
-                inputs: _ViewListInputs(from: viewInputs)
-            )
-            guard case .dynamicList(let viewListAttr, _) = outputs.views else {
-                XCTFail("\(Root.self) with transition ForEach should produce a dynamic list")
-                return
-            }
-            infoAttr = graph.makeStatefulRule(
-                DynamicContainerInfo(
-                    viewListAttr: viewListAttr,
-                    inputs: viewInputs
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                graphInputs = makeGraphInputs(graph: graph, transaction: Transaction())
+                let viewInputs = makeViewInputs(graph: graph, base: graphInputs)
+                source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
+                let outputs = Root._makeViewList(
+                    view: _GraphValue(_attribute: source),
+                    inputs: _ViewListInputs(from: viewInputs)
                 )
-            )
+                guard case .dynamicList(let viewListAttr, _) = outputs.views else {
+                    XCTFail("\(Root.self) with transition ForEach should produce a dynamic list")
+                    return
+                }
+                infoAttr = graph.makeStatefulRule(
+                    DynamicContainerInfo(
+                        viewListAttr: viewListAttr,
+                        inputs: viewInputs
+                    )
+                )
 
-            sampleInfo()
-            animatedValue = try XCTUnwrap(capture.animated)
-            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
-            XCTAssertEqual(recorder.events, ["row appear"])
+                sampleInfo()
+                animatedValue = try XCTUnwrap(capture.animated)
+                XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
+                XCTAssertEqual(recorder.events, ["row appear"])
+            }
         }
 
         func transaction(label: String) -> Transaction {
@@ -4365,6 +4478,14 @@ private struct DynamicContainerLifecycleSizedRow: View {
 
 extension DynamicContainerLifecycleSizedRow: TestPrimitiveView {}
 
+private enum DynamicContainerViewThatFitsSelectionKey: PreferenceKey {
+    static var defaultValue: Int { 0 }
+
+    static func reduce(value: inout Int, nextValue: () -> Int) {
+        value = nextValue()
+    }
+}
+
 private struct DynamicContainerViewThatFitsFallbackRoot: View {
     var primaryWidth: CGFloat
     var recorder: DynamicContainerLifecycleRecorder
@@ -4632,6 +4753,20 @@ private struct DynamicContainerOptionalForkRetargetItem: View {
             capture: capture
         )
         .transition(.opacity)
+    }
+}
+
+/// Lets the direct-attribute harness explicitly consume the transactional
+/// collected-placement rule that a normal host update samples automatically.
+private protocol DynamicContainerLazyPlacementSampler {
+    func resampleCollectedPlacements()
+}
+
+extension LazyScrollable: DynamicContainerLazyPlacementSampler {
+    fileprivate func resampleCollectedPlacements() {
+        guard let cache else { return }
+        cache._placedSubviews.invalidateValue()
+        _ = cache._placedSubviews.value
     }
 }
 

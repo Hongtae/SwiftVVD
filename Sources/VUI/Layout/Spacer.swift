@@ -7,10 +7,12 @@
 
 import Foundation
 
+/// Supplies the minimum-length input shared by primitive spacer views.
 protocol PrimitiveSpacer: View where Body == Never {
     var minLength: CGFloat? { get }
 }
 
+/// Publishes a proposal-sensitive spacer engine for the active stack axis.
 private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
@@ -18,6 +20,7 @@ private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule, AsyncAttr
     var stackOrientation: Axis?
     var dynamicStackOrientation: OptionalAttribute<Axis?>
 
+    /// Measures the spacer and projects its flexible spacing behavior.
     struct Engine: LayoutEngine {
         var spacer: S
         var orientation: Axis?
@@ -85,9 +88,7 @@ private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule, AsyncAttr
         }
 
         let engine = Engine(spacer: spacer.value, orientation: orientation)
-        _AGGraph.setStatefulOutput(
-            LayoutComputer(box: LayoutEngineBox(engine: engine))
-        )
+        update(to: engine)
     }
 }
 

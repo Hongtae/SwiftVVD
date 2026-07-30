@@ -137,81 +137,9 @@ func makeSecondaryLayerView<Secondary: View>(
     let orderedPreferences = flipOrder
         ? [secondaryOutputs.preferences, primaryOutputs.preferences]
         : [primaryOutputs.preferences, secondaryOutputs.preferences]
-    let outputLayoutComputer: OptionalAttribute<LayoutComputer>
-    if let primaryAttribute = primaryLayoutComputer.attribute,
-       let secondaryAttribute = secondaryOutputs._layoutComputer.attribute {
-        let bridgedLayoutComputer: Attribute<LayoutComputer> = graph.makeRule {
-            let primaryComputer = primaryAttribute.value
-            let secondaryComputer = secondaryAttribute.value
-            let resolvedAlignment = alignment?.value ?? .center
-            let resolvedLayoutDirection = layoutDirection.value
-            var pendingPlacementTransaction =
-                graph.transaction(for: secondaryLayer.identifier) ??
-                graph.transaction(for: primaryAttribute.identifier) ??
-                graph.transaction(for: secondaryAttribute.identifier)
-            return LayoutComputer(
-                sizeThatFits: { primaryComputer.sizeThatFits($0) },
-                spacing: primaryComputer.spacing(),
-                place: { position, anchor, proposal in
-                    let placementTransaction =
-                        graph.transaction(for: secondaryLayer.identifier) ??
-                        graph.transaction(for: primaryAttribute.identifier) ??
-                        graph.transaction(for: secondaryAttribute.identifier) ??
-                        pendingPlacementTransaction ??
-                        Transaction.current
-                    pendingPlacementTransaction = nil
-                    Transaction.withScopedThreadTransaction(placementTransaction) {
-                        primaryComputer.place(
-                            at: position,
-                            anchor: anchor,
-                            proposal: proposal
-                        )
-
-                        let primarySize = ViewSize(
-                            primaryComputer.sizeThatFits(_ProposedSize(proposal)),
-                            proposal: _ProposedSize(proposal)
-                        )
-                        let primaryOrigin = CGPoint(
-                            x: position.x - primarySize.width * anchor.x,
-                            y: position.y - primarySize.height * anchor.y
-                        )
-                        let secondaryGeometry = resolveSecondaryLayerGeometry(
-                            alignment: resolvedAlignment,
-                            layoutDirection: resolvedLayoutDirection,
-                            primaryPosition: primaryOrigin,
-                            primarySize: primarySize,
-                            primaryComputer: primaryComputer,
-                            secondaryComputer: secondaryComputer
-                        )
-
-                        // Primitive children of the implicit layout still receive
-                        // their concrete geometry through LayoutComputer.place.
-                        // Keep construction lazy, then bridge placement only when
-                        // the enclosing primary layout is actually placed.
-                        secondaryComputer.place(
-                            at: secondaryGeometry.origin,
-                            anchor: .topLeading,
-                            proposal: ProposedViewSize(primarySize.value)
-                        )
-                    }
-                },
-                childGeometries: {
-                    primaryComputer.childGeometries(at: $0, origin: $1)
-                },
-                priority: primaryComputer.layoutPriority(),
-                explicitAlignment: {
-                    primaryComputer.explicitAlignment($0, at: $1)
-                },
-                changeCount: primaryComputer.changeCount
-            )
-        }
-        outputLayoutComputer = OptionalAttribute(bridgedLayoutComputer)
-    } else {
-        outputLayoutComputer = primaryLayoutComputer
-    }
     return _ViewOutputs(
         preferences: PreferencesOutputs.merge(orderedPreferences, in: graph),
-        layoutComputer: outputLayoutComputer
+        layoutComputer: primaryLayoutComputer
     )
 }
 

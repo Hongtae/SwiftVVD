@@ -40,10 +40,8 @@ private final class MatchedGeometryAnimatedFrameCapture: @unchecked Sendable {
 }
 
 private final class SecondaryLayerPlacementCapture: @unchecked Sendable {
-    var count = 0
-    var position: CGPoint?
-    var anchor: UnitPoint?
-    var proposal: ProposedViewSize?
+    var position: Attribute<CGPoint>?
+    var size: Attribute<ViewSize>?
 }
 
 private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
@@ -59,16 +57,12 @@ private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
             fatalError("SecondaryLayerPlacementProbe called outside an active graph.")
         }
         let capture = view._attribute.value.capture
+        capture.position = inputs.position
+        capture.size = inputs.size
         return _ViewOutputs(
             layoutComputer: OptionalAttribute(
-                graph.makeInput(value: LayoutComputer(
-                    sizeThatFits: { _ in CGSize(width: 40, height: 20) },
-                    place: { position, anchor, proposal in
-                        capture.count += 1
-                        capture.position = position
-                        capture.anchor = anchor
-                        capture.proposal = proposal
-                    }
+                graph.makeInput(value: LayoutComputer.fixed(
+                    CGSize(width: 40, height: 20)
                 ))
             )
         )
@@ -216,14 +210,19 @@ final class MatchedGeometryEffectTests: XCTestCase {
         XCTAssertTrue(capture.hasScope)
     }
 
-    func testOverlayDefersSecondaryPlacementUntilParentPlacement() throws {
+    func testOverlaySecondaryGeometryComesFromDedicatedQuery() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let capture = SecondaryLayerPlacementCapture()
-            let inputs = makeViewInputs(graph: graph)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.position = graph.makeInput(value: CGPoint(x: 50, y: 50))
+            inputs.size = graph.makeInput(value: ViewSize(width: 100, height: 60))
             let modifier = graph.makeInput(value: _OverlayModifier(
                 overlay: SecondaryLayerPlacementProbe(capture: capture),
                 alignment: .center
+            ))
+            let primaryLayoutComputer = graph.makeInput(value: LayoutComputer.fixed(
+                CGSize(width: 100, height: 60)
             ))
 
             let outputs = _OverlayModifier<SecondaryLayerPlacementProbe>._makeView(
@@ -231,27 +230,23 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 inputs: inputs
             ) { _, _ in
                 _ViewOutputs(
-                    layoutComputer: OptionalAttribute(
-                        graph.makeInput(value: LayoutComputer.fixed(
-                            CGSize(width: 100, height: 60)
-                        ))
-                    )
+                    layoutComputer: OptionalAttribute(primaryLayoutComputer)
                 )
             }
 
-            XCTAssertEqual(capture.count, 0)
-            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            layout.place(
-                at: CGPoint(x: 100, y: 80),
-                anchor: .center,
-                proposal: ProposedViewSize(width: 100, height: 60)
-            )
-            XCTAssertEqual(capture.count, 1)
-            XCTAssertEqual(capture.position, CGPoint(x: 80, y: 70))
-            XCTAssertEqual(capture.anchor, .topLeading)
             XCTAssertEqual(
-                capture.proposal,
-                ProposedViewSize(width: 100, height: 60)
+                outputs._layoutComputer.attribute?.identifier,
+                primaryLayoutComputer.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.position).value,
+                CGPoint(x: 80, y: 70)
+            )
+            let secondarySize = try XCTUnwrap(capture.size).value
+            XCTAssertEqual(secondarySize.value, CGSize(width: 40, height: 20))
+            XCTAssertEqual(
+                secondarySize.proposal,
+                _ProposedSize(width: 100, height: 60)
             )
         }
     }
@@ -735,7 +730,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     _ = childInputs.transform.value
                     return _ViewOutputs(
                         layoutComputer: OptionalAttribute(
-                            graph.makeInput(value: LayoutComputer(
+                            graph.makeInput(value: testLayoutComputer(
                                 sizeThatFits: { proposal in
                                     proposal.fixingUnspecifiedDimensions()
                                 },
@@ -868,7 +863,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 )
             }
 
-            let flexible = LayoutComputer(sizeThatFits: { proposal in
+            let flexible = testLayoutComputer(sizeThatFits: { proposal in
                 CGSize(
                     width: proposal.width ?? 0,
                     height: proposal.height ?? 0

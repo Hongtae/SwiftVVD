@@ -139,12 +139,18 @@ extension SectionConfiguration: Sendable {
 extension SectionConfiguration.ID: Sendable {
 }
 
+/// Exposes one transformed child from a subview collection.
 public struct Subview: View, Identifiable {
-    public struct ID: Hashable {
-        var base: AnyHashable
+    /// Preserves the complete list identity while supporting typed ID lookup.
+    public struct ID: Hashable, HasCustomIDRepresentation {
+        var base: _ViewList_ID
 
-        init(_ base: AnyHashable) {
+        init(_ base: _ViewList_ID) {
             self.base = base
+        }
+
+        func containsID<ID: Hashable>(_ id: ID) -> Bool {
+            base.containsID(id)
         }
     }
 
@@ -157,7 +163,7 @@ public struct Subview: View, Identifiable {
     }
 
     public var id: ID {
-        ID(AnyHashable(view.id))
+        ID(view.id)
     }
 
     public var containerValues: ContainerValues {

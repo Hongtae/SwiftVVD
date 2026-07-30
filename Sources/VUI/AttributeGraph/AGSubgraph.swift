@@ -10,9 +10,7 @@ import Synchronization
 
 // MARK: - AGSubgraph
 
-/// A group of AG nodes that are created and destroyed together.
-///
-/// Subgraph lifecycle handle for groups of AG nodes.
+/// Owns a group of graph nodes that share one insertion and invalidation lifecycle.
 ///
 /// Must be created while an _AGGraph context is active (`_AGGraph.current != nil`).
 /// The owning _AGGraph is captured at creation time and validated on `invalidate()`.
@@ -194,6 +192,33 @@ final class AGSubgraphRef: @unchecked Sendable {
             ancestor.value?.children.removeAll { $0 === self }
         }
         secondaryAncestors.removeAll()
+    }
+
+    /// Reattaches a valid child to this subgraph's primary ownership tree.
+    func addChild(_ child: AGSubgraphRef) {
+        guard isValid, child.isValid else { return }
+        guard graph === child.graph else {
+            fatalError("AGSubgraph.addChild(_:) cannot attach a subgraph owned by a different graph.")
+        }
+        guard child !== self else {
+            fatalError("AGSubgraph.addChild(_:) cannot attach a subgraph to itself.")
+        }
+        if child.parent === self {
+            return
+        }
+        child.removeFromParent()
+        children.append(child)
+        child.parent = self
+        let childPending = child.pendingFlags | child.descendantPendingFlags
+        if childPending != 0 {
+            let addedFlags = childPending & ~descendantPendingFlags
+            if addedFlags != 0 {
+                descendantPendingFlags |= addedFlags
+                propagateDescendantPending(
+                    pendingFlags | descendantPendingFlags
+                )
+            }
+        }
     }
 
     func addSecondaryChild(_ child: AGSubgraphRef) {

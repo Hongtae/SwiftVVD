@@ -7,6 +7,7 @@
 
 import Foundation
 
+/// Installs the retained-removal inputs required by a resettable lazy root.
 struct ResettableLazyLayoutRoot<Content>: View where Content: View {
     var content: Content
 
@@ -38,9 +39,11 @@ extension View {
     }
 }
 
+/// Marks implementation-only carriers that belong to the lazy layout system.
 protocol LazyLayoutNamespace {
 }
 
+/// Reads one environment value through the current rule's cached-value lane.
 private struct EnvironmentFetch<Value>: Rule, AsyncAttribute, Hashable {
     var environment: Attribute<EnvironmentValues>
     var keyPath: KeyPath<EnvironmentValues, Value>
@@ -51,9 +54,10 @@ private struct EnvironmentFetch<Value>: Rule, AsyncAttribute, Hashable {
 }
 
 @dynamicMemberLookup
+/// Supplies environment-backed values to lazy measurement and spacing calls.
 struct SizeAndSpacingContext {
     var context: AnyRuleContext
-    var owner: AGAttribute?
+    var owner: AGAttribute
     var _environment: Attribute<EnvironmentValues>
 
     init(
@@ -62,7 +66,7 @@ struct SizeAndSpacingContext {
         environment: Attribute<EnvironmentValues>
     ) {
         self.context = context
-        self.owner = owner
+        self.owner = owner ?? context.attribute
         self._environment = environment
     }
 
@@ -81,6 +85,7 @@ struct SizeAndSpacingContext {
     }
 }
 
+/// Describes the axes and multi-child axes supported by a lazy layout.
 struct _LazyLayout_Properties: LazyLayoutNamespace, Equatable {
     var axes: Axis.Set
     var multipleViewAxes: Axis.Set
@@ -91,6 +96,7 @@ struct _LazyLayout_Properties: LazyLayoutNamespace, Equatable {
     }
 }
 
+/// Summarizes whether a prefetch step found no, partial, or complete work.
 enum _LazyLayout_PrefetchResult: UInt8, Hashable {
     case none
     case some
@@ -106,6 +112,7 @@ enum _LazyLayout_PrefetchResult: UInt8, Hashable {
     }
 }
 
+/// Carries the current scroll-prefetch window and requested edge set.
 struct ScrollPrefetchState: ViewInput {
     typealias Value = OptionalAttribute<ScrollPrefetchState>
 
@@ -152,6 +159,7 @@ struct ScrollPrefetchState: ViewInput {
     }
 }
 
+/// Identifies one resumable stage in the lazy prefetch state machine.
 enum LazyPrefetchOperation {
     case layout
     case outputs
@@ -160,53 +168,56 @@ enum LazyPrefetchOperation {
     case removal
 }
 
+/// Pairs a prefetch result with whether the cache already signaled its host.
 struct LazyPrefetchPhaseAdvance {
     var result: _LazyLayout_PrefetchResult
     var didNotify: Bool
 }
 
-final class LazyLayoutCacheReference<LayoutType: LazyLayout> {
-    var cache: _LazyLayoutViewCache<LayoutType>?
-    var updateViewCache: Attribute<Void>?
-    var layoutComputer: Attribute<LayoutComputer>?
-}
+/// Holds a non-owning reference for cache relationships that must not extend
+/// the lifetime of a retained child graph.
+struct WeakBox<Base: AnyObject> {
+    weak var base: Base?
 
-struct LazySubviewMaterialization<LayoutType: LazyLayout>: StatefulRule {
-    typealias Value = Void
-
-    var reference: LazyLayoutCacheReference<LayoutType>
-
-    mutating func updateValue() {
-        guard let cache = reference.cache else {
-            _AGGraph.setStatefulOutput(())
-            return
-        }
-        guard let owner = _AGGraph.currentRuleContextAttribute else {
-            fatalError("LazySubviewMaterialization evaluated outside a rule context.")
-        }
-
-        _ = reference.updateViewCache?.value
-        let subviews = cache.subviews(context: AnyRuleContext(attribute: owner))
-        var placedSubviews: [_LazyLayout_PlacedSubview] = []
-        var from = 0
-        _ = subviews.apply(from: &from) { _, subview, _ in
-            let item = cache.item(data: subview.data)
-            let placement = _Placement(proposedSize: CGSize.zero)
-            item.placement = placement
-            placedSubviews.append(
-                _LazyLayout_PlacedSubview(
-                    item: item,
-                    placement: placement,
-                    index: subview.index
-                )
-            )
-        }
-        cache.commitPlacedSubviews(placedSubviews)
-        cache.updateItemPhases()
-        _AGGraph.setStatefulOutput(())
+    init(_ base: Base?) {
+        self.base = base
     }
 }
 
+/// Carries the parent cache and the stable child-registration seed assigned to
+/// one materialized lazy item.
+struct LazyLayoutCacheParent {
+    weak var cache: LazyLayoutViewCache?
+    var seed: Int
+
+    init(cache: LazyLayoutViewCache? = nil, seed: Int = -1) {
+        self.cache = cache
+        self.seed = seed
+    }
+}
+
+/// Overrides the idle-generation limit inherited by a nested lazy cache.
+struct LazyLayoutReuseIdleInput: GraphInput {
+    static var defaultValue: Int? { nil }
+}
+
+extension _GraphInputs {
+    /// Routes a nested lazy cache back to the item that owns its graph.
+    struct LazyLayoutCacheParentKey: GraphInput {
+        static var defaultValue: LazyLayoutCacheParent {
+            LazyLayoutCacheParent()
+        }
+
+        static func valuesEqual(
+            _ lhs: LazyLayoutCacheParent,
+            _ rhs: LazyLayoutCacheParent
+        ) -> Bool {
+            lhs.cache === rhs.cache && lhs.seed == rhs.seed
+        }
+    }
+}
+
+/// Publishes the primary stack axis contributed by a lazy layout type.
 private struct LazyDynamicStackOrientationRule<L: LazyLayout>: Rule {
     var layout: Attribute<L>
 
@@ -222,27 +233,30 @@ private struct LazyDynamicStackOrientationRule<L: LazyLayout>: Rule {
     }
 }
 
+/// Resets and republishes the shared lazy cache when the graph phase advances.
 struct UpdateViewCache: StatefulRule, ObservedAttribute {
-    typealias Value = Void
+    typealias Value = LazyLayoutViewCache
 
-    var phase: Attribute<Phase>
-    weak var cache: LazyLayoutViewCache?
-    var lastResetSeed: UInt32?
+    var _phase: Attribute<Phase>
+    var cache: LazyLayoutViewCache?
+    var lastResetSeed: UInt32
 
-    init(phase: Attribute<Phase>, cache: LazyLayoutViewCache?) {
-        self.phase = phase
+    init(_phase: Attribute<Phase>, cache: LazyLayoutViewCache?) {
+        self._phase = _phase
         self.cache = cache
-        self.lastResetSeed = nil
+        self.lastResetSeed = 0
     }
 
     mutating func updateValue() {
-        let resetSeed = phase.value.resetSeed
-        if let lastResetSeed,
-           lastResetSeed != resetSeed {
-            cache?.reset()
+        let resetSeed = _phase.value.resetSeed
+        guard let cache else {
+            fatalError("UpdateViewCache requires its cache before evaluation.")
+        }
+        if lastResetSeed != resetSeed {
+            cache.reset()
         }
         lastResetSeed = resetSeed
-        _AGGraph.setStatefulOutput(())
+        _AGGraph.setStatefulOutput(cache)
     }
 
     mutating func destroy() {
@@ -250,6 +264,19 @@ struct UpdateViewCache: StatefulRule, ObservedAttribute {
     }
 }
 
+/// Runs cache collection before exposing the latest committed placements.
+struct LazyCollectedPlacements: Rule, AsyncAttribute {
+    var _subviews: Attribute<[_LazyLayout_PlacedSubview]>
+    var _cache: Attribute<LazyLayoutViewCache>
+
+    var value: [_LazyLayout_PlacedSubview] {
+        let cache = _cache.value
+        cache.collect()
+        return _subviews.value
+    }
+}
+
+/// Computes the materialized subviews and geometry for one lazy layout pass.
 struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribute {
     typealias Value = [_LazyLayout_PlacedSubview]
 
@@ -260,7 +287,8 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribut
     var environment: Attribute<EnvironmentValues>
     var layoutDirection: Attribute<LayoutDirection>
     var accessibilityEnabled: Attribute<Bool>
-    var reference: LazyLayoutCacheReference<LayoutType>
+    var _cache: Attribute<LazyLayoutViewCache>
+    var _layoutComputer: OptionalAttribute<LayoutComputer>
     var stackCache: _LazyStack_Cache<LayoutType>
 
     init(
@@ -271,7 +299,8 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribut
         environment: Attribute<EnvironmentValues>,
         layoutDirection: Attribute<LayoutDirection>,
         accessibilityEnabled: Attribute<Bool>,
-        reference: LazyLayoutCacheReference<LayoutType>
+        cache: Attribute<LazyLayoutViewCache>,
+        layoutComputer: OptionalAttribute<LayoutComputer> = OptionalAttribute()
     ) {
         self.layout = layout
         self.size = size
@@ -280,24 +309,33 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribut
         self.environment = environment
         self.layoutDirection = layoutDirection
         self.accessibilityEnabled = accessibilityEnabled
-        self.reference = reference
+        self._cache = cache
+        self._layoutComputer = layoutComputer
         self.stackCache = _LazyStack_Cache()
     }
 
     mutating func updateValue() {
-        guard let cache = reference.cache else {
-            _AGGraph.setStatefulOutput([])
-            return
+        guard let cache = _cache.value as? _LazyLayoutViewCache<LayoutType> else {
+            fatalError("LazySubviewPlacements requires its matching concrete cache.")
         }
         let previousSubviews = _AGGraph.currentStatefulOutput([_LazyLayout_PlacedSubview].self)
-        _ = reference.updateViewCache?.value
-        let placements = makePlacements(cache: cache)
-        cache.commitPlacedSubviews(placements.subviews)
+        // A layout pass owns the next commit generation before any subview is
+        // proposed or placed. Subviews stamp that generation into their
+        // pending placement, and commit reconciles it with placementSeed.
+        cache.commitSeed &+= 1
+        var placements = makePlacements(cache: cache)
+        let containingSize = containerSize.attribute?.value.value ?? size.value.value
+        cache.commitPlacedSubviews(
+            from: previousSubviews ?? [],
+            to: &placements.subviews,
+            wasCancelled: placements.wasCancelled,
+            context: AnyRuleContext(context),
+            containingSize: containingSize
+        )
         cache.outerPlacedRect = placements.validRect
-        cache.containingSize = containerSize.attribute?.value.value ?? size.value.value
         _AGGraph.setStatefulOutput(placements.subviews)
         if shouldInvalidateSize(previous: previousSubviews, current: placements) {
-            if let layoutComputer = reference.layoutComputer {
+            if let layoutComputer = _layoutComputer.attribute {
                 cache.invalidateSize(
                     layoutComputer: layoutComputer,
                     animation: Transaction.current.animation
@@ -413,6 +451,7 @@ struct LazySubviewPlacements<LayoutType: LazyStack>: StatefulRule, AsyncAttribut
     }
 }
 
+/// Advances lazy materialization and removal prefetch work across update passes.
 struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule, AsyncAttribute {
     typealias Value = Void
 
@@ -791,6 +830,7 @@ struct LazySubviewPrefetcher<LayoutType: LazyLayout>: StatefulRule, AsyncAttribu
     }
 }
 
+/// Identifies an item's section role for pinning and display ordering.
 struct LazyLayoutCacheSection: Equatable {
     var id: UInt32?
     var isHeader: Bool
@@ -803,6 +843,7 @@ struct LazyLayoutCacheSection: Equatable {
     }
 }
 
+/// Projects a lazy item's section role into accessibility collection metadata.
 struct AccessibilitySectionContext: Equatable {
     var id: UInt32
     var isHeader: Bool
@@ -816,6 +857,7 @@ struct AccessibilitySectionContext: Equatable {
 }
 
 @dynamicMemberLookup
+/// Extends the base sizing context with an optional container-size input.
 struct _LazyLayout_SizeAndSpacingContext: LazyLayoutNamespace {
     var baseContext: SizeAndSpacingContext
     var _containerSize: OptionalAttribute<ViewSize>
@@ -851,7 +893,92 @@ struct _LazyLayout_SizeAndSpacingContext: LazyLayoutNamespace {
     }
 }
 
+/// Builds the size-and-spacing engine shared by a lazy layout root.
+///
+/// Placement remains owned by `LazySubviewPlacements`; adding child geometry
+/// or imperative placement here would duplicate that work and broaden the
+/// layout computer's invalidation dependencies.
+struct LazyLayoutComputer<LayoutType: LazyLayout>: StatefulRule, AsyncAttribute {
+    typealias Value = LayoutComputer
+
+    var _layout: Attribute<LayoutType>
+    var _environment: Attribute<EnvironmentValues>
+    var _cache: Attribute<LazyLayoutViewCache>
+    var _containerSize: OptionalAttribute<ViewSize>
+
+    /// Measures lazy content from its shared view cache without owning placement.
+    struct Engine: LayoutEngine {
+        var layout: LayoutType
+        var context: _LazyLayout_SizeAndSpacingContext
+        var cache: LazyLayoutViewCache
+        var maxSize: CGSize
+        var sizeCache: ViewSizeCache
+
+        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+            let layout = layout
+            let context = context
+            let cache = cache
+            let measured = sizeCache.get(proposal) {
+                var result: CGSize!
+                context.ruleContext.update {
+                    let subviews = cache.subviews(context: context.ruleContext)
+                    let cacheState = cache.copyCacheState(type: LayoutType.self)
+                    result = layout.sizeThatFits(
+                        proposedSize: ProposedViewSize(proposal),
+                        subviews: subviews,
+                        context: context,
+                        cache: cacheState
+                    )
+                }
+                return result
+            }
+
+            // The cache records the largest committed lazy extent. A later
+            // partial materialization must not make the container shrink below
+            // that extent merely because fewer items were measured this pass.
+            return CGSize(
+                width: max(measured.width, maxSize.width),
+                height: max(measured.height, maxSize.height)
+            )
+        }
+
+        mutating func spacing() -> Spacing {
+            var result: Spacing!
+            context.ruleContext.update {
+                let subviews = cache.subviews(context: context.ruleContext)
+                let cacheState = cache.copyCacheState(type: LayoutType.self)
+                result = layout.spacing(
+                    subviews: subviews,
+                    context: context,
+                    cache: cacheState
+                )
+            }
+            return result
+        }
+    }
+
+    mutating func updateValue() {
+        let ruleContext = AnyRuleContext(context)
+        let cache = _cache.value
+        let engine = Engine(
+            layout: _layout.value,
+            context: _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                owner: ruleContext.attribute,
+                environment: _environment,
+                containerSize: _containerSize
+            ),
+            cache: cache,
+            maxSize: cache.maxSize,
+            sizeCache: ViewSizeCache()
+        )
+        update(to: engine)
+    }
+}
+
+/// Supplies geometry, visibility, and environment state to lazy placement.
 struct _LazyLayout_PlacementContext: LazyLayoutNamespace {
+    /// Groups the geometry values shared by placement callbacks.
     struct Geometry: Equatable {
         var transform: ViewTransform
         var layoutDirection: LayoutDirection
@@ -927,6 +1054,7 @@ struct _LazyLayout_PlacementContext: LazyLayoutNamespace {
     }
 }
 
+/// Wraps placement context for estimated, noncommitting layout queries.
 struct _LazyLayout_EstimatedPlacementContext: LazyLayoutNamespace {
     var base: _LazyLayout_PlacementContext
 
@@ -935,7 +1063,9 @@ struct _LazyLayout_EstimatedPlacementContext: LazyLayoutNamespace {
     }
 }
 
+/// Traverses lazy view-list nodes without eagerly materializing every child.
 struct _LazyLayout_Subviews: LazyLayoutNamespace {
+    /// Presents nested list and section nodes to lazy layout traversal.
     enum Node {
         case subviews(_LazyLayout_Subviews)
         case section(_LazyLayout_Section)
@@ -1359,11 +1489,14 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
 
 }
 
+/// Splits one lazy section into independently traversable header, content, and footer regions.
 struct _LazyLayout_Section: LazyLayoutNamespace {
+    /// Carries the stable section identity shared by its three regions.
     struct ID: Hashable {
         var id: UInt32
     }
 
+    /// Selects which section region contributes an item to traversal.
     private enum Region {
         case header
         case content
@@ -1485,6 +1618,7 @@ struct _LazyLayout_Section: LazyLayoutNamespace {
     }
 }
 
+/// Resolves, proposes, prefetches, and places one lazily materialized child.
 struct _LazyLayout_Subview: LazyLayoutNamespace {
     var cache: LazyLayoutViewCache
     var context: AnyRuleContext
@@ -1503,6 +1637,7 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         self.index = index
     }
 
+    /// Carries the view-list identity and element storage needed for materialization.
     struct Data {
         var elements: _ViewList_SubgraphElements
         var id: _ViewList_ID
@@ -1525,6 +1660,7 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         }
     }
 
+    /// Distinguishes ordinary items from section boundary items.
     enum Kind: Hashable, CustomDebugStringConvertible {
         case normal
         case header
@@ -1541,7 +1677,12 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
 
     func proposeSize(_ proposal: ProposedViewSize) -> _LazyLayout_ProposedSubview {
         let item = cache.item(data: data)
-        item.placement = _Placement(
+        guard let cache = item.cache else {
+            fatalError("_LazyLayout_Subview.proposeSize requires an owning cache.")
+        }
+        item.placementSeed = cache.commitSeed
+        item.prefetchSeed = 0
+        item.pendingPlacement = _Placement(
             proposedSize: proposal.replacingUnspecifiedDimensions()
         )
         return _LazyLayout_ProposedSubview(
@@ -1584,7 +1725,12 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
 
     func place(at placement: _Placement) -> _LazyLayout_PlacedSubview {
         let item = cache.item(data: data)
-        item.placement = placement
+        guard let cache = item.cache else {
+            fatalError("_LazyLayout_Subview.place requires an owning cache.")
+        }
+        item.placementSeed = cache.commitSeed
+        item.prefetchSeed = 0
+        item.pendingPlacement = placement
         return _LazyLayout_PlacedSubview(
             item: item,
             placement: placement,
@@ -1593,7 +1739,10 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
     }
 }
 
-final class LazyLayoutCacheItem: LazyLayoutNamespace {
+/// Retains one materialized lazy child and all state needed to reuse, place,
+/// transition, prefetch, or eventually evict its graph.
+final class LazyLayoutCacheItem: AnimationListener, LazyLayoutNamespace, @unchecked Sendable {
+    /// Publishes transition phase and removal state to the retained child graph.
     struct State: Hashable {
         var resetDelta: UInt32
         var phase: TransitionPhase
@@ -1613,6 +1762,7 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
         }
     }
 
+    /// Describes ownership work that may keep an offscreen item alive.
     enum PrefetchPhase: Hashable {
         case notPrefetching
         case prefetching
@@ -1620,11 +1770,13 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
         case pendingRemoval
     }
 
+    /// Records whether the item's subgraph is attached to the cache parent.
     enum ParentingPhase: Hashable {
         case inserted
         case removed
     }
 
+    /// Defers phase reconciliation for every retained item to the graph host.
     struct AllItemsPhaseMutation: GraphMutation {
         weak var cache: LazyLayoutViewCache?
 
@@ -1633,6 +1785,7 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
         }
     }
 
+    /// Defers phase reconciliation for one item after its last animation ends.
     struct SingleItemPhaseMutation: GraphMutation {
         weak var cache: LazyLayoutViewCache?
         weak var item: LazyLayoutCacheItem?
@@ -1675,10 +1828,6 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
     var willAnimateRemoval: Bool
     var parentingPhase: ParentingPhase?
     var hasWarned: Bool
-    var transitionPhaseSetters: [_TransitionPhaseSetter]
-    var transitionCompletionSeed: Attribute<UInt32>?
-    var transitionTransactions: _TransitionTransactionResolver?
-    var removalListener: DynamicContainer.TransitionRemovalListener?
 
     init(
         cache: LazyLayoutViewCache?,
@@ -1719,7 +1868,7 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
         self.prefetchSeed = 0
         self.prefetchPhase = .notPrefetching
         self.displayIndex = nil
-        self.removedSeed = 0
+        self.removedSeed = .max
         self.placement = nil
         self.pendingPlacement = nil
         self.releaseSecondaryElements = nil
@@ -1727,35 +1876,23 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
         self.willAnimateRemoval = false
         self.parentingPhase = nil
         self.hasWarned = false
-        self.transitionPhaseSetters = []
-        self.transitionCompletionSeed = nil
-        self.transitionTransactions = nil
-        self.removalListener = nil
     }
 
-    func setTransitionPhase(
-        _ phase: TransitionPhase,
-        transaction: Transaction = Transaction()
-    ) {
-        for setter in transitionPhaseSetters {
-            setter(phase, transaction)
-        }
-    }
-
-    func animationWasAdded() {
+    override func animationWasAdded() {
         animationCount &+= 1
     }
 
-    func animationWasRemoved() {
-        guard animationCount > 0 else { return }
+    override func animationWasRemoved() -> [() -> Void] {
+        guard animationCount > 0 else { return [] }
         animationCount &-= 1
         guard animationCount == 0,
               let cache else {
-            return
+            return []
         }
         cache.viewGraph?.continueTransaction(
             SingleItemPhaseMutation(cache: cache, item: self)
         )
+        return []
     }
 
     func beginPrefetching(at proposal: ProposedViewSize) {
@@ -1769,21 +1906,59 @@ final class LazyLayoutCacheItem: LazyLayoutNamespace {
     }
 }
 
+/// Tracks weakly owned descendant lazy caches for one retained parent item.
 struct LazyLayoutCacheChildren {
-    struct WeakChild {
-        weak var value: LazyLayoutViewCache?
-    }
-
     var seed: Int
-    var children: [WeakChild]
+    var children: [WeakBox<LazyLayoutViewCache>]
 
-    init(seed: Int = 0, children: [WeakChild] = []) {
+    init(seed: Int = 0, children: [WeakBox<LazyLayoutViewCache>] = []) {
         self.seed = seed
         self.children = children
     }
 }
 
+/// Owns materialized lazy children and the placement state shared by sizing,
+/// scrolling, transitions, and per-item geometry rules.
+///
+/// The cache is reference-backed because those subsystems must observe one
+/// placement lifecycle. Mutations that affect graph outputs still invalidate
+/// their narrow AG attributes explicitly; mutating this object is not itself
+/// an AttributeGraph dependency.
 class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
+    /// Groups every per-item graph node produced during one lazy child
+    /// materialization before ownership is transferred to the cache item.
+    struct SubviewOutputs {
+        var state: Attribute<LazyLayoutCacheItem.State>?
+        var geometry: Attribute<ViewGeometry>?
+        var phase: Attribute<Phase>?
+        var displayListWrapper: Attribute<HiddenForReuseEffect>?
+        var transaction: Attribute<Transaction>?
+        var transition: AGAttribute?
+        var transitionType: Any.Type?
+        var viewOutputs: _ViewOutputs
+
+        init(
+            state: Attribute<LazyLayoutCacheItem.State>? = nil,
+            geometry: Attribute<ViewGeometry>? = nil,
+            phase: Attribute<Phase>? = nil,
+            displayListWrapper: Attribute<HiddenForReuseEffect>? = nil,
+            transaction: Attribute<Transaction>? = nil,
+            transition: AGAttribute? = nil,
+            transitionType: Any.Type? = nil,
+            viewOutputs: _ViewOutputs = _ViewOutputs()
+        ) {
+            self.state = state
+            self.geometry = geometry
+            self.phase = phase
+            self.displayListWrapper = displayListWrapper
+            self.transaction = transaction
+            self.transition = transition
+            self.transitionType = transitionType
+            self.viewOutputs = viewOutputs
+        }
+    }
+
+    /// Orders reusable items by recent use and memoizes that ordering per pass.
     struct LeastRecentlyUsedItems {
         private(set) var usedSeed: UInt32 = 0
         var maxIdle: Int = 16
@@ -1848,13 +2023,16 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     var maxDisplayListSubviews: Int?
     weak var parentCache: LazyLayoutViewCache?
     var childCaches: [_ViewList_ID.Canonical: LazyLayoutCacheChildren]
-    var childCacheSeeds: [_ViewList_ID.Canonical: Int]
+    var childCacheSeeds: [Int: _ViewList_ID.Canonical]
     var nextChildCacheSeed: Int
 
-    var layoutType: Any.Type { Never.self }
+    /// Identifies the concrete lazy layout type hidden behind this cache.
+    class var viewType: Any.Type {
+        fatalError("LazyLayoutViewCache.viewType requires a concrete cache type.")
+    }
 
     var description: String {
-        "LazyLayoutViewCache<\(String(describing: layoutType))>"
+        "LazyLayoutViewCache<\(String(describing: type(of: self).viewType))>"
     }
 
     init(
@@ -1908,6 +2086,9 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         lru.reset()
         commitSeed = 1
         placementSeed = 1
+        hasSections = false
+        hasDepth = false
+        isFirstCommit = true
     }
 
     func invalidate() {
@@ -1919,6 +2100,55 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             item.subgraph.removeFromParent()
         }
         items.removeAll()
+    }
+
+    /// Synchronizes retained subgraph parenting and evicts only expired,
+    /// unplaced items that have no animation or prefetch ownership.
+    func collect() {
+        for item in items.values {
+            synchronizeParenting(of: item)
+        }
+
+        items = items.filter { _, item in
+            let idleAge = Int(lru.usedSeed &- item.usedSeed)
+            let isExpired = idleAge > lru.maxIdle
+                && item.placementSeed != placementSeed
+                && item.animationCount == 0
+                && item.prefetchSeed != commitSeed
+                && item.prefetchPhase != .pendingRemoval
+            guard isExpired else {
+                return true
+            }
+
+            if item.subgraph.isInserted {
+                item.subgraph.willRemove()
+            }
+            item.subgraph.invalidate()
+            item.subgraph.removeFromParent()
+            return false
+        }
+        lru.invalidate()
+    }
+
+    private func synchronizeParenting(of item: LazyLayoutCacheItem) {
+        if item.displayIndex == nil {
+            guard item.parentingPhase == .inserted else {
+                return
+            }
+            item.subgraph.willRemove()
+            item.subgraph.removeFromParent()
+            item.parentingPhase = .removed
+            return
+        }
+
+        guard item.parentingPhase != .inserted else {
+            return
+        }
+        parentSubgraph.addChild(item.subgraph)
+        if item.parentingPhase == .removed {
+            item.subgraph.didReinsert()
+        }
+        item.parentingPhase = .inserted
     }
 
     func invalidateSize(layoutComputer: Attribute<LayoutComputer>, animation: Animation?) {
@@ -1961,9 +2191,9 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     }
 
     private func layoutInvalidationSeed(for layoutComputer: Attribute<LayoutComputer>) -> UInt32 {
-        let changeCount = layoutComputer.value.changeCount
-        if changeCount != 0 {
-            return UInt32(truncatingIfNeeded: changeCount)
+        let seed = layoutComputer.value.seed
+        if seed != 0 {
+            return UInt32(truncatingIfNeeded: seed)
         }
         return layoutComputer.identifier.rawValue
     }
@@ -1984,6 +2214,65 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
 
     func item(for subgraph: AGSubgraph) -> LazyLayoutCacheItem? {
         items.values.first { $0.subgraph === subgraph }
+    }
+
+    /// Returns an independent copy of the concrete layout's cache state.
+    ///
+    /// Size and spacing queries are observational. Letting them mutate the
+    /// placement cache would make repeated measurements order-dependent.
+    func copyCacheState<LayoutType: LazyLayout>(
+        type: LayoutType.Type
+    ) -> LayoutType.Cache {
+        fatalError(
+            "LazyLayoutViewCache.copyCacheState(type:) requires a matching concrete cache."
+        )
+    }
+
+    /// Resolves the entrance placement for an item entering the committed display set.
+    func initialPlacement(
+        newIndex: Int,
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasInsertedToSubviews: Bool,
+        context: AnyRuleContext
+    ) -> _Placement {
+        fatalError(
+            "LazyLayoutViewCache.initialPlacement requires a matching concrete cache."
+        )
+    }
+
+    /// Resolves the destination placement retained while an item leaves the display set.
+    func finalPlacement(
+        oldIndex: Int,
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasRemovedFromSubviews: Bool,
+        context: AnyRuleContext
+    ) -> _Placement {
+        fatalError(
+            "LazyLayoutViewCache.finalPlacement requires a matching concrete cache."
+        )
+    }
+
+    /// Resolves the placement visible to a materialized item.
+    ///
+    /// The display index is the common O(1) path, but identity is verified
+    /// because retained/reused items can outlive an array generation. A scan
+    /// repairs a stale index. During retargeting, pending placement takes
+    /// precedence over the last committed item placement.
+    func placement(
+        of item: LazyLayoutCacheItem,
+        in placedSubviews: [_LazyLayout_PlacedSubview]
+    ) -> _Placement? {
+        if let displayIndex = item.displayIndex,
+           placedSubviews.indices.contains(displayIndex),
+           placedSubviews[displayIndex].item === item {
+            return placedSubviews[displayIndex].placement
+        }
+        if let placedSubview = placedSubviews.first(where: { $0.item === item }) {
+            return placedSubview.placement
+        }
+        return item.pendingPlacement ?? item.placement
     }
 
     func subviews(context: AnyRuleContext) -> _LazyLayout_Subviews {
@@ -2026,6 +2315,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     func addItem(_ item: LazyLayoutCacheItem, reset: Bool = false) {
         item.cache = self
         item.insertionTransactionSeed = lru.transactionSeed
+        item.removedSeed = .max
         let transaction = Transaction.current
         var state = item._state.value
         if reset {
@@ -2051,6 +2341,8 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             item.prefetchPhase = .notPrefetching
         }
         items[item.id.canonicalID] = item
+        hasSections = hasSections || item.section.id != nil
+        hasDepth = hasDepth || item.zIndex != 0
         lru.invalidate()
     }
 
@@ -2060,14 +2352,11 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         state: Attribute<LazyLayoutCacheItem.State>,
         in graph: _AGGraph
     ) -> Attribute<Phase> {
-        let secondaryPhase = elementPhase.identifier == basePhase.identifier
-            ? OptionalAttribute<Phase>()
-            : OptionalAttribute(elementPhase)
         return graph.makeRule(
             LazyViewPhase(
-                basePhase: basePhase,
-                secondaryPhase: secondaryPhase,
-                state: state
+                _phase1: basePhase,
+                _phase2: elementPhase,
+                _state: state
             )
         )
     }
@@ -2088,116 +2377,246 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             return
         }
         guard state.phase != .willAppear else { return }
-        if let listener = item.removalListener {
-            listener.readSeed()
-            guard listener.isCompletionPublished else { return }
-            item.removalListener = nil
-        }
-        if state.isRemoved {
-            item.subgraph.invalidate()
-            item.subgraph.removeFromParent()
-            items.removeValue(forKey: item.id.canonicalID)
-            return
-        }
         if state.phase == .identity,
            item.displayIndex != nil {
             let listTransaction = currentListTransaction()
-            var removalTransaction = item.transitionTransactions?(.didDisappear, listTransaction)
-                .first { candidate in
-                    guard let animation = candidate.effectiveAnimation else { return false }
-                    return animation.box.duration > 0
-                } ?? listTransaction
-            if let completionSeed = item.transitionCompletionSeed,
-               let animation = removalTransaction.effectiveAnimation,
-               animation.box.duration > 0,
-               let graph = _AGGraph.current {
-                let listener = DynamicContainer.TransitionRemovalListener(
-                    seed: completionSeed,
-                    inbox: graph.inbox
-                )
-                item.removalListener = listener
-                _ = listener.installCompletion(into: &removalTransaction)
-            }
-            item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
             state.phase = .didDisappear
             state.enableTransitions = item.willEnableTransitions
-            item._state.setValue(state, transaction: removalTransaction)
+            // The concrete transition body owns phase-specific transaction
+            // filtering. Publishing only the item state keeps one source of
+            // truth for both ordinary and filtered transitions.
+            item._state.setValue(state, transaction: listTransaction)
             item.willEnableTransitions = false
-            item.removalListener?.readSeed()
-            finalizeAnimationCompletions(
-                in: removalTransaction,
-                animation: removalTransaction.effectiveAnimation
-            )
-            if item.parentingPhase == .inserted {
-                item.displayIndex = nil
-                item.placement = nil
-                item.prefetchPhase = .notPrefetching
-            }
             return
         }
         guard item.animationCount == 0 else { return }
-        if item.parentingPhase == .inserted {
-            item.displayIndex = nil
-            item.placement = nil
-            item.prefetchPhase = .notPrefetching
-            state.isRemoved = false
-            item._state.setValue(state, transaction: currentListTransaction())
-            return
-        }
         item.displayIndex = nil
         item.placement = nil
         item.prefetchPhase = supportsViewHierarchyPrefetching ? .pendingRemoval : .notPrefetching
         state.isRemoved = true
         item._state.setValue(state, transaction: currentListTransaction())
-        item.subgraph.willRemove()
-        if let graph = _AGGraph.current,
-           let currentAttribute = _AGGraph.currentRuleContextAttribute {
-            graph.inbox.enqueue {
-                graph.invalidateAttribute(currentAttribute)
-            }
-        }
     }
 
-    func commitPlacedSubviews(_ placedSubviews: [_LazyLayout_PlacedSubview]) {
+    /// Reconciles one pending layout result with the previously displayed item set.
+    func commitPlacedSubviews(
+        from previousPlacedSubviews: [_LazyLayout_PlacedSubview],
+        to placedSubviews: inout [_LazyLayout_PlacedSubview],
+        wasCancelled: Bool,
+        context: AnyRuleContext,
+        containingSize: CGSize
+    ) {
         placementSeed &+= 1
-        var minPlacedIndex = Int.max
-        var maxPlacedIndex = Int.min
-        for (displayIndex, placedSubview) in placedSubviews.enumerated() {
-            let item = placedSubview.item
-            item.displayIndex = displayIndex
-            item.usedSeed = lru.usedSeed
-            item.placementSeed = placementSeed
-            item.commitSeed = placementSeed
-            item.placement = placedSubview.placement
-            item.pendingPlacement = nil
-            item.parentingPhase = .inserted
-            minPlacedIndex = min(minPlacedIndex, placedSubview.index)
-            maxPlacedIndex = max(maxPlacedIndex, placedSubview.index)
-        }
-        if minPlacedIndex <= maxPlacedIndex {
-            placedIndices = (minPlacedIndex, maxPlacedIndex)
-        } else {
-            placedIndices = (0, -1)
-        }
+        var oldPlacedSubviews = previousPlacedSubviews
+        var minPlacedIndex: Int?
+        var maxPlacedIndex: Int?
+        var needsPhaseUpdate = false
+        var appendedStaleItem = false
+        var retargetedRemovalItems: [LazyLayoutCacheItem] = []
 
-        var hasStaleItems = false
-        for item in items.values where item.commitSeed != placementSeed {
-            if containsCurrentListItem(item) {
-                item.parentingPhase = .inserted
-                item.prefetchPhase = .notPrefetching
-                hasStaleItems = true
+        var newIndex = 0
+        while newIndex < placedSubviews.count {
+            let targetPlacedSubview = placedSubviews[newIndex]
+            let item = targetPlacedSubview.item
+
+            // One cache item may appear only once in a committed display set.
+            // Keep the first occurrence so displayIndex remains unambiguous.
+            if item.commitSeed == placementSeed {
+                if !item.hasWarned {
+                    item.hasWarned = true
+                    print(
+                        "\(String(reflecting: type(of: self).viewType)): the ID " +
+                        "\(item.id.canonicalID) occurs multiple times within " +
+                        "the collection, this will give undefined results!"
+                    )
+                }
+                placedSubviews.remove(at: newIndex)
                 continue
             }
-            item.parentingPhase = .removed
-            item.removalTransactionSeed = lru.transactionSeed
-            item.prefetchPhase = supportsViewHierarchyPrefetching ? .pendingRemoval : .notPrefetching
-            item.willEnableTransitions = item.transitionType != nil
-            hasStaleItems = true
+
+            let state = item._state.value
+            if state.phase != .identity {
+                if item.displayIndex == nil {
+                    if !isFirstCommit {
+                        let initial = initialPlacement(
+                            newIndex: newIndex,
+                            newPlacedSubviews: placedSubviews,
+                            oldPlacedSubviews: oldPlacedSubviews,
+                            wasInsertedToSubviews: state.enableTransitions,
+                            context: context
+                        )
+                        placedSubviews[newIndex].placement = initial
+                        var oldPlacedSubview = targetPlacedSubview
+                        oldPlacedSubview.placement = initial
+                        oldPlacedSubviews.append(oldPlacedSubview)
+                        needsPhaseUpdate = true
+                    }
+                } else {
+                    needsPhaseUpdate = true
+                }
+            }
+
+            item.displayIndex = newIndex
+            item.usedSeed = lru.usedSeed
+            item.commitSeed = placementSeed
+            item.placement = targetPlacedSubview.placement
+
+            minPlacedIndex = minPlacedIndex.map {
+                min($0, targetPlacedSubview.index)
+            } ?? targetPlacedSubview.index
+            maxPlacedIndex = maxPlacedIndex.map {
+                max($0, targetPlacedSubview.index)
+            } ?? targetPlacedSubview.index
+            newIndex += 1
         }
-        if hasStaleItems {
+
+        updatePlacedIndices(
+            minIndex: minPlacedIndex,
+            maxIndex: maxPlacedIndex,
+            containingSize: containingSize
+        )
+
+        for item in items.values where item.commitSeed != placementSeed {
+            guard let previousPlacement = item.placement,
+                  let oldIndex = item.displayIndex else {
+                continue
+            }
+
+            let state = item._state.value
+            var displayedPlacement = previousPlacement
+            if state.phase != .didDisappear {
+                let transaction = currentListTransaction()
+                if transaction.fromScrollView {
+                    // Scroll-driven eviction has no retained transition. Its
+                    // prefetch generation alone owns the offscreen item.
+                    item.displayIndex = nil
+                    item.prefetchPhase =
+                        supportsViewHierarchyPrefetching
+                        ? .pendingRemoval
+                        : .notPrefetching
+                    item.removalTransactionSeed = lru.transactionSeed
+                    item.placement = nil
+                    continue
+                }
+
+                let itemList = item._list.attribute?.value
+                let wasRemoved = itemList?.edit(
+                    forID: item.id,
+                    since: lru.lastTransactionID
+                ) == .removed
+                displayedPlacement = finalPlacement(
+                    oldIndex: oldIndex,
+                    oldPlacedSubviews: oldPlacedSubviews,
+                    newPlacedSubviews: placedSubviews,
+                    wasRemovedFromSubviews: wasRemoved,
+                    context: context
+                )
+                item.willEnableTransitions =
+                    item.transitionType != nil && wasRemoved
+                item.willAnimateRemoval = true
+                item.removedSeed = placementSeed
+                retargetedRemovalItems.append(item)
+                needsPhaseUpdate = true
+            } else if item.willAnimateRemoval {
+                item.willAnimateRemoval = false
+                needsPhaseUpdate = true
+            } else if item.animationCount == 0 {
+                needsPhaseUpdate = true
+            }
+
+            item.displayIndex = placedSubviews.count
+            item.usedSeed = lru.usedSeed
+            placedSubviews.append(
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: displayedPlacement,
+                    index: -1
+                )
+            )
+            appendedStaleItem = true
+        }
+
+        // The outgoing item is displayed at its previous placement while its
+        // cache stores the final target consumed by the transition geometry.
+        for item in retargetedRemovalItems {
+            guard let displayIndex = item.displayIndex,
+                  placedSubviews.indices.contains(displayIndex),
+                  let previousPlacement = item.placement else {
+                fatalError("Retargeted lazy removal lost its committed placement.")
+            }
+            let finalPlacement = placedSubviews[displayIndex].placement
+            placedSubviews[displayIndex].placement = previousPlacement
+            item.placement = finalPlacement
+        }
+
+        if hasDepth || hasSections || appendedStaleItem {
+            sortForDisplay(&placedSubviews)
+        }
+
+        if needsPhaseUpdate {
             viewGraph?.continueTransaction(
                 LazyLayoutCacheItem.AllItemsPhaseMutation(cache: self)
             )
+        } else if !wasCancelled && !placedSubviews.isEmpty {
+            isFirstCommit = false
+        }
+    }
+
+    /// Updates the visible index range and its rolling density estimate.
+    private func updatePlacedIndices(
+        minIndex: Int?,
+        maxIndex: Int?,
+        containingSize: CGSize
+    ) {
+        if self.containingSize != containingSize {
+            averagePlacedCount = (0, 0)
+        }
+
+        placedIndices = (minIndex ?? -1, maxIndex ?? -1)
+        if let minIndex, let maxIndex {
+            let nextCount = averagePlacedCount.count + 1
+            averagePlacedCount.value =
+                (
+                    averagePlacedCount.value *
+                    Double(averagePlacedCount.count) +
+                    Double(maxIndex - minIndex)
+                ) / Double(nextCount)
+            averagePlacedCount.count = nextCount
+        }
+        self.containingSize = containingSize
+    }
+
+    /// Orders committed display items by depth, section role, and removal age.
+    private func sortForDisplay(
+        _ placedSubviews: inout [_LazyLayout_PlacedSubview]
+    ) {
+        placedSubviews.sort { lhs, rhs in
+            let lhsItem = lhs.item
+            let rhsItem = rhs.item
+            if lhsItem.zIndex != rhsItem.zIndex {
+                return lhsItem.zIndex < rhsItem.zIndex
+            }
+
+            let lhsIsSectionBoundary =
+                lhsItem.section.isHeader || lhsItem.section.isFooter
+            let rhsIsSectionBoundary =
+                rhsItem.section.isHeader || rhsItem.section.isFooter
+            if lhsIsSectionBoundary != rhsIsSectionBoundary {
+                return !lhsIsSectionBoundary
+            }
+
+            if lhsItem.removedSeed != rhsItem.removedSeed {
+                return lhsItem.removedSeed < rhsItem.removedSeed
+            }
+
+            guard let lhsIndex = lhsItem.displayIndex,
+                  let rhsIndex = rhsItem.displayIndex else {
+                fatalError("Displayed lazy items require display indices.")
+            }
+            return lhsIndex < rhsIndex
+        }
+
+        for index in placedSubviews.indices {
+            placedSubviews[index].item.displayIndex = index
         }
     }
 
@@ -2222,16 +2641,14 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         anyTransition transition: AnyTransition?
     ) -> LazyLayoutCacheItem? {
         let id = data.id.canonicalID
-        let transitionType = transition?._transitionType
         let reuseIdentifier = data.id.reuseIdentifier
         let candidates = lru.updatedItems(Array(items.values))
         guard let item = candidates.first(where: {
-            isReusableCandidate(
+            isReusableCandidateBase(
                 $0,
                 for: id,
-                reuseIdentifier: reuseIdentifier,
-                transitionType: transitionType
-            )
+                reuseIdentifier: reuseIdentifier
+            ) && hasCompatibleTransition($0, transition: transition)
         }) else {
             return nil
         }
@@ -2242,9 +2659,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             items.removeValue(forKey: oldID)
             if let children = childCaches.removeValue(forKey: oldID) {
                 childCaches[newID] = children
-            }
-            if let seed = childCacheSeeds.removeValue(forKey: oldID) {
-                childCacheSeeds[newID] = seed
+                childCacheSeeds[children.seed] = newID
             }
         }
         addItem(item, reset: true)
@@ -2257,20 +2672,50 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         reuseIdentifier: Int,
         transitionType: Any.Type?
     ) -> Bool {
-        guard item.id.canonicalID != id,
-              item.reuseIdentifier == reuseIdentifier else {
+        guard isReusableCandidateBase(
+            item,
+            for: id,
+            reuseIdentifier: reuseIdentifier
+        ) else { return false }
+        switch (item.transitionType, transitionType) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            return ObjectIdentifier(lhs) == ObjectIdentifier(rhs)
+        default:
             return false
         }
-        guard item.parentingPhase != .inserted else {
+    }
+
+    private func isReusableCandidateBase(
+        _ item: LazyLayoutCacheItem,
+        for id: _ViewList_ID.Canonical,
+        reuseIdentifier: Int
+    ) -> Bool {
+        guard item.id.canonicalID != id,
+              item.reuseIdentifier == reuseIdentifier,
+              item.parentingPhase != .inserted else {
             return false
         }
         let insertionAge = Int32(bitPattern: lru.transactionSeed &- item.insertionTransactionSeed)
-        guard insertionAge >= 1,
-              item.placementSeed != placementSeed,
-              item.displayIndex == nil else {
-            return false
+        return insertionAge >= 1
+            && item.placementSeed != placementSeed
+            && item.displayIndex == nil
+    }
+
+    private func hasCompatibleTransition(
+        _ item: LazyLayoutCacheItem,
+        transition: AnyTransition?
+    ) -> Bool {
+        guard let transition else {
+            return item.transitionType == nil
         }
-        return item.transitionType == transitionType
+        var comparison = CompareTransitionType(
+            existingType: item.transitionType,
+            compatibleTypes: false
+        )
+        transition.visitType(&comparison)
+        return comparison.compatibleTypes
     }
 
     func prefetchOutputs() -> _LazyLayout_PrefetchResult {
@@ -2463,9 +2908,31 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         return _ViewOutputs(preferences: preferences)
     }
 
+    /// Returns the stable seed used when descendants register a nested cache
+    /// under this materialized item.
+    private func childCacheSeed(id: _ViewList_ID.Canonical) -> Int {
+        if let children = childCaches[id] {
+            return children.seed
+        }
+        let seed = nextChildCacheSeed
+        childCacheSeeds[seed] = id
+        nextChildCacheSeed &+= 1
+        return seed
+    }
+
+    /// Attaches a nested cache to the item identified by its previously issued
+    /// seed without introducing a strong parent-child ownership cycle.
+    fileprivate func addChildCache(_ child: LazyLayoutViewCache, seed: Int) {
+        guard let id = childCacheSeeds[seed] else { return }
+        var children = childCaches[id] ?? LazyLayoutCacheChildren(seed: seed)
+        children.children.append(WeakBox(child))
+        childCaches[id] = children
+        child.parentCache = self
+    }
+
     private func liveChildCaches(for item: LazyLayoutCacheItem) -> [LazyLayoutViewCache] {
         guard let children = childCaches[item.id.canonicalID] else { return [] }
-        return children.children.compactMap(\.value)
+        return children.children.compactMap(\.base)
     }
 
     private func anyTransition(data: _LazyLayout_Subview.Data) -> AnyTransition? {
@@ -2473,11 +2940,122 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         return data.traits[TransitionTraitKey.self]
     }
 
-    private func containsCurrentListItem(_ item: LazyLayoutCacheItem) -> Bool {
-        _list.value.firstOffset(
-            forID: item.id.canonicalID,
-            style: _ViewList_IteratorStyle()
-        ) != nil
+    /// Builds the graph-node bundle owned by one materialized lazy child.
+    private func makeSubviewOutputs(
+        inputs parentInputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?,
+        data: _LazyLayout_Subview.Data,
+        anyTransition transition: AnyTransition?
+    ) -> SubviewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("LazyLayoutViewCache.makeSubviewOutputs requires an active AttributeGraph.")
+        }
+
+        let parentSeed = childCacheSeed(id: data.id.canonicalID)
+        var result = SubviewOutputs()
+        let outputs = data.elements.makeOneElement(
+            at: data.id.index,
+            inputs: parentInputs,
+            indirectMap: indirectMap
+        ) { elementInputs, makeView in
+            var elementInputs = elementInputs
+            elementInputs.base.merge(parentInputs.base, ignoringPhase: true)
+
+            let state = graph.makeInput(
+                value: LazyLayoutCacheItem.State(
+                    phase: .willAppear,
+                    isRemoved: true
+                )
+            )
+            let geometry: Attribute<ViewGeometry> = graph.makeRule(
+                LazyViewGeometry(
+                    _subviews: _placedSubviews,
+                    _size: self.inputs.size,
+                    _parentPosition: self.inputs.position,
+                    _layoutDirection: _layoutDirection,
+                    cache: self,
+                    item: nil
+                )
+            )
+            let phase = lazyViewPhase(
+                basePhase: parentInputs.base.phase,
+                elementPhase: elementInputs.base.phase,
+                state: state,
+                in: graph
+            )
+            let displayListWrapper: Attribute<HiddenForReuseEffect> =
+                graph.makeStatefulRule(
+                    LazyDisplayListWrapper(
+                        item: nil,
+                        isRemoved: false,
+                        wasHiddenForReuse: false
+                    )
+                )
+
+            // Geometry is projected from a single node so origin and size
+            // cannot observe different placement generations.
+            elementInputs.position = geometry.origin()
+            elementInputs.size = geometry.size()
+            elementInputs.base.phase = phase
+            elementInputs.base[LazyLayoutReuseIdleInput.self] = Optional<Int>.none
+            elementInputs.base[_GraphInputs.LazyLayoutCacheParentKey.self] =
+                LazyLayoutCacheParent(cache: self, seed: parentSeed)
+
+            let transaction: Attribute<Transaction> = graph.makeStatefulRule(
+                LazyTransaction(
+                    transaction: elementInputs.base.transaction,
+                    state: state,
+                    item: nil
+                )
+            )
+            elementInputs.base.transaction = transaction
+
+            var transitionAttribute: AGAttribute?
+            var transitionType: Any.Type?
+            let makeBody: (_Graph, _ViewInputs) -> _ViewOutputs = { _, bodyInputs in
+                guard let transition else {
+                    return makeView(bodyInputs)
+                }
+                var visitor = MakeSubviewTransition(
+                    _state: state,
+                    inputs: bodyInputs,
+                    id: data.id,
+                    makeElt: makeView,
+                    outputs: nil,
+                    transition: nil,
+                    transitionType: nil
+                )
+                transition.visit(&visitor)
+                transitionAttribute = visitor.transition
+                transitionType = visitor.transitionType
+                return visitor.outputs ?? _ViewOutputs()
+            }
+
+            let viewOutputs: _ViewOutputs
+            if elementInputs.preferences.keys.contains(DisplayList.Key.self) {
+                viewOutputs = _RendererEffectSupport.makeView(
+                    effect: _GraphValue(_attribute: displayListWrapper),
+                    inputs: elementInputs,
+                    body: makeBody
+                )
+            } else {
+                viewOutputs = makeBody(_Graph(), elementInputs)
+            }
+
+            result = SubviewOutputs(
+                state: state,
+                geometry: geometry,
+                phase: phase,
+                displayListWrapper: displayListWrapper,
+                transaction: transaction,
+                transition: transitionAttribute,
+                transitionType: transitionType,
+                viewOutputs: viewOutputs
+            )
+            return viewOutputs
+        }
+        result.viewOutputs = outputs ?? _ViewOutputs()
+        return result
     }
 
     private func makeNewItem(
@@ -2493,75 +3071,62 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         var childInputs = inputs
         childInputs.copyCaches()
         let materialized = AGSubgraph.withCurrent(subgraph) {
-            let state = graph.makeInput(value: LazyLayoutCacheItem.State())
-            let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
-            var transitionPhaseSetters: [_TransitionPhaseSetter] = []
-            var lazyTransactionAttr: Attribute<Transaction>?
-            let outputs = data.elements.makeOneElement(at: data.id.index, inputs: childInputs) {
-                elementInputs,
-                makeView in
-                var elementInputs = elementInputs
-                elementInputs.base.phase = lazyViewPhase(
-                    basePhase: childInputs.base.phase,
-                    elementPhase: elementInputs.base.phase,
-                    state: state,
-                    in: graph
-                )
-                let lazyTransaction = graph.makeStatefulRule(
-                    LazyTransaction(
-                        transaction: elementInputs.base.transaction,
-                        state: state,
-                        item: nil
-                    )
-                )
-                lazyTransactionAttr = lazyTransaction
-                elementInputs.base.transaction = lazyTransaction
-                if let transition {
-                    return transition._makeView(
-                        phase: .identity,
-                        inputs: elementInputs,
-                        phaseSetters: &transitionPhaseSetters
-                    ) { _, transitionInputs in
-                        makeView(transitionInputs)
-                    }
-                }
-                return makeView(elementInputs)
-            } ?? _ViewOutputs()
-            return (
-                state: state,
-                outputs: outputs,
-                transitionCompletionSeed: transitionCompletionSeed,
-                transitionPhaseSetters: transitionPhaseSetters,
-                lazyTransactionAttr: lazyTransactionAttr
+            makeSubviewOutputs(
+                inputs: childInputs,
+                indirectMap: nil,
+                data: data,
+                anyTransition: transition
             )
+        }
+        guard let state = materialized.state else {
+            fatalError("Lazy child materialization did not produce an item state.")
         }
 
         let item = LazyLayoutCacheItem(
             cache: self,
             subgraph: subgraph,
-            outputs: materialized.outputs,
-            state: materialized.state,
+            outputs: materialized.viewOutputs,
+            state: state,
             list: data.list.map(OptionalAttribute.init) ?? OptionalAttribute<any ViewList>(),
             elements: data.elements,
             elementIndex: data.id.index,
             id: data.id,
             reuseIdentifier: data.id.reuseIdentifier,
             section: data.section,
-            transition: nil,
-            transitionType: transition?._transitionType,
+            transition: materialized.transition,
+            transitionType: materialized.transitionType,
             zIndex: data.traits[ZIndexTraitKey.self]
         )
-        item.transitionPhaseSetters = materialized.transitionPhaseSetters
-        item.transitionCompletionSeed = materialized.transitionCompletionSeed
-        item.transitionTransactions = transition.map { transition in
-            { phase, transaction in
-                transition._retainedRemovalTransactions(from: transaction, phase: phase)
-            }
-        }
-        if let lazyTransactionAttr = materialized.lazyTransactionAttr {
-            graph.mutateStatefulRule(lazyTransactionAttr.identifier, as: LazyTransaction.self) { rule in
+        if let transaction = materialized.transaction {
+            graph.mutateStatefulRule(transaction.identifier, as: LazyTransaction.self) { rule in
                 rule.item = item
             }
+        }
+        if let geometry = materialized.geometry {
+            graph.mutateRule(
+                geometry.identifier,
+                as: LazyViewGeometry.self,
+                invalidating: true
+            ) { geometry in
+                geometry.item = item
+            }
+        }
+        if let displayListWrapper = materialized.displayListWrapper {
+            graph.mutateStatefulRule(
+                displayListWrapper.identifier,
+                as: LazyDisplayListWrapper.self,
+                invalidating: true
+            ) { wrapper in
+                wrapper.item = item
+            }
+        }
+        if let transitionAttribute = materialized.transition,
+           let transition {
+            var visitor = UpdateSubviewTransition(
+                transition: transitionAttribute,
+                item: item
+            )
+            transition.visitType(&visitor)
         }
         item.releaseElements = release
         addItem(item, reset: false)
@@ -2579,27 +3144,23 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         item.id = data.id
         item.reuseIdentifier = data.id.reuseIdentifier
         item.section = data.section
-        item.transition = nil
-        item.transitionType = transition?._transitionType
-        item.transitionCompletionSeed = transition == nil ? nil : item.transitionCompletionSeed
-        item.transitionTransactions = transition.map { transition in
-            { phase, transaction in
-                transition._retainedRemovalTransactions(from: transaction, phase: phase)
-            }
-        }
         item.zIndex = data.traits[ZIndexTraitKey.self]
+        hasSections = hasSections || data.section.id != nil
+        hasDepth = hasDepth || item.zIndex != 0
     }
 }
 
+/// Binds the type-erased lazy cache lifecycle to one concrete layout and its
+/// opaque user-defined `Cache` value.
 final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     var _layout: Attribute<LayoutType>
-    var cacheState: Attribute<LayoutType.Cache>
+    var cacheState: LayoutType.Cache
 
-    override var layoutType: Any.Type { LayoutType.self }
+    override class var viewType: Any.Type { LayoutType.self }
 
     init(
         layout: Attribute<LayoutType>,
-        cacheState: Attribute<LayoutType.Cache>,
+        cacheState: LayoutType.Cache,
         viewGraph: GraphHost?,
         parentSubgraph: AGSubgraph,
         inputs: _ViewInputs,
@@ -2627,6 +3188,17 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
             scrollPosition: scrollPosition,
             accessibilityEnabled: accessibilityEnabled
         )
+
+        // A nested cache registers through the seed issued while its owning
+        // item was materialized. The seed survives item reuse even when the
+        // canonical item ID changes.
+        let parent = inputs.base[_GraphInputs.LazyLayoutCacheParentKey.self]
+        if parent.seed != -1, let parentCache = parent.cache {
+            parentCache.addChildCache(self, seed: parent.seed)
+        }
+        if let maxIdle = inputs.base[LazyLayoutReuseIdleInput.self] {
+            lru.maxIdle = maxIdle
+        }
     }
 
     override var supportsPrefetching: Bool {
@@ -2635,11 +3207,97 @@ final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
     }
 
     override func reset() {
-        cacheState.setValue(LayoutType.initialCache)
+        cacheState = LayoutType.initialCache
         super.reset()
+    }
+
+    override func copyCacheState<L: LazyLayout>(type: L.Type) -> L.Cache {
+        guard ObjectIdentifier(type) == ObjectIdentifier(LayoutType.self) else {
+            fatalError(
+                "Lazy layout cache type mismatch: expected \(LayoutType.self), got \(L.self)."
+            )
+        }
+
+        // The metatype check above proves that both associated Cache types
+        // are identical. Rebinding is needed only because this virtual method
+        // crosses the type-erased base-class boundary.
+        return withUnsafePointer(to: cacheState) { pointer in
+            UnsafeRawPointer(pointer)
+                .assumingMemoryBound(to: L.Cache.self)
+                .pointee
+        }
+    }
+
+    override func initialPlacement(
+        newIndex: Int,
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasInsertedToSubviews: Bool,
+        context: AnyRuleContext
+    ) -> _Placement {
+        withPlacementData(context: context) { layout, placementContext in
+            let cacheState = copyCacheState(type: LayoutType.self)
+            let subviews = subviews(context: context)
+            return layout.initialPlacement(
+                newIndex: newIndex,
+                newPlacedSubviews: newPlacedSubviews,
+                oldPlacedSubviews: oldPlacedSubviews,
+                wasInsertedToSubviews: wasInsertedToSubviews,
+                context: placementContext,
+                subviews: subviews,
+                cache: cacheState
+            )
+        }
+    }
+
+    override func finalPlacement(
+        oldIndex: Int,
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasRemovedFromSubviews: Bool,
+        context: AnyRuleContext
+    ) -> _Placement {
+        withPlacementData(context: context) { layout, placementContext in
+            let cacheState = copyCacheState(type: LayoutType.self)
+            let subviews = subviews(context: context)
+            return layout.finalPlacement(
+                oldIndex: oldIndex,
+                oldPlacedSubviews: oldPlacedSubviews,
+                newPlacedSubviews: newPlacedSubviews,
+                wasRemovedFromSubviews: wasRemovedFromSubviews,
+                context: placementContext,
+                subviews: subviews,
+                cache: cacheState
+            )
+        }
+    }
+
+    /// Reconstructs the concrete layout and placement context for virtual callbacks.
+    private func withPlacementData<Result>(
+        context: AnyRuleContext,
+        _ body: (LayoutType, _LazyLayout_PlacementContext) -> Result
+    ) -> Result {
+        let layout = _layout.value
+        let sizingContext = _LazyLayout_SizeAndSpacingContext(
+            ruleContext: context,
+            owner: context.attribute,
+            environment: inputs.base.cachedEnvironment.value.environment,
+            containerSize: inputs.containerSize
+        )
+        let placementContext = _LazyLayout_PlacementContext(
+            base: sizingContext,
+            position: inputs.position.value,
+            size: inputs.size.value,
+            transform: inputs.transform.value,
+            layoutDirection: _layoutDirection.value,
+            pinnedViews: layout.pinnedViews,
+            isAccessibilityEnabled: _accessibilityEnabled.value
+        )
+        return body(layout, placementContext)
     }
 }
 
+/// Exposes a concrete lazy cache through the scrollable collection interfaces.
 struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableContainer {
     var position: WeakAttribute<CGPoint>
     var transform: WeakAttribute<ViewTransform>
@@ -2739,7 +3397,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
     }
 
     func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
-        cache?._list.value.firstOffset(forID: id, style: _ViewList_IteratorStyle())
+        cache?._list.value.firstOffset(of: id)
     }
 
     func applyCollectionViewIDs(
@@ -2903,6 +3561,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
     }
 }
 
+/// Supplies cached or estimated target geometry to lazy scrolling operations.
 private protocol LazyScrollableTargetProducing {
     func lazyScrollableTarget(
         for id: _ViewList_ID.Canonical,
@@ -2919,11 +3578,11 @@ extension _LazyLayoutViewCache: LazyScrollableTargetProducing where LayoutType: 
         transform: ViewTransform,
         context: AnyRuleContext
     ) -> ScrollTarget? {
-        let style = _ViewList_IteratorStyle()
-        guard _list.value.firstOffset(forID: id, style: style) != nil else {
+        guard _list.value.firstOffset(of: id) != nil else {
             return nil
         }
 
+        let style = _ViewList_IteratorStyle()
         let subviews = subviews(context: context)
         let layout = _layout.value
         var minorSize = lazyMinorLength(containingSize, axis: LayoutType.majorAxis)
@@ -3039,6 +3698,7 @@ private extension CGRect {
     }
 }
 
+/// Pairs a materialized cache item with its committed placement and list index.
 struct _LazyLayout_PlacedSubview {
     var item: LazyLayoutCacheItem
     var placement: _Placement
@@ -3090,46 +3750,7 @@ struct _LazyLayout_PlacedSubview {
 extension _LazyLayout_PlacedSubview: LazyLayoutNamespace {
 }
 
-private func placeLazySubviews(
-    _ placedSubviews: [_LazyLayout_PlacedSubview],
-    at origin: CGPoint
-) {
-    for placedSubview in placedSubviews {
-        let layoutComputer =
-            placedSubview.item.outputs._layoutComputer.attribute?.value ?? .defaultValue
-        let anchorPosition = CGPoint(
-            x: origin.x + placedSubview.placement.anchorPosition.x,
-            y: origin.y + placedSubview.placement.anchorPosition.y
-        )
-        layoutComputer.place(
-            at: anchorPosition,
-            anchor: placedSubview.placement.anchor,
-            proposal: ProposedViewSize(placedSubview.placement.proposedSize)
-        )
-    }
-}
-
-private func lazyChildGeometries(
-    from placedSubviews: [_LazyLayout_PlacedSubview],
-    origin: CGPoint
-) -> [ViewGeometry] {
-    placedSubviews.map { placedSubview in
-        let layoutComputer =
-            placedSubview.item.outputs._layoutComputer.attribute?.value ?? .defaultValue
-        let frame = placedSubview.frame.offsetBy(dx: origin.x, dy: origin.y)
-        return ViewGeometry(
-            origin: frame.origin,
-            dimensions: ViewDimensions(
-                guideComputer: layoutComputer,
-                size: ViewSize(
-                    frame.size,
-                    proposal: _ProposedSize(placedSubview.placement.proposedSize)
-                )
-            )
-        )
-    }
-}
-
+/// Groups the placed header, content, and footer entries of one pinnable section.
 private struct PinnedLazySection {
     var horizontalBounds: ClosedRange<CGFloat>
     var verticalBounds: ClosedRange<CGFloat>
@@ -3587,6 +4208,7 @@ extension Array where Element == _LazyLayout_PlacedSubview {
     }
 }
 
+/// Records one lazily materialized item and the proposal prepared for prefetch.
 struct _LazyLayout_ProposedSubview: LazyLayoutNamespace {
     var item: LazyLayoutCacheItem
     var proposal: _ProposedSize
@@ -3603,6 +4225,7 @@ struct _LazyLayout_ProposedSubview: LazyLayoutNamespace {
     }
 }
 
+/// Accumulates proposal work emitted by a lazy layout prefetch query.
 struct _LazyLayout_ProposedSizes: LazyLayoutNamespace {
     var subviews: [_LazyLayout_ProposedSubview]
 
@@ -3611,6 +4234,7 @@ struct _LazyLayout_ProposedSizes: LazyLayoutNamespace {
     }
 }
 
+/// Stores the resolved cross-axis track count, extent, and layout-specific geometry.
 struct MinorProperties<LayoutType: LazyStack>: LazyLayoutNamespace {
     var count: Int
     var size: CGFloat
@@ -3623,11 +4247,13 @@ struct MinorProperties<LayoutType: LazyStack>: LazyLayoutNamespace {
     }
 }
 
+/// Couples one major-axis item length with its preceding spacing.
 struct LengthSpacing: LazyLayoutNamespace, Equatable {
     var length: CGFloat
     var spacing: CGFloat?
 }
 
+/// Maintains rolling length and spacing estimates for unmaterialized stack groups.
 struct EstimationCache: LazyLayoutNamespace {
     var lengthToCount: [CGFloat: Int]
     var spacingToCount: [CGFloat: Int]
@@ -3685,6 +4311,7 @@ struct EstimationCache: LazyLayoutNamespace {
     }
 }
 
+/// Carries the immutable stack inputs shared by exact and estimated placement.
 struct PlacementProperties<LayoutType: LazyStack>: LazyLayoutNamespace {
     var minor: MinorProperties<LayoutType>
     var visible: Range<CGFloat>
@@ -3710,12 +4337,14 @@ struct PlacementProperties<LayoutType: LazyStack>: LazyLayoutNamespace {
     }
 }
 
+/// Selects the terminal index or major-axis position for a placement traversal.
 enum StoppingCondition: LazyLayoutNamespace, Equatable {
     case never
     case position(CGFloat)
     case index(Int)
 }
 
+/// Traverses lazy list nodes while measuring, grouping, and emitting visible stack items.
 struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
     var stack: LayoutType
     var axis: Axis
@@ -4228,6 +4857,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
     }
 }
 
+/// Preserves stack estimates and the last resolved viewport start across layout passes.
 struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
     var minor: MinorProperties<LayoutType>?
     var endIndex: Int?
@@ -4669,6 +5299,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
     }
 }
 
+/// Returns the placed item set and validity metadata produced by one layout pass.
 struct _LazyLayout_Placements: LazyLayoutNamespace {
     var subviews: [_LazyLayout_PlacedSubview]
     var validRect: CGRect
@@ -4691,6 +5322,7 @@ struct _LazyLayout_Placements: LazyLayoutNamespace {
     }
 }
 
+/// Returns a provisional index and item set for noncommitting placement queries.
 struct _LazyLayout_EstimatedPlacements: LazyLayoutNamespace {
     var index: Int?
     var subviews: [_LazyLayout_PlacedSubview]
@@ -4701,20 +5333,66 @@ struct _LazyLayout_EstimatedPlacements: LazyLayoutNamespace {
     }
 }
 
+/// Projects one lazy item's current placement into the geometry consumed by
+/// its materialized child graph.
+///
+/// This rule is the sole bridge from the shared placed-subview array to that
+/// child. Keeping geometry here lets AttributeGraph invalidate only affected
+/// item graphs instead of recursively placing every visible layout computer.
+struct LazyViewGeometry: Rule, AsyncAttribute {
+    var _subviews: Attribute<[_LazyLayout_PlacedSubview]>
+    var _size: Attribute<ViewSize>
+    var _parentPosition: Attribute<CGPoint>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var cache: LazyLayoutViewCache
+    var item: LazyLayoutCacheItem?
+
+    var value: ViewGeometry {
+        guard let item else {
+            fatalError("LazyViewGeometry evaluated before its cache item was connected.")
+        }
+
+        let parentSize = _size.value
+        let placement = cache.placement(of: item, in: _subviews.value)
+            ?? _Placement(proposedSize: parentSize.proposal, at: .zero)
+        let layoutComputer =
+            item.outputs._layoutComputer.attribute?.value ?? .defaultValue
+        let childSize = layoutComputer.sizeThatFits(placement.proposedSize_)
+        var geometry = ViewGeometry(
+            origin: placement.frameOrigin(childSize: childSize),
+            dimensions: ViewDimensions(
+                guideComputer: layoutComputer,
+                size: ViewSize(childSize, proposal: placement.proposedSize_)
+            )
+        )
+
+        // Reflection is parent-local. The parent position is added only after
+        // RTL finalization so global coordinates do not affect the mirror.
+        geometry.finalizeLayoutDirection(
+            _layoutDirection.value,
+            parentSize: parentSize.value
+        )
+        let parentPosition = _parentPosition.value
+        geometry.origin.x += parentPosition.x
+        geometry.origin.y += parentPosition.y
+        return geometry
+    }
+}
+
+/// Merges the parent and element phases with the retained lazy item's
+/// transition state.
 struct LazyViewPhase: Rule, AsyncAttribute {
     typealias Value = Phase
 
-    var basePhase: Attribute<Phase>
-    var secondaryPhase: OptionalAttribute<Phase>
-    var state: Attribute<LazyLayoutCacheItem.State>
+    var _phase1: Attribute<Phase>
+    var _phase2: Attribute<Phase>
+    var _state: Attribute<LazyLayoutCacheItem.State>
 
     var value: Phase {
-        var phase = basePhase.value
-        if let secondaryPhase = secondaryPhase.attribute {
-            phase.merge(secondaryPhase.value)
-        }
+        var phase = _phase1.value
+        phase.merge(_phase2.value)
 
-        let state = state.value
+        let state = _state.value
         phase.rawValue &+= state.resetDelta &<< 1
         if state.phase == .didDisappear {
             phase.isBeingRemoved = true
@@ -4723,6 +5401,172 @@ struct LazyViewPhase: Rule, AsyncAttribute {
     }
 }
 
+/// Marks a materialized lazy child's display list as hidden while the child is
+/// retained only for reuse or while its owning subgraph is detached.
+struct HiddenForReuseEffect: Equatable, RendererEffect {
+    typealias AnimatableData = EmptyAnimatableData
+    typealias Body = Never
+
+    var isHiddenForReuse: Bool
+
+    func effectValue(size: CGSize) -> DisplayList.Effect {
+        let stateWord: UInt32 = isHiddenForReuse ? 0x100 : 0
+        return .state(StrongHash(words: (stateWord, 0, 0, 0, 0)))
+    }
+}
+
+/// Publishes the hidden-for-reuse renderer state for one retained lazy item.
+struct LazyDisplayListWrapper: StatefulRule, RemovableAttribute, AsyncAttribute {
+    typealias Value = HiddenForReuseEffect
+
+    var item: LazyLayoutCacheItem?
+    var isRemoved: Bool
+    var wasHiddenForReuse: Bool
+
+    mutating func updateValue() {
+        guard let item else {
+            fatalError("LazyDisplayListWrapper evaluated before its cache item was connected.")
+        }
+
+        // Prefetch-phase changes are reference-backed cache mutations. Reading
+        // the signal establishes the AG dependency that republishes this state.
+        _ = item.cache?._prefetchSignal.value
+        let isPendingReuse: Bool
+        switch item.prefetchPhase {
+        case .pendingDisplay, .pendingRemoval:
+            isPendingReuse = true
+        case .notPrefetching, .prefetching:
+            isPendingReuse = false
+        }
+        let isHiddenForReuse = isRemoved || isPendingReuse
+        guard !hasValue || wasHiddenForReuse != isHiddenForReuse else {
+            return
+        }
+        wasHiddenForReuse = isHiddenForReuse
+        _AGGraph.setStatefulOutput(
+            HiddenForReuseEffect(isHiddenForReuse: isHiddenForReuse)
+        )
+    }
+
+    static func willRemove(attribute: AGAttribute) {
+        setRemoved(true, attribute: attribute)
+    }
+
+    static func didReinsert(attribute: AGAttribute) {
+        setRemoved(false, attribute: attribute)
+    }
+
+    private static func setRemoved(_ isRemoved: Bool, attribute: AGAttribute) {
+        guard let graph = _AGGraph.current else { return }
+        var cache: LazyLayoutViewCache?
+        graph.mutateStatefulRule(attribute, as: Self.self) { wrapper in
+            wrapper.isRemoved = isRemoved
+            guard let item = wrapper.item else {
+                fatalError("LazyDisplayListWrapper removal requires its cache item.")
+            }
+            cache = item.cache
+        }
+        cache?.signalPrefetch()
+    }
+}
+
+/// Resolves the concrete transition body from the current item state while
+/// retaining the last compatible type-erased transition value.
+struct LazyTransition<A: Transition>: StatefulRule, AsyncAttribute {
+    typealias Value = A.Body
+
+    var _state: Attribute<LazyLayoutCacheItem.State>
+    var item: LazyLayoutCacheItem?
+    var lastValue: A
+
+    mutating func updateValue() {
+        guard let item else {
+            fatalError("LazyTransition evaluated before its cache item was connected.")
+        }
+
+        let current = item._list.attribute?.value.traits[TransitionTraitKey.self]
+            ?? .opacity
+        if let compatible = current.base(as: A.self) {
+            lastValue = compatible
+        }
+
+        let state = _state.value
+        let phase = state.enableTransitions ? state.phase : .identity
+        _AGGraph.setStatefulOutput(
+            lastValue.body(
+                content: PlaceholderContentView<A>(),
+                phase: phase
+            )
+        )
+    }
+}
+
+/// Opens a type-erased transition and constructs its concrete lazy child
+/// transition subtree.
+struct MakeSubviewTransition: TransitionVisitor {
+    var _state: Attribute<LazyLayoutCacheItem.State>
+    var inputs: _ViewInputs
+    var id: _ViewList_ID
+    var makeElt: (_ViewInputs) -> _ViewOutputs
+    var outputs: _ViewOutputs?
+    var transition: AGAttribute?
+    var transitionType: Any.Type?
+
+    mutating func visit<A: Transition>(_ transition: A) {
+        guard let graph = _AGGraph.current else {
+            fatalError("MakeSubviewTransition requires an active AttributeGraph.")
+        }
+        let body: Attribute<A.Body> = graph.makeStatefulRule(
+            LazyTransition(
+                _state: _state,
+                item: nil,
+                lastValue: transition
+            )
+        )
+        let makeElt = makeElt
+        outputs = A.makeView(
+            view: _GraphValue(_attribute: body),
+            inputs: inputs
+        ) { _, inputs in
+            makeElt(inputs)
+        }
+        self.transition = body.identifier
+        transitionType = A.self
+    }
+}
+
+/// Connects a reused or newly allocated cache item to its concrete transition
+/// state rule without rebuilding the transition subtree.
+struct UpdateSubviewTransition: TransitionTypeVisitor {
+    var transition: AGAttribute
+    var item: LazyLayoutCacheItem
+
+    mutating func visit<A: Transition>(_ type: A.Type) {
+        _AGGraph.current?.mutateStatefulRule(
+            transition,
+            as: LazyTransition<A>.self,
+            invalidating: true
+        ) { rule in
+            rule.item = item
+        }
+    }
+}
+
+/// Compares a retained transition node's concrete type with a reuse candidate.
+struct CompareTransitionType: TransitionTypeVisitor {
+    var existingType: Any.Type?
+    var compatibleTypes: Bool
+
+    mutating func visit<A: Transition>(_ type: A.Type) {
+        guard let existingType else {
+            compatibleTypes = false
+            return
+        }
+        compatibleTypes = ObjectIdentifier(existingType) == ObjectIdentifier(A.self)
+    }
+}
+
+/// Publishes an item's transition-aware transaction and tracks removable state.
 struct LazyTransaction: StatefulRule, RemovableAttribute, AsyncAttribute {
     typealias Value = Transaction
 
@@ -4749,36 +5593,60 @@ struct LazyTransaction: StatefulRule, RemovableAttribute, AsyncAttribute {
     mutating func updateValue() {
         var transaction = _transaction.value
         let state = _state.value
-        if state.enableTransitions,
-           !transaction.disablesAnimations,
-           transaction.animation != nil,
-           let item {
-            transaction.addAnimationListener(LazyLayoutCacheItemAnimationListener(item: item))
+
+        switch state.phase {
+        case .willAppear:
+            // A newly materialized child receives its visual insertion through
+            // the transition node. Its ordinary subtree transaction must not
+            // animate the same state change a second time.
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        case .identity:
+            // Removal/reinsertion and graph-reset boundaries publish a settled
+            // transaction before the child resumes ordinary identity updates.
+            if isRemoved || lastResetDelta != state.resetDelta {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        case .didDisappear:
+            // Register the cache item exactly once when entering the removal
+            // phase. Its animation count retains placement until the last
+            // descendant animation drains.
+            if lastPhase != .didDisappear {
+                guard let item else {
+                    fatalError("LazyTransaction removal requires its cache item.")
+                }
+                transaction.addAnimationListener(item)
+            }
         }
+
         lastPhase = state.phase
         lastResetDelta = state.resetDelta
-        isRemoved = state.isRemoved
         _AGGraph.setStatefulOutput(transaction)
     }
+
+    static func willRemove(attribute: AGAttribute) {
+        _AGGraph.current?.mutateStatefulRule(
+            attribute,
+            as: Self.self,
+            invalidating: true
+        ) { transaction in
+            transaction.isRemoved = true
+        }
+    }
+
+    static func didReinsert(attribute: AGAttribute) {
+        _AGGraph.current?.mutateStatefulRule(
+            attribute,
+            as: Self.self,
+            invalidating: true
+        ) { transaction in
+            transaction.isRemoved = false
+        }
+    }
 }
 
-private final class LazyLayoutCacheItemAnimationListener: AnimationListener, @unchecked Sendable {
-    weak var item: LazyLayoutCacheItem?
-
-    init(item: LazyLayoutCacheItem) {
-        self.item = item
-    }
-
-    override func animationWasAdded() {
-        item?.animationWasAdded()
-    }
-
-    override func animationWasRemoved() -> [() -> Void] {
-        item?.animationWasRemoved()
-        return []
-    }
-}
-
+/// Defines sizing, placement, estimation, and transition hooks for lazy containers.
 protocol LazyLayout: Animatable, _VariadicView_UnaryViewRoot {
     associatedtype Cache
 
@@ -4846,10 +5714,12 @@ protocol LazyLayout: Animatable, _VariadicView_UnaryViewRoot {
     var pinnedViews: PinnedScrollableViews { get }
 }
 
+/// Allows a lazy layout type to provide an explicit accessibility collection role.
 private protocol LazyLayoutAccessibilityRoleProviding {
     static var lazyAccessibilityRole: AccessibilityLayoutRole? { get }
 }
 
+/// Resolves the default accessibility role from the lazy layout family.
 private enum LazyLayoutAccessibilityRole {
     static func role<LayoutType: LazyLayout>(for type: LayoutType.Type) -> AccessibilityLayoutRole? {
         if type is any LazyHVStack.Type { return .stack }
@@ -4901,6 +5771,7 @@ extension LazyLayout {
 
 }
 
+/// Adds one-dimensional grouping and estimation requirements to a lazy layout.
 protocol LazyStack: LazyLayout {
     associatedtype MinorGeometry: Equatable
 
@@ -5143,11 +6014,10 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
         let accessibilityEnabled: Attribute<Bool> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.accessibilityEnabled
         }
-        let cacheState = graph.makeInput(
-            value: Self.initialCache
+        let updateViewCache: Attribute<LazyLayoutViewCache> = graph.makeStatefulRule(
+            UpdateViewCache(_phase: inputs.base.phase, cache: nil)
         )
-        let reference = LazyLayoutCacheReference<Self>()
-        let placedSubviews: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeStatefulRule(
+        let rawPlacedSubviews: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeStatefulRule(
             LazySubviewPlacements(
                 layout: root._attribute,
                 size: inputs.size,
@@ -5156,13 +6026,20 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 environment: inputs.base.cachedEnvironment.value.environment,
                 layoutDirection: layoutDirection,
                 accessibilityEnabled: accessibilityEnabled,
-                reference: reference
+                cache: updateViewCache
             )
         )
+        let placedSubviews: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeRule(
+            LazyCollectedPlacements(
+                _subviews: rawPlacedSubviews,
+                _cache: updateViewCache
+            )
+        )
+        placedSubviews.setFlags(.transactional, mask: .transactional)
         let prefetchSignal = graph.makeInput(value: ())
         let cache = _LazyLayoutViewCache(
             layout: root._attribute,
-            cacheState: cacheState,
+            cacheState: Self.initialCache,
             viewGraph: host,
             parentSubgraph: AGSubgraph.current ?? AGSubgraph(),
             inputs: lazyInputs,
@@ -5175,13 +6052,12 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
             scrollPosition: inputs.base.scrollPositionBinding(kind: .scrollContent),
             accessibilityEnabled: accessibilityEnabled
         )
-        reference.cache = cache
-        reference.updateViewCache = graph.makeStatefulRule(
-            UpdateViewCache(phase: inputs.base.phase, cache: cache)
-        )
-        let materializedSubviews: Attribute<Void> = graph.makeStatefulRule(
-            LazySubviewMaterialization<Self>(reference: reference)
-        )
+        updateViewCache.mutateBody(
+            as: UpdateViewCache.self,
+            invalidating: true
+        ) {
+            $0.cache = cache
+        }
 
         var preferences = PreferencesOutputs()
         var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
@@ -5263,33 +6139,20 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
             )
         }
 
-        let fallbackSize = inputs.containerSize.attribute ?? inputs.size
-        let layoutComputer: Attribute<LayoutComputer> = graph.makeRule {
-            LayoutComputer(
-                sizeThatFits: { proposal in
-                    _ = materializedSubviews.value
-                    if let width = proposal.width, let height = proposal.height {
-                        return CGSize(width: width, height: height)
-                    }
-                    return proposal.fixingUnspecifiedDimensions(
-                        at: fallbackSize.value.value
-                    )
-                },
-                place: { position, anchor, proposal in
-                    let size = proposal.replacingUnspecifiedDimensions(by: fallbackSize.value.value)
-                    let origin = CGPoint(
-                        x: position.x - size.width * anchor.x,
-                        y: position.y - size.height * anchor.y
-                    )
-                    placeLazySubviews(placedSubviews.value, at: origin)
-                },
-                childGeometries: { _, origin in
-                    lazyChildGeometries(from: placedSubviews.value, origin: origin)
-                },
-                changeCount: UInt(cache.placementSeed)
+        let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+            LazyLayoutComputer(
+                _layout: root._attribute,
+                _environment: inputs.base.cachedEnvironment.value.environment,
+                _cache: updateViewCache,
+                _containerSize: inputs.containerSize
             )
+        )
+        rawPlacedSubviews.mutateBody(
+            as: LazySubviewPlacements<Self>.self,
+            invalidating: true
+        ) {
+            $0._layoutComputer = OptionalAttribute(layoutComputer)
         }
-        reference.layoutComputer = layoutComputer
 
         let outputs = _ViewOutputs(
             preferences: preferences,
@@ -5349,6 +6212,7 @@ extension LazyStack {
     }
 }
 
+/// Adapts a horizontal or vertical stack layout to lazy stack traversal.
 protocol LazyHVStack: LazyStack where MinorGeometry == CGFloat {
     associatedtype Base: HVStack
 
@@ -5434,6 +6298,7 @@ extension LazyHVStack {
     }
 }
 
+/// Implements the horizontal lazy stack root and its pinned-view configuration.
 struct LazyHStackLayout: LazyHVStack {
     var base: _HStackLayout
     var pinnedViews: PinnedScrollableViews
@@ -5449,12 +6314,14 @@ struct LazyHStackLayout: LazyHVStack {
 
 }
 
+/// Describes one grid track's cross-axis position, extent, and anchor.
 struct HVGridGeometry: LazyLayoutNamespace, Equatable {
     var position: CGFloat
     var size: CGFloat
     var anchor: UnitPoint
 }
 
+/// Implements the vertical lazy stack root and its pinned-view configuration.
 struct LazyVStackLayout: LazyHVStack {
     var base: _VStackLayout
     var pinnedViews: PinnedScrollableViews

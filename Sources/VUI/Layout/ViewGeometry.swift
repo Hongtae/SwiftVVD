@@ -57,24 +57,45 @@ extension ViewGeometry: Animatable {
 /// animation system to interpolate between layout frames.
 struct ViewSize: Equatable, Sendable {
     var value: CGSize
-    var proposal: _ProposedSize
+    private var _proposedWidth: CGFloat
+    private var _proposedHeight: CGFloat
+
+    var proposal: _ProposedSize {
+        get {
+            _ProposedSize(
+                width: _proposedWidth.isNaN ? nil : _proposedWidth,
+                height: _proposedHeight.isNaN ? nil : _proposedHeight
+            )
+        }
+        set {
+            _proposedWidth = newValue.width ?? .nan
+            _proposedHeight = newValue.height ?? .nan
+        }
+    }
 
     var width:  CGFloat { get { value.width  } set { value.width  = newValue } }
     var height: CGFloat { get { value.height } set { value.height = newValue } }
 
     init(_ value: CGSize, proposal: _ProposedSize = .unspecified) {
         self.value = value
-        self.proposal = proposal
+        self._proposedWidth = proposal.width ?? .nan
+        self._proposedHeight = proposal.height ?? .nan
     }
     init(width: CGFloat, height: CGFloat, proposal: _ProposedSize = .unspecified) {
-        self.value = CGSize(width: width, height: height)
-        self.proposal = proposal
+        self.init(
+            CGSize(width: width, height: height),
+            proposal: proposal
+        )
     }
 
-    static let zero = ViewSize(.zero)
+    static let zero = ViewSize(.zero, proposal: .zero)
 
     static func fixed(_ cgSize: CGSize) -> ViewSize {
         ViewSize(cgSize, proposal: _ProposedSize(cgSize))
+    }
+
+    static func == (lhs: ViewSize, rhs: ViewSize) -> Bool {
+        lhs.value == rhs.value && lhs.proposal == rhs.proposal
     }
 }
 

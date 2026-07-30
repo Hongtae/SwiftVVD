@@ -337,6 +337,7 @@ class GraphHost: CustomReflectable {
             graphRef = nil
         }
 
+        @discardableResult
         func withCurrent<R>(_ body: () throws -> R) rethrows -> R {
             guard let graph = graphRef else {
                 fatalError("GraphHost.Data used after invalidation.")

@@ -197,7 +197,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
-    func testConsecutivePlainInboxWritesUseOneRootLayoutPass() {
+    func testConsecutiveNoOpInboxWritesDoNotRepeatRootLayoutPlacement() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
             content: LayoutSchedulingRoot(counter: counter),
@@ -235,7 +235,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
 
-        XCTAssertEqual(counter.placements - initialPlacements, 1)
+        XCTAssertEqual(counter.placements, initialPlacements)
     }
 
     @MainActor
@@ -5702,7 +5702,7 @@ private struct LayoutSchedulingResourceTransactionProbe: View {
             return list
         }
         let layoutComputer = graph.makeInput(
-            value: LayoutComputer(sizeThatFits: { _ in .zero })
+            value: testLayoutComputer(sizeThatFits: { _ in .zero })
         )
         var outputs = _ViewOutputs()
         outputs._layoutComputer = OptionalAttribute(layoutComputer)

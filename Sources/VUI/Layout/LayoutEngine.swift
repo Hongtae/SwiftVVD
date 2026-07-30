@@ -70,9 +70,51 @@ public struct _Placement: Equatable {
 
 // MARK: - _PositionAwarePlacementContext
 
-/// Context passed to the position-aware child-placement vtable method.
-/// The internal fields are intentionally opaque until behavior requires modeling.
+/// Exposes graph-backed geometry and environment values during position-aware placement.
 struct _PositionAwarePlacementContext {
+    var context: AnyRuleContext
+    var owner: AGAttribute
+    var _size: Attribute<ViewSize>
+    var _environment: Attribute<EnvironmentValues>
+    var _transform: Attribute<ViewTransform>
+    var _position: Attribute<CGPoint>
+    var _safeAreaInsets: OptionalAttribute<SafeAreaInsets>
+
+    init(
+        context: AnyRuleContext,
+        owner: AGAttribute? = nil,
+        size: Attribute<ViewSize>,
+        environment: Attribute<EnvironmentValues>,
+        transform: Attribute<ViewTransform>,
+        position: Attribute<CGPoint>,
+        safeAreaInsets: OptionalAttribute<SafeAreaInsets>
+    ) {
+        self.context = context
+        self.owner = owner ?? context.attribute
+        self._size = size
+        self._environment = environment
+        self._transform = transform
+        self._position = position
+        self._safeAreaInsets = safeAreaInsets
+    }
+
+    var size: CGSize {
+        _size.value.value
+    }
+
+    var proposedSize: _ProposedSize {
+        _size.value.proposal
+    }
+
+    var transform: ViewTransform {
+        var transform = _transform.value
+        transform.appendPosition(_position.value)
+        return transform
+    }
+
+    var unadjustedSafeAreaInsets: SafeAreaInsets? {
+        _safeAreaInsets.attribute?.value
+    }
 }
 
 // MARK: - LayoutEngine protocol
@@ -88,7 +130,6 @@ protocol LayoutEngine {
     func requiresSpacingProjection() -> Bool
     mutating func spacing() -> Spacing
     mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize
-    mutating func truncates(_ proposal: _ProposedSize) -> Bool
     mutating func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat
     mutating func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
     mutating func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
@@ -97,23 +138,12 @@ protocol LayoutEngine {
                                  placementContext: _PositionAwarePlacementContext) -> _Placement
 }
 
-/// Renderer-side placement dispatch kept separate from the layout-engine
-/// protocol surface.
-protocol LayoutEnginePlacing {
-    mutating func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize)
-}
-
 extension LayoutEngine {
     var debugContentDescription: String? { nil }
     func layoutPriority() -> Double { 0 }
     func ignoresAutomaticPadding() -> Bool { false }
     func requiresSpacingProjection() -> Bool { false }
     func spacing() -> Spacing { Spacing() }
-    mutating func truncates(_ proposal: _ProposedSize) -> Bool {
-        let ideal = sizeThatFits(.unspecified)
-        return proposal.width.map { ideal.width > $0 } == true ||
-            proposal.height.map { ideal.height > $0 } == true
-    }
     mutating func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
         let s = sizeThatFits(proposal)
         return axis == .horizontal ? s.width : s.height
@@ -135,14 +165,12 @@ extension StatefulRule where Value == LayoutComputer {
         modify: (inout Engine) -> Void,
         create: () -> Engine
     ) {
-        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
-           current.withMutableEngine(type: Engine.self, do: modify) != nil {
-            current.changeCount &+= 1
+        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self) {
+            current.withMutableEngine(type: Engine.self, do: modify)
+            current.seed &+= 1
             _AGGraph.setStatefulOutput(current)
         } else {
-            _AGGraph.setStatefulOutput(
-                LayoutComputer(box: LayoutEngineBox(engine: create()))
-            )
+            _AGGraph.setStatefulOutput(LayoutComputer(create()))
         }
     }
 
@@ -211,123 +239,328 @@ extension Layout {
     }
 }
 
-// MARK: - _AnyLayoutEngineBoxDispatch
+// MARK: - Layout tracing
 
-/// Class-bound dispatch protocol for LayoutEngineBox.
-/// Using a class-bound protocol lets LayoutComputer.box store a single 8-byte pointer.
-/// Class-constrained existentials use a single reference word with no inline witness table.
-protocol _AnyLayoutEngineBoxDispatch: AnyObject {
-    var currentAttribute: AGAttribute { get set }
-    var isNilAttribute: Bool { get set }
-    func sizeThatFits_(_ proposal: _ProposedSize) -> CGSize
-    func spacing_() -> Spacing
-    func layoutPriority_() -> Double
-    func ignoresAutomaticPadding_() -> Bool
-    func requiresSpacingProjection_() -> Bool
-    func lengthThatFits_(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat
-    func childGeometries_(at size: ViewSize, origin: CGPoint) -> [ViewGeometry]
-    func explicitAlignment_(_ key: AlignmentKey, at size: ViewSize) -> CGFloat?
-    func childPlacement_(at size: ViewSize) -> _Placement
-    func childPlacement_(at size: ViewSize,
-                         placementContext: _PositionAwarePlacementContext) -> _Placement
-    func place_(_ position: CGPoint, _ anchor: UnitPoint, _ proposal: ProposedViewSize)
-}
+/// Coordinates optional layout cache and alignment tracing for the active graph.
+struct LayoutTrace {
+    /// Stores the mutable trace state collected during one graph's layout work.
+    final class Recorder {
+        var graph: AGGraphRef
+        var frameActive: Bool
+        var cacheLookup: (proposal: _ProposedSize, hit: Bool)?
+        var alignmentTypes: [UInt32: AlignmentID.Type]
 
-/// Three-entry insertion-order cache used for repeated layout proposals.
-/// Cache hits do not change replacement order: after three distinct inserts,
-/// the fourth replaces the oldest inserted entry.
-private struct LayoutSizeCache {
-    private struct Entry {
-        var proposal: _ProposedSize
-        var size: CGSize
-    }
-
-    private var first: Entry?
-    private var second: Entry?
-    private var third: Entry?
-    private var replacementIndex = 0
-
-    mutating func value(
-        for proposal: _ProposedSize,
-        makeValue: () -> CGSize
-    ) -> CGSize {
-        if let first, first.proposal == proposal { return first.size }
-        if let second, second.proposal == proposal { return second.size }
-        if let third, third.proposal == proposal { return third.size }
-
-        let size = makeValue()
-        let entry = Entry(proposal: proposal, size: size)
-        switch replacementIndex {
-        case 0: first = entry
-        case 1: second = entry
-        default: third = entry
+        init(graph: AGGraphRef) {
+            self.graph = graph
+            self.frameActive = false
+            self.cacheLookup = nil
+            self.alignmentTypes = [:]
         }
-        replacementIndex = (replacementIndex + 1) % 3
-        return size
+
+        func traceSizeThatFits(
+            _ attribute: AGAttribute?,
+            proposal: _ProposedSize,
+            _ body: () -> CGSize
+        ) -> CGSize {
+            body()
+        }
+
+        func traceLengthThatFits(
+            _ attribute: AGAttribute?,
+            proposal: _ProposedSize,
+            in axis: Axis,
+            _ body: () -> CGFloat
+        ) -> CGFloat {
+            body()
+        }
+
+        func traceChildGeometries(
+            _ attribute: AGAttribute?,
+            at size: ViewSize,
+            origin: CGPoint,
+            body: () -> [ViewGeometry]
+        ) -> [ViewGeometry] {
+            body()
+        }
+
+        func traceExplicitAlignment(
+            _ attribute: AGAttribute?,
+            alignment: AlignmentKey,
+            at size: ViewSize,
+            body: () -> CGFloat?
+        ) -> CGFloat? {
+            body()
+        }
     }
 
-    mutating func invalidate() {
-        first = nil
-        second = nil
-        third = nil
-        replacementIndex = 0
+    nonisolated(unsafe) static var recorder: Recorder?
+
+    static func traceSizeThatFits(
+        _ attribute: AGAttribute?,
+        proposal: _ProposedSize,
+        _ body: () -> CGSize
+    ) -> CGSize {
+        guard let recorder else {
+            fatalError("A tracing layout engine was used outside its recorder lifetime.")
+        }
+        return recorder.traceSizeThatFits(attribute, proposal: proposal, body)
+    }
+
+    static func traceLengthThatFits(
+        _ attribute: AGAttribute?,
+        proposal: _ProposedSize,
+        in axis: Axis,
+        _ body: () -> CGFloat
+    ) -> CGFloat {
+        guard let recorder else {
+            fatalError("A tracing layout engine was used outside its recorder lifetime.")
+        }
+        return recorder.traceLengthThatFits(
+            attribute,
+            proposal: proposal,
+            in: axis,
+            body
+        )
+    }
+
+    static func traceCacheLookup(_ proposal: _ProposedSize, _ hit: Bool) {
+        recorder?.cacheLookup = (proposal, hit)
+    }
+
+    static func traceCacheLookup(_ size: CGSize, _ hit: Bool) {
+        traceCacheLookup(_ProposedSize(size), hit)
+    }
+
+    static func traceChildGeometries(
+        _ attribute: AGAttribute?,
+        at size: ViewSize,
+        origin: CGPoint,
+        _ body: () -> [ViewGeometry]
+    ) -> [ViewGeometry] {
+        guard let recorder else {
+            fatalError("A tracing layout engine was used outside its recorder lifetime.")
+        }
+        return recorder.traceChildGeometries(
+            attribute,
+            at: size,
+            origin: origin,
+            body: body
+        )
+    }
+
+    static func traceExplicitAlignment(
+        _ attribute: AGAttribute?,
+        alignment: AlignmentKey,
+        at size: ViewSize,
+        body: () -> CGFloat?
+    ) -> CGFloat? {
+        guard let recorder else {
+            fatalError("A tracing layout engine was used outside its recorder lifetime.")
+        }
+        return recorder.traceExplicitAlignment(
+            attribute,
+            alignment: alignment,
+            at: size,
+            body: body
+        )
     }
 }
 
-// MARK: - LayoutEngineBox<E: LayoutEngine>
+// MARK: - Layout engine erasure
 
-/// Generic box holding a concrete LayoutEngine instance.
-final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
-    /// The AG attribute that "owns" this box (used for dependency tracking).
-    var currentAttribute: AGAttribute = .init(rawValue: 0)
-    /// True when currentAttribute is not valid (nil attribute).
-    var isNilAttribute: Bool = true
-    /// The concrete layout engine stored inline.
+/// Defines the type-erased dispatch surface stored by a layout computer.
+class AnyLayoutEngineBox {
+    func mutateEngine<Engine: LayoutEngine, Result>(
+        as type: Engine.Type,
+        do body: (inout Engine) -> Result
+    ) -> Result {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func layoutPriority() -> Double {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func ignoresAutomaticPadding() -> Bool {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func requiresSpacingProjection() -> Bool {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func spacing() -> Spacing {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func lengthThatFits(
+        _ proposal: _ProposedSize,
+        in axis: Axis
+    ) -> CGFloat {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func childGeometries(
+        at size: ViewSize,
+        origin: CGPoint
+    ) -> [ViewGeometry] {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func childPlacement(at size: ViewSize) -> _Placement {
+        fatalError("Abstract layout-engine box method.")
+    }
+
+    func childPlacement(
+        at size: ViewSize,
+        placementContext: _PositionAwarePlacementContext
+    ) -> _Placement {
+        fatalError("Abstract layout-engine box method.")
+    }
+}
+
+/// Owns one concrete layout engine and forwards erased layout operations to it.
+class LayoutEngineBox<E: LayoutEngine>: AnyLayoutEngineBox {
     var engine: E
 
-    init(engine: E) { self.engine = engine }
+    init(_ engine: E) {
+        self.engine = engine
+    }
 
-    func sizeThatFits_(_ p: _ProposedSize) -> CGSize { engine.sizeThatFits(p) }
-    func spacing_() -> Spacing { engine.spacing() }
-    func layoutPriority_() -> Double { engine.layoutPriority() }
-    func ignoresAutomaticPadding_() -> Bool { engine.ignoresAutomaticPadding() }
-    func requiresSpacingProjection_() -> Bool { engine.requiresSpacingProjection() }
-    func lengthThatFits_(_ p: _ProposedSize, in axis: Axis) -> CGFloat {
+    override func mutateEngine<Engine: LayoutEngine, Result>(
+        as type: Engine.Type,
+        do body: (inout Engine) -> Result
+    ) -> Result {
+        guard type == E.self else {
+            fatalError(
+                "Layout engine type changed from \(E.self) to \(Engine.self)."
+            )
+        }
+        return withUnsafeMutablePointer(to: &engine) { pointer in
+            let typed = UnsafeMutableRawPointer(pointer)
+                .assumingMemoryBound(to: Engine.self)
+            return body(&typed.pointee)
+        }
+    }
+
+    override func sizeThatFits(_ p: _ProposedSize) -> CGSize {
+        engine.sizeThatFits(p)
+    }
+
+    override func spacing() -> Spacing {
+        engine.spacing()
+    }
+
+    override func layoutPriority() -> Double {
+        engine.layoutPriority()
+    }
+
+    override func ignoresAutomaticPadding() -> Bool {
+        engine.ignoresAutomaticPadding()
+    }
+
+    override func requiresSpacingProjection() -> Bool {
+        engine.requiresSpacingProjection()
+    }
+
+    override func lengthThatFits(
+        _ p: _ProposedSize,
+        in axis: Axis
+    ) -> CGFloat {
         engine.lengthThatFits(p, in: axis)
     }
-    func childGeometries_(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+
+    override func childGeometries(
+        at size: ViewSize,
+        origin: CGPoint
+    ) -> [ViewGeometry] {
         engine.childGeometries(at: size, origin: origin)
     }
-    func explicitAlignment_(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+
+    override func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
         engine.explicitAlignment(key, at: size)
     }
-    func childPlacement_(at size: ViewSize) -> _Placement { engine.childPlacement(at: size) }
-    func childPlacement_(at size: ViewSize,
-                         placementContext: _PositionAwarePlacementContext) -> _Placement {
+
+    override func childPlacement(at size: ViewSize) -> _Placement {
+        engine.childPlacement(at: size)
+    }
+
+    override func childPlacement(
+        at size: ViewSize,
+        placementContext: _PositionAwarePlacementContext
+    ) -> _Placement {
         engine.childPlacement(at: size, placementContext: placementContext)
     }
-    func place_(_ position: CGPoint, _ anchor: UnitPoint, _ proposal: ProposedViewSize) {
-        // Closure layout computers are reference-backed renderer bridges. Their
-        // placement closure can read geometry through the same layout computer,
-        // so invoking the generic mutating witness directly would keep an
-        // exclusive modification access to `engine` across that reentrant read.
-        if let referenceEngine = engine as? ClosureLayoutEngine {
-            referenceEngine.place(at: position, anchor: anchor, proposal: proposal)
-            return
-        }
-        guard var placementEngine = engine as? any LayoutEnginePlacing else {
-            return
-        }
-        placementEngine.place(at: position, anchor: anchor, proposal: proposal)
-        guard let updatedEngine = placementEngine as? E else {
-            fatalError("LayoutEngine placement dispatch changed the concrete engine type.")
-        }
-        engine = updatedEngine
-    }
-
 }
 
-// MARK: - ClosureLayoutEngine
+/// Adds attribute-scoped trace recording around a concrete layout engine.
+final class TracingLayoutEngineBox<E: LayoutEngine>: LayoutEngineBox<E> {
+    var attribute: AGAttribute?
+
+    override init(_ engine: E) {
+        attribute = _AGGraph.currentRuleContextAttribute
+        super.init(engine)
+    }
+
+    override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        LayoutTrace.traceSizeThatFits(attribute, proposal: proposal) {
+            super.sizeThatFits(proposal)
+        }
+    }
+
+    override func lengthThatFits(
+        _ proposal: _ProposedSize,
+        in axis: Axis
+    ) -> CGFloat {
+        LayoutTrace.traceLengthThatFits(
+            attribute,
+            proposal: proposal,
+            in: axis
+        ) {
+            super.lengthThatFits(proposal, in: axis)
+        }
+    }
+
+    override func childGeometries(
+        at size: ViewSize,
+        origin: CGPoint
+    ) -> [ViewGeometry] {
+        LayoutTrace.traceChildGeometries(
+            attribute,
+            at: size,
+            origin: origin
+        ) {
+            super.childGeometries(at: size, origin: origin)
+        }
+    }
+
+    override func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        LayoutTrace.traceExplicitAlignment(
+            attribute,
+            alignment: key,
+            at: size
+        ) {
+            super.explicitAlignment(key, at: size)
+        }
+    }
+}
 
 // MARK: - ViewLayoutEngine<L: Layout>
 
@@ -335,7 +568,7 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
 /// Bridges Layout protocol methods to the LayoutEngine dispatch surface.
 /// childGeometries creates PlacementData, exposes it through the thread layout data slot,
 /// and lets LayoutSubview.place write child geometries into that buffer.
-struct ViewLayoutEngine<L: Layout>: LayoutEngine, LayoutEnginePlacing {
+struct ViewLayoutEngine<L: Layout>: LayoutEngine {
     var layout: L
     var cache: L.Cache
     var proxies: LayoutProxyCollection
@@ -512,64 +745,4 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine, LayoutEnginePlacing {
         }
     }
 
-    mutating func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
-        let subviews = makeSubviews()
-        let size = sizeThatFits(_ProposedSize(proposal))
-        let origin = CGPoint(
-            x: position.x - size.width * anchor.x,
-            y: position.y - size.height * anchor.y
-        )
-        Transaction.withScopedThreadTransaction(placementTransaction()) {
-            proxies.context.update {
-                layout.placeSubviews(
-                    in: CGRect(origin: origin, size: size),
-                    proposal: proposal,
-                    subviews: subviews,
-                    cache: &cache
-                )
-            }
-        }
-    }
-}
-
-// MARK: - ClosureLayoutEngine
-
-/// Closure-based LayoutEngine bridging the closure-based LayoutComputer API
-/// to the LayoutEngine protocol required by LayoutEngineBox.
-final class ClosureLayoutEngine: LayoutEngine, LayoutEnginePlacing {
-    var _sizeThatFits: (_ProposedSize) -> CGSize
-    var _spacing: Spacing
-    var _place: (CGPoint, UnitPoint, ProposedViewSize) -> Void
-    var _childGeometries: (ViewSize, CGPoint) -> [ViewGeometry]
-    var _priority: Double
-    var _explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)?
-
-    init(
-        sizeThatFits: @escaping (_ProposedSize) -> CGSize,
-        spacing: Spacing = Spacing(),
-        place: @escaping (CGPoint, UnitPoint, ProposedViewSize) -> Void = { _, _, _ in },
-        childGeometries: @escaping (ViewSize, CGPoint) -> [ViewGeometry] = { _, _ in [] },
-        priority: Double = 0,
-        explicitAlignment: ((AlignmentKey, ViewSize) -> CGFloat?)? = nil
-    ) {
-        _sizeThatFits = sizeThatFits
-        _spacing = spacing
-        _place = place
-        _childGeometries = childGeometries
-        _priority = priority
-        _explicitAlignment = explicitAlignment
-    }
-
-    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize { _sizeThatFits(proposal) }
-    func spacing() -> Spacing { _spacing }
-    func layoutPriority() -> Double { _priority }
-    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
-        _childGeometries(size, origin)
-    }
-    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
-        _explicitAlignment?(key, size)
-    }
-    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
-        _place(position, anchor, proposal)
-    }
 }

@@ -168,6 +168,21 @@ extension Transition {
     public func apply<V>(content: V, phase: TransitionPhase) -> some View where V: View {
         content.modifier(ApplyTransitionModifier(transition: self, phase: phase))
     }
+
+    /// Builds a concrete transition body while preserving the original child
+    /// builder behind the transition placeholder.
+    static func makeView(
+        view: _GraphValue<Body>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        var inputs = inputs
+        inputs.base.append(
+            BodyInputElement(makeView: body),
+            forKey: BodyInput<PlaceholderContentView<Self>>.self
+        )
+        return Body._makeView(view: view, inputs: inputs)
+    }
 }
 
 struct ApplyTransitionModifier<T: Transition>: ViewModifier {
@@ -973,6 +988,17 @@ extension Edge {
 typealias _TransitionPhaseSetter = (TransitionPhase, Transaction) -> Void
 typealias _TransitionTransactionResolver = (TransitionPhase, Transaction) -> [Transaction]
 
+/// Opens a type-erased transition value for code that must build a
+/// concrete-transition graph rule.
+protocol TransitionVisitor {
+    mutating func visit<T: Transition>(_ transition: T)
+}
+
+/// Opens only the concrete type stored by a type-erased transition.
+protocol TransitionTypeVisitor {
+    mutating func visit<T: Transition>(_ type: T.Type)
+}
+
 @usableFromInline
 class AnyTransitionBox {
     // Type-erased transition boxes carry composition behavior without forcing
@@ -1018,6 +1044,16 @@ class AnyTransitionBox {
         original: Transaction
     ) -> [Transaction] {
         filteredTransactions(from: transaction, phase: phase)
+    }
+
+    func base<T: Transition>(as type: T.Type) -> T? {
+        nil
+    }
+
+    func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
+    }
+
+    func visitType<Visitor: TransitionTypeVisitor>(_ visitor: inout Visitor) {
     }
 
     func _makeView(
@@ -1088,6 +1124,18 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
             phase: phase,
             original: original
         )
+    }
+
+    override func base<T: Transition>(as type: T.Type) -> T? {
+        base as? T
+    }
+
+    override func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
+        visitor.visit(base)
+    }
+
+    override func visitType<Visitor: TransitionTypeVisitor>(_ visitor: inout Visitor) {
+        visitor.visit(Base.self)
     }
 
     override func _makeView(
@@ -1327,6 +1375,18 @@ public struct AnyTransition {
             phase: phase,
             original: transaction
         )
+    }
+
+    func base<T: Transition>(as type: T.Type) -> T? {
+        box.base(as: type)
+    }
+
+    func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
+        box.visit(&visitor)
+    }
+
+    func visitType<Visitor: TransitionTypeVisitor>(_ visitor: inout Visitor) {
+        box.visitType(&visitor)
     }
 
     var _transitionType: Any.Type {

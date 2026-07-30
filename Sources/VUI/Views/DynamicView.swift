@@ -478,10 +478,11 @@ private struct DynamicViewList<V: DynamicView>: StatefulRule, AsyncAttribute {
         }
 
         func edit(forID id: _ViewList_ID, since transaction: TransactionID) -> _ViewList_Edit? {
+            let explicitID: V.ID? = id.explicitID(owner: item.owner)
             guard transaction >= lastTransaction,
                   let lastID,
                   lastID != item.id,
-                  let explicitID: V.ID = id.explicitID(owner: item.owner) else {
+                  let explicitID else {
                 return base.edit(forID: id, since: transaction)
             }
             if explicitID == lastID {

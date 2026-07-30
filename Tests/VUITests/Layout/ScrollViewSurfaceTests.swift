@@ -911,10 +911,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
             }
             .scrollTargetLayout()
             let viewAttribute = graph.makeInput(value: view)
-            let outputs = type(of: view)._makeView(
-                view: _GraphValue(_attribute: viewAttribute),
-                inputs: makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
-            )
+            let outputs = AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttribute),
+                    inputs: makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
+                )
+            }
 
             guard let outputLayoutsID = outputs.preferences.value(for: ScrollTargetRole.ContentKey.self) else {
                 XCTFail("expected ScrollTargetRole.ContentKey output")
@@ -965,10 +967,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
             inputs.transform = graph.makeInput(value: contentTransform)
             inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 100, height: 80)))
 
-            let outputs = type(of: view)._makeView(
-                view: _GraphValue(_attribute: viewAttribute),
-                inputs: inputs
-            )
+            let outputs = AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttribute),
+                    inputs: inputs
+                )
+            }
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
 
@@ -981,16 +985,30 @@ final class ScrollViewSurfaceTests: XCTestCase {
         try host.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
             let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            let targetID = _ViewList_ID(explicitID: AnyHashable(3)).canonicalID
+            let collectionIDs = collection.visibleCollectionViewIDs
+            guard collectionIDs.count == 4 else {
+                XCTFail("expected four collection IDs, got \(collectionIDs)")
+                return
+            }
+            let targetID = collectionIDs[3]
             let itemSubgraph = try XCTUnwrap(recorder.itemSubgraphs[2])
 
-            XCTAssertEqual(collection.firstCollectionViewIndex(of: targetID), 3)
+            let resolvedOffsets = collectionIDs.map {
+                collection.firstCollectionViewIndex(of: $0)
+            }
+            guard resolvedOffsets[3] == 3 else {
+                XCTFail("IDs \(collectionIDs) resolved to offsets \(resolvedOffsets)")
+                return
+            }
             XCTAssertEqual(
                 collection.collectionViewID(for: itemSubgraph),
-                _ViewList_ID(explicitID: AnyHashable(2)).canonicalID
+                collectionIDs[2]
             )
             XCTAssertNil(collection.collectionViewID(for: AGSubgraph()))
-            XCTAssertTrue(collection.scroll(toCollectionViewID: targetID, anchor: .bottom))
+            guard collection.scroll(toCollectionViewID: targetID, anchor: .bottom) else {
+                XCTFail("failed to scroll to \(targetID)")
+                return
+            }
             XCTAssertEqual(parent.contentTargets.count, 1)
 
             let geometry = ScrollGeometry(
@@ -1030,10 +1048,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
             inputs.scrollable = OptionalAttribute(parentAttr)
 
-            let outputs = type(of: view)._makeView(
-                view: _GraphValue(_attribute: viewAttribute),
-                inputs: inputs
-            )
+            let outputs = AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttribute),
+                    inputs: inputs
+                )
+            }
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
 

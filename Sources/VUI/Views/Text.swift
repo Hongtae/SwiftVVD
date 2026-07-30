@@ -1835,45 +1835,26 @@ extension Text: View {
             )
             lcAttr = graph.makeStatefulRule(
                 SizeFittingTextLayoutComputer(
-                    text: resolvedStyledTextAttr,
-                    environment: environmentAttr,
-                    renderer: textRendererAttr?.asWeak() ?? WeakAttribute(),
+                    _text: resolvedStyledTextAttr,
+                    _environment: environmentAttr,
+                    _renderer: textRendererAttr?.asWeak() ?? WeakAttribute(),
                     cache: cache
                 )
             )
         } else {
             displayedStyledTextAttr = resolvedStyledTextAttr
-            lcAttr = graph.makeRule {
+            let textViewAttr: Attribute<StyledTextContentView> = graph.makeRule {
                 let styledText = resolvedStyledTextAttr.value
-                let resolved = styledText.resolvedText
                 let renderer = textRendererAttr?.value
-
-                func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-                    guard let resolved else { return .zero }
-                    if let renderer {
-                        return renderer.sizeThatFits(
-                            proposal: proposal,
-                            text: TextProxy(resolved)
-                        )
-                    }
-                    return styledText.sizeThatFits(_ProposedSize(proposal))
-                }
-
-                return LayoutComputer(
-                    sizeThatFits: { sizeThatFits(ProposedViewSize($0)) },
-                    spacing: ViewSpacing.text.spacing,
-                    explicitAlignment: { key, size in
-                        guard resolved != nil else { return nil }
-                        if key == VerticalAlignment.firstTextBaseline.key {
-                            return styledText.firstBaseline(in: size.value)
-                        }
-                        if key == VerticalAlignment.lastTextBaseline.key {
-                            return styledText.lastBaseline(in: size.value)
-                        }
-                        return nil
-                    }
+                return StyledTextContentView(
+                    text: styledText,
+                    renderer: renderer,
+                    needsDrawingGroup: styledText.needsDrawingGroup
                 )
             }
+            lcAttr = graph.makeStatefulRule(
+                StyledTextLayoutComputer(_textView: textViewAttr)
+            )
         }
 
         let interpolatorGroup = _ShapeStyle_InterpolatorGroup()

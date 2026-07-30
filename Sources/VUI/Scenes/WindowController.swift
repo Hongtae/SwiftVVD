@@ -854,7 +854,7 @@ class WindowController: WindowDelegate,
         animationDelta = delta * Self.animationTimeScale
         animationTimestamp = animationTimestamp + animationDelta
         let time = animationTimestamp
-        guard let rootLayoutComputer = viewGraph.rootLayoutComputer else { return }
+        guard viewGraph.rootGeometry != nil else { return }
 
         let layoutContentSize = layoutContentSize(from: contentSize)
 
@@ -934,14 +934,13 @@ class WindowController: WindowDelegate,
         ) -> Bool {
             let layoutChangeSet = _AGChangeSet()
             _AGGraph.withChangeSet(layoutChangeSet) {
-                // Layout pass: determine root view size/position after AG evaluation completes.
+                // Pull the dependency-driven root geometry before sampling
+                // outputs that consume its origin and size projections.
                 viewGraph.data.withCurrent {
-                    let lc = rootLayoutComputer.value
-                    let proposal = ProposedViewSize(width: cachedContentSize.width,
-                                                   height: cachedContentSize.height)
-                    let center = CGPoint(x: cachedContentSize.width / 2,
-                                         y: cachedContentSize.height / 2)
-                    lc.place(at: center, anchor: .center, proposal: proposal)
+                    guard let rootGeometry = viewGraph.rootGeometry else {
+                        fatalError("ViewGraph root geometry is not instantiated.")
+                    }
+                    _ = rootGeometry.value
 
                     if samplesDisplayList, let rootDisplayList = viewGraph.rootDisplayList {
                         _ = rootDisplayList.value

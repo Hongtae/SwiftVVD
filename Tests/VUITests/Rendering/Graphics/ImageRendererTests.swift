@@ -87,7 +87,11 @@ final class ImageRendererTests: XCTestCase {
         let recorder = ImageRendererRootInputRecorder()
         let renderer = ImageRenderer(content: ImageRendererFeatureRoot(recorder: recorder))
 
-        XCTAssertEqual(renderer.viewGraph.viewGraphFeatureCount, 1)
+        XCTAssertEqual(
+            renderer.viewGraph.viewGraphFeatureCount,
+            2,
+            "the root hit-test feature precedes the image-renderer feature"
+        )
         XCTAssertEqual(recorder.events, ["root"])
         XCTAssertTrue(recorder.rootUsingGraphicsRenderer)
         XCTAssertTrue(recorder.rootAnimationsDisabled)

@@ -26,8 +26,8 @@ public struct _AlignmentWritingModifier: MultiViewModifier, PrimitiveViewModifie
         if inputs.requestsLayoutComputer {
             let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
                 AlignmentModifiedLayoutComputer(
-                    modifier: modifier._attribute,
-                    layoutComputer: outputs._layoutComputer
+                    _modifier: modifier._attribute,
+                    _childLayoutComputer: outputs._layoutComputer
                 )
             )
             outputs._layoutComputer = OptionalAttribute(layoutComputer)
@@ -37,86 +37,59 @@ public struct _AlignmentWritingModifier: MultiViewModifier, PrimitiveViewModifie
     public typealias Body = Never
 }
 
+/// Wraps a child layout computer with one explicit alignment-guide override.
 private struct AlignmentModifiedLayoutComputer: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
-    var modifier: Attribute<_AlignmentWritingModifier>
-    var layoutComputer: OptionalAttribute<LayoutComputer>
+    var _modifier: Attribute<_AlignmentWritingModifier>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
 
     mutating func updateValue() {
-        let modifier = modifier.value
-        let layoutComputer = layoutComputer.attribute?.value ?? .defaultValue
+        let modifier = _modifier.value
+        let childLayoutComputer =
+            _childLayoutComputer.attribute?.value ?? .defaultValue
         update(
             to: Engine(
-                key: modifier.key,
-                computeValue: modifier.computeValue,
-                layoutComputer: layoutComputer
+                modifier: modifier,
+                childLayoutComputer: childLayoutComputer
             )
         )
     }
 
-    struct Engine: LayoutEngine, LayoutEnginePlacing {
-        var key: AlignmentKey
-        var computeValue: @Sendable (ViewDimensions) -> CGFloat
-        var layoutComputer: LayoutComputer
+    /// Forwards layout queries while intercepting the configured alignment key.
+    struct Engine: LayoutEngine {
+        var modifier: _AlignmentWritingModifier
+        var childLayoutComputer: LayoutComputer
 
         func layoutPriority() -> Double {
-            layoutComputer.layoutPriority()
-        }
-
-        func ignoresAutomaticPadding() -> Bool {
-            layoutComputer.ignoresAutomaticPadding()
-        }
-
-        func requiresSpacingProjection() -> Bool {
-            layoutComputer.requiresSpacingProjection()
+            childLayoutComputer.layoutPriority()
         }
 
         func spacing() -> Spacing {
-            layoutComputer.spacing()
+            childLayoutComputer.spacing()
         }
 
         func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-            layoutComputer.sizeThatFits(proposal)
+            childLayoutComputer.sizeThatFits(proposal)
         }
 
         func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
-            layoutComputer.lengthThatFits(proposal, in: axis)
-        }
-
-        func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
-            layoutComputer.childGeometries(at: size, origin: origin)
+            childLayoutComputer.lengthThatFits(proposal, in: axis)
         }
 
         func explicitAlignment(_ requestedKey: AlignmentKey, at size: ViewSize) -> CGFloat? {
-            if requestedKey == key {
-                return computeValue(
-                    ViewDimensions(guideComputer: layoutComputer, size: size)
+            if requestedKey == modifier.key {
+                return modifier.computeValue(
+                    ViewDimensions(
+                        guideComputer: childLayoutComputer,
+                        size: size
+                    )
                 )
             }
-            return layoutComputer.explicitAlignment(requestedKey, at: size)
-        }
-
-        mutating func childPlacement(at size: ViewSize) -> _Placement {
-            layoutComputer.childPlacement(at: size)
-        }
-
-        mutating func childPlacement(
-            at size: ViewSize,
-            placementContext: _PositionAwarePlacementContext
-        ) -> _Placement {
-            layoutComputer.childPlacement(
-                at: size,
-                placementContext: placementContext
+            return childLayoutComputer.explicitAlignment(
+                requestedKey,
+                at: size
             )
-        }
-
-        mutating func place(
-            at position: CGPoint,
-            anchor: UnitPoint,
-            proposal: ProposedViewSize
-        ) {
-            layoutComputer.place(at: position, anchor: anchor, proposal: proposal)
         }
     }
 }

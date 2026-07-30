@@ -218,7 +218,10 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            XCTAssertEqual(layout.sizeThatFits(.unspecified), .zero)
+            XCTAssertEqual(
+                layout.sizeThatFits(.unspecified),
+                CGSize(width: 10, height: 10)
+            )
         }
     }
 

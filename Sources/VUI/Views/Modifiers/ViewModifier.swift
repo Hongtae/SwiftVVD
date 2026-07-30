@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // MARK: - BodyInputElement
 // One entry on the BodyInput<Content> stack.
@@ -616,7 +617,7 @@ struct PlacementContext {
     }
 
     var context: AnyRuleContext
-    var owner: AGAttribute?
+    var owner: AGAttribute
     var _environment: Attribute<EnvironmentValues>
     private var parentSize: ParentSize
 
@@ -627,7 +628,7 @@ struct PlacementContext {
         parentSize: ViewSize
     ) {
         self.context = context
-        self.owner = owner
+        self.owner = owner ?? context.attribute
         self._environment = environment
         self.parentSize = .eager(parentSize)
     }
@@ -639,7 +640,7 @@ struct PlacementContext {
         parentSize: Attribute<ViewSize>
     ) {
         self.context = context
-        self.owner = owner
+        self.owner = owner ?? context.attribute
         self._environment = environment
         self.parentSize = .lazy(parentSize)
     }
@@ -699,21 +700,93 @@ struct Cache3<Key: Equatable, Value> {
     }
 }
 
+/// Caches the three most recent proposal-to-size measurements for one engine.
 struct ViewSizeCache {
-    var cache: Cache3<_ProposedSize, CGSize>
+    var cache: Cache3<ProposedViewSize, CGSize>
 
-    init(cache: Cache3<_ProposedSize, CGSize> = Cache3()) {
+    init(cache: Cache3<ProposedViewSize, CGSize> = Cache3()) {
         self.cache = cache
+        ViewSizeCacheStats.incrementInvalidationCount()
     }
 
     mutating func get(
         _ proposal: _ProposedSize,
         makeValue: () -> CGSize
     ) -> CGSize {
-        cache.get(proposal, makeValue: makeValue)
+        let key = ProposedViewSize(proposal)
+        if let value = cache.find(key) {
+            ViewSizeCacheStats.incrementHitCount()
+            LayoutTrace.traceCacheLookup(proposal, true)
+            return value
+        }
+        ViewSizeCacheStats.incrementMissCount()
+        LayoutTrace.traceCacheLookup(proposal, false)
+        let value = makeValue()
+        cache.put(key, value: value)
+        return value
     }
 }
 
+/// Reports process-wide size-cache construction, hit, and miss counters.
+struct ViewSizeCacheStats: Equatable, AdditiveArithmetic {
+    var invalidationCount: UInt32
+    var hitCount: UInt32
+    var missCount: UInt32
+
+    private static let invalidations = Atomic<UInt32>(0)
+    private static let hits = Atomic<UInt32>(0)
+    private static let misses = Atomic<UInt32>(0)
+
+    static func current() -> ViewSizeCacheStats {
+        ViewSizeCacheStats(
+            invalidationCount: invalidations.load(ordering: .relaxed),
+            hitCount: hits.load(ordering: .relaxed),
+            missCount: misses.load(ordering: .relaxed)
+        )
+    }
+
+    static func incrementInvalidationCount() {
+        _ = invalidations.wrappingAdd(1, ordering: .relaxed)
+    }
+
+    static func incrementHitCount() {
+        _ = hits.wrappingAdd(1, ordering: .relaxed)
+    }
+
+    static func incrementMissCount() {
+        _ = misses.wrappingAdd(1, ordering: .relaxed)
+    }
+
+    static func + (
+        lhs: ViewSizeCacheStats,
+        rhs: ViewSizeCacheStats
+    ) -> ViewSizeCacheStats {
+        ViewSizeCacheStats(
+            invalidationCount: lhs.invalidationCount &+ rhs.invalidationCount,
+            hitCount: lhs.hitCount &+ rhs.hitCount,
+            missCount: lhs.missCount &+ rhs.missCount
+        )
+    }
+
+    static func - (
+        lhs: ViewSizeCacheStats,
+        rhs: ViewSizeCacheStats
+    ) -> ViewSizeCacheStats {
+        ViewSizeCacheStats(
+            invalidationCount: lhs.invalidationCount &- rhs.invalidationCount,
+            hitCount: lhs.hitCount &- rhs.hitCount,
+            missCount: lhs.missCount &- rhs.missCount
+        )
+    }
+
+    static let zero = ViewSizeCacheStats(
+        invalidationCount: 0,
+        hitCount: 0,
+        missCount: 0
+    )
+}
+
+/// Caches the three most recent resolved placements for one unary engine.
 struct ViewPlacementCache {
     var cache = Cache3<ViewSize, _Placement>()
 
@@ -725,7 +798,8 @@ struct ViewPlacementCache {
     }
 }
 
-private struct UnaryLayoutEngine<L: UnaryLayout>: LayoutEngine, LayoutEnginePlacing
+/// Measures and places an ordinary unary layout using eager parent geometry.
+private struct UnaryLayoutEngine<L: UnaryLayout>: LayoutEngine
 where L.PlacementContextType == PlacementContext {
     var layout: L
     var layoutContext: SizeAndSpacingContext
@@ -815,31 +889,90 @@ where L.PlacementContextType == PlacementContext {
         }
     }
 
-    mutating func place(
-        at position: CGPoint,
-        anchor: UnitPoint,
-        proposal: ProposedViewSize
+}
+
+/// Measures a unary layout whose placement reads graph-backed position context.
+private struct UnaryPositionAwareLayoutEngine<L: UnaryLayout>: LayoutEngine
+where L.PlacementContextType == _PositionAwarePlacementContext {
+    var layout: L
+    var layoutContext: SizeAndSpacingContext
+    var child: LayoutProxy
+    var cache: ViewSizeCache
+
+    mutating func update(
+        layout: L,
+        layoutContext: SizeAndSpacingContext,
+        child: LayoutProxy
     ) {
-        let internalProposal = _ProposedSize(proposal)
-        let resolvedSize = sizeThatFits(internalProposal)
-        let size = ViewSize(resolvedSize, proposal: internalProposal)
-        let placement = childPlacement(at: size)
-        let origin = CGPoint(
-            x: position.x - size.width * anchor.x,
-            y: position.y - size.height * anchor.y
-        )
-        let childPosition = CGPoint(
-            x: origin.x + placement.anchorPosition.x,
-            y: origin.y + placement.anchorPosition.y
-        )
-        child.layoutComputer.place(
-            at: childPosition,
-            anchor: placement.anchor,
-            proposal: ProposedViewSize(placement.proposedSize)
-        )
+        self.layout = layout
+        self.layoutContext = layoutContext
+        self.child = child
+        cache = ViewSizeCache()
+    }
+
+    func layoutPriority() -> Double {
+        var result: Double!
+        layoutContext.context.update {
+            result = layout.layoutPriority(child: child)
+        }
+        return result
+    }
+
+    func ignoresAutomaticPadding() -> Bool {
+        var result: Bool!
+        layoutContext.context.update {
+            result = layout.ignoresAutomaticPadding(child: child)
+        }
+        return result
+    }
+
+    func spacing() -> Spacing {
+        var result: Spacing!
+        layoutContext.context.update {
+            result = layout.spacing(in: layoutContext, child: child)
+        }
+        return result
+    }
+
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        let layout = layout
+        let layoutContext = layoutContext
+        let child = child
+        return cache.get(proposal) {
+            var result: CGSize!
+            layoutContext.context.update {
+                result = layout.sizeThatFits(
+                    in: proposal,
+                    context: layoutContext,
+                    child: child
+                )
+            }
+            return result
+        }
+    }
+
+    func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+        var result: CGFloat?
+        layoutContext.context.update {
+            result = child.layoutComputer.explicitAlignment(key, at: size)
+        }
+        return result
+    }
+
+    func childPlacement(
+        at size: ViewSize,
+        placementContext: _PositionAwarePlacementContext
+    ) -> _Placement {
+        var result: _Placement!
+        placementContext.context.update {
+            result = layout.placement(of: child, in: placementContext)
+        }
+        return result
     }
 }
 
+/// Publishes the ordinary unary engine while preserving its measurement caches.
+/// An absent child computer remains optional so `LayoutProxy` supplies the default leaf metrics.
 private struct UnaryLayoutComputer<L: UnaryLayout>: StatefulRule, AsyncAttribute
 where L.PlacementContextType == PlacementContext {
     typealias Value = LayoutComputer
@@ -849,48 +982,87 @@ where L.PlacementContextType == PlacementContext {
     var _childLayoutComputer: OptionalAttribute<LayoutComputer>
 
     mutating func updateValue() {
-        guard let childLayoutComputer = _childLayoutComputer.attribute else {
-            fatalError(
-                "UnaryLayoutComputer<\(L.self)> evaluated before its child was connected."
-            )
-        }
         let layout = _layout.value
-        _ = childLayoutComputer.value
-        var child = LayoutProxy(
-            attributes: LayoutProxyAttributes(
-                layoutComputer: childLayoutComputer
-            )
+        let ruleContext = AnyRuleContext(context)
+        // The unary rule owns every child-computer read performed by its
+        // engine. A child attribute is data, not a substitute context owner.
+        let child = LayoutProxy(
+            context: ruleContext,
+            layoutComputer: _childLayoutComputer.attribute
         )
-        child.context = AnyRuleContext(context)
         let layoutContext = SizeAndSpacingContext(
-            context: AnyRuleContext(context),
+            context: ruleContext,
             owner: context.attribute.identifier,
             environment: _environment
         )
-        if var current = _AGGraph.currentStatefulOutput(LayoutComputer.self),
-           let box = current.box as? LayoutEngineBox<UnaryLayoutEngine<L>> {
-            box.engine.update(
-                layout: layout,
-                layoutContext: layoutContext,
-                child: child
-            )
-            current.changeCount &+= 1
-            _AGGraph.setStatefulOutput(current)
-        } else {
-            let engine = UnaryLayoutEngine(
-                layout: layout,
-                layoutContext: layoutContext,
-                child: child,
-                dimensionsCache: ViewSizeCache(),
-                placementCache: ViewPlacementCache()
-            )
-            _AGGraph.setStatefulOutput(
-                LayoutComputer(box: LayoutEngineBox(engine: engine))
-            )
-        }
+        update(
+            modify: { (engine: inout UnaryLayoutEngine<L>) in
+                engine.update(
+                    layout: layout,
+                    layoutContext: layoutContext,
+                    child: child
+                )
+            },
+            create: {
+                UnaryLayoutEngine(
+                    layout: layout,
+                    layoutContext: layoutContext,
+                    child: child,
+                    dimensionsCache: ViewSizeCache(),
+                    placementCache: ViewPlacementCache()
+                )
+            }
+        )
     }
 }
 
+/// Publishes the position-aware unary engine and its proposal cache.
+/// It preserves a missing child computer as the proxy's default-layout sentinel.
+private struct UnaryPositionAwareLayoutComputer<L: UnaryLayout>:
+    StatefulRule, AsyncAttribute
+where L.PlacementContextType == _PositionAwarePlacementContext {
+    typealias Value = LayoutComputer
+
+    var _layout: Attribute<L>
+    var _environment: Attribute<EnvironmentValues>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
+
+    mutating func updateValue() {
+        let layout = _layout.value
+        let ruleContext = AnyRuleContext(context)
+        // Measurement and position-aware placement share the publishing
+        // rule's identity so both dependency paths invalidate one owner.
+        let child = LayoutProxy(
+            context: ruleContext,
+            layoutComputer: _childLayoutComputer.attribute
+        )
+        let layoutContext = SizeAndSpacingContext(
+            context: ruleContext,
+            owner: context.attribute.identifier,
+            environment: _environment
+        )
+        update(
+            modify: { (engine: inout UnaryPositionAwareLayoutEngine<L>) in
+                engine.update(
+                    layout: layout,
+                    layoutContext: layoutContext,
+                    child: child
+                )
+            },
+            create: {
+                UnaryPositionAwareLayoutEngine(
+                    layout: layout,
+                    layoutContext: layoutContext,
+                    child: child,
+                    cache: ViewSizeCache()
+                )
+            }
+        )
+    }
+}
+
+/// Resolves ordinary unary placement into the child geometry output.
+/// Layout-empty children are measured through `LayoutProxy`'s default computer.
 private struct UnaryChildGeometry<L: UnaryLayout>: Rule, AsyncAttribute {
     var _parentSize: Attribute<ViewSize>
     var _layoutDirection: Attribute<LayoutDirection>
@@ -898,15 +1070,18 @@ private struct UnaryChildGeometry<L: UnaryLayout>: Rule, AsyncAttribute {
     var _childLayoutComputer: OptionalAttribute<LayoutComputer>
 
     var value: ViewGeometry {
-        guard let childLayoutComputer = _childLayoutComputer.attribute else {
-            fatalError("UnaryChildGeometry evaluated before its child was connected.")
-        }
         let size = _parentSize.value
         let placement = _parentLayoutComputer.value.childPlacement(at: size)
-        return LayoutProxy(
-            attributes: LayoutProxyAttributes(
-                layoutComputer: childLayoutComputer
+        guard let currentAttribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError(
+                "UnaryChildGeometry evaluated outside an active rule context."
             )
+        }
+        // Final measurement belongs to this geometry rule even though the
+        // measured computer belongs to the child.
+        return LayoutProxy(
+            context: AnyRuleContext(attribute: currentAttribute),
+            layoutComputer: _childLayoutComputer.attribute
         ).finallyPlaced(
             at: placement,
             in: size.value,
@@ -915,13 +1090,66 @@ private struct UnaryChildGeometry<L: UnaryLayout>: Rule, AsyncAttribute {
     }
 }
 
+/// Resolves position-aware unary placement from live graph geometry inputs.
+/// Its child proxy retains the optional-computer sentinel through placement.
+private struct UnaryPositionAwareChildGeometry<L: UnaryLayout>:
+    Rule, AsyncAttribute
+where L.PlacementContextType == _PositionAwarePlacementContext {
+    var _parentLayoutComputer: Attribute<LayoutComputer>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _parentSize: Attribute<ViewSize>
+    var _position: Attribute<CGPoint>
+    var _transform: Attribute<ViewTransform>
+    var _environment: Attribute<EnvironmentValues>
+    var _childLayoutComputer: OptionalAttribute<LayoutComputer>
+    var _safeAreaInsets: OptionalAttribute<SafeAreaInsets>
+
+    var value: ViewGeometry {
+        guard let currentAttribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError(
+                "UnaryPositionAwareChildGeometry evaluated outside an active rule context."
+            )
+        }
+        let context = AnyRuleContext(attribute: currentAttribute)
+        let parentSize = _parentSize.value
+        let placementContext = _PositionAwarePlacementContext(
+            context: context,
+            owner: currentAttribute,
+            size: _parentSize,
+            environment: _environment,
+            transform: _transform,
+            position: _position,
+            safeAreaInsets: _safeAreaInsets
+        )
+        let placement = _parentLayoutComputer.value.childPlacement(
+            at: parentSize,
+            placementContext: placementContext
+        )
+        // The geometry rule remains the dependency owner for final child
+        // measurement; the optional child computer is only the measured input.
+        var geometry = LayoutProxy(
+            context: context,
+            layoutComputer: _childLayoutComputer.attribute
+        ).finallyPlaced(
+            at: placement,
+            in: parentSize.value,
+            layoutDirection: _layoutDirection.value
+        )
+        let position = _position.value
+        geometry.origin.x += position.x
+        geometry.origin.y += position.y
+        return geometry
+    }
+}
+
+/// Combines parent and layout-local positions for ordinary unary descendants.
 struct LayoutPositionQuery: Rule, AsyncAttribute {
-    var parentPosition: Attribute<CGPoint>
-    var localPosition: Attribute<CGPoint>
+    var _parentPosition: Attribute<CGPoint>
+    var _localPosition: Attribute<CGPoint>
 
     var value: CGPoint {
-        let parent = parentPosition.value
-        let local = localPosition.value
+        let parent = _parentPosition.value
+        let local = _localPosition.value
         return CGPoint(x: parent.x + local.x, y: parent.y + local.y)
     }
 }
@@ -982,8 +1210,8 @@ extension UnaryLayout where PlacementContextType == PlacementContext {
             }
             let childPosition = graph.makeRule(
                 LayoutPositionQuery(
-                    parentPosition: inputs.position,
-                    localPosition: localChildPosition
+                    _parentPosition: inputs.position,
+                    _localPosition: localChildPosition
                 )
             )
             let parentTransform = inputs.transform
@@ -1003,9 +1231,6 @@ extension UnaryLayout where PlacementContextType == PlacementContext {
         childInputs.requestsLayoutComputer = true
 
         let childOutputs = body(_Graph(), childInputs)
-        guard childOutputs._layoutComputer.attribute != nil else {
-            fatalError("UnaryLayout<\(Self.self)> body returned no layout computer.")
-        }
         graph.mutateStatefulRule(
             parentLayoutComputer.identifier,
             as: UnaryLayoutComputer<Self>.self,
@@ -1044,6 +1269,119 @@ extension UnaryLayout where PlacementContextType == PlacementContext {
             layoutComputer: inputs.requestsLayoutComputer
                 ? OptionalAttribute(parentLayoutComputer)
                 : OptionalAttribute()
+        )
+    }
+}
+
+extension UnaryLayout
+where PlacementContextType == _PositionAwarePlacementContext {
+    static func makeViewImpl(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard inputs.needsLayout else {
+            return body(_Graph(), inputs)
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self).makeViewImpl called outside an active _AGGraph context.")
+        }
+
+        var modifier = modifier
+        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+        let environment = inputs.base.cachedEnvironment.value.environment
+        var childInputs = inputs
+        childInputs.copyCaches()
+
+        let geometryLayoutComputer: Attribute<LayoutComputer>?
+        let childGeometry: Attribute<ViewGeometry>?
+        if inputs.needsGeometry {
+            let layoutComputer = graph.makeStatefulRule(
+                UnaryPositionAwareLayoutComputer(
+                    _layout: modifier._attribute,
+                    _environment: environment,
+                    _childLayoutComputer: OptionalAttribute()
+                )
+            )
+            geometryLayoutComputer = layoutComputer
+            let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
+                environment.value.layoutDirection
+            }
+            let geometry = graph.makeRule(
+                UnaryPositionAwareChildGeometry<Self>(
+                    _parentLayoutComputer: layoutComputer,
+                    _layoutDirection: layoutDirection,
+                    _parentSize: inputs.size,
+                    _position: inputs.position,
+                    _transform: inputs.transform,
+                    _environment: environment,
+                    _childLayoutComputer: OptionalAttribute(),
+                    _safeAreaInsets: inputs.safeAreaInsets
+                )
+            )
+            childGeometry = geometry
+            let childPosition = graph.subscriptNode(
+                parent: geometry,
+                keyPath: \ViewGeometry.origin
+            )
+            let childSize = graph.subscriptNode(
+                parent: geometry,
+                keyPath: \ViewGeometry.dimensions.size
+            )
+            let parentTransform = inputs.transform
+            childInputs.position = childPosition
+            childInputs.size = childSize
+            childInputs.transform = graph.makeRule {
+                var transform = parentTransform.value
+                transform.appendPosition(childPosition.value)
+                return transform
+            }
+            childInputs.containerPosition = inputs.position
+            childInputs.containerSize = OptionalAttribute(inputs.size)
+        } else {
+            geometryLayoutComputer = nil
+            childGeometry = nil
+        }
+
+        childInputs.requestsLayoutComputer = true
+        let childOutputs = body(_Graph(), childInputs)
+
+        if let geometryLayoutComputer {
+            graph.mutateStatefulRule(
+                geometryLayoutComputer.identifier,
+                as: UnaryPositionAwareLayoutComputer<Self>.self,
+                invalidating: true
+            ) { computer in
+                computer._childLayoutComputer = childOutputs._layoutComputer
+            }
+        }
+        if let childGeometry {
+            graph.mutateRule(
+                childGeometry.identifier,
+                as: UnaryPositionAwareChildGeometry<Self>.self,
+                invalidating: true
+            ) { geometry in
+                geometry._childLayoutComputer = childOutputs._layoutComputer
+            }
+        }
+
+        let outputLayoutComputer: OptionalAttribute<LayoutComputer>
+        if inputs.requestsLayoutComputer {
+            let layoutComputer = graph.makeStatefulRule(
+                UnaryPositionAwareLayoutComputer(
+                    _layout: modifier._attribute,
+                    _environment: environment,
+                    _childLayoutComputer: childOutputs._layoutComputer
+                )
+            )
+            outputLayoutComputer = OptionalAttribute(layoutComputer)
+        } else {
+            outputLayoutComputer = OptionalAttribute()
+        }
+
+        return _ViewOutputs(
+            preferences: childOutputs.preferences,
+            layoutComputer: outputLayoutComputer
         )
     }
 }

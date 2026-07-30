@@ -459,6 +459,13 @@ public struct _ViewInputs {
     }
 }
 
+/// Tracks whether debug replacement counting has produced a stable value.
+enum DebugReplaceableViewCount {
+    case counting(Int)
+    case uninitialized
+    case indeterminate
+}
+
 /// The bundle of AG context Attributes passed from parent to child during `_makeViewList`.
 ///
 /// Unlike `_ViewInputs`, this struct does NOT carry layout Attributes (`position`, `size`,
@@ -499,7 +506,7 @@ public struct _ViewListInputs {
     /// Debug-only counter for replaceable view slots in the list.
     /// `MutableBox` allows shared mutation across copies of `_ViewListInputs`
     /// in the same subtree. `nil` when debug instrumentation is not active.
-    var debugReplaceableViewCount: MutableBox<Int?>?
+    var debugReplaceableViewCount: MutableBox<DebugReplaceableViewCount>?
 
     var needsSectionListOutputs: Bool {
         (options & Self.sectionListOptions) != 0
@@ -641,6 +648,8 @@ public struct _ViewOutputs {
 /// - `nextImplicitID`: next auto-assigned child index (equals child count for static lists)
 /// - `staticCount`: non-nil only for fully static lists (all children known at build time)
 public struct _ViewListOutputs {
+    typealias Views = ViewListContent
+
     /// The resolved list content: static (TupleView) or dynamic (ForEach / mixed).
     var views: ViewListContent
 

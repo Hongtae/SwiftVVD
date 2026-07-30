@@ -71,6 +71,42 @@ extension ViewList {
         return found
     }
 
+    /// Finds a canonical collection identity using the collection-ID traversal style.
+    func firstOffset(of id: _ViewList_ID.Canonical) -> Int? {
+        firstOffset(of: id, style: _ViewList_IteratorStyle(value: 2))
+    }
+
+    /// Uses the typed ID collection fast path before transformed sublist traversal.
+    func firstOffset(
+        of id: _ViewList_ID.Canonical,
+        style: _ViewList_IteratorStyle
+    ) -> Int? {
+        if style.value == 2, let viewIDs {
+            for offset in viewIDs.indices {
+                if viewIDs[offset].canonicalID == id {
+                    return offset
+                }
+            }
+            return nil
+        }
+
+        var from = 0
+        var traversalOffset = 0
+        var found: Int?
+        _ = _applySublists(in: self, from: &from, style: style) { sublist in
+            for offset in 0..<sublist.count {
+                let elementIndex = sublist.start + offset
+                if sublist.id.elementID(at: elementIndex).canonicalID == id {
+                    found = traversalOffset + offset
+                    return false
+                }
+            }
+            traversalOffset += sublist.count
+            return true
+        }
+        return found
+    }
+
     @discardableResult
     func applyIDs(
         from index: inout Int,
@@ -131,6 +167,11 @@ private func _viewListID<A: Hashable>(_ viewID: _ViewList_ID, matches target: A)
     return viewID.containsID(target)
 }
 
+/// Allows a composite data ID to match one of its nested hashable identities.
+protocol HasCustomIDRepresentation {
+    func containsID<ID: Hashable>(_ id: ID) -> Bool
+}
+
 // MARK: - _ViewList_Backing
 
 /// Concrete backing adapter returned by variadic children.
@@ -168,6 +209,19 @@ struct BaseViewList: ViewList {
 
     func count(style: _ViewList_IteratorStyle) -> Int { elements.count }
     func estimatedCount(style: _ViewList_IteratorStyle) -> Int { elements.count }
+
+    /// Appends the base element range while preserving this list's implicit lane.
+    func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
+        guard let upperBound = Int32(exactly: elements.count),
+              let implicitID = Int32(exactly: implicitID),
+              upperBound >= 0 else {
+            preconditionFailure("BaseViewList ID bounds must fit Int32.")
+        }
+        accumulator.appendWithoutExplicitID(
+            indices: 0..<upperBound,
+            implicitID: implicitID
+        )
+    }
 
     func applyNodes(
         from: inout Int,
@@ -892,6 +946,7 @@ struct HeterogeneousViewIDs {
     }
 }
 
+/// Maps canonical heterogeneous view identities back to their flattened index.
 struct HeterogeneousViewIDIndexLookupTable {
     var lookupTable: HeterogeneousIndexLookupTable
 
@@ -900,6 +955,7 @@ struct HeterogeneousViewIDIndexLookupTable {
     }
 }
 
+/// Coalesces adjacent view IDs by concrete type while preserving explicit-ID scopes.
 struct HeterogeneousViewIDsAccumulator {
     private var collections: ContiguousArray<AbstractHomogeneousCollection>
     private var _count: Int
@@ -1061,6 +1117,7 @@ struct HeterogeneousViewIDsAccumulator {
         }
     }
 
+    /// Exposes typed canonical-field slots inside one caller-sized allocation.
     struct UnsafeOutputBuffer {
         var pointer: UnsafeMutableRawPointer
         var count: Int
@@ -1112,6 +1169,7 @@ struct HeterogeneousViewIDsAccumulator {
         }
     }
 
+    /// Initializes one homogeneous canonical-ID collection without per-element erasure.
     mutating func appendWithUnsafeOutputBuffer<ID: Hashable>(
         explicitID type: ID.Type = ID.self,
         count: Int,
@@ -1137,8 +1195,42 @@ struct HeterogeneousViewIDsAccumulator {
         append(contentsOf: values)
     }
 
+    /// Collects transformed list IDs when no homogeneous specialization is available.
+    mutating func appendSlowPath<List: ViewList>(_ list: List) {
+        var offset = 0
+        _ = list.applyIDs(from: &offset) { id in
+            let canonical = id.canonicalID
+            if let explicitID = canonical.explicitID?.base as? any Hashable {
+                appendOpenedExplicitID(
+                    explicitID,
+                    index: canonical._index,
+                    implicitID: canonical.implicitID
+                )
+            } else {
+                append(
+                    index: canonical._index,
+                    implicitID: canonical.implicitID
+                )
+            }
+            return true
+        }
+    }
+
     private mutating func append<ID: Hashable>(_ value: TypedCanonicalViewID<ID>) {
         withBuffer(of: TypedCanonicalViewID<ID>.self) { $0.append(value) }
+    }
+
+    /// Opens an erased hashable so the homogeneous collection retains its concrete type.
+    private mutating func appendOpenedExplicitID<ID: Hashable>(
+        _ explicitID: ID,
+        index: Int32,
+        implicitID: Int32
+    ) {
+        append(
+            index: index,
+            implicitID: implicitID,
+            explicitID: explicitID
+        )
     }
 
     private mutating func appendCurrentExplicitID<ID: Hashable>(
@@ -1691,7 +1783,9 @@ enum _ViewList_Node {
     case sublist(_ViewList_Sublist)
 }
 
+/// Carries the ordered regions and identity transforms for one logical section.
 struct _ViewList_Section: ViewList {
+    /// Identifies a section region and whether it occupies an edge role.
     struct Info {
         var id: UInt32
         var isHeader: Bool
@@ -1757,6 +1851,18 @@ struct _ViewList_Section: ViewList {
         base.estimatedCount(style: style)
     }
 
+    /// Uses only the leading region for hierarchical sections; flat sections append all regions.
+    func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
+        if isHierarchical {
+            guard let first = base.lists.first else {
+                preconditionFailure("A hierarchical section requires a leading region.")
+            }
+            first.list.appendViewIDs(into: &accumulator)
+        } else {
+            base.appendViewIDs(into: &accumulator)
+        }
+    }
+
     func applyNodes(
         from: inout Int,
         style: _ViewList_IteratorStyle,
@@ -1786,6 +1892,13 @@ struct _ViewList_Group: ViewList {
         lists.reduce(0) { $0 + $1.list.count(style: style) }
     }
 
+    /// Preserves the stored region order while forwarding each concrete list witness.
+    func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
+        for entry in lists {
+            entry.list.appendViewIDs(into: &accumulator)
+        }
+    }
+
     func applyNodes(
         from: inout Int,
         style: _ViewList_IteratorStyle,
@@ -1813,12 +1926,14 @@ struct _ViewList_Group: ViewList {
     }
 }
 
+/// Distinguishes a child identity by its stored group entry and owner.
 struct _ViewList_GroupEntryID: Hashable {
     var owner: UInt32
     var index: Int
     var child: _ViewList_ID.Canonical
 }
 
+/// Binds a group-entry lane without replacing a child's primary identity.
 private struct _ViewList_GroupEntryTransform: _ViewList_SublistTransform_Item {
     var owner: AGAttribute
     var index: Int
@@ -1868,6 +1983,32 @@ struct _ViewList_Sublist {
     var elements: _ViewList_SubgraphElements
     var traits: ViewTraitCollection
     var list: Attribute<any ViewList>?
+
+    /// Appends the stored remaining range using the primary transformed identity.
+    func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
+        guard let lowerBound = Int32(exactly: start),
+              let upperBound = Int32(exactly: count),
+              lowerBound <= upperBound else {
+            preconditionFailure("_ViewList_Sublist ID bounds must form an Int32 range.")
+        }
+        let indices = lowerBound..<upperBound
+        // Sublist accumulation uses the unary sentinel for this flattened
+        // range. The element index remains in `indices`; the sublist's stored
+        // implicit lane belongs to the full traversal ID and is not forwarded.
+        let implicitID: Int32 = -1
+        if let explicitID = id.explicitIDs.first?.id.base as? any Hashable {
+            accumulator.append(
+                indices: indices,
+                implicitID: implicitID,
+                explicitID: explicitID
+            )
+        } else {
+            accumulator.appendWithoutExplicitID(
+                indices: indices,
+                implicitID: implicitID
+            )
+        }
+    }
 }
 
 /// View wrapper used by `_VariadicView_Children.Element`.
@@ -2106,6 +2247,30 @@ struct AnyTrait<Key: _ViewTraitKey>: AnyViewTrait {
 struct ViewTraitCollection {
     var storage: [AnyViewTrait] = []
     init() {}
+
+    /// Returns whether this collection already stores a value for the key.
+    func contains<K>(_ key: K.Type) -> Bool where K: _ViewTraitKey {
+        storage.contains { $0 is AnyTrait<K> }
+    }
+
+    /// Writes a trait only when an inner view has not supplied the same key.
+    mutating func setValueIfUnset<K>(
+        _ value: K.Value,
+        for key: K.Type
+    ) where K: _ViewTraitKey {
+        guard !contains(key) else {
+            return
+        }
+        storage.append(AnyTrait<K>(value: value))
+    }
+
+    /// Supplies an element identity as the default tag for its concrete ID type.
+    mutating func setTagIfUnset<ID>(
+        for type: ID.Type,
+        value: ID
+    ) where ID: Hashable {
+        setValueIfUnset(.tagged(value), for: TagValueTraitKey<ID>.self)
+    }
 
     subscript<K: _ViewTraitKey>(key: K.Type) -> K.Value {
         get {
