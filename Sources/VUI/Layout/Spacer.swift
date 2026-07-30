@@ -40,13 +40,54 @@ private struct SpacerLayoutComputer<S: PrimitiveSpacer>: StatefulRule, AsyncAttr
         func spacing() -> Spacing {
             guard isEnabled else { return Spacing() }
 
-            // ViewSpacing currently models the ordinary edge category. The text
-            // baseline spacer's additional private categories collapse to the
-            // same zero-distance result in this reduced representation.
+            let isBaselineRelative =
+                S.self == _TextBaselineRelativeSpacer.self
             switch orientation {
             case .horizontal:
+                if isBaselineRelative {
+                    // Horizontal baseline spacing pairs the physical edges
+                    // with their corresponding text-baseline categories.
+                    return Spacing(minima: [
+                        Spacing.Key(
+                            category: .leftTextBaseline,
+                            edge: .left
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .rightTextBaseline,
+                            edge: .right
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .default,
+                            edge: .left
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .default,
+                            edge: .right
+                        ): .distance(0),
+                    ])
+                }
                 return .horizontal(0)
             case .vertical:
+                if isBaselineRelative {
+                    return Spacing(minima: [
+                        Spacing.Key(
+                            category: .textBaseline,
+                            edge: .top
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .textBaseline,
+                            edge: .bottom
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .default,
+                            edge: .top
+                        ): .distance(0),
+                        Spacing.Key(
+                            category: .default,
+                            edge: .bottom
+                        ): .distance(0),
+                    ])
+                }
                 return .vertical(0)
             case nil:
                 return .zero

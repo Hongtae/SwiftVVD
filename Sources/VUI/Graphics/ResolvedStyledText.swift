@@ -996,6 +996,24 @@ final class ResolvedStyledText: InterpolatableContent {
         cachedLayoutMetrics(in: size)?.lastBaseline ?? .zero
     }
 
+    func spacing() -> Spacing {
+        // Measure the unconstrained text before aggregating font metrics.
+        // Missing either carrier means there are no text-spacing categories.
+        let idealSize = CGSize(
+            width: CGFloat.infinity,
+            height: CGFloat.infinity
+        )
+        guard let idealMetrics = cachedLayoutMetrics(in: idealSize),
+              let maxFontMetrics else {
+            return Spacing()
+        }
+        return Spacing.textSpacing(
+            maxFontMetrics: maxFontMetrics,
+            idealMetrics: idealMetrics,
+            layoutProperties: layoutProperties
+        )
+    }
+
     private func cachedLayoutMetrics(
         in requestedSize: CGSize
     ) -> GraphicsContext.ResolvedText.LayoutMetrics? {

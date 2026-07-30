@@ -386,7 +386,7 @@ struct StyledTextLayoutEngine: LayoutEngine {
     var renderer: TextRendererBoxBase?
 
     func spacing() -> Spacing {
-        ViewSpacing.text.spacing
+        text.spacing()
     }
 
     func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {

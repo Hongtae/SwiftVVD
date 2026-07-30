@@ -26,6 +26,14 @@ private func spacingDistance(_ spacing: Spacing, at edge: AbsoluteEdge) -> CGFlo
     spacing.minima[Spacing.Key(category: .default, edge: edge)]?.value
 }
 
+private func spacingDistance(
+    _ spacing: Spacing,
+    category: Spacing.Category,
+    edge: AbsoluteEdge
+) -> CGFloat? {
+    spacing.minima[Spacing.Key(category: category, edge: edge)]?.value
+}
+
 final class PrimitiveSpacerTests: XCTestCase {
     func testSpacerUsesInheritedStackOrientationAndDefaultMinimum() {
         withGraph { graph in
@@ -128,6 +136,26 @@ final class PrimitiveSpacerTests: XCTestCase {
                 stackOrientation: .horizontal
             )
             XCTAssertEqual(horizontal.sizeThatFits(.unspecified), CGSize(width: 12, height: 0))
+            let horizontalSpacing = horizontal.spacing()
+            XCTAssertEqual(horizontalSpacing.minima.count, 4)
+            XCTAssertEqual(spacingDistance(horizontalSpacing, at: .left), 0)
+            XCTAssertEqual(spacingDistance(horizontalSpacing, at: .right), 0)
+            XCTAssertEqual(
+                spacingDistance(
+                    horizontalSpacing,
+                    category: .leftTextBaseline,
+                    edge: .left
+                ),
+                0
+            )
+            XCTAssertEqual(
+                spacingDistance(
+                    horizontalSpacing,
+                    category: .rightTextBaseline,
+                    edge: .right
+                ),
+                0
+            )
 
             let vertical = makeLayoutComputer(
                 _TextBaselineRelativeSpacer(minLength: 12),
@@ -135,6 +163,41 @@ final class PrimitiveSpacerTests: XCTestCase {
                 stackOrientation: .vertical
             )
             XCTAssertEqual(vertical.sizeThatFits(.unspecified), CGSize(width: 0, height: 12))
+            let verticalSpacing = vertical.spacing()
+            XCTAssertEqual(verticalSpacing.minima.count, 4)
+            XCTAssertEqual(spacingDistance(verticalSpacing, at: .top), 0)
+            XCTAssertEqual(spacingDistance(verticalSpacing, at: .bottom), 0)
+            XCTAssertEqual(
+                spacingDistance(
+                    verticalSpacing,
+                    category: .textBaseline,
+                    edge: .top
+                ),
+                0
+            )
+            XCTAssertEqual(
+                spacingDistance(
+                    verticalSpacing,
+                    category: .textBaseline,
+                    edge: .bottom
+                ),
+                0
+            )
+
+            let neutral = makeLayoutComputer(
+                _TextBaselineRelativeSpacer(minLength: 12),
+                graph: graph,
+                stackOrientation: nil
+            )
+            let neutralSpacing = neutral.spacing()
+            XCTAssertEqual(neutralSpacing.minima.count, 4)
+            XCTAssertNil(
+                spacingDistance(
+                    neutralSpacing,
+                    category: .textBaseline,
+                    edge: .top
+                )
+            )
         }
     }
 

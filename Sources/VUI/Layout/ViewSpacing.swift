@@ -126,9 +126,27 @@ struct Spacing: Equatable, CustomStringConvertible {
         }
 
         static func spacing(top: TextMetrics, bottom: TextMetrics) -> CGFloat {
-            let spacing = bottom.leading
-            guard top.pixelLength > 0, top.pixelLength.isFinite else {
-                return spacing
+            guard _SemanticFeature<Semantics_v5>.isEnabled else {
+                return 0
+            }
+
+            // Preserve the emitted operation order. Although the unequal
+            // branch reduces algebraically to `bottom.leading`, its
+            // cancellation and non-finite behavior are part of the result.
+            var spacing: CGFloat
+            if top.isAlmostEqual(to: bottom) {
+                spacing = bottom.leading
+            } else {
+                spacing = bottom.ascend + bottom.descend
+                spacing += bottom.leading
+                spacing -= bottom.descend
+                spacing += top.descend
+                spacing -= top.descend
+                spacing -= bottom.ascend
+            }
+
+            if top.pixelLength == 1 {
+                return ceil(spacing)
             }
             return ceil(spacing / top.pixelLength) * top.pixelLength
         }
@@ -212,6 +230,90 @@ struct Spacing: Equatable, CustomStringConvertible {
         ])
     }
 
+    static func textSpacing(
+        maxFontMetrics: ResolvedFontMetrics,
+        idealMetrics: GraphicsContext.ResolvedText.LayoutMetrics,
+        layoutProperties: TextLayoutProperties
+    ) -> Spacing {
+        let beforeEdge: AbsoluteEdge
+        let afterEdge: AbsoluteEdge
+        let beforeEdgeCategory: Category
+        let afterEdgeCategory: Category
+        let beforeBaselineCategory: Category
+        let afterBaselineCategory: Category
+
+        if layoutProperties.writingMode == .verticalRightToLeft {
+            beforeEdge = .right
+            afterEdge = .left
+            beforeEdgeCategory = .edgeRightText
+            afterEdgeCategory = .edgeLeftText
+            beforeBaselineCategory = .rightTextBaseline
+            afterBaselineCategory = .leftTextBaseline
+        } else {
+            beforeEdge = .top
+            afterEdge = .bottom
+            beforeEdgeCategory = .edgeAboveText
+            afterEdgeCategory = .edgeBelowText
+            beforeBaselineCategory = .textBaseline
+            afterBaselineCategory = .textBaseline
+        }
+
+        let lineHeight = maxFontMetrics.ascender - maxFontMetrics.descender
+        var naturalBoundaryDistance = lineHeight * 0.1
+        if _SemanticFeature<Semantics_v5>.isEnabled {
+            let pixelLength = layoutProperties.pixelLength
+            if pixelLength == 1 {
+                naturalBoundaryDistance = ceil(naturalBoundaryDistance)
+            } else {
+                naturalBoundaryDistance =
+                    ceil(naturalBoundaryDistance / pixelLength) * pixelLength
+            }
+        } else {
+            naturalBoundaryDistance =
+                ceil(naturalBoundaryDistance / 4) * 4
+        }
+
+        // Uniform line height divides leading between both metric extents.
+        // Other sizing modes leave it as the text-to-text gap component.
+        let distributedLeading =
+            layoutProperties.textSizing == .uniformLineHeight
+            ? maxFontMetrics.leading
+            : 0
+        let halfDistributedLeading = distributedLeading * 0.5
+        let textMetrics = TextMetrics(
+            ascend: maxFontMetrics.ascender + halfDistributedLeading,
+            descend: halfDistributedLeading - maxFontMetrics.descender,
+            leading: maxFontMetrics.leading - distributedLeading,
+            pixelLength: layoutProperties.pixelLength
+        )
+
+        let outer = lineHeight + naturalBoundaryDistance
+        let beforeDistance = outer - textMetrics.ascend
+        let afterDistance = max(
+            outer - maxFontMetrics.capHeight,
+            naturalBoundaryDistance + textMetrics.descend
+        )
+
+        // Metric cases intentionally face the adjacent text: the before edge
+        // carries bottom metrics and the after edge carries top metrics.
+        return Spacing(minima: [
+            Key(category: .textToText, edge: beforeEdge):
+                .bottomTextMetrics(textMetrics),
+            Key(category: .textToText, edge: afterEdge):
+                .topTextMetrics(textMetrics),
+            Key(category: afterBaselineCategory, edge: afterEdge):
+                .distance(
+                    idealMetrics.lastBaseline - idealMetrics.size.height
+                ),
+            Key(category: beforeBaselineCategory, edge: beforeEdge):
+                .distance(-idealMetrics.firstBaseline),
+            Key(category: beforeEdgeCategory, edge: beforeEdge):
+                .distance(beforeDistance),
+            Key(category: afterEdgeCategory, edge: afterEdge):
+                .distance(afterDistance),
+        ])
+    }
+
     var description: String {
         minima.isEmpty ? "Spacing (empty)" : "Spacing \(minima)"
     }
@@ -240,8 +342,33 @@ struct Spacing: Equatable, CustomStringConvertible {
     }
 
     mutating func reset(_ edges: AbsoluteEdge.Set) {
-        clear(edges)
-        incorporate(edges, of: .zero)
+        func retainedCategory(for edge: AbsoluteEdge) -> Category {
+            switch edge {
+            case .top: .edgeBelowText
+            case .left: .edgeRightText
+            case .bottom: .edgeAboveText
+            case .right: .edgeLeftText
+            }
+        }
+
+        // Reset preserves the text-boundary identity associated with an edge.
+        // Every other selected-edge category is removed.
+        var edgesNeedingInsertion = edges
+        for key in Array(minima.keys) where edges.contains(key.edge) {
+            if key.category == retainedCategory(for: key.edge) {
+                minima[key] = .distance(0)
+                edgesNeedingInsertion.remove(AbsoluteEdge.Set(key.edge))
+            } else {
+                minima.removeValue(forKey: key)
+            }
+        }
+        for edge in AbsoluteEdge.allCases
+            where edgesNeedingInsertion.contains(edge) {
+            minima[Key(
+                category: retainedCategory(for: edge),
+                edge: edge
+            )] = .distance(0)
+        }
     }
 
     mutating func reset(_ edges: Edge.Set, layoutDirection: LayoutDirection) {
@@ -264,30 +391,70 @@ struct Spacing: Equatable, CustomStringConvertible {
             leading = .top
         }
 
-        var distance: CGFloat?
-        let previousValues = minima.filter { $0.key.edge == trailing }
-        let nextValues = next.minima.filter { $0.key.edge == leading }
-        for (key, value) in previousValues {
-            if let nextValue = nextValues[Key(category: key.category, edge: leading)],
-               let candidate = value.distance(to: nextValue) {
-                distance = max(distance ?? candidate, candidate)
-            }
+        // Iterate the smaller category map. The helper is symmetric under the
+        // paired edge/preferred-map swap used by the other branch.
+        if minima.count < next.minima.count {
+            return _distance(
+                from: trailing,
+                to: leading,
+                ofViewPreferring: next
+            )
         }
-        return distance
+        return next._distance(
+            from: leading,
+            to: trailing,
+            ofViewPreferring: self
+        )
+    }
+
+    private func _distance(
+        from sourceEdge: AbsoluteEdge,
+        to targetEdge: AbsoluteEdge,
+        ofViewPreferring preferred: Spacing
+    ) -> CGFloat? {
+        var distance: CGFloat?
+        for (key, value) in minima {
+            guard key.category != .default, key.edge == sourceEdge else {
+                continue
+            }
+            guard let preferredValue = preferred.minima[Key(
+                category: key.category,
+                edge: targetEdge
+            )], let candidate = value.distance(to: preferredValue) else {
+                continue
+            }
+            distance = max(distance ?? candidate, candidate)
+        }
+        if let distance {
+            return distance
+        }
+
+        // Default values are a fallback category. Unlike non-default scalar
+        // pairs, the two sides choose a maximum rather than a sum.
+        let sourceDefault = minima[Key(
+            category: .default,
+            edge: sourceEdge
+        )]?.value
+        let targetDefault = preferred.minima[Key(
+            category: .default,
+            edge: targetEdge
+        )]?.value
+        switch (sourceDefault, targetDefault) {
+        case let (source?, target?):
+            return max(source, target)
+        case let (source?, nil):
+            return source
+        case let (nil, target?):
+            return target
+        case (nil, nil):
+            return nil
+        }
     }
 }
 
 public struct ViewSpacing: @unchecked Sendable {
     public static let zero = ViewSpacing(Spacing.zero)
     static let defaultSpacing: CGFloat = Spacing.defaultValue.width
-
-    static let text: ViewSpacing = {
-        let metrics = Spacing.TextMetrics(ascend: 0, descend: 0, leading: 0, pixelLength: 0.5)
-        return ViewSpacing(Spacing(minima: [
-            Spacing.Key(category: .textToText, edge: .top): .topTextMetrics(metrics),
-            Spacing.Key(category: .textToText, edge: .bottom): .bottomTextMetrics(metrics),
-        ]))
-    }()
 
     var spacing: Spacing
     var layoutDirection: LayoutDirection?
