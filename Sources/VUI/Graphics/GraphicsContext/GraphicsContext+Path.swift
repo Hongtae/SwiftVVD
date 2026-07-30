@@ -806,9 +806,12 @@ extension GraphicsContext {
 
         var property = shading.properties.first
         if case let .style(style) = property {
-            var shape = _ShapeStyle_Shape()
+            var shape = _ShapeStyle_Shape(
+                operation: .fallbackColor(level: 0),
+                environment: environment
+            )
             style._apply(to: &shape)
-            property = shape.shading?.properties.first
+            property = shape.resolvedShading?.properties.first
         }
 
         if let property {

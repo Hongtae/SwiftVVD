@@ -155,7 +155,7 @@ public struct MeshGradient: ShapeStyle, Equatable, Sendable {
     }
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .meshGradient(self)
+        shape.resolvedShading = .meshGradient(self)
     }
 
     public typealias Resolved = Never

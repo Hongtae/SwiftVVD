@@ -298,6 +298,17 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
         }
     }
 
+    mutating func adjustLevelIndices(
+        of name: _ShapeStyle_Name,
+        by offset: Int
+    ) {
+        for index in styles.indices where styles[index].key.name == name {
+            let level = Int(styles[index].key._level) + offset
+            precondition((0...Int(UInt8.max)).contains(level))
+            styles[index].key._level = UInt8(level)
+        }
+    }
+
     struct Effect: Equatable, Sendable {
         enum Kind: Equatable, Sendable {
             enum AnimatableData: VectorArithmetic, Sendable {

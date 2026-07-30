@@ -689,7 +689,10 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(gradient.hasSameInterpolationSurface(as: erasedGradient))
         XCTAssertFalse(gradient.hasSameInterpolationSurface(as: changedGradient))
         XCTAssertFalse(gradient.hasSameInterpolationSurface(as: color))
-        XCTAssertEqual(foreground.itemRecords.first?.shapeStyle, .color(Color(.sRGB, white: 0.145)))
+        XCTAssertEqual(
+            foreground.itemRecords.first?.shapeStyle,
+            .color(.primary)
+        )
         XCTAssertEqual(background.itemRecords.first?.shapeStyle, .color(Color(.sRGB, white: 1)))
         XCTAssertFalse(foreground.hasSameInterpolationSurface(as: background))
     }

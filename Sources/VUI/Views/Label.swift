@@ -47,6 +47,7 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
 }
 
 struct ResolvedLabelStyle: View {
+    typealias Body = Never
     var configuration: LabelStyleConfiguration = LabelStyleConfiguration()
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {

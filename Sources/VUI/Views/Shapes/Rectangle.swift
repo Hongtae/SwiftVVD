@@ -17,6 +17,8 @@ public struct Rectangle: Shape {
     @inlinable public init() {
     }
 
+    public var layoutDirectionBehavior: LayoutDirectionBehavior { .fixed }
+
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Body = _ShapeView<Rectangle, ForegroundStyle>
 }

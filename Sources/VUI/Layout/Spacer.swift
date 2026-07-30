@@ -344,58 +344,76 @@ struct DividerStyleConfiguration {
     var orientation: Axis
 }
 
-struct DividerShape<S: Shape>: Shape {
-    var shape: S
+protocol DividerStyle {
+    associatedtype Body: View
+    func makeBody(configuration: DividerStyleConfiguration) -> Body
+}
 
-    init(_ shape: S) {
-        self.shape = shape
+struct DividerShape<S: Shape>: Shape {
+    var base: S
+
+    init(_ base: S) {
+        self.base = base
     }
 
     static var role: ShapeRole { .separator }
 
+    // DividerShape changes only the semantic role. Geometry and directional
+    // mirroring continue to come from the wrapped shape.
+    var layoutDirectionBehavior: LayoutDirectionBehavior {
+        base.layoutDirectionBehavior
+    }
+
     func path(in rect: CGRect) -> Path {
-        shape.path(in: rect)
+        base.path(in: rect)
     }
 
     typealias AnimatableData = S.AnimatableData
 
     var animatableData: AnimatableData {
-        get { shape.animatableData }
-        set { shape.animatableData = newValue }
+        get { base.animatableData }
+        set { base.animatableData = newValue }
     }
 
     typealias Body = _ShapeView<DividerShape<S>, ForegroundStyle>
 }
 
-struct PlainDividerStyle {
-    func makeBody(configuration: DividerStyleConfiguration) -> some View {
-        PlainDividerStyleBody(configuration: configuration)
-    }
-}
-
-private struct PlainDividerStyleBody: View {
-    var configuration: DividerStyleConfiguration
+struct PlainDividerStyle: DividerStyle {
     @Environment(\.dividerThickness) private var thickness
 
-    @ViewBuilder
-    var body: some View {
-        if configuration.orientation == .vertical {
-            _ShapeView(shape: DividerShape(Rectangle()), style: SeparatorShapeStyle())
-                .frame(width: thickness, height: nil, alignment: .center)
-        } else {
-            _ShapeView(shape: DividerShape(Rectangle()), style: SeparatorShapeStyle())
-                .frame(width: nil, height: thickness, alignment: .center)
-        }
+    func makeBody(configuration: DividerStyleConfiguration) -> some View {
+        // The separator always occupies the environment-provided thickness on
+        // its cross axis and remains unconstrained on its stack axis.
+        _ShapeView(
+            shape: DividerShape(Rectangle()),
+            style: SeparatorShapeStyle()
+        )
+        .frame(
+            width: configuration.orientation == .vertical ? thickness : nil,
+            height: configuration.orientation == .horizontal ? thickness : nil,
+            alignment: .center
+        )
     }
 }
 
-struct ResolvedDivider: View {
-    var orientation: Axis
-
-    var body: some View {
-        PlainDividerStyle().makeBody(
-            configuration: DividerStyleConfiguration(orientation: orientation)
+struct DefaultDividerStyle: DividerStyle {
+    func makeBody(configuration: DividerStyleConfiguration) -> some View {
+        // Re-enter Divider with the concrete fallback style on the style stack.
+        // ResolvedDivider consumes it on the second styleable-view pass.
+        Divider().modifier(
+            DividerStyleModifier(style: PlainDividerStyle())
         )
+    }
+}
+
+struct ResolvedDivider: StyleableView {
+    var configuration: DividerStyleConfiguration
+
+    typealias DefaultStyleModifier =
+        DividerStyleModifier<DefaultDividerStyle>
+
+    static var defaultStyleModifier: DefaultStyleModifier {
+        DividerStyleModifier(style: DefaultDividerStyle())
     }
 }
 
@@ -417,9 +435,17 @@ extension Divider {
 
             switch stackOrientation ?? dynamicOrientation {
             case .horizontal:
-                return ResolvedDivider(orientation: .vertical)
+                return ResolvedDivider(
+                    configuration: DividerStyleConfiguration(
+                        orientation: .vertical
+                    )
+                )
             case .vertical, nil:
-                return ResolvedDivider(orientation: .horizontal)
+                return ResolvedDivider(
+                    configuration: DividerStyleConfiguration(
+                        orientation: .horizontal
+                    )
+                )
             }
         }
     }

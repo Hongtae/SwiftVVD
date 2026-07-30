@@ -54,9 +54,14 @@ final class ShaderTests: XCTestCase {
             .layerEffect,
         ]).count, 4)
 
-        var shape = _ShapeStyle_Shape()
+        var shape = _ShapeStyle_Shape(
+            operation: .fallbackColor(level: 0),
+            environment: EnvironmentValues()
+        )
         shader._apply(to: &shape)
-        guard case let .shader(storedShader, bounds)? = shape.shading?.properties.first else {
+        guard case let .shader(storedShader, bounds)? =
+            shape.resolvedShading?.properties.first
+        else {
             return XCTFail("expected shader shape style shading")
         }
         XCTAssertEqual(storedShader, shader)

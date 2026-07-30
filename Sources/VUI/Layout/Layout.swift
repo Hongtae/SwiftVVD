@@ -1875,7 +1875,7 @@ extension Layout {
     }
 }
 
-public enum LayoutDirection: Hashable, CaseIterable {
+public enum LayoutDirection: Hashable, CaseIterable, Sendable {
     case leftToRight
     case rightToLeft
 }

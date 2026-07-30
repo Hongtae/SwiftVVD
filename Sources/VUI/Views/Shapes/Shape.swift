@@ -13,14 +13,25 @@ public enum ShapeRole: Equatable, Hashable {
     case separator
 }
 
+public enum LayoutDirectionBehavior: Hashable, Sendable {
+    case fixed
+    case mirrors(in: LayoutDirection)
+
+    public static var mirrors: LayoutDirectionBehavior {
+        .mirrors(in: .rightToLeft)
+    }
+}
+
 public protocol Shape: Animatable, View {
     func path(in rect: CGRect) -> Path
     static var role: ShapeRole { get }
+    var layoutDirectionBehavior: LayoutDirectionBehavior { get }
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
 }
 
 extension Shape {
     public static var role: ShapeRole { .fill }
+    public var layoutDirectionBehavior: LayoutDirectionBehavior { .mirrors }
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
     }

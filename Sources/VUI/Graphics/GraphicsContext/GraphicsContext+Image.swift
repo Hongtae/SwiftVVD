@@ -354,21 +354,14 @@ extension GraphicsContext {
     }
 
     private func symbolShading(for semanticLevel: Int) -> Shading {
-        guard let levels = environment.foregroundStyleLevels else {
-            return .style(ForegroundStyle())
-        }
-        let style: AnyShapeStyle
-        switch semanticLevel {
-        case 1:
-            style = levels.secondary ?? levels.primary
-        case 2...:
-            style = levels.tertiary ?? levels.secondary ?? levels.primary
-        default:
-            style = levels.primary
-        }
-        var shape = _ShapeStyle_Shape()
+        let level = UInt32(clamping: max(semanticLevel, 0))
+        let style = HierarchicalShapeStyle(id: min(level, 4))
+        var shape = _ShapeStyle_Shape(
+            operation: .fallbackColor(level: 0),
+            environment: environment
+        )
         style._apply(to: &shape)
-        return shape.shading ?? .style(ForegroundStyle())
+        return shape.resolvedShading ?? .style(ForegroundStyle())
     }
 
     public func draw(_ svg: SVG, in rect: CGRect) {
@@ -462,9 +455,12 @@ extension GraphicsContext {
             guard let style = environment.backgroundStyle else {
                 return .style(BackgroundStyle())
             }
-            var shape = _ShapeStyle_Shape()
+            var shape = _ShapeStyle_Shape(
+                operation: .fallbackColor(level: 0),
+                environment: environment
+            )
             style._apply(to: &shape)
-            return shape.shading ?? .style(BackgroundStyle())
+            return shape.resolvedShading ?? .style(BackgroundStyle())
         }
     }
     public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {

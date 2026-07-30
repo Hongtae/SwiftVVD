@@ -7571,7 +7571,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 uniformSpacing: nil
             )
             XCTAssertEqual(vertical.length, 36)
-            XCTAssertEqual(vertical.spacing, 12)
+            // Default edge distances select the larger side rather than
+            // summing predecessor and successor values.
+            XCTAssertEqual(vertical.spacing, 7)
 
             let horizontal = current.lengthAndSpacing(
                 size: ProposedViewSize(width: 24, height: 36),
@@ -7580,7 +7582,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 uniformSpacing: nil
             )
             XCTAssertEqual(horizontal.length, 24)
-            XCTAssertEqual(horizontal.spacing, 14)
+            XCTAssertEqual(horizontal.spacing, 11)
             XCTAssertTrue(cache.item(for: currentID.canonicalID) === item)
             XCTAssertTrue(cache.item(for: predecessorID.canonicalID) === predecessorItem)
         }

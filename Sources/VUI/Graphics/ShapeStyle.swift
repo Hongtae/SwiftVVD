@@ -15,6 +15,9 @@ public protocol ShapeStyle: Sendable {
     func resolve(in environment: EnvironmentValues) -> Self.Resolved
 }
 
+protocol PrimitiveShapeStyle: ShapeStyle {
+}
+
 extension Never: ShapeStyle {
     public typealias Resolved = Never
 }
@@ -41,14 +44,218 @@ extension ShapeStyle {
 }
 
 public struct _ShapeStyle_Shape {
-    var shading: GraphicsContext.Shading?
-    // Resolved foreground style context for hierarchical style resolution.
-    // Set by view contexts before calling _apply when available.
-    var foregroundStyle: (primary: AnyShapeStyle?, secondary: AnyShapeStyle?, tertiary: AnyShapeStyle?)? = nil
+    enum Operation {
+        case prepareText(level: Int)
+        case resolveStyle(name: _ShapeStyle_Name, levels: Range<Int>)
+        case fallbackColor(level: Int)
+        case copyStyle(name: _ShapeStyle_Name)
+        case modifyBackground(level: Int)
+        case multiLevel
+        case primaryStyle
+    }
+
+    enum PreparedTextResult {
+        case foregroundColor(Color)
+        case foregroundKeyColor
+    }
+
+    enum Result {
+        case preparedText(PreparedTextResult)
+        case pack(_ShapeStyle_Pack)
+        case style(AnyShapeStyle)
+        case color(Color)
+        case bool(Bool)
+        case none
+    }
+
+    struct RecursiveStyles: OptionSet {
+        var rawValue: UInt8
+
+        static let content = Self(rawValue: 1 << 0)
+        static let foreground = Self(rawValue: 1 << 1)
+        static let background = Self(rawValue: 1 << 2)
+        static let materialProvider = Self(rawValue: 1 << 3)
+    }
+
+    var operation: Operation
+    var result: Result
+    var environment: EnvironmentValues
+    var foregroundStyle: AnyShapeStyle?
+    var bounds: CGRect?
+    var role: ShapeRole
+    var substrate: _ShapeStyle_Substrate?
+    var activeRecursiveStyles: RecursiveStyles
+
+    init(
+        operation: Operation,
+        result: Result = .none,
+        environment: EnvironmentValues,
+        foregroundStyle: AnyShapeStyle? = nil,
+        bounds: CGRect? = nil,
+        role: ShapeRole = .fill,
+        substrate: _ShapeStyle_Substrate? = nil
+    ) {
+        self.operation = operation
+        self.result = result
+        self.environment = environment
+        self.foregroundStyle = foregroundStyle
+        self.bounds = bounds
+        self.role = role
+        self.substrate = substrate
+        self.activeRecursiveStyles = []
+    }
+
+    // The renderer consumes the native operation result through its shading
+    // vocabulary. This bridge carries no additional style-resolution state.
+    var resolvedShading: GraphicsContext.Shading? {
+        get {
+            switch result {
+            case let .preparedText(.foregroundColor(color)):
+                return .color(color)
+            case .preparedText(.foregroundKeyColor):
+                return nil
+            case let .pack(pack):
+                return pack.shapeStyle().flatMap(Self.shading(for:))
+            case let .style(style):
+                return Self.shading(for: style)
+            case let .color(color):
+                return .color(color)
+            case .bool, .none:
+                return nil
+            }
+        }
+        set {
+            guard let newValue, newValue.properties.count == 1 else {
+                result = .none
+                return
+            }
+            switch newValue.properties[0] {
+            case let .color(color):
+                result = .color(color)
+            case let .style(style):
+                result = .style(AnyShapeStyle(style))
+            case let .meshGradient(mesh):
+                result = .style(AnyShapeStyle(mesh))
+            case let .shader(shader, _):
+                result = .style(AnyShapeStyle(shader))
+            default:
+                result = .none
+            }
+        }
+    }
+
+    func opacity(at level: Int) -> Float {
+        environment.systemColorDefinition.base.opacity(
+            at: level,
+            environment: environment
+        )
+    }
+
+    func opacity(for color: Color, at level: Int) -> Float {
+        color.provider.opacity(at: level, environment: environment)
+    }
+
+    func applyingOpacity(at level: Int, to color: Color) -> Color {
+        guard level > 0 else { return color }
+        return color.opacity(Double(opacity(for: color, at: level)))
+    }
+
+    func applyingOpacity(
+        at level: Int,
+        to color: Color.Resolved
+    ) -> Color.Resolved {
+        guard level > 0 else { return color }
+        var color = color
+        color.opacity *= opacity(at: level)
+        return color
+    }
+
+    private static func shading(
+        for style: AnyShapeStyle
+    ) -> GraphicsContext.Shading? {
+        shading(for: style.storage.box.style)
+    }
+
+    private static func shading(
+        for style: any ShapeStyle
+    ) -> GraphicsContext.Shading? {
+        if let color = style as? Color {
+            return .color(color)
+        }
+        if let color = style as? Color.Resolved {
+            return .color(Color(color))
+        }
+        if let mesh = style as? MeshGradient {
+            return .meshGradient(mesh)
+        }
+        if let shader = style as? Shader {
+            return .shader(shader, bounds: .null)
+        }
+        if let erased = style as? AnyShapeStyle {
+            return shading(for: erased)
+        }
+        return .style(style)
+    }
+}
+
+extension _ShapeStyle_Shape.Operation {
+    var levelOffset: Int {
+        switch self {
+        case let .prepareText(level),
+             let .fallbackColor(level),
+             let .modifyBackground(level):
+            return level
+        case let .resolveStyle(_, levels):
+            return levels.lowerBound
+        case .copyStyle, .multiLevel, .primaryStyle:
+            return 0
+        }
+    }
+
+    func replacingLevelOffset(with level: Int) -> Self {
+        switch self {
+        case .prepareText:
+            return .prepareText(level: level)
+        case let .resolveStyle(name, levels):
+            let count = levels.count
+            return .resolveStyle(name: name, levels: level..<(level + count))
+        case .fallbackColor:
+            return .fallbackColor(level: level)
+        case let .copyStyle(name):
+            return .copyStyle(name: name)
+        case .modifyBackground:
+            return .modifyBackground(level: level)
+        case .multiLevel:
+            return .multiLevel
+        case .primaryStyle:
+            return .primaryStyle
+        }
+    }
+}
+
+enum _ShapeStyle_Substrate: Hashable, Sendable {
+    case caLayer
+    case graphicsContext
+    case archive
 }
 
 public struct _ShapeStyle_ShapeType {
-    var type: (any ShapeStyle.Type)?
+    enum Operation: Hashable {
+        case modifiesBackground
+    }
+
+    enum Result {
+        case bool(Bool)
+        case none
+    }
+
+    var operation: Operation
+    var result: Result
+
+    init(operation: Operation = .modifiesBackground, result: Result = .none) {
+        self.operation = operation
+        self.result = result
+    }
 }
 
 public struct ForegroundStyle: ShapeStyle {
@@ -57,10 +264,22 @@ public struct ForegroundStyle: ShapeStyle {
         _ShapeView<S, ForegroundStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .color(.sRGB, white: 0.145)
+        if shape.activeRecursiveStyles.contains(.foreground) {
+            SystemColorsStyle()._apply(to: &shape)
+            return
+        }
+
+        shape.activeRecursiveStyles.insert(.foreground)
+        defer { shape.activeRecursiveStyles.remove(.foreground) }
+        if let foregroundStyle = shape.foregroundStyle ??
+            shape.environment.foregroundStyleLevels?.primary {
+            foregroundStyle._apply(to: &shape)
+            return
+        }
+        HierarchicalShapeStyle.primary._apply(to: &shape)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        type.type = self
+        type.result = .bool(true)
     }
     public typealias Resolved = Never
 }
@@ -71,10 +290,10 @@ public struct BackgroundStyle: ShapeStyle {
         _ShapeView<S, BackgroundStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .color(.sRGB, white: 1)
+        shape.resolvedShading = .color(.sRGB, white: 1)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        type.type = self
+        type.result = .bool(true)
     }
 
     public typealias Resolved = Never
@@ -87,10 +306,14 @@ public struct SeparatorShapeStyle: ShapeStyle {
         _ShapeView<S, SeparatorShapeStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .color(.sRGB, white: 0, opacity: 0.1)
+        // Separator resolution is environment-defined. Clear the semantic role
+        // before applying the hierarchy style so the recursive separator branch
+        // cannot select the default a second time.
+        shape.role = .fill
+        shape.environment.defaultSeparatorShapeStyle._apply(to: &shape)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        type.type = self
+        type.result = .bool(true)
     }
     public typealias Resolved = Never
 }
@@ -104,53 +327,236 @@ public struct _ImplicitShapeStyle: ShapeStyle {
 }
 
 public struct HierarchicalShapeStyle: ShapeStyle {
-    public enum Level: Sendable {
-        case primary
-        case secondary
-        case tertiary
-        case quaternary
-    }
+    var id: UInt32
 
-    let level: Level
+    public static let primary = HierarchicalShapeStyle(id: 0)
+    public static let secondary = HierarchicalShapeStyle(id: 1)
+    public static let tertiary = HierarchicalShapeStyle(id: 2)
+    public static let quaternary = HierarchicalShapeStyle(id: 3)
+    public static let quinary = HierarchicalShapeStyle(id: 4)
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        // Resolve against explicit foreground style context when available.
-        if let styles = shape.foregroundStyle {
-            switch level {
-            case .primary:
-                if let s = styles.primary { s._apply(to: &shape); return }
-            case .secondary:
-                if let s = styles.secondary { s._apply(to: &shape); return }
-            case .tertiary:
-                if let s = styles.tertiary { s._apply(to: &shape); return }
-            case .quaternary:
-                break
+        if shape.role == .separator {
+            shape.role = .fill
+            shape.environment.defaultSeparatorShapeStyle._apply(to: &shape)
+            return
+        }
+
+        if shape.activeRecursiveStyles.contains(.content) {
+            OffsetShapeStyle(
+                base: SystemColorsStyle(),
+                offset: Int(id)
+            )._apply(to: &shape)
+            return
+        }
+
+        shape.activeRecursiveStyles.insert(.content)
+        defer { shape.activeRecursiveStyles.remove(.content) }
+
+        let levels = shape.environment.foregroundStyleLevels
+        let primary = shape.foregroundStyle ?? levels?.primary
+        if let primary {
+            let requestedLevel = shape.operation.levelOffset + Int(id)
+            if let tertiary = levels?.tertiary, requestedLevel >= 2 {
+                shape.operation = shape.operation.replacingLevelOffset(with: 0)
+                tertiary._apply(to: &shape)
+            } else if let secondary = levels?.secondary, requestedLevel >= 1 {
+                shape.operation = shape.operation.replacingLevelOffset(with: 0)
+                secondary._apply(to: &shape)
+            } else {
+                OffsetShapeStyle(
+                    base: primary,
+                    offset: Int(id)
+                )._apply(to: &shape)
             }
+            return
         }
-        switch level {
-        case .primary:
-            shape.shading = .color(.sRGB, white: 0.145)
-        case .secondary:
-            shape.shading = .color(.sRGB, white: 0, opacity: 0.498)
-        case .tertiary:
-            shape.shading = .color(.sRGB, white: 0, opacity: 0.3)
-        case .quaternary:
-            shape.shading = .color(.sRGB, white: 0, opacity: 0.18)
-        }
+
+        OffsetShapeStyle(
+            base: SystemColorsStyle(),
+            offset: Int(id)
+        )._apply(to: &shape)
     }
 
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, HierarchicalShapeStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
         _ShapeView<S, HierarchicalShapeStyle>._makeView(view: view, inputs: inputs)
     }
 
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        type.result = .bool(true)
+    }
+
     public typealias Resolved = Never
+
 }
 
 extension ShapeStyle where Self == HierarchicalShapeStyle {
-    public static var primary: HierarchicalShapeStyle { .init(level: .primary) }
-    public static var secondary: HierarchicalShapeStyle { .init(level: .secondary) }
-    public static var tertiary: HierarchicalShapeStyle { .init(level: .tertiary) }
-    public static var quaternary: HierarchicalShapeStyle { .init(level: .quaternary) }
+    public static var primary: HierarchicalShapeStyle {
+        HierarchicalShapeStyle.primary
+    }
+
+    public static var secondary: HierarchicalShapeStyle {
+        HierarchicalShapeStyle.secondary
+    }
+
+    public static var tertiary: HierarchicalShapeStyle {
+        HierarchicalShapeStyle.tertiary
+    }
+
+    public static var quaternary: HierarchicalShapeStyle {
+        HierarchicalShapeStyle.quaternary
+    }
+
+    public static var quinary: HierarchicalShapeStyle {
+        HierarchicalShapeStyle.quinary
+    }
+}
+
+extension EnvironmentValues {
+    struct DefaultSeparatorShapeStyleKey: EnvironmentKey {
+        static let defaultValue = HierarchicalShapeStyle.quaternary
+    }
+
+    var defaultSeparatorShapeStyle: HierarchicalShapeStyle {
+        get { self[DefaultSeparatorShapeStyleKey.self] }
+        set { self[DefaultSeparatorShapeStyleKey.self] = newValue }
+    }
+}
+
+public struct _OpacityShapeStyle<Style: ShapeStyle>: ShapeStyle {
+    public var style: Style
+    public var opacity: Float
+
+    @inlinable public init(style: Style, opacity: Float) {
+        self.style = style
+        self.opacity = opacity
+    }
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        style._apply(to: &shape)
+        switch shape.result {
+        case let .preparedText(.foregroundColor(color)):
+            shape.result = .preparedText(
+                .foregroundColor(color.opacity(Double(opacity)))
+            )
+        case .preparedText(.foregroundKeyColor):
+            break
+        case var .pack(pack):
+            for index in pack.styles.indices {
+                pack.styles[index].style.opacity *= opacity
+            }
+            shape.result = .pack(pack)
+        case let .style(style):
+            shape.result = .style(AnyShapeStyle(
+                _OpacityShapeStyle<AnyShapeStyle>(
+                    style: style,
+                    opacity: opacity
+                )
+            ))
+        case let .color(color):
+            shape.result = .color(color.opacity(Double(opacity)))
+        case .bool, .none:
+            break
+        }
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        Style._apply(to: &type)
+    }
+
+    public typealias Resolved = Never
+}
+
+struct OffsetShapeStyle<Base: ShapeStyle>: ShapeStyle {
+    var base: Base
+    var offset: Int
+
+    func _apply(to shape: inout _ShapeStyle_Shape) {
+        var resolvedName: _ShapeStyle_Name?
+        switch shape.operation {
+        case let .prepareText(level):
+            shape.operation = .prepareText(level: level + offset)
+        case let .resolveStyle(name, levels):
+            resolvedName = name
+            shape.operation = .resolveStyle(
+                name: name,
+                levels: (levels.lowerBound + offset)..<(levels.upperBound + offset)
+            )
+        case let .fallbackColor(level):
+            shape.operation = .fallbackColor(level: level + offset)
+        case let .modifyBackground(level):
+            shape.operation = .modifyBackground(level: level + offset)
+        case .copyStyle:
+            base._apply(to: &shape)
+            if offset != 0, case let .style(style) = shape.result {
+                // A copied style carries the offset with it because resolution
+                // occurs after the current operation has finished.
+                shape.result = .style(AnyShapeStyle(OffsetShapeStyle<AnyShapeStyle>(
+                    base: style,
+                    offset: offset
+                )))
+            }
+            return
+        case .multiLevel, .primaryStyle:
+            break
+        }
+
+        // Shift the operation into the base style's hierarchy. Pack keys are
+        // expressed in the caller's hierarchy, so translate them back after
+        // the base style has produced its result.
+        base._apply(to: &shape)
+        if let resolvedName, case var .pack(pack) = shape.result {
+            pack.adjustLevelIndices(of: resolvedName, by: -offset)
+            shape.result = .pack(pack)
+        }
+    }
+
+    static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        Base._apply(to: &type)
+    }
+
+    typealias Resolved = Never
+}
+
+public struct HierarchicalShapeStyleModifier<Base: ShapeStyle>: ShapeStyle {
+    @usableFromInline
+    var base: Base
+    @usableFromInline
+    var level: Int
+
+    @usableFromInline
+    init(base: Base, level: Int) {
+        self.base = base
+        self.level = level
+    }
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        OffsetShapeStyle(base: base, offset: level)._apply(to: &shape)
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        type.result = .bool(true)
+    }
+
+    public typealias Resolved = Never
+}
+
+extension ShapeStyle {
+    public var secondary: some ShapeStyle {
+        HierarchicalShapeStyleModifier(base: self, level: 1)
+    }
+
+    public var tertiary: some ShapeStyle {
+        HierarchicalShapeStyleModifier(base: self, level: 2)
+    }
+
+    public var quaternary: some ShapeStyle {
+        HierarchicalShapeStyleModifier(base: self, level: 3)
+    }
+
+    public var quinary: some ShapeStyle {
+        HierarchicalShapeStyleModifier(base: self, level: 4)
+    }
 }
 
 extension ShapeStyle where Self == ForegroundStyle {

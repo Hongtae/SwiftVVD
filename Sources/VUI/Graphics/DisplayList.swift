@@ -1863,7 +1863,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             role: role,
             style: Self.shapeStyleRecord(
                 for: style,
-                environment: environment ?? EnvironmentValues()
+                environment: environment ?? EnvironmentValues(),
+                role: role
             ),
             fillStyle: isStroke ? nil : fillStyle,
             strokeStyle: isStroke ? strokeStyle : nil,
@@ -1888,7 +1889,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             role: role,
             style: Self.shapeStyleRecord(
                 for: style,
-                environment: environment ?? EnvironmentValues()
+                environment: environment ?? EnvironmentValues(),
+                role: role
             ),
             fillStyle: isStroke ? nil : fillStyle,
             strokeStyle: isStroke ? strokeStyle : nil,
@@ -2948,14 +2950,20 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
     private static func shapeStyleRecord<S: ShapeStyle>(
         for style: S,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        role: ShapeRole
     ) -> ItemRecord.ShapeStyleRecord? {
-        shapeStyleRecord(for: style as any ShapeStyle, environment: environment)
+        shapeStyleRecord(
+            for: style as any ShapeStyle,
+            environment: environment,
+            role: role
+        )
     }
 
     private static func shapeStyleRecord(
         for style: any ShapeStyle,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        role: ShapeRole
     ) -> ItemRecord.ShapeStyleRecord? {
         if let color = style as? Color {
             return .color(color)
@@ -2978,30 +2986,29 @@ struct DisplayList: Equatable, CustomStringConvertible {
         if let erased = style as? AnyShapeStyle {
             return shapeStyleRecord(
                 for: erased.storage.box.style,
-                environment: environment
+                environment: environment,
+                role: role
             )
         }
-        if let foreground = style as? ForegroundStyle {
-            return shapeStyleRecord(resolving: foreground)
-        }
-        if let background = style as? BackgroundStyle {
-            return shapeStyleRecord(resolving: background)
-        }
-        if let separator = style as? SeparatorShapeStyle {
-            return shapeStyleRecord(resolving: separator)
-        }
-        if let hierarchical = style as? HierarchicalShapeStyle {
-            return shapeStyleRecord(resolving: hierarchical)
-        }
-        return nil
+        return shapeStyleRecord(
+            resolving: style,
+            environment: environment,
+            role: role
+        )
     }
 
-    private static func shapeStyleRecord<S: ShapeStyle>(
-        resolving style: S
+    private static func shapeStyleRecord(
+        resolving style: any ShapeStyle,
+        environment: EnvironmentValues,
+        role: ShapeRole
     ) -> ItemRecord.ShapeStyleRecord? {
-        var shape = _ShapeStyle_Shape()
+        var shape = _ShapeStyle_Shape(
+            operation: .fallbackColor(level: 0),
+            environment: environment,
+            role: role
+        )
         style._apply(to: &shape)
-        guard let shading = shape.shading else { return nil }
+        guard let shading = shape.resolvedShading else { return nil }
         if case let .color(color)? = shadingRecord(for: shading) {
             return .color(color)
         }

@@ -24,12 +24,6 @@ protocol BodyAccessor {
     // Used to read the container value inside DynamicBody.updateValue().
     var containerAttr: Attribute<Container> { get }
 
-    static func makeBody(
-        container: _GraphValue<Container>,
-        inputs: inout _GraphInputs,
-        fields: DynamicPropertyCache.Fields
-    ) -> (_GraphValue<Body>, Optional<_DynamicPropertyBuffer>)
-
     // Return value is published via _AGGraph.setStatefulOutput in StatefulRule.
     mutating func updateBody(of container: Container, changed: Bool) -> Body
 }
@@ -94,6 +88,80 @@ struct ModifierBodyAccessor<M: ViewModifier>: BodyAccessor {
             return (_GraphValue(_attribute: attr), nil)
         } else {
             let attr = graph.makeStatefulRule(DynamicBody<ModifierBodyAccessor<M>, MainThreadFlags>(accessor: accessor, buffer: buffer))
+            return (_GraphValue(_attribute: attr), buffer)
+        }
+    }
+}
+
+// Evaluates a style body from the projected style field while retaining the
+// owning modifier and styleable view. Dynamic properties are installed on the
+// projected style value, then written back into a modifier copy before dispatch.
+struct StyleBodyAccessor<V: StyleableView, S: StyleModifier>: BodyAccessor {
+    typealias Container = S.Style
+    typealias Body = S.StyleBody
+
+    let _view: Attribute<V>
+    let _styleModifier: Attribute<S>
+
+    var containerAttr: Attribute<S.Style> {
+        _styleModifier[offset: { modifier in
+            PointerOffset.of(&modifier.style)
+        }]
+    }
+
+    mutating func updateBody(
+        of style: S.Style,
+        changed: Bool
+    ) -> S.StyleBody {
+        var modifier = _styleModifier.value
+        modifier.style = style
+        let view = _view.value
+        guard let configuration =
+                view.configuration as? S.StyleConfiguration else {
+            fatalError(
+                "StyleBodyAccessor configuration type mismatch: " +
+                "\(V.Configuration.self) vs " +
+                "\(S.StyleConfiguration.self)"
+            )
+        }
+        return modifier.styleBody(configuration: configuration)
+    }
+
+    static func makeBody(
+        container: _GraphValue<S.Style>,
+        view: _GraphValue<V>,
+        styleModifier: Attribute<S>,
+        inputs: inout _GraphInputs,
+        fields: DynamicPropertyCache.Fields
+    ) -> (_GraphValue<S.StyleBody>, Optional<_DynamicPropertyBuffer>) {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "StyleBodyAccessor.makeBody called outside _AGGraph context"
+            )
+        }
+        let buffer = _DynamicPropertyBuffer(
+            fields: fields,
+            container: container,
+            inputs: &inputs
+        )
+        let accessor = StyleBodyAccessor(
+            _view: view._attribute,
+            _styleModifier: styleModifier
+        )
+        if buffer.isEmpty {
+            let attr = graph.makeStatefulRule(
+                StaticBody<StyleBodyAccessor<V, S>, MainThreadFlags>(
+                    accessor: accessor
+                )
+            )
+            return (_GraphValue(_attribute: attr), nil)
+        } else {
+            let attr = graph.makeStatefulRule(
+                DynamicBody<StyleBodyAccessor<V, S>, MainThreadFlags>(
+                    accessor: accessor,
+                    buffer: buffer
+                )
+            )
             return (_GraphValue(_attribute: attr), buffer)
         }
     }

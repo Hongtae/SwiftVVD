@@ -84,43 +84,68 @@ extension StyleModifier {
 
 // StyleModifierType<M: StyleModifier>: AnyStyleModifierType
 // Concrete dispatcher parameterized by the concrete StyleModifier type M.
-// makeView uses AnyStyleModifier.value to read M from the AG node,
-// then calls M.styleBody(configuration:) to build the view.
+// The style field is projected as its own graph value so its DynamicProperty
+// fields are updated before styleBody(configuration:) is evaluated.
 struct StyleModifierType<M: StyleModifier>: AnyStyleModifierType {
     static func makeView<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewInputs
     ) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("StyleModifierType.makeView called outside AG context.")
         }
-        let styleAttr = Attribute<M>(modifier.value)
-        let bodyAttr = graph.makeRule {
-            let v = view._attribute.value
-            let m = styleAttr.value
-            guard let config = v.configuration as? M.StyleConfiguration else {
-                fatalError("StyleModifierType.makeView: configuration type mismatch: \(type(of: v.configuration)) vs \(M.StyleConfiguration.self)")
-            }
-            return m.styleBody(configuration: config)
-        }
-        return VUI.makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        var graphInputs = inputs.base
+        let fields = DynamicPropertyCache.fields(of: M.Style.self)
+        let (body, _) = makeStyleBody(
+            view: view,
+            modifier: modifier,
+            inputs: &graphInputs,
+            fields: fields
+        )
+        var inputs = inputs
+        inputs.base = graphInputs
+        return VUI.makeView(view: body, inputs: inputs)
     }
 
     static func makeViewList<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewListInputs
     ) -> _ViewListOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("StyleModifierType.makeViewList called outside AG context.")
         }
-        let styleAttr = Attribute<M>(modifier.value)
-        let bodyAttr = graph.makeRule {
-            let v = view._attribute.value
-            let m = styleAttr.value
-            guard let config = v.configuration as? M.StyleConfiguration else {
-                fatalError("StyleModifierType.makeViewList: configuration type mismatch")
-            }
-            return m.styleBody(configuration: config)
-        }
-        return M.StyleBody._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        var graphInputs = inputs.base
+        let fields = DynamicPropertyCache.fields(of: M.Style.self)
+        let (body, _) = makeStyleBody(
+            view: view,
+            modifier: modifier,
+            inputs: &graphInputs,
+            fields: fields
+        )
+        var inputs = inputs
+        inputs.base = graphInputs
+        return M.StyleBody._makeViewList(view: body, inputs: inputs)
+    }
+
+    static func makeStyleBody<V: StyleableView>(
+        view: _GraphValue<V>,
+        modifier: AnyStyleModifier,
+        inputs: inout _GraphInputs,
+        fields: DynamicPropertyCache.Fields
+    ) -> (_GraphValue<M.StyleBody>, Optional<_DynamicPropertyBuffer>) {
+        precondition(
+            !(M.Style.self is AnyObject.Type),
+            "styles must be value types (either a struct or an enum)"
+        )
+        let styleModifier = Attribute<M>(modifier.value)
+        let style = styleModifier[offset: { modifier in
+            PointerOffset.of(&modifier.style)
+        }]
+        return StyleBodyAccessor<V, M>.makeBody(
+            container: _GraphValue(_attribute: style),
+            view: view,
+            styleModifier: styleModifier,
+            inputs: &inputs,
+            fields: fields
+        )
     }
 
     static func viewListCount(inputs: _ViewListCountInputs) -> Int? { nil }
@@ -155,6 +180,20 @@ struct ToggleStyleModifier<S: ToggleStyle>: StyleModifier {
     init(style: S) { self.style = style }
 
     func styleBody(configuration: ToggleStyleConfiguration) -> S.Body {
+        style.makeBody(configuration: configuration)
+    }
+}
+
+struct DividerStyleModifier<S: DividerStyle>: StyleModifier {
+    typealias Body = Never
+    typealias StyleConfiguration = DividerStyleConfiguration
+    typealias StyleBody = S.Body
+
+    var style: S
+
+    init(style: S) { self.style = style }
+
+    func styleBody(configuration: DividerStyleConfiguration) -> S.Body {
         style.makeBody(configuration: configuration)
     }
 }
@@ -266,6 +305,10 @@ struct MakeDefaultRepresentation<V: StyleableView>: Rule {
 extension StyleableView {
     static var isScrapeable: Bool { false }
     var scrapeableContent: ScrapeableContent.Content? { nil }
+
+    // Re-enter the same value after installing the styleable-view context.
+    // The second pass selects the nearest style modifier or the default style.
+    var body: some View { self }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {

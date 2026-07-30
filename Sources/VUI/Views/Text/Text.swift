@@ -1499,14 +1499,12 @@ extension Text {
             return .color(foregroundColor)
         }
         if let styles = environment.foregroundStyleLevels {
-            var shape = _ShapeStyle_Shape()
-            shape.foregroundStyle = (
-                primary: styles.primary,
-                secondary: styles.secondary,
-                tertiary: styles.tertiary
+            var shape = _ShapeStyle_Shape(
+                operation: .fallbackColor(level: 0),
+                environment: environment
             )
             styles.primary._apply(to: &shape)
-            if let shading = shape.shading {
+            if let shading = shape.resolvedShading {
                 return shading
             }
         }

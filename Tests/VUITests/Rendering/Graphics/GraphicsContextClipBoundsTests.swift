@@ -145,7 +145,8 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertGreaterThan(outline.count, 0)
         XCTAssertGreaterThan(filled.count, outline.count)
         XCTAssertLessThan(outline.centerAlpha, filled.centerAlpha)
-        XCTAssertEqual(filled.centerAlpha, 255)
+        // The default symbol foreground resolves through system primary.
+        XCTAssertEqual(filled.centerAlpha, 216)
 
         let photo = try renderSymbol("photo.fill", deviceContext: deviceContext)
         let primaryHidden = try renderSymbol(

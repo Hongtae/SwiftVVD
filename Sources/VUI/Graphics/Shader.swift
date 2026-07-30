@@ -658,7 +658,7 @@ extension Shader: ShapeStyle {
     }
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .shader(self, bounds: .null)
+        shape.resolvedShading = .shader(self, bounds: .null)
     }
 }
 

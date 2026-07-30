@@ -184,9 +184,19 @@ struct DirectShapeStyleResolver<Style: ShapeStyle>: StatefulRule, ObservedAttrib
         style: Style,
         environment: EnvironmentValues
     ) -> _ShapeStyle_Pack {
-        var shape = _ShapeStyle_Shape()
+        var shape = _ShapeStyle_Shape(
+            operation: .resolveStyle(
+                name: .foreground,
+                levels: 0..<1
+            ),
+            environment: environment,
+            role: role
+        )
         style._apply(to: &shape)
-        guard let property = shape.shading?.properties.first else {
+        if case let .pack(pack) = shape.result {
+            return pack
+        }
+        guard let property = shape.resolvedShading?.properties.first else {
             return _ShapeStyle_Pack()
         }
         switch property {
@@ -403,7 +413,10 @@ public struct _ShapeView<Content, Style>: View, ShapeView, ContentResponder
         inputs: _ViewInputs,
         graph: _AGGraph
     ) -> Attribute<_ShapeStyle_Pack>? {
-        guard Style.self == Color.self || Style.self == MeshGradient.self else {
+        guard Style.self == Color.self ||
+                Style.self == MeshGradient.self ||
+                Style.self == SeparatorShapeStyle.self ||
+                Style.self == HierarchicalShapeStyle.self else {
             return nil
         }
 

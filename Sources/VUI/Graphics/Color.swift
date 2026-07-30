@@ -37,6 +37,7 @@ private protocol ColorProvider: Hashable {
 
     func resolve(in environment: EnvironmentValues) -> Color.Resolved
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR
+    func opacity(at level: Int, environment: EnvironmentValues) -> Float
     func isEqual(to other: any ColorProvider) -> Bool
 }
 
@@ -47,6 +48,15 @@ private extension ColorProvider {
 
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
         Color.ResolvedHDR(resolve(in: environment))
+    }
+
+    func opacity(at level: Int, environment: EnvironmentValues) -> Float {
+        // Hierarchy opacity belongs to the environment's color definition.
+        // This keeps custom color providers and resolved colors on one policy.
+        environment.systemColorDefinition.base.opacity(
+            at: level,
+            environment: environment
+        )
     }
 
     func isEqual(to other: any ColorProvider) -> Bool {
@@ -104,7 +114,7 @@ private struct OpacityColor: ColorProvider {
     }
 }
 
-private struct ResolvedHDRColorProvider: ColorProvider {
+private struct ResolvedColorProvider: ColorProvider {
     var color: Color.ResolvedHDR
 
     var components: ColorComponents {
@@ -118,7 +128,24 @@ private struct ResolvedHDRColorProvider: ColorProvider {
     }
 
     var description: String {
-        color.description
+        if color.headroom == nil {
+            if color.linearRed == 0,
+               color.linearGreen == 0,
+               color.linearBlue == 0 {
+                if color.opacity == 0 {
+                    return "clear"
+                }
+                if color.opacity == 1 {
+                    return "black"
+                }
+            } else if color.linearRed == 1,
+                      color.linearGreen == 1,
+                      color.linearBlue == 1,
+                      color.opacity == 1 {
+                return "white"
+            }
+        }
+        return color.description
     }
 
     func resolve(in environment: EnvironmentValues) -> Color.Resolved {
@@ -130,35 +157,55 @@ private struct ResolvedHDRColorProvider: ColorProvider {
     }
 }
 
-private enum SystemColorType: String, ColorProvider, Sendable {
-    case red, orange, yellow, green, mint, teal, cyan, blue
-    case indigo, purple, pink, brown, white, gray, black, clear
-    case primary, secondary
+enum SystemColorType: ColorProvider, Codable, Sendable {
+    case red, orange, yellow, green, teal, mint, cyan, blue
+    case indigo, purple, pink, brown, gray
+    case primary, secondary, tertiary, quaternary, quinary
+    case primaryFill, secondaryFill, tertiaryFill, quaternaryFill
 
-    var components: ColorComponents {
+    fileprivate var components: ColorComponents {
         components(scheme: .light, contrast: .standard)
     }
 
-    var description: String { rawValue }
-
-    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
-        components(
-            scheme: environment.colorScheme,
-            contrast: environment.colorSchemeContrast
-        ).resolve()
-    }
-
-    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
-        let resolved = resolve(in: environment)
+    var description: String {
         switch self {
-        case .white, .black, .clear:
-            return Color.ResolvedHDR(resolved)
-        default:
-            return Color.ResolvedHDR(resolved, headroom: 1)
+        case .red: "red"
+        case .orange: "orange"
+        case .yellow: "yellow"
+        case .green: "green"
+        case .teal: "teal"
+        case .mint: "mint"
+        case .cyan: "cyan"
+        case .blue: "blue"
+        case .indigo: "indigo"
+        case .purple: "purple"
+        case .pink: "pink"
+        case .brown: "brown"
+        case .gray: "gray"
+        case .primary: "primary"
+        case .secondary: "secondary"
+        case .tertiary: "tertiary"
+        case .quaternary: "quaternary"
+        case .quinary: "quinary"
+        case .primaryFill: "primaryFill"
+        case .secondaryFill: "secondaryFill"
+        case .tertiaryFill: "tertiaryFill"
+        case .quaternaryFill: "quaternaryFill"
         }
     }
 
-    private func components(
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        resolveHDR(in: environment).base
+    }
+
+    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        environment.systemColorDefinition.base.value(
+            for: self,
+            environment: environment
+        )
+    }
+
+    fileprivate func components(
         scheme: ColorScheme,
         contrast: ColorSchemeContrast
     ) -> ColorComponents {
@@ -168,10 +215,55 @@ private enum SystemColorType: String, ColorProvider, Sendable {
         case (.primary, .dark, .standard): rgba = (255, 255, 255, 216)
         case (.secondary, .light, .standard): rgba = (0, 0, 0, 127)
         case (.secondary, .dark, .standard): rgba = (255, 255, 255, 140)
+        case (.tertiary, .light, .standard): rgba = (0, 0, 0, 66)
+        case (.tertiary, .dark, .standard): rgba = (255, 255, 255, 63)
+        case (.quaternary, .light, .standard): rgba = (0, 0, 0, 25)
+        case (.quaternary, .dark, .standard): rgba = (255, 255, 255, 25)
+        case (.quinary, .light, .standard): rgba = (0, 0, 0, 12)
+        case (.quinary, .dark, .standard): rgba = (255, 255, 255, 12)
         case (.primary, .light, .increased): rgba = (0, 0, 0, 255)
         case (.primary, .dark, .increased): rgba = (255, 255, 255, 255)
         case (.secondary, .light, .increased): rgba = (0, 0, 0, 193)
         case (.secondary, .dark, .increased): rgba = (255, 255, 255, 178)
+        case (.tertiary, .light, .increased): rgba = (0, 0, 0, 142)
+        case (.tertiary, .dark, .increased): rgba = (255, 255, 255, 127)
+        case (.quaternary, .light, .increased): rgba = (0, 0, 0, 89)
+        case (.quaternary, .dark, .increased): rgba = (255, 255, 255, 76)
+        case (.quinary, .light, .increased): rgba = (0, 0, 0, 38)
+        case (.quinary, .dark, .increased): rgba = (255, 255, 255, 38)
+
+        case (.primaryFill, .light, .standard):
+            rgba = (120, 120, 128, 0.20 * 255)
+        case (.primaryFill, .dark, .standard):
+            rgba = (120, 120, 128, 0.36 * 255)
+        case (.primaryFill, .light, .increased):
+            rgba = (120, 120, 128, 0.28 * 255)
+        case (.primaryFill, .dark, .increased):
+            rgba = (120, 120, 128, 0.44 * 255)
+        case (.secondaryFill, .light, .standard):
+            rgba = (120, 120, 128, 0.16 * 255)
+        case (.secondaryFill, .dark, .standard):
+            rgba = (120, 120, 128, 0.32 * 255)
+        case (.secondaryFill, .light, .increased):
+            rgba = (120, 120, 128, 0.24 * 255)
+        case (.secondaryFill, .dark, .increased):
+            rgba = (120, 120, 128, 0.40 * 255)
+        case (.tertiaryFill, .light, .standard):
+            rgba = (120, 120, 128, 0.12 * 255)
+        case (.tertiaryFill, .dark, .standard):
+            rgba = (118, 118, 128, 0.24 * 255)
+        case (.tertiaryFill, .light, .increased):
+            rgba = (118, 118, 128, 0.20 * 255)
+        case (.tertiaryFill, .dark, .increased):
+            rgba = (118, 118, 128, 0.32 * 255)
+        case (.quaternaryFill, .light, .standard):
+            rgba = (116, 116, 128, 0.08 * 255)
+        case (.quaternaryFill, .dark, .standard):
+            rgba = (116, 116, 128, 0.18 * 255)
+        case (.quaternaryFill, .light, .increased):
+            rgba = (116, 116, 128, 0.12 * 255)
+        case (.quaternaryFill, .dark, .increased):
+            rgba = (116, 116, 128, 0.26 * 255)
 
         case (.red, .light, .standard): rgba = (255, 56, 60, 255)
         case (.red, .dark, .standard): rgba = (255, 66, 69, 255)
@@ -227,9 +319,6 @@ private enum SystemColorType: String, ColorProvider, Sendable {
         case (.gray, .light, .increased): rgba = (105, 105, 110, 255)
         case (.gray, .dark, .increased): rgba = (152, 152, 157, 255)
 
-        case (.white, _, _): rgba = (255, 255, 255, 255)
-        case (.black, _, _): rgba = (0, 0, 0, 255)
-        case (.clear, _, _): rgba = (0, 0, 0, 0)
         }
         return ColorComponents(
             colorSpace: .sRGB,
@@ -238,6 +327,75 @@ private enum SystemColorType: String, ColorProvider, Sendable {
             blue: rgba.2 / 255,
             alpha: rgba.3 / 255
         )
+    }
+}
+
+protocol SystemColorDefinition {
+    static func value(
+        for type: SystemColorType,
+        environment: EnvironmentValues
+    ) -> Color.ResolvedHDR
+
+    static func opacity(
+        at level: Int,
+        environment: EnvironmentValues
+    ) -> Float
+}
+
+extension SystemColorDefinition {
+    static func opacity(
+        at level: Int,
+        environment: EnvironmentValues
+    ) -> Float {
+        switch level {
+        case ...0: 1
+        case 1: 0.5
+        case 2: 0.25
+        default: 0.18
+        }
+    }
+}
+
+struct SystemColorDefinitionType: Equatable, @unchecked Sendable {
+    var base: any SystemColorDefinition.Type
+
+    static func == (
+        lhs: SystemColorDefinitionType,
+        rhs: SystemColorDefinitionType
+    ) -> Bool {
+        // Definition identity is the concrete metatype. The existential
+        // conformance witness is an implementation detail of that metatype.
+        ObjectIdentifier(lhs.base) == ObjectIdentifier(rhs.base)
+    }
+}
+
+private struct DefaultSystemColorDefinition: SystemColorDefinition {
+    static func value(
+        for type: SystemColorType,
+        environment: EnvironmentValues
+    ) -> Color.ResolvedHDR {
+        // The default definition resolves every semantic color from the same
+        // scheme-and-contrast snapshot used by the hierarchy opacity policy.
+        Color.ResolvedHDR(
+            type.components(
+                scheme: environment.colorScheme,
+                contrast: environment.colorSchemeContrast
+            ).resolve(),
+            headroom: 1
+        )
+    }
+}
+
+private struct SystemColorDefinitionKey: EnvironmentKey {
+    static let defaultValue = SystemColorDefinitionType(
+        base: DefaultSystemColorDefinition.self
+    )
+}
+
+extension EnvironmentValues {
+    var systemColorDefinition: SystemColorDefinitionType {
+        get { self[SystemColorDefinitionKey.self] }
+        set { self[SystemColorDefinitionKey.self] = newValue }
     }
 }
 
@@ -270,6 +428,10 @@ final class AnyColorBox: Hashable, @unchecked Sendable {
 
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
         colorProvider.resolveHDR(in: environment)
+    }
+
+    func opacity(at level: Int, environment: EnvironmentValues) -> Float {
+        colorProvider.opacity(at: level, environment: environment)
     }
 }
 
@@ -361,7 +523,7 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
 }
 
 extension Color {
-    private init(systemColor: SystemColorType) {
+    fileprivate init(systemColor: SystemColorType) {
         self.init(AnyColorBox(systemColor))
     }
 
@@ -377,12 +539,74 @@ extension Color {
     public static let purple = Color(systemColor: .purple)
     public static let pink = Color(systemColor: .pink)
     public static let brown = Color(systemColor: .brown)
-    public static let white = Color(systemColor: .white)
+    public static let white = Color(Color.ResolvedHDR(Color.Resolved(
+        colorSpace: .sRGBLinear,
+        red: 1,
+        green: 1,
+        blue: 1
+    )))
     public static let gray = Color(systemColor: .gray)
-    public static let black = Color(systemColor: .black)
-    public static let clear = Color(systemColor: .clear)
+    public static let black = Color(Color.ResolvedHDR(Color.Resolved(
+        colorSpace: .sRGBLinear,
+        red: 0,
+        green: 0,
+        blue: 0
+    )))
+    public static let clear = Color(Color.ResolvedHDR(Color.Resolved(
+        colorSpace: .sRGBLinear,
+        red: 0,
+        green: 0,
+        blue: 0,
+        opacity: 0
+    )))
     public static let primary = Color(systemColor: .primary)
     public static let secondary = Color(systemColor: .secondary)
+}
+
+struct SystemColorsStyle: PrimitiveShapeStyle {
+    func _apply(to shape: inout _ShapeStyle_Shape) {
+        switch shape.operation {
+        case let .prepareText(level):
+            shape.result = .preparedText(
+                .foregroundColor(color(at: level))
+            )
+        case let .resolveStyle(name, levels):
+            shape.result = .pack(_ShapeStyle_Pack(styles: levels.map { level in
+                (
+                    key: _ShapeStyle_Pack.Key(name, level),
+                    style: _ShapeStyle_Pack.Style(
+                        .color(color(at: level).resolveHDR(
+                            in: shape.environment
+                        ))
+                    )
+                )
+            }))
+        case let .fallbackColor(level):
+            shape.result = .color(color(at: level))
+        case .copyStyle, .modifyBackground, .multiLevel, .primaryStyle:
+            break
+        }
+    }
+
+    static func _apply(to type: inout _ShapeStyle_ShapeType) {
+    }
+
+    private func color(at level: Int) -> Color {
+        switch level {
+        case ...0:
+            Color(systemColor: .primary)
+        case 1:
+            Color(systemColor: .secondary)
+        case 2:
+            Color(systemColor: .tertiary)
+        case 3:
+            Color(systemColor: .quaternary)
+        default:
+            Color(systemColor: .quinary)
+        }
+    }
+
+    typealias Resolved = Never
 }
 
 extension Color {
@@ -405,11 +629,18 @@ extension Color: ShapeStyle {
     }
     
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.shading = .color(self)
+        if case let .fallbackColor(level) = shape.operation {
+            shape.result = .color(shape.applyingOpacity(at: level, to: self))
+        } else {
+            shape.result = .color(self)
+        }
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
     }
     
     // Stored in linear light; red/green/blue are computed sRGB accessors.
-    public struct Resolved: Hashable, Animatable, ShapeStyle, CustomStringConvertible, Codable {
+    public struct Resolved: Hashable, Animatable, PrimitiveShapeStyle, CustomStringConvertible, Codable {
         public var linearRed:   Float
         public var linearGreen: Float
         public var linearBlue:  Float
@@ -548,18 +779,21 @@ extension Color: ShapeStyle {
         public typealias Resolved = Never
         
         public func _apply(to shape: inout _ShapeStyle_Shape) {
-            shape.shading = .color(.sRGB,
-                                   red: Double(red),
-                                   green: Double(green),
-                                   blue: Double(blue),
-                                   opacity: Double(opacity))
+            let resolved: Self
+            if case let .fallbackColor(level) = shape.operation {
+                resolved = shape.applyingOpacity(at: level, to: self)
+            } else {
+                resolved = self
+            }
+            shape.result = .color(Color(resolved))
         }
-        public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
+        public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        }
     }
 }
 
 extension Color {
-    public struct ResolvedHDR: Hashable, Sendable, Animatable, ShapeStyle, CustomStringConvertible, Codable {
+    public struct ResolvedHDR: Hashable, Sendable, Animatable, PrimitiveShapeStyle, CustomStringConvertible, Codable {
         var base: Color.Resolved
         var _headroom: Float
 
@@ -727,7 +961,7 @@ extension Color {
     }
 
     public init(_ resolved: Color.ResolvedHDR) {
-        self.init(AnyColorBox(ResolvedHDRColorProvider(color: resolved)))
+        self.init(AnyColorBox(ResolvedColorProvider(color: resolved)))
     }
 }
 

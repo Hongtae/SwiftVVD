@@ -35,9 +35,14 @@ final class MeshGradientTests: XCTestCase {
         }
         XCTAssertEqual(stored, mesh)
 
-        var shape = _ShapeStyle_Shape()
+        var shape = _ShapeStyle_Shape(
+            operation: .fallbackColor(level: 0),
+            environment: EnvironmentValues()
+        )
         mesh._apply(to: &shape)
-        guard case let .meshGradient(applied)? = shape.shading?.properties.first else {
+        guard case let .meshGradient(applied)? =
+            shape.resolvedShading?.properties.first
+        else {
             return XCTFail("expected applied mesh-gradient shading")
         }
         XCTAssertEqual(applied, mesh)
