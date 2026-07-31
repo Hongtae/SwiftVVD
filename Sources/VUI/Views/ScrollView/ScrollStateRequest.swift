@@ -56,12 +56,18 @@ extension Scrollable {
 extension ScrollableContainer {
     func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
         guard let target = makeTarget(for: id) else { return false }
-        return setContentTarget(target)
+        return setParentTarget(target)
+    }
+
+    func setParentTarget(
+        _ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?
+    ) -> Bool {
+        guard let parent else { return false }
+        return parent.setContentTarget(target)
     }
 
     func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        if let parent,
-           parent.setContentTarget(target) {
+        if setParentTarget(target) {
             return true
         }
         for child in children ?? [] {

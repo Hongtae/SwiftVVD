@@ -1017,6 +1017,18 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(mutableEstimations.average.length, 12.5)
             XCTAssertEqual(mutableEstimations.average.spacing, 2)
 
+            var mergedEstimations = estimations
+            mergedEstimations.merge(
+                EstimationCache(
+                    lengthToCount: [12: 3, 18: 4],
+                    spacingToCount: [4: 2, 6: 1],
+                    zeroIndices: IndexSet(integer: 11)
+                )
+            )
+            XCTAssertEqual(mergedEstimations.lengthToCount, [12: 5, 18: 4])
+            XCTAssertEqual(mergedEstimations.spacingToCount, [4: 3, 6: 1])
+            XCTAssertEqual(mergedEstimations.zeroIndices, IndexSet([9, 11]))
+
             var cappedEstimations = EstimationCache()
             for value in 0..<26 {
                 cappedEstimations.add(
@@ -1559,7 +1571,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     context: placementContext,
                     cache: wideCache
                 ),
-                CGRect(x: 0, y: 30, width: 10, height: 10)
+                CGRect(x: 0, y: 30, width: 100, height: 10)
             )
 
             let nearby = layout.initialPlacement(
@@ -1572,7 +1584,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 cache: wideCache
             )
             XCTAssertEqual(nearby.anchor, .center)
-            XCTAssertEqual(nearby.anchorPosition, CGPoint(x: 5, y: 35))
+            XCTAssertEqual(nearby.anchorPosition, CGPoint(x: 50, y: 35))
 
             let outsideWindow = layout.initialPlacement(
                 newIndex: 0,
@@ -12127,7 +12139,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let list = SegmentedLayoutViewList(
                 graph: graph,
                 sizes: [
-                    CGSize(width: 5, height: 6),
+                    CGSize(width: 5, height: 12),
                     CGSize(width: 10, height: 12),
                 ]
             )
@@ -12136,10 +12148,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 layout: LazyVGridLayout(
                     columns: [GridItem(.fixed(12))],
                     alignment: .center,
-                    spacing: nil,
+                    spacing: 0,
                     pinnedViews: []
                 ),
                 nearestScrollableAxes: .vertical
+            )
+            cache.inputs.size = graph.makeInput(
+                value: ViewSize(width: 12, height: 40)
             )
             cache._list = graph.makeInput(value: list as any ViewList)
 
@@ -12198,12 +12213,19 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(visible.first?.id, item.id)
             XCTAssertEqual(visible.first?.frame, CGRect(x: 20, y: 30, width: 10, height: 12))
 
-            XCTAssertTrue(scrollable.scroll(toCollectionViewID: item.id.canonicalID, anchor: .center))
+            let request = graph.makeStatefulRule(
+                LazyScrollableTargetRequest(
+                    scrollable: scrollable,
+                    id: appliedIDs[1],
+                    anchor: .center
+                )
+            )
+            XCTAssertFalse(request.value)
             XCTAssertEqual(parent.targetRequestCount, 1)
-            XCTAssertEqual(child.targetRequestCount, 1)
+            XCTAssertEqual(child.targetRequestCount, 0)
             XCTAssertEqual(
-                child.lastTarget,
-                ScrollTarget(rect: CGRect(x: 20, y: 30, width: 10, height: 12), anchor: .center)
+                parent.lastTarget,
+                ScrollTarget(rect: CGRect(x: 0, y: 12, width: 12, height: 12), anchor: .center)
             )
 
             parent.firstChildMarker = LazyScrollableLookupMarker(11)
@@ -12399,12 +12421,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(width: 100, height: 40))
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
                 cacheState: LazyVStackLayout.initialCache,
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
-                inputs: makeViewInputs(graph: graph),
+                inputs: inputs,
                 outputs: _ViewOutputs(),
                 list: graph.makeInput(value: list as any ViewList),
                 layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
@@ -12449,11 +12473,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(parent.targetRequestCount, 1)
             XCTAssertEqual(
                 parent.lastTarget,
-                ScrollTarget(rect: CGRect(x: 0, y: 30, width: 60, height: 30), anchor: .bottom)
+                ScrollTarget(rect: CGRect(x: 0, y: 30, width: 100, height: 15), anchor: .bottom)
             )
             XCTAssertTrue(cache._placedSubviews.value.isEmpty)
-            XCTAssertEqual(cache.items.count, 3)
-            XCTAssertTrue(cache.items.values.contains {
+            XCTAssertEqual(cache.items.count, 2)
+            XCTAssertFalse(cache.items.values.contains {
                 $0.id.canonicalID.implicitID == targetID.implicitID
             })
         }
@@ -12476,12 +12500,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(width: 100, height: 40))
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
                 cacheState: LazyVStackLayout.initialCache,
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
-                inputs: makeViewInputs(graph: graph),
+                inputs: inputs,
                 outputs: _ViewOutputs(),
                 list: graph.makeInput(value: list as any ViewList),
                 layoutDirection: graph.makeInput(value: LayoutDirection.rightToLeft),
@@ -12523,7 +12549,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(parent.targetRequestCount, 1)
             XCTAssertEqual(
                 parent.lastTarget,
-                ScrollTarget(rect: CGRect(x: 40, y: 30, width: 60, height: 30), anchor: .top)
+                ScrollTarget(rect: CGRect(x: 0, y: 30, width: 100, height: 15), anchor: .top)
             )
         }
     }
@@ -12545,12 +12571,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     CGSize(width: 60, height: 30),
                 ]
             )
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = graph.makeInput(value: ViewSize(width: 100, height: 40))
             let cache = _LazyLayoutViewCache(
                 layout: graph.makeInput(value: layout),
                 cacheState: LazyVStackLayout.initialCache,
                 viewGraph: host,
                 parentSubgraph: AGSubgraph(),
-                inputs: makeViewInputs(graph: graph),
+                inputs: inputs,
                 outputs: _ViewOutputs(),
                 list: graph.makeInput(value: list as any ViewList),
                 layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
@@ -12605,7 +12633,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(parent.targetRequestCount, 1)
             XCTAssertEqual(
                 parent.lastTarget,
-                ScrollTarget(rect: CGRect(x: -11, y: 17, width: 60, height: 30), anchor: .top)
+                ScrollTarget(rect: CGRect(x: -11, y: 17, width: 100, height: 15), anchor: .top)
             )
         }
     }

@@ -2756,7 +2756,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
             return false
         }
         let rect = frame(for: placement).converted(to: .content, using: transform.value)
-        return setContentTarget { _, _ in
+        return setParentTarget { _, _ in
             ScrollTarget(rect: rect, anchor: anchor)
         }
     }

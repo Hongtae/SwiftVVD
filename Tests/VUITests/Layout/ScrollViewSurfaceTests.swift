@@ -266,6 +266,7 @@ private final class ScrollViewTargetSubgraphRecorder {
 
 private struct ScrollViewTargetRow: View, TestPrimitiveView {
     var id: Int
+    var height: CGFloat = 20
     var subgraphRecorder: ScrollViewTargetSubgraphRecorder?
     var childScrollable: ScrollViewChildCollectionScrollable?
 
@@ -280,7 +281,7 @@ private struct ScrollViewTargetRow: View, TestPrimitiveView {
             row.subgraphRecorder?.itemSubgraphs[row.id] = subgraph
         }
         let layout = graph.makeRule {
-            LayoutComputer.fixed(CGSize(width: 40, height: 20))
+            LayoutComputer.fixed(CGSize(width: 40, height: row.height))
         }
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layout))
         if let child = row.childScrollable {
@@ -2447,6 +2448,169 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let updatedGeometry = geometryAttribute.value.first?.geometry
             XCTAssertEqual(updatedGeometry?.contentOffset, CGPoint(x: 0, y: 140))
             XCTAssertEqual(updatedGeometry?.visibleRect.origin, CGPoint(x: 0, y: 140))
+        }
+    }
+
+    func testSystemScrollViewScrollableResolvesLazyNonVisibleIDTarget() throws {
+        let host = GraphHost()
+        var scrollablePreference: AGAttribute!
+        var geometryPreference: AGAttribute!
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                var preferenceKeys = PreferenceKeys()
+                preferenceKeys.add(ScrollablePreferenceKey.self)
+                preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+                let rows = (0..<200).map { ScrollViewTargetRow(id: $0) }
+                let content = LazyVStack(spacing: 0) {
+                    ForEach(rows, id: \.id) { row in
+                        row
+                    }
+                }
+                let view = SystemScrollView(
+                    configuration: ScrollViewConfiguration(),
+                    content: content
+                )
+                let viewAttr = graph.makeInput(value: view)
+                var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
+                inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 100, height: 80)))
+
+                let outputs = type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttr),
+                    inputs: inputs
+                )
+                scrollablePreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollablePreferenceKey.self)
+                )
+                geometryPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
+                )
+
+                _ = Attribute<[any Scrollable]>(scrollablePreference).value
+            }
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<[any Scrollable]>(scrollablePreference).value
+            let scrollable = try XCTUnwrap(scrollables.first)
+            let lazyScrollable = try XCTUnwrap(
+                scrollable.mapFirstChild(ofType: LazyScrollable<LazyVStackLayout>.self) { $0 }
+            )
+            let cache = try XCTUnwrap(lazyScrollable.cache)
+            XCTAssertEqual(
+                cache._list.value.count(style: _ViewList_IteratorStyle()),
+                200
+            )
+            XCTAssertEqual(
+                cache._list.value.firstOffset(
+                    forID: 150,
+                    style: _ViewList_IteratorStyle()
+                ),
+                150
+            )
+            XCTAssertTrue(lazyScrollable.position.isValid(in: host.data.graph))
+            XCTAssertTrue(lazyScrollable.transform.isValid(in: host.data.graph))
+            let geometry = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let initialGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            XCTAssertEqual(initialGeometry.contentOffset, .zero)
+
+            let targetBuilder = try XCTUnwrap(lazyScrollable.makeTarget(for: 150))
+            let target = try XCTUnwrap(targetBuilder(initialGeometry, .leftToRight))
+            XCTAssertEqual(
+                target,
+                ScrollTarget(
+                    rect: CGRect(x: 0, y: 3_000, width: 100, height: 20),
+                    anchor: nil
+                )
+            )
+
+            var transaction = Transaction()
+            transaction.scrollTargetAnchor = .top
+            withTransaction(transaction) {
+                XCTAssertTrue(scrollable.scroll(to: 150))
+            }
+
+            let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            XCTAssertEqual(updatedGeometry.contentOffset, CGPoint(x: 0, y: 3_000))
+            XCTAssertEqual(updatedGeometry.visibleRect.origin, CGPoint(x: 0, y: 3_000))
+        }
+    }
+
+    func testSystemScrollViewLazyNonVisibleIDUsesInitialEstimateSamples() throws {
+        let host = GraphHost()
+        var scrollablePreference: AGAttribute!
+        var geometryPreference: AGAttribute!
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                var preferenceKeys = PreferenceKeys()
+                preferenceKeys.add(ScrollablePreferenceKey.self)
+                preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+                let rows = (0..<200).map {
+                    ScrollViewTargetRow(id: $0, height: $0 < 10 ? 10 : 30)
+                }
+                let content = LazyVStack(spacing: 0) {
+                    ForEach(rows, id: \.id) { row in
+                        row
+                    }
+                }
+                let view = SystemScrollView(
+                    configuration: ScrollViewConfiguration(),
+                    content: content
+                )
+                let viewAttr = graph.makeInput(value: view)
+                var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
+                inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 100, height: 80)))
+
+                let outputs = type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttr),
+                    inputs: inputs
+                )
+                scrollablePreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollablePreferenceKey.self)
+                )
+                geometryPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
+                )
+
+                _ = Attribute<[any Scrollable]>(scrollablePreference).value
+            }
+        }
+
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            let scrollables = Attribute<[any Scrollable]>(scrollablePreference).value
+            let scrollable = try XCTUnwrap(scrollables.first)
+            let lazyScrollable = try XCTUnwrap(
+                scrollable.mapFirstChild(ofType: LazyScrollable<LazyVStackLayout>.self) { $0 }
+            )
+            let geometry = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let initialGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+
+            let targetBuilder = try XCTUnwrap(lazyScrollable.makeTarget(for: 150))
+            let target = try XCTUnwrap(targetBuilder(initialGeometry, .leftToRight))
+            XCTAssertEqual(
+                target,
+                ScrollTarget(
+                    rect: CGRect(x: 0, y: 1_500, width: 100, height: 10),
+                    anchor: nil
+                )
+            )
+
+            var transaction = Transaction()
+            transaction.scrollTargetAnchor = .top
+            withTransaction(transaction) {
+                XCTAssertTrue(scrollable.scroll(to: 150))
+            }
+
+            let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            XCTAssertEqual(updatedGeometry.contentOffset, CGPoint(x: 0, y: 1_500))
+            XCTAssertEqual(updatedGeometry.visibleRect.origin, CGPoint(x: 0, y: 1_500))
         }
     }
 

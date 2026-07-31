@@ -154,7 +154,8 @@ extension ViewList {
     var debugDescription: String { "ViewList(\(count(style: _ViewList_IteratorStyle())))" }
 }
 
-private func _viewListID<A: Hashable>(_ viewID: _ViewList_ID, matches target: A) -> Bool {
+/// Matches an arbitrary lookup key against canonical, full, and explicit ID lanes.
+func _viewListID<A: Hashable>(_ viewID: _ViewList_ID, matches target: A) -> Bool {
     if let canonical = target as? _ViewList_ID.Canonical {
         return viewID.canonicalID == canonical
     }

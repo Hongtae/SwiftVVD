@@ -1422,7 +1422,7 @@ private struct DynamicLayoutScrollable: ScrollableCollection, ScrollableContaine
         guard let offset = firstCollectionViewIndex(of: id) else {
             return false
         }
-        return setContentTarget { _, _ in
+        return setParentTarget { _, _ in
             makeTarget(at: offset, anchor: anchor)
         }
     }
