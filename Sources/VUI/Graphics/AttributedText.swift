@@ -151,7 +151,7 @@ private func _resolvedAttributedRuns(
     defaultTypefaces: [Typeface],
     context: GraphicsContext
 ) -> [GraphicsContext.ResolvedText.Run] {
-    value.runs.compactMap { run in
+    value.runs.compactMap { run -> GraphicsContext.ResolvedText.Run? in
         let text = String(value.characters[run.range])
         guard !text.isEmpty else { return nil }
 

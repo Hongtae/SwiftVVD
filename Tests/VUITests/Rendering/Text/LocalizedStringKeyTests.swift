@@ -470,6 +470,63 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertEqual(sourceToken.id, 0)
     }
 
+    func testPortableLocalizationCompatibilityCarriers() {
+        let literal = _StringLocalizationValue("plain")
+        XCTAssertEqual(literal.pattern, "plain")
+
+        var interpolation = _StringLocalizationValue.StringInterpolation(
+            literalCapacity: 6,
+            interpolationCount: 1
+        )
+        interpolation.appendLiteral("value ")
+        interpolation.appendInterpolation(placeholder: .int, specifier: "%lld")
+        let interpolated = _StringLocalizationValue(
+            stringInterpolation: interpolation
+        )
+        XCTAssertEqual(interpolated.pattern, "value %lld")
+        XCTAssertEqual(interpolated.unresolvedString(), "value %lld")
+        XCTAssertEqual(
+            String(interpolated.unresolvedAttributedString().characters),
+            "value %lld"
+        )
+
+        let resource = _LocalizedStringResource(interpolated)
+        XCTAssertEqual(resource, _LocalizedStringResource(interpolated))
+        XCTAssertEqual(resource.value.pattern, "value %lld")
+
+        var options = _AttributedStringLocalizationOptions()
+        XCTAssertNil(options.replacements)
+        XCTAssertFalse(options.applyReplacementIndexAttribute)
+        let foundationOptions = AttributedString.LocalizationOptions()
+        XCTAssertNil(foundationOptions.replacements)
+        XCTAssertEqual(
+            options.applyReplacementIndexAttribute,
+            foundationOptions.applyReplacementIndexAttribute
+        )
+        options.replacements = [Int64(42)]
+        options.applyReplacementIndexAttribute = true
+        XCTAssertEqual(options.replacements?.count, 1)
+        XCTAssertTrue(options.applyReplacementIndexAttribute)
+
+        var intent = _InlinePresentationIntent.emphasized
+        intent.formUnion(.stronglyEmphasized)
+        XCTAssertTrue(intent.contains(.emphasized))
+        XCTAssertTrue(intent.contains(.stronglyEmphasized))
+        XCTAssertEqual(
+            _InlinePresentationIntent.emphasized.rawValue,
+            InlinePresentationIntent.emphasized.rawValue
+        )
+        XCTAssertEqual(
+            _InlinePresentationIntent.stronglyEmphasized.rawValue,
+            InlinePresentationIntent.stronglyEmphasized.rawValue
+        )
+        XCTAssertEqual(
+            _InlinePresentationIntentAttribute.name,
+            AttributeScopes.FoundationAttributes
+                .InlinePresentationIntentAttribute.name
+        )
+    }
+
     func testDateIntervalStorageInterpolationAndEnvironmentFormatting() {
         let defaults = EnvironmentValues()
         XCTAssertEqual(defaults.calendar, Calendar.autoupdatingCurrent)

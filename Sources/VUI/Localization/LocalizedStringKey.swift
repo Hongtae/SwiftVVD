@@ -243,6 +243,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             appendInterpolation(String(substring))
         }
 
+        #if canImport(Darwin)
         public mutating func appendInterpolation<Subject>(
             _ subject: Subject,
             formatter: Formatter? = nil
@@ -256,6 +257,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
         ) where Subject: NSObject {
             appendValue(subject, formatter: formatter)
         }
+        #endif
 
         public mutating func appendInterpolation<T>(_ value: T)
         where T: _FormatSpecifiable {
