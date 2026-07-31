@@ -1,6 +1,32 @@
 import XCTest
 @testable import VUI
 
+private struct PositionAwareContainerRelayLayout: ViewModifier, Animatable {
+    typealias AnimatableData = EmptyAnimatableData
+    typealias Body = Never
+}
+
+extension PositionAwareContainerRelayLayout: UnaryLayout {
+    func sizeThatFits(
+        in proposal: _ProposedSize,
+        context: SizeAndSpacingContext,
+        child: LayoutProxy
+    ) -> CGSize {
+        child.dimensions(in: proposal).size.value
+    }
+
+    func placement(
+        of child: LayoutProxy,
+        in context: _PositionAwarePlacementContext
+    ) -> _Placement {
+        _Placement(
+            proposedSize: context.proposedSize,
+            anchoring: .topLeading,
+            at: .zero
+        )
+    }
+}
+
 private final class ScrollViewInputRecorder {
     var sawScrollablePreferenceKey = false
     var sawUpdateScrollStateRequestKey = false
@@ -10,6 +36,7 @@ private final class ScrollViewInputRecorder {
     var phaseStateAttribute: AGAttribute?
     var transform: Attribute<ViewTransform>?
     var safeAreaInsets: Attribute<SafeAreaInsets>?
+    var containerSize: Attribute<ViewSize>?
 }
 
 private struct ScrollViewRecordingContent: View, TestPrimitiveView {
@@ -32,6 +59,7 @@ private struct ScrollViewRecordingContent: View, TestPrimitiveView {
         recorder.phaseStateAttribute = inputs.base.scrollPhaseState.attribute?.identifier
         recorder.transform = inputs.transform
         recorder.safeAreaInsets = inputs.safeAreaInsets.attribute
+        recorder.containerSize = inputs.containerSize.attribute
 
         let layout = graph.makeRule {
             LayoutComputer.fixed(view._attribute.value.size)
@@ -492,6 +520,191 @@ final class ScrollViewSurfaceTests: XCTestCase {
             result.updateValue(optionalCGFloat(child.value), forKey: label)
         }
         return result
+    }
+
+    func testUnaryPaddingPreservesNearestContainerInputs() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
+            inputs.requestsLayoutComputer = true
+            inputs.position = graph.makeInput(
+                value: CGPoint(x: 100, y: 50)
+            )
+            inputs.size = graph.makeInput(
+                value: ViewSize(width: 300, height: 6_796)
+            )
+            let containerPosition = graph.makeInput(
+                value: CGPoint(x: 20, y: 30)
+            )
+            let containerSize = graph.makeInput(
+                value: ViewSize(width: 300, height: 260)
+            )
+            inputs.containerPosition = containerPosition
+            inputs.containerSize = OptionalAttribute(containerSize)
+
+            let modifier = graph.makeInput(
+                value: _PaddingLayout(edges: .all, insets: EdgeInsets())
+            )
+            var childContainerPosition: Attribute<CGPoint>?
+            var childContainerSize: Attribute<ViewSize>?
+            _ = _PaddingLayout._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, childInputs in
+                childContainerPosition = childInputs.containerPosition
+                childContainerSize = childInputs.containerSize.attribute
+                return _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(
+                            value: LayoutComputer.fixed(
+                                CGSize(width: 300, height: 6_796)
+                            )
+                        )
+                    )
+                )
+            }
+
+            XCTAssertEqual(
+                try XCTUnwrap(childContainerPosition).identifier,
+                containerPosition.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(childContainerSize).identifier,
+                containerSize.identifier
+            )
+        }
+    }
+
+    func testPositionAwareUnaryLayoutPreservesNearestContainerInputs() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
+            inputs.requestsLayoutComputer = true
+            inputs.position = graph.makeInput(
+                value: CGPoint(x: 100, y: 50)
+            )
+            inputs.size = graph.makeInput(
+                value: ViewSize(width: 300, height: 6_796)
+            )
+            let containerPosition = graph.makeInput(
+                value: CGPoint(x: 20, y: 30)
+            )
+            let containerSize = graph.makeInput(
+                value: ViewSize(width: 300, height: 260)
+            )
+            inputs.containerPosition = containerPosition
+            inputs.containerSize = OptionalAttribute(containerSize)
+
+            let modifier = graph.makeInput(
+                value: PositionAwareContainerRelayLayout()
+            )
+            var childContainerPosition: Attribute<CGPoint>?
+            var childContainerSize: Attribute<ViewSize>?
+            _ = PositionAwareContainerRelayLayout._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, childInputs in
+                childContainerPosition = childInputs.containerPosition
+                childContainerSize = childInputs.containerSize.attribute
+                return _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(
+                            value: LayoutComputer.fixed(
+                                CGSize(width: 300, height: 6_796)
+                            )
+                        )
+                    )
+                )
+            }
+
+            XCTAssertEqual(
+                try XCTUnwrap(childContainerPosition).identifier,
+                containerPosition.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(childContainerSize).identifier,
+                containerSize.identifier
+            )
+        }
+    }
+
+    func testVStackPreservesNearestContainerSizeForChildren() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let recorder = ScrollViewInputRecorder()
+            let stack = VStack(spacing: 12) {
+                ScrollViewRecordingContent(recorder: recorder)
+                ScrollViewRecordingContent(
+                    recorder: ScrollViewInputRecorder()
+                )
+            }
+            let stackAttribute = graph.makeInput(value: stack)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
+            inputs.requestsLayoutComputer = true
+            inputs.size = graph.makeInput(
+                value: ViewSize(width: 520, height: 470)
+            )
+            let containerSize = graph.makeInput(
+                value: ViewSize(width: 900, height: 470)
+            )
+            inputs.containerSize = OptionalAttribute(containerSize)
+
+            _ = type(of: stack)._makeView(
+                view: _GraphValue(_attribute: stackAttribute),
+                inputs: inputs
+            )
+
+            XCTAssertEqual(
+                try XCTUnwrap(recorder.containerSize).identifier,
+                containerSize.identifier
+            )
+        }
+    }
+
+    func testDynamicVStackPreservesNearestContainerSizeForChildren() throws {
+        let host = GraphHost()
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let recorder = ScrollViewInputRecorder()
+                let stack = VStack(spacing: 12) {
+                    ForEach(0..<2, id: \.self) { index in
+                        if index == 0 {
+                            ScrollViewRecordingContent(recorder: recorder)
+                        } else {
+                            ScrollViewRecordingContent(
+                                recorder: ScrollViewInputRecorder()
+                            )
+                        }
+                    }
+                }
+                let stackAttribute = graph.makeInput(value: stack)
+                var inputs = makeViewInputs(graph: graph)
+                inputs.needsGeometry = true
+                inputs.requestsLayoutComputer = true
+                inputs.size = graph.makeInput(
+                    value: ViewSize(width: 520, height: 470)
+                )
+                let containerSize = graph.makeInput(
+                    value: ViewSize(width: 900, height: 470)
+                )
+                inputs.containerSize = OptionalAttribute(containerSize)
+
+                let outputs = type(of: stack)._makeView(
+                    view: _GraphValue(_attribute: stackAttribute),
+                    inputs: inputs
+                )
+                _ = outputs._layoutComputer.attribute?.value
+
+                XCTAssertEqual(
+                    try XCTUnwrap(recorder.containerSize).identifier,
+                    containerSize.identifier
+                )
+            }
+        }
     }
 
     func testEdgeInsetsInsetByRectangleCornerInsetsUsesAdjacentCornerMaxima() {

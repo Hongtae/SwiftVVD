@@ -1221,8 +1221,9 @@ struct DynamicContainerInfo: StatefulRule, AsyncAttribute {
                         return transform
                     }
                     childInputs.containerPosition = capturedInputs.position
+                    // Layout placement does not redefine the nearest container
+                    // size; viewport-sensitive descendants keep the inherited channel.
                     childInputs.safeAreaInsets = capturedInputs.safeAreaInsets
-                    childInputs.containerSize = OptionalAttribute(capturedInputs.size)
                     childInputs.stackOrientation = capturedInputs.stackOrientation
                     if let transition {
                         return transition._makeView(
@@ -1649,7 +1650,8 @@ extension Layout {
                 childInputs.size = sizeAttr
                 childInputs.transform = childTransformAttr
                 childInputs.containerPosition = inputs.position
-                childInputs.containerSize = OptionalAttribute(inputs.size)
+                // Layout placement does not redefine the nearest container
+                // size; viewport-sensitive descendants keep the inherited channel.
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
                 childInputs.stackOrientation = layoutInputs.stackOrientation
                 childInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
