@@ -763,6 +763,103 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentPosition().y, 160, accuracy: 0.001)
     }
 
+    // ASSERTIONS animatableFramePlainTargetContinuationObserved
+    func testAnimatableFrameAttributeLaterPlainSizeChangeKeepsPositionPresentation() {
+        assertFrameAttributeLaterPlainSizeChangeKeepsPositionPresentation(
+            supportsVFD: false
+        )
+    }
+
+    func testAnimatableFrameAttributeVFDLaterPlainSizeChangeKeepsPositionPresentation() {
+        assertFrameAttributeLaterPlainSizeChangeKeepsPositionPresentation(
+            supportsVFD: true
+        )
+    }
+
+    private func assertFrameAttributeLaterPlainSizeChangeKeepsPositionPresentation(
+        supportsVFD: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: CGPoint(x: 100, y: 160),
+            initialSize: ViewSize(width: 48, height: 12),
+            supportsVFD: supportsVFD
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 168),
+            size: ViewSize(width: 48, height: 12),
+            transaction: Transaction(
+                animation: Animation(UnitLinearAnimation(duration: 2))
+            )
+        )
+        _ = harness.currentFrame()
+
+        harness.setTime(0.5)
+        _ = harness.currentFrame()
+        harness.setTime(1)
+        let beforePlainChange = harness.currentFrame()
+        XCTAssertGreaterThan(
+            beforePlainChange.origin.y,
+            160,
+            file: file,
+            line: line
+        )
+        XCTAssertLessThan(
+            beforePlainChange.origin.y,
+            168,
+            file: file,
+            line: line
+        )
+
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 168),
+            size: ViewSize(width: 112, height: 12),
+            transaction: Transaction(animation: nil)
+        )
+        let boundary = harness.currentFrame()
+        XCTAssertEqual(
+            boundary.origin.y,
+            beforePlainChange.origin.y,
+            accuracy: 0.001,
+            "A plain cross-axis size change must not discard the active position residual.",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            boundary.size.width,
+            112,
+            accuracy: 0.001,
+            file: file,
+            line: line
+        )
+
+        harness.setTime(1.25)
+        let continuing = harness.currentFrame()
+        XCTAssertGreaterThan(
+            continuing.origin.y,
+            boundary.origin.y,
+            file: file,
+            line: line
+        )
+        XCTAssertLessThan(
+            continuing.origin.y,
+            168,
+            file: file,
+            line: line
+        )
+
+        harness.setTime(4)
+        XCTAssertEqual(
+            harness.currentFrame().origin.y,
+            168,
+            accuracy: 0.001,
+            file: file,
+            line: line
+        )
+    }
+
     func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
         assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
             supportsVFD: false
@@ -1776,7 +1873,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.nextUpdateReasons(), [], file: file, line: line)
     }
 
-    func testAnimatableFrameAttributeNoAnimationRetargetRemovesRawListenersInCriteriaOrder() {
+    func testAnimatableFrameAttributeNoAnimationRetargetKeepsResidualAndRawListeners() {
         let recorder = AnimationCompletionRecorder()
         let removedListener = RecordingAnimationListener(
             label: "removed",
@@ -1814,6 +1911,8 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         recorder.removeAll()
         harness.setTime(0.5)
         _ = harness.currentFrame()
+        harness.setTime(0.6)
+        let beforePlainChange = harness.currentFrame()
         XCTAssertGreaterThan(harness.nextUpdateInterval(), 0)
 
         harness.resetNextUpdate()
@@ -1823,30 +1922,39 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             transaction: Transaction(animation: nil)
         )
         let frame = harness.currentFrame()
-        XCTAssertEqual(frame.origin.x, 25, accuracy: 0.000_001)
-        XCTAssertEqual(frame.size.width, 30, accuracy: 0.000_001)
+        XCTAssertEqual(
+            frame.origin.x,
+            25 + beforePlainChange.origin.x - 100,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            frame.size.width,
+            30 + beforePlainChange.size.width - 50,
+            accuracy: 0.000_001
+        )
         harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [])
+        XCTAssertGreaterThan(harness.nextUpdateInterval(), 0)
+        XCTAssertTrue(harness.nextUpdateReasons().contains(0xF85))
+
+        harness.resetNextUpdate()
+        harness.setTime(4)
+        let settled = harness.currentFrame()
+        harness.flushCompletionActions()
+        XCTAssertEqual(settled.origin.x, 25, accuracy: 0.000_001)
+        XCTAssertEqual(settled.size.width, 30, accuracy: 0.000_001)
         XCTAssertEqual(
             recorder.events,
             [
-                "removed removed",
                 "logical removed",
+                "removed removed",
             ]
         )
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [])
-
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "removed removed",
-                "logical removed",
-            ]
-        )
     }
 
-    func testAnimatableFrameAttributeVFDNoAnimationRetargetRemovesRawListenersInCriteriaOrder() {
+    func testAnimatableFrameAttributeVFDNoAnimationRetargetKeepsResidualAndRawListeners() {
         let recorder = AnimationCompletionRecorder()
         let removedListener = RecordingAnimationListener(
             label: "removed",
@@ -1886,7 +1994,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.setTime(0.5)
         _ = harness.currentFrame()
         harness.setTime(0.6)
-        _ = harness.currentFrame()
+        let beforePlainChange = harness.currentFrame()
         XCTAssertGreaterThan(harness.nextUpdateInterval(), 0)
 
         harness.resetNextUpdate()
@@ -1896,44 +2004,53 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             transaction: Transaction(animation: nil)
         )
         let frame = harness.currentFrame()
-        XCTAssertEqual(frame.origin.x, 25, accuracy: 0.000_001)
-        XCTAssertEqual(frame.size.width, 30, accuracy: 0.000_001)
+        XCTAssertEqual(
+            frame.origin.x,
+            25 + beforePlainChange.origin.x - 1_000,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            frame.size.width,
+            30 + beforePlainChange.size.width - 50,
+            accuracy: 0.000_001
+        )
         harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, [])
+        XCTAssertGreaterThan(harness.nextUpdateInterval(), 0)
+        XCTAssertTrue(harness.nextUpdateReasons().contains(0xF86))
+
+        harness.resetNextUpdate()
+        harness.setTime(4)
+        let settled = harness.currentFrame()
+        harness.flushCompletionActions()
+        XCTAssertEqual(settled.origin.x, 25, accuracy: 0.000_001)
+        XCTAssertEqual(settled.size.width, 30, accuracy: 0.000_001)
         XCTAssertEqual(
             recorder.events,
             [
-                "removed removed",
                 "logical removed",
+                "removed removed",
             ]
         )
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [])
-
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "removed removed",
-                "logical removed",
-            ]
-        )
     }
 
-    func testAnimatableFrameAttributeNoAnimationRetargetAfterLogicalDrainFinishesOnlyRemainingRemoved() {
-        assertFrameAttributeNoAnimationRetargetAfterLogicalDrainFinishesOnlyRemainingRemoved(
+    func testAnimatableFrameAttributeNoAnimationRetargetAfterLogicalDrainKeepsRemainingRemoved() {
+        assertFrameAttributeNoAnimationRetargetAfterLogicalDrainKeepsRemainingRemoved(
             supportsVFD: false,
             animationReason: 0xF81
         )
     }
 
-    func testAnimatableFrameAttributeVFDNoAnimationRetargetAfterLogicalDrainFinishesOnlyRemainingRemoved() {
-        assertFrameAttributeNoAnimationRetargetAfterLogicalDrainFinishesOnlyRemainingRemoved(
+    func testAnimatableFrameAttributeVFDNoAnimationRetargetAfterLogicalDrainKeepsRemainingRemoved() {
+        assertFrameAttributeNoAnimationRetargetAfterLogicalDrainKeepsRemainingRemoved(
             supportsVFD: true,
             animationReason: 0xF82
         )
     }
 
-    private func assertFrameAttributeNoAnimationRetargetAfterLogicalDrainFinishesOnlyRemainingRemoved(
+    private func assertFrameAttributeNoAnimationRetargetAfterLogicalDrainKeepsRemainingRemoved(
         supportsVFD: Bool,
         animationReason: UInt32,
         file: StaticString = #filePath,
@@ -1992,7 +2109,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.setTime(0.7)
         _ = harness.currentFrame()
         harness.setTime(0.8)
-        _ = harness.currentFrame()
+        let beforePlainChange = harness.currentFrame()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["logical removed"], file: file, line: line)
         XCTAssertGreaterThan(harness.nextUpdateInterval(), 0, file: file, line: line)
@@ -2004,11 +2121,51 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             transaction: Transaction(animation: nil)
         )
         let frame = harness.currentFrame()
-        XCTAssertEqual(frame.origin.x, 25, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(frame.origin.y, 15, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(frame.size.width, 30, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(frame.size.height, 35, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(
+            frame.origin.x,
+            25 + beforePlainChange.origin.x - 1_000,
+            accuracy: 0.000_001,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            frame.origin.y,
+            15 + beforePlainChange.origin.y - 40,
+            accuracy: 0.000_001,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            frame.size.width,
+            30 + beforePlainChange.size.width - 50,
+            accuracy: 0.000_001,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            frame.size.height,
+            35 + beforePlainChange.size.height - 60,
+            accuracy: 0.000_001,
+            file: file,
+            line: line
+        )
         harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, ["logical removed"], file: file, line: line)
+        XCTAssertGreaterThan(harness.nextUpdateInterval(), 0, file: file, line: line)
+        XCTAssertTrue(
+            harness.nextUpdateReasons().contains(animationReason),
+            file: file,
+            line: line
+        )
+
+        harness.resetNextUpdate()
+        harness.setTime(4)
+        let settled = harness.currentFrame()
+        harness.flushCompletionActions()
+        XCTAssertEqual(settled.origin.x, 25, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(settled.origin.y, 15, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(settled.size.width, 30, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(settled.size.height, 35, accuracy: 0.000_001, file: file, line: line)
         XCTAssertEqual(
             recorder.events,
             [
@@ -2020,17 +2177,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001, file: file, line: line)
         XCTAssertEqual(harness.nextUpdateReasons(), [], file: file, line: line)
-
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "logical removed",
-                "removed removed",
-            ],
-            file: file,
-            line: line
-        )
     }
 
     func testAnimatableFrameAttributeNodeRemovalAfterLogicalDrainFinishesOnlyRemainingRemoved() {

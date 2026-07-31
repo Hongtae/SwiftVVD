@@ -815,6 +815,90 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(loadIndex, animatedRequestIndex)
     }
 
+    // ASSERTIONS customAnimationStatusLayoutContinuityObserved
+    @MainActor
+    func testCustomAnimationCompletionStatusKeepsMovingWithReversedLayout() throws {
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingCustomCompletionStatusRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingCustomCompletionStatusRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) throws -> CGRect {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 420, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try XCTUnwrap(
+                textBounds(in: try displayList(in: controller)).first {
+                    $0.height < 30
+                }
+            )
+        }
+
+        _ = try update(time: 0)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        _ = try update(time: 0.001)
+        _ = try update(time: 0.25)
+        _ = try update(time: 0.60)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        var beforeCompletion: (time: Double, bounds: CGRect)?
+        var boundary: (time: Double, bounds: CGRect)?
+        for step in 37...180 {
+            let time = Double(step) / 60.0
+            let bounds = try update(time: time)
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.001))
+            if probe.completions.isEmpty {
+                beforeCompletion = (time, bounds)
+                continue
+            }
+            boundary = (time + 0.000_1, try update(time: time + 0.000_1))
+            break
+        }
+
+        let before = try XCTUnwrap(
+            beforeCompletion,
+            "The first custom-animation completion did not leave a pre-boundary sample."
+        )
+        let after = try XCTUnwrap(
+            boundary,
+            "The first custom-animation completion did not fire while the reverse route was active."
+        )
+        let continuing = try update(time: after.time + 0.25)
+
+        XCTAssertEqual(probe.completions, [1])
+        XCTAssertEqual(
+            after.bounds.midY,
+            before.bounds.midY,
+            accuracy: 1.0,
+            "Changing the status payload must not discard the active layout presentation."
+        )
+        XCTAssertGreaterThan(
+            abs(continuing.midY - after.bounds.midY),
+            0.5,
+            "The completion status must continue moving with the reversed layout."
+        )
+    }
+
     @MainActor
     func testSpringCompletionStatusSurfaceStaysRunningUntilAnimationCompletes() throws {
         let counter = LayoutSchedulingCounter()
@@ -5994,6 +6078,51 @@ private struct LayoutSchedulingResourceTransactionProbe: View {
 }
 
 extension LayoutSchedulingResourceTransactionProbe: TestPrimitiveView {
+}
+
+private struct LayoutSchedulingCustomCompletionStatusRoot: View {
+    let counter: LayoutSchedulingCounter
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var expanded = false
+    @State private var runCount = 0
+    @State private var status = "idle"
+
+    var body: some View {
+        probe.toggle = {
+            let nextRun = runCount + 1
+            runCount = nextRun
+            status = "running"
+            withAnimation(
+                Animation(UnitLinearAnimation(duration: 2)),
+                completionCriteria: .logicallyComplete
+            ) {
+                expanded.toggle()
+            } completion: {
+                status = "logical completion"
+                probe.completions.append(nextRun)
+            }
+        }
+        return LayoutSchedulingPassThroughLayout(counter: counter) {
+            VStack(spacing: 12) {
+                LayoutSchedulingRawTextMarker(
+                    size: CGSize(
+                        width: expanded ? 190 : 85,
+                        height: expanded ? 105 : 70
+                    )
+                )
+
+                LayoutSchedulingEnvironmentTextMarker(
+                    content: LayoutSchedulingTextContent(value: status),
+                    size: CGSize(
+                        width: status == "logical completion" ? 112 : 48,
+                        height: 12
+                    )
+                )
+            }
+            .frame(width: 240, height: 210)
+        }
+        .frame(width: 420, height: 240)
+    }
 }
 
 private struct LayoutSchedulingCompletionStatusRoot: View {

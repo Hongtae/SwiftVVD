@@ -150,8 +150,15 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
                 ) {
                     value.value = update.target
                 } else {
-                    finishValue(update.target)
-                    return
+                    // A plain model refinement does not replace an active
+                    // presentation. Commit its new endpoint, then keep sampling
+                    // the existing residual against that endpoint.
+                    helper.commitTarget(update.target)
+                    value.value = update.target
+                    if !helper.isAnimating {
+                        _AGGraph.setStatefulOutput(update.target)
+                        return
+                    }
                 }
             }
         }
@@ -268,8 +275,15 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
                 ) {
                     value.value = update.target
                 } else {
-                    finishValue(update.target)
-                    return
+                    // Keep the existing presentation residual when a later
+                    // plain layout pass refines only the model endpoint.
+                    helper.commitTarget(update.target)
+                    value.value = update.target
+                    if !helper.isAnimating {
+                        velocityFilter.reset()
+                        _AGGraph.setStatefulOutput(update.target)
+                        return
+                    }
                 }
             }
         }
