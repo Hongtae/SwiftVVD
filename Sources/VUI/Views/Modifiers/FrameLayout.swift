@@ -7,6 +7,39 @@
 
 import Foundation
 
+/// Shared placement contract for fixed and flexible frame modifiers.
+///
+/// Conforming layouts expose the alignment whose parent and child guides are
+/// reconciled by `commonPlacement`.
+private protocol FrameLayoutCommon {
+    var alignment: Alignment { get }
+}
+
+private extension FrameLayoutCommon {
+    func commonPlacement(
+        of child: LayoutProxy,
+        in context: PlacementContext,
+        childProposal: _ProposedSize
+    ) -> _Placement {
+        let childDimensions = child.dimensions(in: childProposal)
+        let parentDimensions = ViewDimensions(
+            guideComputer: .defaultValue,
+            size: ViewSize(context.size)
+        )
+
+        // Place the child's selected guides on the corresponding parent
+        // guides. The top-leading anchor preserves the raw child proposal;
+        // the later geometry pass resolves any unspecified dimensions.
+        let position = CGPoint(
+            x: parentDimensions[alignment.horizontal]
+                - childDimensions[alignment.horizontal],
+            y: parentDimensions[alignment.vertical]
+                - childDimensions[alignment.vertical]
+        )
+        return _Placement(proposedSize: childProposal, at: position)
+    }
+}
+
 public struct _FrameLayout: ViewModifier, Animatable, Sendable {
     let width: CGFloat?
     let height: CGFloat?
@@ -23,37 +56,32 @@ public struct _FrameLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
-extension _FrameLayout: UnaryLayout {
-    private func childProposal(for proposal: _ProposedSize) -> _ProposedSize {
-        _ProposedSize(
-            width: width ?? proposal.width,
-            height: height ?? proposal.height
-        )
-    }
+extension _FrameLayout: FrameLayoutCommon {}
 
+extension _FrameLayout: UnaryLayout {
     func sizeThatFits(
         in proposal: _ProposedSize,
         context: SizeAndSpacingContext,
         child: LayoutProxy
     ) -> CGSize {
-        let childSize = child.dimensions(in: childProposal(for: proposal)).size.value
+        let childProposal = _ProposedSize(
+            width: width ?? proposal.width,
+            height: height ?? proposal.height
+        )
+        let childSize = child.dimensions(in: childProposal).size.value
         return CGSize(width: width ?? childSize.width, height: height ?? childSize.height)
     }
 
     func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
-        let proposal = childProposal(for: context.proposedSize)
-        let childSize = child.dimensions(in: proposal).size.value
-        let anchor = UnitPoint(
-            x: alignment.horizontal == .leading ? 0 : alignment.horizontal == .trailing ? 1 : 0.5,
-            y: alignment.vertical == .top ? 0 : alignment.vertical == .bottom ? 1 : 0.5
+        let parentProposal = context.proposedSize
+        let childProposal = _ProposedSize(
+            width: width ?? parentProposal.width,
+            height: height ?? parentProposal.height
         )
-        return _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
-            anchoring: anchor,
-            at: CGPoint(
-                x: context.size.width * anchor.x,
-                y: context.size.height * anchor.y
-            )
+        return commonPlacement(
+            of: child,
+            in: context,
+            childProposal: childProposal
         )
     }
 }
@@ -95,32 +123,85 @@ public struct _FlexFrameLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
+extension _FlexFrameLayout: FrameLayoutCommon {}
+
 extension _FlexFrameLayout: UnaryLayout {
-    private func constrainedProposal(
-        _ value: CGFloat?,
-        min: CGFloat?,
-        ideal: CGFloat?,
-        max: CGFloat?
-    ) -> CGFloat? {
-        guard var value = value ?? ideal else { return nil }
-        if let min { value = Swift.max(value, min) }
-        if let max { value = Swift.min(value, max) }
-        return value
+    /// Builds the proposal used by the measurement pass.
+    ///
+    /// Placement has a separate proposal policy because an intrinsic axis can
+    /// remain unspecified after the frame size has already been resolved.
+    private func childProposal(myProposal: _ProposedSize) -> _ProposedSize {
+        let childWidth: CGFloat?
+        if var width = myProposal.width ?? idealWidth {
+            if let minWidth {
+                width = Swift.max(width, minWidth)
+            }
+            if let maxWidth {
+                width = Swift.min(width, maxWidth)
+            }
+            childWidth = width
+        } else {
+            childWidth = nil
+        }
+
+        let childHeight: CGFloat?
+        if var height = myProposal.height ?? idealHeight {
+            if let minHeight {
+                height = Swift.max(height, minHeight)
+            }
+            if let maxHeight {
+                height = Swift.min(height, maxHeight)
+            }
+            childHeight = height
+        } else {
+            childHeight = nil
+        }
+
+        return _ProposedSize(
+            width: childWidth,
+            height: childHeight
+        )
     }
 
-    private func childProposal(for proposal: _ProposedSize) -> _ProposedSize {
-        _ProposedSize(
-            width: constrainedProposal(
-                proposal.width,
+    private func childPlacementProposal(
+        of child: LayoutProxy,
+        context: PlacementContext
+    ) -> _ProposedSize {
+        // The child parameter belongs to the placement-helper shape; proposal
+        // selection itself depends only on frame constraints and context.
+        func proposal(
+            min: CGFloat?,
+            ideal: CGFloat?,
+            max: CGFloat?,
+            size: CGFloat,
+            parentProposal: CGFloat?
+        ) -> CGFloat? {
+            // A proposal-free axis strictly inside its flexible bounds stays
+            // unspecified during placement. Equality with either bound, an
+            // ideal, or a concrete parent proposal pins it to the frame size.
+            if ideal == nil,
+               parentProposal == nil,
+               (min ?? -.infinity) < size,
+               size < (max ?? .infinity) {
+                return nil
+            }
+            return size
+        }
+
+        return _ProposedSize(
+            width: proposal(
                 min: minWidth,
                 ideal: idealWidth,
-                max: maxWidth
+                max: maxWidth,
+                size: context.size.width,
+                parentProposal: context.proposedSize.width
             ),
-            height: constrainedProposal(
-                proposal.height,
+            height: proposal(
                 min: minHeight,
                 ideal: idealHeight,
-                max: maxHeight
+                max: maxHeight,
+                size: context.size.height,
+                parentProposal: context.proposedSize.height
             )
         )
     }
@@ -132,6 +213,9 @@ extension _FlexFrameLayout: UnaryLayout {
         ideal: CGFloat?,
         max: CGFloat?
     ) -> CGFloat {
+        // A concrete parent proposal and an intrinsic measurement do not use
+        // the same resolution branch. Keep this policy local to flexible-frame
+        // measurement; placement uses childPlacementProposal instead.
         if let proposed {
             if let max {
                 return Swift.min(Swift.max(proposed, min ?? -.infinity), max)
@@ -139,8 +223,12 @@ extension _FlexFrameLayout: UnaryLayout {
             return Swift.max(child, min ?? -.infinity)
         }
         var value = ideal ?? child
-        if let min { value = Swift.max(value, min) }
-        if let max { value = Swift.min(value, max) }
+        if let min {
+            value = Swift.max(value, min)
+        }
+        if let max {
+            value = Swift.min(value, max)
+        }
         return value
     }
 
@@ -149,7 +237,8 @@ extension _FlexFrameLayout: UnaryLayout {
         context: SizeAndSpacingContext,
         child: LayoutProxy
     ) -> CGSize {
-        let childSize = child.dimensions(in: childProposal(for: proposal)).size.value
+        let childProposal = childProposal(myProposal: proposal)
+        let childSize = child.dimensions(in: childProposal).size.value
         return CGSize(
             width: resolvedDimension(
                 proposal.width,
@@ -169,19 +258,17 @@ extension _FlexFrameLayout: UnaryLayout {
     }
 
     func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
-        let proposal = childProposal(for: context.proposedSize)
-        let childSize = child.dimensions(in: proposal).size.value
-        let anchor = UnitPoint(
-            x: alignment.horizontal == .leading ? 0 : alignment.horizontal == .trailing ? 1 : 0.5,
-            y: alignment.vertical == .top ? 0 : alignment.vertical == .bottom ? 1 : 0.5
-        )
-        return _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
-            anchoring: anchor,
-            at: CGPoint(
-                x: context.size.width * anchor.x,
-                y: context.size.height * anchor.y
-            )
+        // Modern semantics preserve an intrinsic axis during placement, while
+        // the older baseline pins both axes to the resolved frame size.
+        let childProposal = if _SemanticFeature<Semantics_v5>.isEnabled {
+            childPlacementProposal(of: child, context: context)
+        } else {
+            _ProposedSize(context.size)
+        }
+        return commonPlacement(
+            of: child,
+            in: context,
+            childProposal: childProposal
         )
     }
 }
