@@ -66,32 +66,50 @@ struct LeafLayoutEngine<Leaf: LeafViewLayout>: LayoutEngine {
 
 // MARK: - Layout AG rules
 
-/// AG Rule: computes child geometries for a layout container.
-/// Reads parentSize/parentPosition and calls LayoutComputer.childGeometries via the box vtable.
+/// Computes one coherent placement array from the container geometry and
+/// layout computer. Per-child rules index this array instead of recomputing
+/// placement independently.
 struct LayoutChildGeometries: Rule, AsyncAttribute {
     typealias Value = [ViewGeometry]
-    var parentSize: Attribute<ViewSize>
-    var parentPosition: Attribute<CGPoint>
-    var layoutComputer: Attribute<LayoutComputer>
+
+    var _parentSize: Attribute<ViewSize>
+    var _parentPosition: Attribute<CGPoint>
+    var _layoutComputer: Attribute<LayoutComputer>
+
+    init(
+        parentSize: Attribute<ViewSize>,
+        parentPosition: Attribute<CGPoint>,
+        layoutComputer: Attribute<LayoutComputer>
+    ) {
+        _parentSize = parentSize
+        _parentPosition = parentPosition
+        _layoutComputer = layoutComputer
+    }
+
     var value: [ViewGeometry] {
-        let lc = layoutComputer.value
-        return lc.childGeometries(
-            at: parentSize.value,
-            origin: parentPosition.value
+        let layoutComputer = _layoutComputer.value
+        return layoutComputer.childGeometries(
+            at: _parentSize.value,
+            origin: _parentPosition.value
         )
     }
 }
 
-/// AG Rule: extracts one ViewGeometry from the LayoutChildGeometries output by index.
-/// Position and size projections are created with makeRule closures.
+/// Selects one child geometry from the aggregate placement result. Position
+/// and size remain direct projections of this same value, preserving their
+/// shared invalidation boundary.
 private struct LayoutChildGeometry: Rule, AsyncAttribute {
     typealias Value = ViewGeometry
-    var geometriesAttr: Attribute<[ViewGeometry]>
+
+    var _childGeometries: Attribute<[ViewGeometry]>
     var index: Int
+
     var value: ViewGeometry {
-        let geoms = geometriesAttr.value
-        precondition(index >= 0 && index < geoms.count)
-        return geoms[index]
+        let childGeometries = _childGeometries.value
+        precondition(
+            index >= 0 && index < childGeometries.count
+        )
+        return childGeometries[index]
     }
 }
 
@@ -253,14 +271,16 @@ struct ScrollableItemIdentifier<Index: Hashable>: Rule {
     }
 }
 
-/// StatefulRule: produces LayoutComputer wrapping ViewLayoutEngine<L> for a static child list.
-/// Re-fires when layoutAttr changes (e.g. animating spacing). Child LC deps are tracked
-/// downstream by LayoutChildGeometries (which calls childGeometries via ViewLayoutEngine).
+/// Produces the layout computer for a static child list. The rule is installed
+/// before child enumeration and receives the collected child attributes
+/// afterward, allowing each child to consume projections of the aggregate
+/// placement result without introducing an independent placement owner.
 private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, CustomStringConvertible {
     typealias Value = LayoutComputer
-    var layoutAttr: Attribute<L>
-    var environment: Attribute<EnvironmentValues>
-    var children: [LayoutProxyAttributes]
+
+    var _layout: Attribute<L>
+    var _environment: Attribute<EnvironmentValues>
+    var childAttributes: [LayoutProxyAttributes]
 
     var description: String {
         "\(L.self) → LayoutComputer"
@@ -268,9 +288,9 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, Cu
 
     mutating func updateValue() {
         updateLayoutComputer(
-            layout: layoutAttr.value,
-            environment: environment,
-            attributes: children
+            layout: _layout.value,
+            environment: _environment,
+            attributes: childAttributes
         )
     }
 }
@@ -1542,18 +1562,9 @@ public protocol Layout: Sendable, Animatable {
 }
 
 extension Layout {
-    /// Generic implementation of `_makeLayoutView` that works for any `Layout` type.
-    ///
-    /// Algorithm:
-    /// 1. Calls `body(_Graph(), inputs)` to wire the content's AG nodes and obtain
-    ///    `_ViewListOutputs` containing per-child `ViewProxy` values.
-    /// 2. For each child proxy, creates a per-child position `Attribute<CGPoint>` and
-    ///    calls `proxy.makeView` with child-specific inputs to get `_ViewOutputs`.
-    /// 3. Creates an `Attribute<LayoutComputer>` rule that:
-    ///    - reads the layout configuration from `root._attribute` (registers dependency),
-    ///    - reads each child's LayoutComputer attribute (registers re-layout dependency),
-    ///    - builds `LayoutSubviews` and returns a `LayoutComputer` with sizing and
-    ///      placement closures that delegate to the concrete `Layout` protocol methods.
+    /// Builds either the static or dynamic layout graph while keeping
+    /// measurement, aggregate placement, and per-child geometry in their
+    /// distinct rule owners.
     public static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeLayoutView called outside an active _AGGraph context.")
@@ -1601,9 +1612,9 @@ extension Layout {
 
             let staticLCAttr: Attribute<LayoutComputer> = graph.makeStatefulRule(
                 StaticLayoutComputer(
-                    layoutAttr: root._attribute,
-                    environment: environment,
-                    children: [],
+                    _layout: root._attribute,
+                    _environment: environment,
+                    childAttributes: [],
                 )
             )
             let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
@@ -1619,7 +1630,7 @@ extension Layout {
             elements.makeElements(from: &from, inputs: layoutInputs, indirectMap: nil) { elementInputs, makeView in
                 let geometry = graph.makeRule(
                     LayoutChildGeometry(
-                        geometriesAttr: childGeometries,
+                        _childGeometries: childGeometries,
                         index: childIndex
                     )
                 )
@@ -1632,14 +1643,11 @@ extension Layout {
                 childInputs[LayoutPlacementStateInput.self] = OptionalAttribute(
                     graph.makeRule(LayoutGeometryPlacementState(geometry: geometry))
                 )
-                let posAttr = graph.subscriptNode(
-                    parent: geometry,
-                    keyPath: \ViewGeometry.origin
-                )
-                let sizeAttr = graph.subscriptNode(
-                    parent: geometry,
-                    keyPath: \ViewGeometry.dimensions.size
-                )
+                // Both child inputs project from the same geometry rule so a
+                // placement update cannot publish independently recomputed
+                // position and size values.
+                let posAttr = geometry.origin()
+                let sizeAttr = geometry.size()
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
@@ -1673,7 +1681,7 @@ extension Layout {
                 as: StaticLayoutComputer<Self>.self,
                 invalidating: true
             ) {
-                $0.children = childProxyAttrs
+                $0.childAttributes = childProxyAttrs
             }
             layoutComputerAttr = staticLCAttr
             mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)

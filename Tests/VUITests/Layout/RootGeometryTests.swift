@@ -297,6 +297,53 @@ final class RootGeometryTests: XCTestCase {
         }
     }
 
+    func testStaticLayoutChildGeometryUsesSharedOffsetProjections() throws {
+        let capture = RootGeometryPlacementCapture()
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: RootGeometryPlacementRoot.self,
+            content: RootGeometryPlacementRoot(capture: capture),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+
+        try viewGraph.data.withCurrent {
+            try XCTUnwrap(viewGraph.sizeAttr).setValue(
+                ViewSize(CGSize(width: 100, height: 80))
+            )
+
+            let position = try XCTUnwrap(capture.position)
+            let size = try XCTUnwrap(capture.size)
+            let graph = viewGraph.data.graph
+            let positionDescription = graph.debugDescription(
+                for: position.identifier
+            )
+            let sizeDescription = graph.debugDescription(
+                for: size.identifier
+            )
+
+            XCTAssertTrue(positionDescription.hasSuffix(" + 0)"))
+            XCTAssertTrue(sizeDescription.hasSuffix(" + 32)"))
+
+            func offsetParent(in description: String) -> Substring? {
+                guard let marker = description.range(of: "(offset: @") else {
+                    return nil
+                }
+                return description[marker.upperBound...]
+                    .split(separator: " ")
+                    .first
+            }
+            let positionParent = try XCTUnwrap(
+                offsetParent(in: positionDescription)
+            )
+            let sizeParent = try XCTUnwrap(
+                offsetParent(in: sizeDescription)
+            )
+            XCTAssertEqual(positionParent, sizeParent)
+        }
+    }
+
     private func makeViewGraph(
         rootSize: CGSize,
         proposedSize: CGSize,
