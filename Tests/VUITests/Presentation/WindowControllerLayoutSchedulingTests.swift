@@ -239,6 +239,121 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testSettledLayoutSkipsMeasurementAndResizeReusesChildSizes() throws {
+        let counter = LayoutMeasurementCounter()
+        let probe = LayoutMeasurementProbe()
+        let controller = WindowController(
+            content: LayoutMeasurementRoot(counter: counter, probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutMeasurementRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Layout measurement should not request graphics resources.")
+        }
+
+        func sample() -> LayoutMeasurementCounts {
+            counter.snapshot()
+        }
+
+        let constructed = sample()
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 320, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+        let cold = sample()
+
+        redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 320, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+        let warm = sample()
+
+        try XCTUnwrap(probe.changeLayoutValue)()
+        redraw = false
+        controller.updateView(
+            tick: 2,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(2.0 / 60.0),
+            contentSize: CGSize(width: 320, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+        let layoutValue = sample()
+
+        try XCTUnwrap(probe.toggleVisual)()
+        redraw = false
+        controller.updateView(
+            tick: 3,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(3.0 / 60.0),
+            contentSize: CGSize(width: 320, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+        let visual = sample()
+
+        redraw = false
+        controller.updateView(
+            tick: 4,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(4.0 / 60.0),
+            contentSize: CGSize(width: 360, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+        let resized = sample()
+
+        XCTAssertEqual(constructed, .zero)
+        XCTAssertEqual(
+            cold - constructed,
+            LayoutMeasurementCounts(
+                makeCache: 1,
+                updateCache: 0,
+                sizeThatFits: 1,
+                placeSubviews: 1,
+                leafSizeThatFits: 4,
+                leafPlaceSubviews: 2
+            )
+        )
+        XCTAssertEqual(warm - cold, .zero)
+        XCTAssertEqual(
+            layoutValue - warm,
+            LayoutMeasurementCounts(
+                makeCache: 0,
+                updateCache: 1,
+                sizeThatFits: 1,
+                placeSubviews: 1,
+                leafSizeThatFits: 0,
+                leafPlaceSubviews: 0
+            )
+        )
+        XCTAssertEqual(visual - layoutValue, .zero)
+        XCTAssertEqual(
+            resized - visual,
+            LayoutMeasurementCounts(
+                makeCache: 0,
+                updateCache: 0,
+                sizeThatFits: 0,
+                placeSubviews: 1,
+                leafSizeThatFits: 0,
+                leafPlaceSubviews: 2
+            )
+        )
+    }
+
+    @MainActor
     func testScheduledAnimationUpdateSamplesIntermediateBounds() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -281,7 +396,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let targetPlacements = counter.placements
-        XCTAssertGreaterThan(targetPlacements, initialPlacements)
+        XCTAssertEqual(targetPlacements - initialPlacements, 1)
 
         redraw = false
         controller.updateView(
@@ -294,6 +409,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let sampledBounds = try displayBounds(in: controller)
+        XCTAssertEqual(counter.placements - targetPlacements, 1)
         XCTAssertTrue(redraw)
         XCTAssertNotEqual(sampledBounds, initialBounds)
     }
@@ -5419,6 +5535,170 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
 private final class LayoutSchedulingCounter: @unchecked Sendable {
     var placements = 0
+}
+
+private struct LayoutMeasurementCounts: Equatable, AdditiveArithmetic {
+    var makeCache = 0
+    var updateCache = 0
+    var sizeThatFits = 0
+    var placeSubviews = 0
+    var leafSizeThatFits = 0
+    var leafPlaceSubviews = 0
+
+    static func + (
+        lhs: LayoutMeasurementCounts,
+        rhs: LayoutMeasurementCounts
+    ) -> LayoutMeasurementCounts {
+        LayoutMeasurementCounts(
+            makeCache: lhs.makeCache + rhs.makeCache,
+            updateCache: lhs.updateCache + rhs.updateCache,
+            sizeThatFits: lhs.sizeThatFits + rhs.sizeThatFits,
+            placeSubviews: lhs.placeSubviews + rhs.placeSubviews,
+            leafSizeThatFits: lhs.leafSizeThatFits + rhs.leafSizeThatFits,
+            leafPlaceSubviews: lhs.leafPlaceSubviews + rhs.leafPlaceSubviews
+        )
+    }
+
+    static func - (
+        lhs: LayoutMeasurementCounts,
+        rhs: LayoutMeasurementCounts
+    ) -> LayoutMeasurementCounts {
+        LayoutMeasurementCounts(
+            makeCache: lhs.makeCache - rhs.makeCache,
+            updateCache: lhs.updateCache - rhs.updateCache,
+            sizeThatFits: lhs.sizeThatFits - rhs.sizeThatFits,
+            placeSubviews: lhs.placeSubviews - rhs.placeSubviews,
+            leafSizeThatFits: lhs.leafSizeThatFits - rhs.leafSizeThatFits,
+            leafPlaceSubviews: lhs.leafPlaceSubviews - rhs.leafPlaceSubviews
+        )
+    }
+
+    static let zero = LayoutMeasurementCounts()
+}
+
+private final class LayoutMeasurementCounter: @unchecked Sendable {
+    var counts = LayoutMeasurementCounts()
+
+    func snapshot() -> LayoutMeasurementCounts {
+        counts
+    }
+}
+
+private final class LayoutMeasurementProbe {
+    var toggleVisual: (() -> Void)?
+    var changeLayoutValue: (() -> Void)?
+}
+
+private final class LayoutMeasurementCache: @unchecked Sendable {}
+
+private struct LayoutMeasurementContainer: Layout {
+    let counter: LayoutMeasurementCounter
+    var revision: Int
+
+    func makeCache(subviews: Subviews) -> LayoutMeasurementCache {
+        counter.counts.makeCache += 1
+        return LayoutMeasurementCache()
+    }
+
+    func updateCache(
+        _ cache: inout LayoutMeasurementCache,
+        subviews: Subviews
+    ) {
+        counter.counts.updateCache += 1
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout LayoutMeasurementCache
+    ) -> CGSize {
+        counter.counts.sizeThatFits += 1
+        var result = CGSize.zero
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            result.width = max(result.width, size.width)
+            result.height += size.height
+        }
+        return result
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout LayoutMeasurementCache
+    ) {
+        counter.counts.placeSubviews += 1
+        var y = bounds.minY
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            y += size.height
+        }
+    }
+}
+
+private struct LayoutMeasurementLeaf: Layout {
+    let counter: LayoutMeasurementCounter
+    let size: CGSize
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        counter.counts.leafSizeThatFits += 1
+        return size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        counter.counts.leafPlaceSubviews += 1
+    }
+}
+
+private struct LayoutMeasurementRoot: View {
+    let counter: LayoutMeasurementCounter
+    let probe: LayoutMeasurementProbe
+    @State private var visualToggle = false
+    @State private var revision = 0
+
+    var body: some View {
+        probe.toggleVisual = {
+            visualToggle.toggle()
+        }
+        probe.changeLayoutValue = {
+            revision += 1
+        }
+        return LayoutMeasurementContainer(
+            counter: counter,
+            revision: revision
+        ) {
+            LayoutMeasurementLeaf(
+                counter: counter,
+                size: CGSize(width: 44, height: 18)
+            ) {
+                Color.clear
+            }
+            LayoutMeasurementLeaf(
+                counter: counter,
+                size: CGSize(width: 52, height: 20)
+            ) {
+                Color.clear
+            }
+        }
+        .frame(width: 120, height: 120, alignment: .topLeading)
+        .background(visualToggle ? Color.blue.opacity(0.08) : Color.clear)
+        .frame(width: 320, height: 180, alignment: .topLeading)
+    }
 }
 
 private struct LayoutSchedulingRoot: View {
