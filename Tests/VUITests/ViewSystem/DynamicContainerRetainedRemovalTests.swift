@@ -129,7 +129,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertGreaterThan(initial.items.first?.subgraph.nodes.count ?? 0, 0)
         }
 
@@ -149,7 +149,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(retained.removedCount, 1)
                 XCTAssertEqual(retained.unusedCount, 0)
                 let item = try XCTUnwrap(retained.items.first)
-                XCTAssertEqual(item.phase, 2)
+                XCTAssertEqual(item.phase, .didDisappear)
                 XCTAssertNotNil(item.listener)
                 XCTAssertFalse(try XCTUnwrap(item.listener).isComplete)
                 XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
@@ -206,7 +206,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
         }
 
@@ -224,7 +224,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.activeItems.count, 0)
             XCTAssertEqual(retained.removedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertEqual(removalEvents, [])
             XCTAssertEqual(lifecycleEvents, ["row appear"])
@@ -284,7 +284,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             if let layout = initial.items.first?.outputs._layoutComputer.attribute?.value {
                 _ = layout.sizeThatFits(.unspecified)
             }
@@ -308,7 +308,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(retained.activeItems.count, 0)
                 XCTAssertEqual(retained.removedCount, 1)
                 let item = try XCTUnwrap(retained.items.first)
-                XCTAssertEqual(item.phase, 2)
+                XCTAssertEqual(item.phase, .didDisappear)
                 XCTAssertNotNil(item.listener)
                 XCTAssertFalse(try XCTUnwrap(item.listener).isComplete)
                 XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
@@ -403,7 +403,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(recorder.events, ["row appear"])
             XCTAssertNotNil(animatableSource)
             XCTAssertNotNil(animatedValue)
@@ -463,7 +463,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.activeItems.count, 0)
             XCTAssertEqual(retained.removedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertEqual(recorder.events, ["row appear"])
             return item
@@ -540,7 +540,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
         }
 
@@ -558,7 +558,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(info.removedCount, 1)
                 retainedItem = try XCTUnwrap(info.items.first)
                 retainedListener = try XCTUnwrap(retainedItem.listener)
-                XCTAssertEqual(retainedItem.phase, 2)
+                XCTAssertEqual(retainedItem.phase, .didDisappear)
                 XCTAssertFalse(retainedListener.isComplete)
                 XCTAssertEqual(lifecycleEvents, ["row appear"])
             }
@@ -585,7 +585,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(info.unusedCount, 0)
                 let reinserted = try XCTUnwrap(info.items.first)
                 XCTAssertTrue(reinserted === retainedItem)
-                XCTAssertEqual(reinserted.phase, 1)
+                XCTAssertEqual(reinserted.phase, .identity)
                 XCTAssertNil(reinserted.listener)
                 XCTAssertGreaterThan(reinserted.subgraph.nodes.count, 0)
                 XCTAssertEqual(lifecycleEvents, ["row appear"])
@@ -1217,7 +1217,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
                 let initial = infoAttr.value
                 XCTAssertEqual(initial.activeItems.count, 1)
-                XCTAssertEqual(initial.activeItems.first?.phase, 1)
+                XCTAssertEqual(initial.activeItems.first?.phase, .identity)
             }
         }
 
@@ -1230,7 +1230,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(updated.removedCount, 1)
             let inserted = try XCTUnwrap(updated.activeItems.first)
             XCTAssertTrue(inserted.needsTransitions)
-            XCTAssertEqual(inserted.phase, 0)
+            XCTAssertEqual(inserted.phase, .willAppear)
             XCTAssertFalse(inserted.transitionPhaseSetters.isEmpty)
             let removed = try XCTUnwrap(updated.activeAndRemovedItems.last)
             XCTAssertEqual(inserted.precedingViewCount, 0)
@@ -1384,7 +1384,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
                 let initial = infoAttr.value
                 XCTAssertEqual(initial.activeItems.count, 1)
-                return try XCTUnwrap(initial.activeItems.first)
+                let item = try XCTUnwrap(initial.activeItems.first)
+                // ASSERTIONS dynamicLayoutStateOwnershipObserved
+                XCTAssertEqual(item.uniqueId, 1)
+                return item
             }
         }
 
@@ -1395,6 +1398,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             let removedTrueBranch = infoAttr.value
             XCTAssertEqual(removedTrueBranch.activeItems.count, 1)
             XCTAssertEqual(removedTrueBranch.removedCount, 1)
+            XCTAssertEqual(removedTrueBranch.activeItems.first?.uniqueId, 2)
             XCTAssertTrue(removedTrueBranch.items.last === initialItem)
 
             source.setValue(root(showChild: true), transaction: replacement)
@@ -1404,6 +1408,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinserted.activeItems.count, 1)
             XCTAssertEqual(reinserted.removedCount, 1)
             XCTAssertTrue(reinserted.activeItems.first === initialItem)
+            XCTAssertEqual(reinserted.activeItems.first?.uniqueId, 1)
             XCTAssertEqual(
                 Set(reinserted.items.map(\.uniqueId)).count,
                 reinserted.items.count,
@@ -1923,7 +1928,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 let initial = infoAttr.value
                 XCTAssertEqual(initial.activeItems.count, 1)
                 XCTAssertEqual(initial.removedCount, 0)
-                XCTAssertEqual(initial.items.first?.phase, 1)
+                XCTAssertEqual(initial.items.first?.phase, .identity)
                 XCTAssertEqual(recorder.events, ["row appear"])
             }
         }
@@ -1943,7 +1948,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 1)
             XCTAssertEqual(retained.unusedCount, 0)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(removalEvents, [])
@@ -2458,7 +2463,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 2)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.map(\.phase), [1, 1])
+            XCTAssertEqual(initial.items.map(\.phase), [.identity, .identity])
         }
 
         let retainedItems = try Update.ensure {
@@ -2476,9 +2481,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(retained.activeItems.count, 0)
                 XCTAssertEqual(retained.removedCount, 2)
                 XCTAssertEqual(retained.unusedCount, 0)
-                XCTAssertEqual(retained.items.map(\.phase), [2, 2])
+                XCTAssertEqual(retained.items.map(\.phase), [.didDisappear, .didDisappear])
                 XCTAssertEqual(
-                    retained.items.map { $0.uniqueId.explicitID as? String },
+                    retained.items.map { $0.sourceID.explicitID as? String },
                     ["first", "second"]
                 )
                 for item in retained.items {
@@ -2530,7 +2535,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertTrue(initial.items.first?.needsTransitions == true)
         }
 
@@ -2542,7 +2547,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             return item
@@ -2626,7 +2631,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
         }
 
@@ -2638,7 +2643,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
@@ -2667,7 +2672,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinsertedInfo.unusedCount, 0)
             let reinserted = try XCTUnwrap(reinsertedInfo.items.first)
             XCTAssertTrue(reinserted === unusedItem)
-            XCTAssertEqual(reinserted.phase, 1)
+            XCTAssertEqual(reinserted.phase, .identity)
             XCTAssertNil(reinserted.listener)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear", "row appear"])
 
@@ -2713,7 +2718,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 1)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
             XCTAssertEqual(delegate.events, [])
         }
@@ -2726,7 +2731,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
             XCTAssertEqual(delegate.events, [])
             return item
@@ -2754,7 +2759,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinsertedInfo.unusedCount, 0)
             let reinserted = try XCTUnwrap(reinsertedInfo.items.first)
             XCTAssertTrue(reinserted === unusedItem)
-            XCTAssertEqual(reinserted.phase, 1)
+            XCTAssertEqual(reinserted.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear", "row appear"])
             XCTAssertEqual(delegate.events, ["change"])
 
@@ -2789,7 +2794,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
             XCTAssertEqual(
-                initial.items.map { $0.uniqueId.explicitID as? String },
+                initial.items.map { $0.sourceID.explicitID as? String },
                 ["first", "second"]
             )
         }
@@ -2805,10 +2810,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.uniqueId.explicitID as? String },
+                retained.items.map { $0.sourceID.explicitID as? String },
                 ["second", "first"]
             )
-            XCTAssertEqual(retained.items.map(\.phase), [1, 3])
+            XCTAssertEqual(retained.items.map(\.phase), [.identity, nil])
             let unused = try XCTUnwrap(retained.items.last)
             XCTAssertNil(unused.listener)
             XCTAssertGreaterThan(unused.subgraph.nodes.count, 0)
@@ -2823,8 +2828,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let newestUnused = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(newestUnused.uniqueId.explicitID as? String, "second")
-            XCTAssertEqual(newestUnused.phase, 3)
+            XCTAssertEqual(newestUnused.sourceID.explicitID as? String, "second")
+            XCTAssertNil(newestUnused.phase)
             XCTAssertNil(newestUnused.listener)
             XCTAssertGreaterThan(newestUnused.subgraph.nodes.count, 0)
             XCTAssertEqual(firstUnused.subgraph.nodes.count, 0)
@@ -2854,7 +2859,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
             let initial = infoAttr.value
             XCTAssertEqual(initial.activeItems.count, 2)
-            XCTAssertEqual(initial.items.map(\.phase), [1, 1])
+            XCTAssertEqual(initial.items.map(\.phase), [.identity, .identity])
         }
 
         let firstUnused = try ref.withCurrent {
@@ -2868,10 +2873,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.uniqueId.explicitID as? String },
+                retained.items.map { $0.sourceID.explicitID as? String },
                 ["second", "first"]
             )
-            XCTAssertEqual(retained.items.map(\.phase), [1, 3])
+            XCTAssertEqual(retained.items.map(\.phase), [.identity, nil])
             let unused = try XCTUnwrap(retained.items.last)
             XCTAssertGreaterThan(unused.subgraph.nodes.count, 0)
             return unused
@@ -2889,10 +2894,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 1)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.uniqueId.explicitID as? String },
+                retained.items.map { $0.sourceID.explicitID as? String },
                 ["second", "first"]
             )
-            XCTAssertEqual(retained.items.map(\.phase), [2, 3])
+            XCTAssertEqual(retained.items.map(\.phase), [.didDisappear, nil])
             let removed = try XCTUnwrap(retained.items.first)
             XCTAssertNotNil(removed.listener)
             XCTAssertGreaterThan(removed.subgraph.nodes.count, 0)
@@ -2912,8 +2917,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(finalized.removedCount, 0)
             XCTAssertEqual(finalized.unusedCount, 1)
             let retainedUnused = try XCTUnwrap(finalized.items.first)
-            XCTAssertEqual(retainedUnused.uniqueId.explicitID as? String, "first")
-            XCTAssertEqual(retainedUnused.phase, 3)
+            XCTAssertEqual(retainedUnused.sourceID.explicitID as? String, "first")
+            XCTAssertNil(retainedUnused.phase)
             XCTAssertEqual(secondRemoved.subgraph.nodes.count, 0)
             XCTAssertGreaterThan(firstUnused.subgraph.nodes.count, 0)
         }
@@ -2959,7 +2964,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
         }
 
@@ -2971,7 +2976,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
@@ -2991,7 +2996,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.unusedCount, 0)
             let item = try XCTUnwrap(retained.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
             XCTAssertEqual(removalEvents, [])
@@ -3056,7 +3061,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(lifecycleEvents, ["row appear"])
         }
 
@@ -3068,7 +3073,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
@@ -3088,7 +3093,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.unusedCount, 0)
             let item = try XCTUnwrap(retained.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
             XCTAssertEqual(removalEvents, [])
@@ -3108,7 +3113,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear"])
@@ -3136,7 +3141,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinserted.unusedCount, 0)
             let item = try XCTUnwrap(reinserted.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, 1)
+            XCTAssertEqual(item.phase, .identity)
             XCTAssertEqual(
                 lifecycleEvents,
                 ["row appear", "row disappear", "row appear"]
@@ -3251,7 +3256,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1)
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
-            XCTAssertEqual(initial.items.first?.phase, 1)
+            XCTAssertEqual(initial.items.first?.phase, .identity)
             XCTAssertEqual(recorder.events, ["row appear"])
             XCTAssertNotNil(animatableSource)
             XCTAssertNotNil(animatedValue)
@@ -3304,7 +3309,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let item = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(item.phase, 3)
+            XCTAssertNil(item.phase)
             XCTAssertNil(item.listener)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0)
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
@@ -3327,7 +3332,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.unusedCount, 0)
             let item = try XCTUnwrap(retained.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, 2)
+            XCTAssertEqual(item.phase, .didDisappear)
             XCTAssertNotNil(item.listener)
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
             return item
@@ -3479,7 +3484,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.activeItems.count, 1, file: file, line: line)
             XCTAssertEqual(initial.removedCount, 0, file: file, line: line)
             XCTAssertEqual(initial.unusedCount, 0, file: file, line: line)
-            XCTAssertEqual(initial.items.first?.phase, 1, file: file, line: line)
+            XCTAssertEqual(initial.items.first?.phase, .identity, file: file, line: line)
             XCTAssertEqual(recorder.events, ["row appear"], file: file, line: line)
             XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001, file: file, line: line)
         }
@@ -3509,7 +3514,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0, file: file, line: line)
             XCTAssertEqual(retained.unusedCount, 1, file: file, line: line)
             let item = try XCTUnwrap(retained.items.first, file: file, line: line)
-            XCTAssertEqual(item.phase, 3, file: file, line: line)
+            XCTAssertNil(item.phase, file: file, line: line)
             XCTAssertNil(item.listener, file: file, line: line)
             XCTAssertGreaterThan(item.subgraph.nodes.count, 0, file: file, line: line)
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"], file: file, line: line)
@@ -3531,7 +3536,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.unusedCount, 0, file: file, line: line)
             let item = try XCTUnwrap(retained.items.first, file: file, line: line)
             XCTAssertTrue(item === unusedItem, file: file, line: line)
-            XCTAssertEqual(item.phase, 2, file: file, line: line)
+            XCTAssertEqual(item.phase, .didDisappear, file: file, line: line)
             XCTAssertNotNil(item.listener, file: file, line: line)
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"], file: file, line: line)
             return item
@@ -3659,10 +3664,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
-            let activeLow = makeDisplayMapItem(id: "active-low", zIndex: 0, phase: 1)
-            let activeHigh = makeDisplayMapItem(id: "active-high", zIndex: 8, phase: 1)
-            let activeMiddle = makeDisplayMapItem(id: "active-middle", zIndex: 4, phase: 1)
-            let removed = makeDisplayMapItem(id: "removed", zIndex: 3, phase: 2)
+            let activeLow = makeDisplayMapItem(id: "active-low", zIndex: 0, phase: .identity)
+            let activeHigh = makeDisplayMapItem(id: "active-high", zIndex: 8, phase: .identity)
+            let activeMiddle = makeDisplayMapItem(id: "active-middle", zIndex: 4, phase: .identity)
+            let removed = makeDisplayMapItem(id: "removed", zIndex: 3, phase: .didDisappear)
 
             info.replaceItems(
                 active: [activeLow, activeHigh, activeMiddle],
@@ -3690,25 +3695,25 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 id: "active-a",
                 viewCount: 2,
                 zIndex: 0,
-                phase: 1
+                phase: .identity
             )
             let activeB = makeDisplayMapItem(
                 id: "active-b",
                 viewCount: 1,
                 zIndex: 0,
-                phase: 1
+                phase: .identity
             )
             let removed = makeDisplayMapItem(
                 id: "removed",
                 viewCount: 3,
                 zIndex: 0,
-                phase: 2
+                phase: .didDisappear
             )
             let unused = makeDisplayMapItem(
                 id: "unused",
                 viewCount: 2,
                 zIndex: 0,
-                phase: 3
+                phase: nil
             )
 
             info.replaceItems(
@@ -3730,10 +3735,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
-            let activeA = makeDisplayMapItem(id: "active-a", zIndex: 0, phase: 1)
-            let activeB = makeDisplayMapItem(id: "active-b", zIndex: 0, phase: 1)
-            let removedA = makeDisplayMapItem(id: "removed-a", zIndex: 0, phase: 2)
-            let removedB = makeDisplayMapItem(id: "removed-b", zIndex: 0, phase: 2)
+            let activeA = makeDisplayMapItem(id: "active-a", zIndex: 0, phase: .identity)
+            let activeB = makeDisplayMapItem(id: "active-b", zIndex: 0, phase: .identity)
+            let removedA = makeDisplayMapItem(id: "removed-a", zIndex: 0, phase: .didDisappear)
+            let removedB = makeDisplayMapItem(id: "removed-b", zIndex: 0, phase: .didDisappear)
 
             info.replaceItems(
                 active: [activeA, activeB],
@@ -3754,8 +3759,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
-            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
-            let unusedHigh = makeDisplayMapItem(id: "unused-high", zIndex: 8, phase: 3)
+            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: .identity)
+            let unusedHigh = makeDisplayMapItem(id: "unused-high", zIndex: 8, phase: nil)
 
             info.replaceItems(
                 active: [activeZero],
@@ -3775,10 +3780,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
-            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
-            let activeSameA = makeDisplayMapItem(id: "active-same-a", zIndex: 5, phase: 1)
-            let activeSameB = makeDisplayMapItem(id: "active-same-b", zIndex: 5, phase: 1)
-            let removedSame = makeDisplayMapItem(id: "removed-same", zIndex: 5, phase: 2)
+            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: .identity)
+            let activeSameA = makeDisplayMapItem(id: "active-same-a", zIndex: 5, phase: .identity)
+            let activeSameB = makeDisplayMapItem(id: "active-same-b", zIndex: 5, phase: .identity)
+            let removedSame = makeDisplayMapItem(id: "removed-same", zIndex: 5, phase: .didDisappear)
 
             info.replaceItems(
                 active: [activeZero, activeSameA, activeSameB],
@@ -3799,11 +3804,11 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         let ref = _AGGraphContext(graph: graph)
         ref.withCurrent {
             var info = DynamicContainer.Info()
-            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: 1)
-            let activeMiddle = makeDisplayMapItem(id: "active-middle", zIndex: 4, phase: 1)
-            let activeHigh = makeDisplayMapItem(id: "active-high", zIndex: 8, phase: 1)
-            let removedLow = makeDisplayMapItem(id: "removed-low", zIndex: 3, phase: 2)
-            let removedHigh = makeDisplayMapItem(id: "removed-high", zIndex: 7, phase: 2)
+            let activeZero = makeDisplayMapItem(id: "active-zero", zIndex: 0, phase: .identity)
+            let activeMiddle = makeDisplayMapItem(id: "active-middle", zIndex: 4, phase: .identity)
+            let activeHigh = makeDisplayMapItem(id: "active-high", zIndex: 8, phase: .identity)
+            let removedLow = makeDisplayMapItem(id: "removed-low", zIndex: 3, phase: .didDisappear)
+            let removedHigh = makeDisplayMapItem(id: "removed-high", zIndex: 7, phase: .didDisappear)
 
             info.replaceItems(
                 active: [activeZero, activeMiddle, activeHigh],
@@ -3822,7 +3827,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             case animationsDisabled
         }
 
-        func insertedPhase(_ mode: Mode) throws -> UInt8 {
+        func insertedPhase(_ mode: Mode) throws -> TransitionPhase? {
             let rendererHost = TestViewRendererHost()
             let viewGraph = ViewGraph(
                 rootViewType: EmptyView.self,
@@ -3876,9 +3881,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(try insertedPhase(.enabled), 0)
-        XCTAssertEqual(try insertedPhase(.resetSeedChanged), 1)
-        XCTAssertEqual(try insertedPhase(.animationsDisabled), 1)
+        XCTAssertEqual(try insertedPhase(.enabled), .willAppear)
+        XCTAssertEqual(try insertedPhase(.resetSeedChanged), .identity)
+        XCTAssertEqual(try insertedPhase(.animationsDisabled), .identity)
         // ASSERTIONS dynamicContainerInsertionContinuationDisassemblyObserved
     }
 
@@ -4235,13 +4240,18 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         id: String,
         viewCount: Int = 1,
         zIndex: Double,
-        phase: UInt8
+        phase: TransitionPhase?
     ) -> DynamicContainer.ItemInfo {
-        DynamicContainer.ItemInfo(
+        let sourceID = _ViewList_ID(explicitID: AnyHashable(id)).canonicalID
+        let uniqueId = id.utf8.reduce(UInt32(2_166_136_261)) {
+            ($0 ^ UInt32($1)) &* 16_777_619
+        }
+        return DynamicContainer.ItemInfo(
             subgraph: AGSubgraph(),
-            uniqueId: _ViewList_ID(explicitID: AnyHashable(id)).canonicalID,
-            viewCount: viewCount,
+            uniqueId: uniqueId,
+            viewCount: Int32(viewCount),
             outputs: _ViewOutputs(),
+            sourceID: sourceID,
             layoutAttributes: [],
             preferenceOutputs: [],
             zIndex: zIndex,

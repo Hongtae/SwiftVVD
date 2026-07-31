@@ -4340,15 +4340,17 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 fatalError("Geometry construction is outside this identity-only test.")
             }
             let rowID = _ViewList_ID(explicitID: AnyHashable("row")).canonicalID
+            let uniqueId: UInt32 = 1
             let recoveredIndex = AnyHashable(3)
 
-            XCTAssertNil(context.identifier(for: rowID))
+            XCTAssertNil(context.identifier(for: uniqueId))
 
             let item = DynamicContainer.ItemInfo(
                 subgraph: AGSubgraph(),
-                uniqueId: rowID,
+                uniqueId: uniqueId,
                 viewCount: 1,
                 outputs: _ViewOutputs(),
+                sourceID: rowID,
                 layoutAttributes: [],
                 preferenceOutputs: [],
                 item: recoveredIndex
@@ -4357,8 +4359,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             info.replaceItems(active: [item])
             context.containerInfo = graph.makeInput(value: info)
 
-            XCTAssertEqual(context.identifier(for: rowID), recoveredIndex)
-            XCTAssertNil(context.identifier(for: _ViewList_ID(explicitID: AnyHashable("missing")).canonicalID))
+            XCTAssertEqual(context.identifier(for: uniqueId), recoveredIndex)
+            XCTAssertNil(context.identifier(for: uniqueId + 1))
         }
     }
 

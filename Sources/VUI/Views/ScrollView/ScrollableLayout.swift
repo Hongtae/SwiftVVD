@@ -2746,7 +2746,7 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
     }
 
     func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
-        containerInfo.value.item(for: subgraph)?.uniqueId
+        containerInfo.value.item(for: subgraph)?.sourceID
     }
 
     func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {
