@@ -979,20 +979,11 @@ struct LazyLayoutComputer<LayoutType: LazyLayout>: StatefulRule, AsyncAttribute 
 /// Supplies geometry, visibility, and environment state to lazy placement.
 struct _LazyLayout_PlacementContext: LazyLayoutNamespace {
     /// Groups the geometry values shared by placement callbacks.
-    struct Geometry: Equatable {
-        var transform: ViewTransform
-        var layoutDirection: LayoutDirection
+    struct Geometry {
+        var scrollGeometry: ScrollGeometry
+        var nearestScrollGeometry: ScrollGeometry
+        var viewSize: CGSize
         var isAccessibilityEnabled: Bool
-
-        init(
-            transform: ViewTransform = ViewTransform(),
-            layoutDirection: LayoutDirection = .leftToRight,
-            isAccessibilityEnabled: Bool = false
-        ) {
-            self.transform = transform
-            self.layoutDirection = layoutDirection
-            self.isAccessibilityEnabled = isAccessibilityEnabled
-        }
     }
 
     var base: _LazyLayout_SizeAndSpacingContext
@@ -1010,47 +1001,114 @@ struct _LazyLayout_PlacementContext: LazyLayoutNamespace {
         pinnedViews: PinnedScrollableViews = [],
         isAccessibilityEnabled: Bool = false
     ) {
+        let viewSize = size.value
+        let fallbackGeometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: viewSize,
+            contentInsets: EdgeInsets(),
+            containerSize: viewSize,
+            visibleRect: CGRect(origin: .zero, size: viewSize)
+        )
+        // Resolve the containing and nearest windows independently so a
+        // transform that supplies only one does not erase the other fallback.
+        var scrollGeometry = transform.containingScrollGeometry ?? fallbackGeometry
+        var nearestScrollGeometry = transform.nearestScrollGeometry ?? fallbackGeometry
+
+        if layoutDirection == .rightToLeft {
+            // Mirror each visible window around the placement width while
+            // preserving its size and its nonhorizontal scroll state.
+            let previousOffset = scrollGeometry.contentOffset
+            let newOffsetX = viewSize.width - scrollGeometry.visibleRect.maxX
+            scrollGeometry = ScrollGeometry(
+                contentOffset: CGPoint(x: newOffsetX, y: previousOffset.y),
+                contentSize: scrollGeometry.contentSize,
+                contentInsets: scrollGeometry.contentInsets,
+                containerSize: scrollGeometry.containerSize,
+                visibleRect: scrollGeometry.visibleRect.offsetBy(
+                    dx: newOffsetX - previousOffset.x,
+                    dy: 0
+                )
+            )
+
+            let previousNearestOffset = nearestScrollGeometry.contentOffset
+            let newNearestOffsetX =
+                viewSize.width - nearestScrollGeometry.visibleRect.maxX
+            nearestScrollGeometry = ScrollGeometry(
+                contentOffset: CGPoint(
+                    x: newNearestOffsetX,
+                    y: previousNearestOffset.y
+                ),
+                contentSize: nearestScrollGeometry.contentSize,
+                contentInsets: nearestScrollGeometry.contentInsets,
+                containerSize: nearestScrollGeometry.containerSize,
+                visibleRect: nearestScrollGeometry.visibleRect.offsetBy(
+                    dx: newNearestOffsetX - previousNearestOffset.x,
+                    dy: 0
+                )
+            )
+        }
+
         self.base = base
         self.position = position
-        self.size = size.value
+        self.size = viewSize
         self.pinnedViews = pinnedViews
         self.geometry = Geometry(
-            transform: transform,
-            layoutDirection: layoutDirection,
+            scrollGeometry: scrollGeometry,
+            nearestScrollGeometry: nearestScrollGeometry,
+            viewSize: viewSize,
             isAccessibilityEnabled: isAccessibilityEnabled
         )
     }
 
-    var transform: ViewTransform {
-        geometry.transform
+    var nearestScrollGeometry: ScrollGeometry {
+        geometry.nearestScrollGeometry
     }
 
-    var layoutDirection: LayoutDirection {
-        geometry.layoutDirection
-    }
-
-    var isAccessibilityEnabled: Bool {
-        geometry.isAccessibilityEnabled
-    }
-
-    var unadjustedVisibleRect: CGRect {
-        CGRect(origin: position, size: size)
+    var containingScrollGeometry: ScrollGeometry {
+        geometry.scrollGeometry
     }
 
     var nearestVisibleRect: CGRect {
-        unadjustedVisibleRect
+        nearestScrollGeometry.visibleRect
+    }
+
+    var unadjustedVisibleRect: CGRect {
+        containingScrollGeometry.visibleRect
+    }
+
+    var containerSize: CGSize {
+        base.containerSize
+    }
+
+    var contentInsets: EdgeInsets {
+        nearestScrollGeometry.contentInsets
     }
 
     var containingVisibleRect: CGRect {
-        unadjustedVisibleRect
+        // Accessibility expansion is callback-local; the stored scroll state
+        // remains the unadjusted geometry used by the other accessors.
+        var geometry = containingScrollGeometry
+        if self.geometry.isAccessibilityEnabled {
+            geometry.outsetForAX(limit: self.geometry.viewSize)
+        }
+        return geometry.visibleRect
     }
 
     var clampedVisibleRect: CGRect {
-        unadjustedVisibleRect
+        containingVisibleRect.intersection(
+            CGRect(origin: .zero, size: size)
+        )
     }
 
     var allowsTranslations: Bool {
-        true
+        guard size.width != 0, size.height != 0 else {
+            return false
+        }
+        // Translation is useful only when the nearest viewport is displaced
+        // from an origin edge and leaves undisplayed extent toward an end edge.
+        let visibleRect = nearestVisibleRect
+        return (visibleRect.minX > 0 || visibleRect.minY > 0)
+            && (size.width > visibleRect.maxX || size.height > visibleRect.maxY)
     }
 }
 
@@ -1624,6 +1682,10 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
     var context: AnyRuleContext
     var data: Data
     var index: Int
+
+    var id: _ViewList_ID {
+        data.id
+    }
 
     init(
         cache: LazyLayoutViewCache,
@@ -3696,6 +3758,24 @@ private extension CGRect {
         let dy = midY - other.midY
         return (dx * dx + dy * dy).squareRoot()
     }
+
+    func distance(to point: CGPoint) -> CGFloat {
+        let dx = abs(point.x - midX) - width / 2
+        let dy = abs(point.y - midY) - height / 2
+        if min(dx, dy) > 0 {
+            return (dx * dx + dy * dy).squareRoot()
+        }
+        return max(dx, dy)
+    }
+
+    func distance(to other: CGRect, in axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal:
+            return abs(midX - other.midX) - (width + other.width) / 2
+        case .vertical:
+            return abs(midY - other.midY) - (height + other.height) / 2
+        }
+    }
 }
 
 /// Pairs a materialized cache item with its committed placement and list index.
@@ -3748,6 +3828,108 @@ struct _LazyLayout_PlacedSubview {
 }
 
 extension _LazyLayout_PlacedSubview: LazyLayoutNamespace {
+}
+
+private extension Array where Element == _LazyLayout_PlacedSubview {
+    func motionVectors(
+        closestTo targetIndex: Int,
+        in destination: [_LazyLayout_PlacedSubview],
+        avoiding avoidanceRect: CGRect,
+        distance: (CGRect, CGRect) -> CGFloat
+    ) -> (translation: CGSize, scale: CGSize)? {
+        var destinationIndices: [_ViewList_ID.Canonical: Int] = [:]
+        for (index, subview) in destination.enumerated() {
+            // Later entries deliberately replace earlier duplicate canonical
+            // identities, matching the destination array's final occurrence.
+            destinationIndices[subview.id.canonicalID] = index
+        }
+
+        let targetFrame = self[targetIndex].frame
+        var selectedDistance: CGFloat?
+        var selectedVector: (translation: CGSize, scale: CGSize)?
+
+        for sourceSubview in self {
+            guard let destinationIndex =
+                    destinationIndices[sourceSubview.id.canonicalID] else {
+                continue
+            }
+            let sourceFrame = sourceSubview.frame
+            guard !sourceFrame.isEmpty else {
+                continue
+            }
+            let destinationFrame = destination[destinationIndex].frame
+            guard !destinationFrame.isEmpty else {
+                continue
+            }
+
+            let translation = CGSize(
+                width: destinationFrame.origin.x - sourceFrame.origin.x,
+                height: destinationFrame.origin.y - sourceFrame.origin.y
+            )
+            let scale = CGSize(
+                width: destinationFrame.width / sourceFrame.width,
+                height: destinationFrame.height / sourceFrame.height
+            )
+            var projectedTarget = targetFrame
+            projectedTarget.origin.x += translation.width
+            projectedTarget.origin.y += translation.height
+            projectedTarget.size.width =
+                targetFrame.width == 0 ? 0 : targetFrame.width * scale.width
+            projectedTarget.size.height =
+                targetFrame.height == 0 ? 0 : targetFrame.height * scale.height
+            // A surviving neighbor is usable only when its transform predicts
+            // that the transition target remains outside the live viewport.
+            guard projectedTarget.intersection(avoidanceRect).isEmpty else {
+                continue
+            }
+
+            let candidateDistance = distance(targetFrame, sourceFrame)
+            if let selectedDistance, candidateDistance >= selectedDistance {
+                continue
+            }
+            selectedDistance = candidateDistance
+            selectedVector = (translation, scale)
+        }
+        return selectedVector
+    }
+
+    func externalPlacement(
+        of index: Int,
+        avoiding avoidanceRect: CGRect,
+        in axis: Axis
+    ) -> _Placement {
+        var placement = self[index].placement
+        let dimension = placement.proposedSize_[axis] ?? 10
+        let lowerBound: CGFloat
+        let upperBound: CGFloat
+        let anchor: CGFloat
+        let oldPosition: CGFloat
+        switch axis {
+        case .horizontal:
+            lowerBound = avoidanceRect.minX
+            upperBound = avoidanceRect.maxX
+            anchor = placement.anchor.x
+            oldPosition = placement.anchorPosition.x
+        case .vertical:
+            lowerBound = avoidanceRect.minY
+            upperBound = avoidanceRect.maxY
+            anchor = placement.anchor.y
+            oldPosition = placement.anchorPosition.y
+        }
+        // Move forward by at least one proposed length, or beyond one complete
+        // avoidance span when that lies farther away.
+        let newPosition = Swift.max(
+            oldPosition + dimension,
+            upperBound + (upperBound - lowerBound) + anchor * dimension
+        )
+        switch axis {
+        case .horizontal:
+            placement.anchorPosition.x = newPosition
+        case .vertical:
+            placement.anchorPosition.y = newPosition
+        }
+        return placement
+    }
 }
 
 /// Groups the placed header, content, and footer entries of one pinnable section.
@@ -5798,6 +5980,174 @@ protocol LazyStack: LazyLayout {
 extension LazyStack where Cache == _LazyStack_Cache<Self> {
     static var initialCache: Cache {
         _LazyStack_Cache()
+    }
+
+    func initialPlacement(
+        newIndex: Int,
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasInsertedToSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement {
+        let target = newPlacedSubviews[newIndex]
+        // An explicit list insertion keeps the layout-produced target. Only a
+        // survivor reflow derives an entrance transform from stable identity.
+        guard !wasInsertedToSubviews else {
+            return target.placement
+        }
+
+        let avoidanceRect = context.containingVisibleRect
+        if let vector = newPlacedSubviews.motionVectors(
+            closestTo: newIndex,
+            in: oldPlacedSubviews,
+            avoiding: avoidanceRect,
+            distance: { target, candidate in
+                distanceFromRect(target, toRect: candidate)
+            }
+        ) {
+            var placement = target.placement
+            placement.anchorPosition.x += vector.translation.width
+            placement.anchorPosition.y += vector.translation.height
+            let measuredSize = target.size
+            placement.proposedSize_ = _ProposedSize(
+                width: measuredSize.width == 0
+                    ? 0
+                    : measuredSize.width * vector.scale.width,
+                height: measuredSize.height == 0
+                    ? 0
+                    : measuredSize.height * vector.scale.height
+            )
+            return placement
+        }
+
+        // A nearby full-ID match preserves local layout continuity. The
+        // forward external placement is the final observed fallback.
+        if let nearby = placementOfNearbySubview(
+            target,
+            subviews: subviews,
+            context: context,
+            cache: cache
+        ) {
+            return nearby
+        }
+        return newPlacedSubviews.externalPlacement(
+            of: newIndex,
+            avoiding: avoidanceRect,
+            in: Self.majorAxis
+        )
+    }
+
+    func finalPlacement(
+        oldIndex: Int,
+        oldPlacedSubviews: [_LazyLayout_PlacedSubview],
+        newPlacedSubviews: [_LazyLayout_PlacedSubview],
+        wasRemovedFromSubviews: Bool,
+        context: _LazyLayout_PlacementContext,
+        subviews: _LazyLayout_Subviews,
+        cache: Cache
+    ) -> _Placement {
+        let target = oldPlacedSubviews[oldIndex]
+        // An explicit list removal keeps the committed old placement. Reflow
+        // uses surviving identities to predict the target state.
+        guard !wasRemovedFromSubviews else {
+            return target.placement
+        }
+
+        let avoidanceRect = context.containingVisibleRect
+        if let vector = oldPlacedSubviews.motionVectors(
+            closestTo: oldIndex,
+            in: newPlacedSubviews,
+            avoiding: avoidanceRect,
+            distance: { target, candidate in
+                distanceFromRect(target, toRect: candidate)
+            }
+        ) {
+            var placement = target.placement
+            placement.anchorPosition.x += vector.translation.width
+            placement.anchorPosition.y += vector.translation.height
+            let measuredSize = target.size
+            placement.proposedSize_ = _ProposedSize(
+                width: measuredSize.width == 0
+                    ? 0
+                    : measuredSize.width * vector.scale.width,
+                height: measuredSize.height == 0
+                    ? 0
+                    : measuredSize.height * vector.scale.height
+            )
+            return placement
+        }
+
+        if let nearby = placementOfNearbySubview(
+            target,
+            subviews: subviews,
+            context: context,
+            cache: cache
+        ) {
+            return nearby
+        }
+        return oldPlacedSubviews.externalPlacement(
+            of: oldIndex,
+            avoiding: avoidanceRect,
+            in: Self.majorAxis
+        )
+    }
+
+    private func placementOfNearbySubview(
+        _ target: _LazyLayout_PlacedSubview,
+        subviews: _LazyLayout_Subviews,
+        context: _LazyLayout_PlacementContext,
+        cache: Cache
+    ) -> _Placement? {
+        guard cache.minor != nil, !cache.estimations.lengthToCount.isEmpty else {
+            return nil
+        }
+        let average = cache.estimations.average
+        let stride = average.length + (average.spacing ?? 0)
+        var from = cache.placedIndices.upperBound
+        // Search exactly one estimated visible-length window beyond the placed
+        // prefix; the numeric conversion deliberately keeps trapping semantics.
+        let limit = from + Int(cache.visibleLength / stride)
+        var nearbyIndex: Int?
+        _ = subviews.apply(
+            from: &from,
+            style: _ViewList_IteratorStyle(value: 2)
+        ) { index, subview, stop in
+            if subview.id == target.id {
+                nearbyIndex = index
+                stop = true
+            } else if index >= limit {
+                stop = true
+            }
+        }
+        guard let nearbyIndex,
+              let rect = boundingRect(
+                  at: nearbyIndex,
+                  subviews: subviews,
+                  context: context,
+                  cache: cache
+              ) else {
+            return nil
+        }
+
+        var placement = target.placement
+        placement.anchorPosition = CGPoint(
+            x: rect.origin.x + rect.width * placement.anchor.x,
+            y: rect.origin.y + rect.height * placement.anchor.y
+        )
+        return placement
+    }
+
+    private func distanceFromRect(_ rect: CGRect, toRect: CGRect) -> CGFloat {
+        // Multi-view major axes rank by point distance to the candidate center;
+        // the alternate route ranks by the signed gap along the major axis.
+        if Self.layoutProperties.axes.contains(Self.majorAxis) {
+            return rect.distance(
+                to: CGPoint(x: toRect.midX, y: toRect.midY)
+            )
+        }
+        return rect.distance(to: toRect, in: Self.majorAxis)
     }
 
     func sizeThatFits(

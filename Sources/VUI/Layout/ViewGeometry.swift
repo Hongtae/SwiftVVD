@@ -696,6 +696,7 @@ extension CGRect {
 }
 
 extension ScrollGeometry {
+    /// Projects the visible scroll window onto one axis for overlap checks.
     func outsetOffsetAndSize(axis: Axis) -> (offset: CGFloat, size: CGFloat) {
         switch axis {
         case .horizontal:
@@ -703,6 +704,67 @@ extension ScrollGeometry {
         case .vertical:
             return (visibleRect.minY, visibleRect.height)
         }
+    }
+
+    /// Expands an accessibility viewport toward the supplied view-size limit.
+    mutating func outsetForAX(limit: CGSize) {
+        outsetOffsetAndSize(axis: .horizontal, limit: limit)
+        outsetOffsetAndSize(axis: .vertical, limit: limit)
+    }
+
+    private mutating func outsetOffsetAndSize(axis: Axis, limit: CGSize) {
+        let containerLength: CGFloat
+        let limitLength: CGFloat
+        let offset: CGFloat
+        switch axis {
+        case .horizontal:
+            containerLength = containerSize.width
+            limitLength = limit.width
+            offset = contentOffset.x
+        case .vertical:
+            containerLength = containerSize.height
+            limitLength = limit.height
+            offset = contentOffset.y
+        }
+        guard containerLength < limitLength else {
+            return
+        }
+
+        // Pull the window backward by at most one current container length,
+        // then grow it without exceeding the extent reachable from that shift.
+        let newOffset = min(max(offset - containerLength, 0), offset)
+        let addedLength = containerLength + offset - newOffset
+        let newContainerLength = min(
+            max(limitLength - offset, addedLength),
+            containerLength + addedLength
+        )
+
+        var contentOffset = contentOffset
+        var containerSize = containerSize
+        var visibleRect = visibleRect
+        switch axis {
+        case .horizontal:
+            contentOffset.x = newOffset
+            containerSize.width = newContainerLength
+            visibleRect.origin.x += newOffset - offset
+            visibleRect.size.width += newContainerLength - containerLength
+        case .vertical:
+            contentOffset.y = newOffset
+            containerSize.height = newContainerLength
+            visibleRect.origin.y += newOffset - offset
+            visibleRect.size.height += newContainerLength - containerLength
+        }
+
+        // Offset, container extent, and the explicit visible rectangle form one
+        // correlated scroll state. Rebuild them together so didSet observers do
+        // not replace the adjusted visible rectangle with the default bounds.
+        self = ScrollGeometry(
+            contentOffset: contentOffset,
+            contentSize: contentSize,
+            contentInsets: contentInsets,
+            containerSize: containerSize,
+            visibleRect: visibleRect
+        )
     }
 }
 

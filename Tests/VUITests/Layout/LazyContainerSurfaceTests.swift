@@ -852,17 +852,40 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placementContext.position, CGPoint(x: 7, y: 11))
             XCTAssertEqual(placementContext.size, CGSize(width: 13, height: 17))
             XCTAssertEqual(placementContext.pinnedViews, [.sectionHeaders])
-            XCTAssertEqual(placementContext.layoutDirection, .rightToLeft)
-            XCTAssertTrue(placementContext.isAccessibilityEnabled)
+            XCTAssertEqual(placementContext.geometry.viewSize, CGSize(width: 13, height: 17))
+            XCTAssertTrue(placementContext.geometry.isAccessibilityEnabled)
+            XCTAssertEqual(placementContext.containerSize, CGSize(width: 31, height: 37))
+            XCTAssertEqual(placementContext.contentInsets, EdgeInsets())
+            XCTAssertEqual(placementContext.containingScrollGeometry.contentOffset, .zero)
+            XCTAssertEqual(
+                placementContext.containingScrollGeometry.contentSize,
+                CGSize(width: 13, height: 17)
+            )
+            XCTAssertEqual(
+                placementContext.containingScrollGeometry.containerSize,
+                CGSize(width: 13, height: 17)
+            )
+            XCTAssertEqual(
+                placementContext.nearestScrollGeometry,
+                placementContext.containingScrollGeometry
+            )
+            XCTAssertEqual(
+                placementContext.nearestVisibleRect,
+                CGRect(x: 0, y: 0, width: 13, height: 17)
+            )
             XCTAssertEqual(
                 placementContext.unadjustedVisibleRect,
-                CGRect(x: 7, y: 11, width: 13, height: 17)
+                CGRect(x: 0, y: 0, width: 13, height: 17)
+            )
+            XCTAssertEqual(
+                placementContext.containingVisibleRect,
+                CGRect(x: 0, y: 0, width: 13, height: 17)
             )
             XCTAssertEqual(
                 placementContext.clampedVisibleRect,
-                CGRect(x: 7, y: 11, width: 13, height: 17)
+                CGRect(x: 0, y: 0, width: 13, height: 17)
             )
-            XCTAssertTrue(placementContext.allowsTranslations)
+            XCTAssertFalse(placementContext.allowsTranslations)
 
             let estimatedContext = _LazyLayout_EstimatedPlacementContext(
                 base: placementContext
@@ -1103,6 +1126,469 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stackPlacement,
             ]
             XCTAssertEqual(namespaceValues.count, 18)
+        }
+    }
+
+    func testLazyPlacementContextResolvesScrollGeometryRTLAndAccessibilityOutset() {
+        var accessibilityGeometry = ScrollGeometry(
+            contentOffset: CGPoint(x: 20, y: 30),
+            contentSize: CGSize(width: 300, height: 400),
+            contentInsets: EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4),
+            containerSize: CGSize(width: 40, height: 50)
+        )
+        accessibilityGeometry.outsetForAX(limit: CGSize(width: 100, height: 120))
+        XCTAssertEqual(accessibilityGeometry.contentOffset, .zero)
+        XCTAssertEqual(accessibilityGeometry.containerSize, CGSize(width: 80, height: 90))
+        XCTAssertEqual(
+            accessibilityGeometry.visibleRect,
+            CGRect(x: 0, y: 0, width: 80, height: 90)
+        )
+        XCTAssertEqual(
+            accessibilityGeometry.contentInsets,
+            EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
+        )
+
+        let host = GraphHost()
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let base = _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                environment: graph.makeInput(value: EnvironmentValues()),
+                containerSize: OptionalAttribute(
+                    graph.makeInput(value: ViewSize(width: 31, height: 37))
+                )
+            )
+            let containingInsets = EdgeInsets(
+                top: 1,
+                leading: 2,
+                bottom: 3,
+                trailing: 4
+            )
+            let nearestInsets = EdgeInsets(
+                top: 5,
+                leading: 6,
+                bottom: 7,
+                trailing: 8
+            )
+            var transform = ViewTransform()
+            transform.appendScrollGeometry(
+                ScrollGeometry(
+                    contentOffset: CGPoint(x: 10, y: 20),
+                    contentSize: CGSize(width: 500, height: 600),
+                    contentInsets: containingInsets,
+                    containerSize: CGSize(width: 30, height: 40)
+                ),
+                isClipped: true
+            )
+            transform.appendScrollGeometry(
+                ScrollGeometry(
+                    contentOffset: CGPoint(x: 60, y: 70),
+                    contentSize: CGSize(width: 700, height: 800),
+                    contentInsets: nearestInsets,
+                    containerSize: CGSize(width: 20, height: 25)
+                ),
+                isClipped: true
+            )
+
+            let context = _LazyLayout_PlacementContext(
+                base: base,
+                size: ViewSize(width: 200, height: 150),
+                transform: transform,
+                layoutDirection: .rightToLeft,
+                isAccessibilityEnabled: true
+            )
+
+            XCTAssertEqual(context.geometry.viewSize, CGSize(width: 200, height: 150))
+            XCTAssertTrue(context.geometry.isAccessibilityEnabled)
+            XCTAssertEqual(
+                context.containingScrollGeometry.contentOffset,
+                CGPoint(x: 160, y: 20)
+            )
+            XCTAssertEqual(
+                context.containingScrollGeometry.visibleRect,
+                CGRect(x: 160, y: 20, width: 30, height: 40)
+            )
+            XCTAssertEqual(
+                context.nearestScrollGeometry.contentOffset,
+                CGPoint(x: 120, y: 70)
+            )
+            XCTAssertEqual(
+                context.nearestVisibleRect,
+                CGRect(x: 120, y: 70, width: 20, height: 25)
+            )
+            XCTAssertEqual(context.unadjustedVisibleRect, context.containingScrollGeometry.visibleRect)
+            XCTAssertEqual(context.contentInsets, nearestInsets)
+            XCTAssertEqual(context.containerSize, CGSize(width: 31, height: 37))
+            XCTAssertEqual(
+                context.containingVisibleRect,
+                CGRect(x: 130, y: 0, width: 60, height: 100)
+            )
+            XCTAssertEqual(
+                context.clampedVisibleRect,
+                CGRect(x: 130, y: 0, width: 60, height: 100)
+            )
+            XCTAssertTrue(context.allowsTranslations)
+        }
+    }
+
+    func testLazyStackTransitionPlacementUsesLastSafeNearestMotionVector() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99)
+
+            func placedSubview(
+                id: Int,
+                size: CGSize,
+                at position: CGPoint
+            ) -> _LazyLayout_PlacedSubview {
+                let item = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: id
+                ).item
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(
+                        graph.makeInput(value: LayoutComputer.fixed(size))
+                    )
+                )
+                return _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(
+                        proposedSize: size,
+                        anchoring: .topLeading,
+                        at: position
+                    ),
+                    index: id
+                )
+            }
+
+            let target = placedSubview(
+                id: 1,
+                size: CGSize(width: 20, height: 20),
+                at: CGPoint(x: 0, y: 200)
+            )
+            let rejectedCloserMatch = placedSubview(
+                id: 2,
+                size: CGSize(width: 10, height: 10),
+                at: CGPoint(x: 0, y: 225)
+            )
+            let selectedMatch = placedSubview(
+                id: 3,
+                size: CGSize(width: 10, height: 10),
+                at: CGPoint(x: 0, y: 260)
+            )
+            let firstDuplicateDestination = placedSubview(
+                id: 3,
+                size: CGSize(width: 20, height: 20),
+                at: CGPoint(x: 0, y: 150)
+            )
+            let overlappingDestination = placedSubview(
+                id: 2,
+                size: CGSize(width: 10, height: 10),
+                at: CGPoint(x: 0, y: 25)
+            )
+            let lastDuplicateDestination = placedSubview(
+                id: 3,
+                size: CGSize(width: 30, height: 30),
+                at: CGPoint(x: 0, y: 170)
+            )
+            let source = [target, rejectedCloserMatch, selectedMatch]
+            let destination = [
+                firstDuplicateDestination,
+                overlappingDestination,
+                lastDuplicateDestination,
+            ]
+
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let base = _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                environment: graph.makeInput(value: EnvironmentValues())
+            )
+            let placementContext = _LazyLayout_PlacementContext(
+                base: base,
+                size: ViewSize(width: 100, height: 100)
+            )
+            let subviews = cache.subviews(context: ruleContext)
+            let layout = LazyVStackLayout(base: _VStackLayout(), pinnedViews: [])
+            let stackCache = _LazyStack_Cache<LazyVStackLayout>()
+
+            XCTAssertEqual(
+                layout.initialPlacement(
+                    newIndex: 0,
+                    newPlacedSubviews: source,
+                    oldPlacedSubviews: destination,
+                    wasInsertedToSubviews: true,
+                    context: placementContext,
+                    subviews: subviews,
+                    cache: stackCache
+                ),
+                target.placement
+            )
+            XCTAssertEqual(
+                layout.finalPlacement(
+                    oldIndex: 0,
+                    oldPlacedSubviews: source,
+                    newPlacedSubviews: destination,
+                    wasRemovedFromSubviews: true,
+                    context: placementContext,
+                    subviews: subviews,
+                    cache: stackCache
+                ),
+                target.placement
+            )
+
+            let initial = layout.initialPlacement(
+                newIndex: 0,
+                newPlacedSubviews: source,
+                oldPlacedSubviews: destination,
+                wasInsertedToSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: stackCache
+            )
+            XCTAssertEqual(initial.anchorPosition, CGPoint(x: 0, y: 110))
+            XCTAssertEqual(initial.proposedSize_, _ProposedSize(width: 60, height: 60))
+
+            let final = layout.finalPlacement(
+                oldIndex: 0,
+                oldPlacedSubviews: source,
+                newPlacedSubviews: destination,
+                wasRemovedFromSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: stackCache
+            )
+            XCTAssertEqual(final.anchorPosition, CGPoint(x: 0, y: 110))
+            XCTAssertEqual(final.proposedSize_, _ProposedSize(width: 60, height: 60))
+        }
+    }
+
+    func testLazyStackTransitionPlacementUsesForwardExternalFallback() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, targetItem, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, unmatchedItem, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            targetItem.outputs = _ViewOutputs(
+                layoutComputer: OptionalAttribute(
+                    graph.makeInput(
+                        value: LayoutComputer.fixed(CGSize(width: 10, height: 10))
+                    )
+                )
+            )
+            unmatchedItem.outputs = targetItem.outputs
+
+            let target = _LazyLayout_PlacedSubview(
+                item: targetItem,
+                placement: _Placement(
+                    proposedSize: CGSize(width: 10, height: 10),
+                    anchoring: .center,
+                    at: CGPoint(x: 5, y: 5)
+                ),
+                index: 0
+            )
+            let unmatched = _LazyLayout_PlacedSubview(
+                item: unmatchedItem,
+                placement: _Placement(
+                    proposedSize: CGSize(width: 10, height: 10),
+                    anchoring: .center,
+                    at: CGPoint(x: 5, y: 50)
+                ),
+                index: 1
+            )
+            var transform = ViewTransform()
+            transform.appendScrollGeometry(
+                ScrollGeometry(
+                    contentOffset: CGPoint(x: 0, y: 10),
+                    contentSize: CGSize(width: 100, height: 200),
+                    containerSize: CGSize(width: 100, height: 20)
+                ),
+                isClipped: true
+            )
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let placementContext = _LazyLayout_PlacementContext(
+                base: _LazyLayout_SizeAndSpacingContext(
+                    ruleContext: ruleContext,
+                    environment: graph.makeInput(value: EnvironmentValues())
+                ),
+                size: ViewSize(width: 100, height: 100),
+                transform: transform
+            )
+            let subviews = cache.subviews(context: ruleContext)
+            let layout = LazyVStackLayout(base: _VStackLayout(), pinnedViews: [])
+            let stackCache = _LazyStack_Cache<LazyVStackLayout>()
+
+            let initial = layout.initialPlacement(
+                newIndex: 0,
+                newPlacedSubviews: [target],
+                oldPlacedSubviews: [unmatched],
+                wasInsertedToSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: stackCache
+            )
+            XCTAssertEqual(initial.anchor, .center)
+            XCTAssertEqual(initial.anchorPosition, CGPoint(x: 5, y: 55))
+            XCTAssertEqual(initial.proposedSize_, target.placement.proposedSize_)
+
+            let final = layout.finalPlacement(
+                oldIndex: 0,
+                oldPlacedSubviews: [target],
+                newPlacedSubviews: [unmatched],
+                wasRemovedFromSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: stackCache
+            )
+            XCTAssertEqual(final.anchor, .center)
+            XCTAssertEqual(final.anchorPosition, CGPoint(x: 5, y: 55))
+            XCTAssertEqual(final.proposedSize_, target.placement.proposedSize_)
+        }
+    }
+
+    func testLazyStackTransitionPlacementUsesNearbyFullIdentityWithinEstimatedWindow() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let sizes = Array(
+                repeating: CGSize(width: 10, height: 10),
+                count: 6
+            )
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                )
+            )
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: ruleContext)
+            var from = 3
+            var target: _LazyLayout_PlacedSubview?
+            XCTAssertFalse(subviews.apply(from: &from) { index, subview, stop in
+                target = subview.place(
+                    at: _Placement(
+                        proposedSize: CGSize(width: 10, height: 10),
+                        anchoring: .center,
+                        at: CGPoint(x: 5, y: 300)
+                    )
+                )
+                XCTAssertEqual(index, 3)
+                stop = true
+            })
+            let targetPlacedSubview = try XCTUnwrap(target)
+            let unmatchedItem = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 100,
+                list: list
+            ).item
+            unmatchedItem.outputs = _ViewOutputs(
+                layoutComputer: OptionalAttribute(
+                    graph.makeInput(
+                        value: LayoutComputer.fixed(CGSize(width: 10, height: 10))
+                    )
+                )
+            )
+            let unmatched = _LazyLayout_PlacedSubview(
+                item: unmatchedItem,
+                placement: _Placement(
+                    proposedSize: CGSize(width: 10, height: 10),
+                    anchoring: .topLeading,
+                    at: .zero
+                ),
+                index: 100
+            )
+            let placementContext = _LazyLayout_PlacementContext(
+                base: _LazyLayout_SizeAndSpacingContext(
+                    ruleContext: ruleContext,
+                    environment: graph.makeInput(value: EnvironmentValues())
+                ),
+                size: ViewSize(width: 100, height: 100)
+            )
+            let layout = LazyVStackLayout(base: _VStackLayout(spacing: 0), pinnedViews: [])
+            let estimates = EstimationCache(
+                lengthToCount: [10: 1],
+                spacingToCount: [0: 1]
+            )
+            let wideCache = _LazyStack_Cache<LazyVStackLayout>(
+                minor: MinorProperties(count: 1, size: 100, geometry: 100),
+                visibleLength: 100,
+                estimations: estimates
+            )
+            var identityScanFrom = 0
+            var matchingIndex: Int?
+            XCTAssertFalse(subviews.apply(
+                from: &identityScanFrom,
+                style: _ViewList_IteratorStyle(value: 2)
+            ) { index, subview, stop in
+                if subview.id == targetPlacedSubview.id {
+                    matchingIndex = index
+                    stop = true
+                }
+            })
+            XCTAssertEqual(matchingIndex, 3)
+            XCTAssertEqual(
+                layout.boundingRect(
+                    at: 3,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: wideCache
+                ),
+                CGRect(x: 0, y: 30, width: 10, height: 10)
+            )
+
+            let nearby = layout.initialPlacement(
+                newIndex: 0,
+                newPlacedSubviews: [targetPlacedSubview],
+                oldPlacedSubviews: [unmatched],
+                wasInsertedToSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: wideCache
+            )
+            XCTAssertEqual(nearby.anchor, .center)
+            XCTAssertEqual(nearby.anchorPosition, CGPoint(x: 5, y: 35))
+
+            let outsideWindow = layout.initialPlacement(
+                newIndex: 0,
+                newPlacedSubviews: [targetPlacedSubview],
+                oldPlacedSubviews: [unmatched],
+                wasInsertedToSubviews: false,
+                context: placementContext,
+                subviews: subviews,
+                cache: _LazyStack_Cache<LazyVStackLayout>(
+                    minor: MinorProperties(count: 1, size: 100, geometry: 100),
+                    visibleLength: 20,
+                    estimations: estimates
+                )
+            )
+            XCTAssertEqual(outsideWindow.anchor, .center)
+            XCTAssertEqual(outsideWindow.anchorPosition, CGPoint(x: 5, y: 310))
         }
     }
 
