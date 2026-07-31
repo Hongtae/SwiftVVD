@@ -285,11 +285,40 @@ enum _StackLayoutImplementation {
         }
 
         let previousProposal = cache.stack.header.lastProposedSize
+        let crossProposal = cross(proposal, axis: axis)
+        placeChildren(
+            proposal: proposal,
+            crossProposalForChild: { _ in crossProposal },
+            previousProposal: previousProposal,
+            subviews: subviews,
+            cache: &cache
+        )
+
+        if cache.stack.header.resizeChildrenWithTrailingOverflow {
+            resizeAnyChildrenWithTrailingOverflow(
+                proposal: proposal,
+                previousProposal: previousProposal,
+                subviews: subviews,
+                cache: &cache
+            )
+        }
+        cache.stack.header.lastProposedSize = proposal
+    }
+
+    private static func placeChildren(
+        proposal: ProposedViewSize,
+        crossProposalForChild: (StackLayout.Child) -> CGFloat?,
+        previousProposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        let axis = cache.stack.header.majorAxis
         if let proposedMajor = major(proposal, axis: axis) {
             sizeChildrenGenerally(
                 axis: axis,
                 proposedMajor: proposedMajor,
                 crossProposal: cross(proposal, axis: axis),
+                crossProposalForChild: crossProposalForChild,
                 previousProposal: previousProposal,
                 subviews: subviews,
                 cache: &cache
@@ -297,7 +326,7 @@ enum _StackLayoutImplementation {
         } else {
             sizeChildrenIdeally(
                 axis: axis,
-                crossProposal: cross(proposal, axis: axis),
+                crossProposalForChild: crossProposalForChild,
                 subviews: subviews,
                 cache: &cache
             )
@@ -307,16 +336,18 @@ enum _StackLayoutImplementation {
             axis: axis,
             cache: &cache
         )
-        cache.stack.header.lastProposedSize = proposal
     }
 
     private static func sizeChildrenIdeally(
         axis: Axis,
-        crossProposal: CGFloat?,
+        crossProposalForChild: (StackLayout.Child) -> CGFloat?,
         subviews: LayoutSubviews,
         cache: inout _StackLayoutCache
     ) {
         for index in subviews.indices {
+            let crossProposal = crossProposalForChild(
+                cache.stack.children[index]
+            )
             resize(
                 childAt: index,
                 proposal: proposalFor(
@@ -334,6 +365,7 @@ enum _StackLayoutImplementation {
         axis: Axis,
         proposedMajor: CGFloat,
         crossProposal: CGFloat?,
+        crossProposalForChild: (StackLayout.Child) -> CGFloat?,
         previousProposal: ProposedViewSize,
         subviews: LayoutSubviews,
         cache: inout _StackLayoutCache
@@ -404,12 +436,15 @@ enum _StackLayoutImplementation {
                 let childIndex = cache.stack.children[sortedIndex].fittingOrder
                 let dividedLength = available / CGFloat(unsizedCount)
                 let proposedLength = dividedLength <= 0 ? 0 : dividedLength
+                let childCrossProposal = crossProposalForChild(
+                    cache.stack.children[childIndex]
+                )
                 resize(
                     childAt: childIndex,
                     proposal: proposalFor(
                         axis: axis,
                         major: proposedLength,
-                        cross: crossProposal
+                        cross: childCrossProposal
                     ),
                     subviews: subviews,
                     cache: &cache
@@ -428,6 +463,79 @@ enum _StackLayoutImplementation {
 
             groupStart = groupEnd
         }
+    }
+
+    private static func resizeAnyChildrenWithTrailingOverflow(
+        proposal: ProposedViewSize,
+        previousProposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout _StackLayoutCache
+    ) {
+        let axis = cache.stack.header.majorAxis
+        let proposedCross = cross(proposal, axis: axis) ?? .infinity
+        let stackCross = cross(
+            cache.stack.header.stackSize,
+            axis: axis
+        )
+
+        guard stackCross > proposedCross else {
+            return
+        }
+
+        // When one child already spans the whole cross-axis result, the excess
+        // is intrinsic to that child rather than a sibling-alignment offset.
+        for child in cache.stack.children {
+            if cross(child.geometry.dimensions, axis: axis) == stackCross {
+                return
+            }
+        }
+
+        // Preserve the normal major-axis priority budget. Only the cross-axis
+        // proposal is reduced, and only by the amount that this child's
+        // previously placed trailing edge exceeded the finite stack proposal.
+        placeChildren(
+            proposal: proposal,
+            crossProposalForChild: { child in
+                crossProposalRemovingTrailingOverflow(
+                    from: child,
+                    proposedCross: proposedCross,
+                    axis: axis
+                )
+            },
+            previousProposal: previousProposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
+
+    private static func crossProposalRemovingTrailingOverflow(
+        from child: StackLayout.Child,
+        proposedCross: CGFloat,
+        axis: Axis
+    ) -> CGFloat {
+        let fallbackOverflow = nonNegative(-proposedCross)
+        var trailingOverflow = fallbackOverflow
+
+        if !child.geometry.isInvalid {
+            let start = cross(child.geometry.origin, axis: axis)
+            let end = start + cross(
+                child.geometry.dimensions,
+                axis: axis
+            )
+
+            // Select the ordered endpoints explicitly so unordered values keep
+            // the same fallback behavior as the geometry validity path.
+            let lower = end < start ? end : start
+            let upper = start <= end ? end : start
+            if lower <= upper {
+                trailingOverflow = nonNegative(upper - proposedCross)
+            }
+        }
+        return proposedCross - trailingOverflow
+    }
+
+    private static func nonNegative(_ value: CGFloat) -> CGFloat {
+        value <= 0 ? 0 : value
     }
 
     private static func subtractingWithoutNaN(
@@ -709,6 +817,20 @@ enum _StackLayoutImplementation {
         switch axis {
         case .horizontal: return dimensions.height
         case .vertical: return dimensions.width
+        }
+    }
+
+    private static func cross(_ size: CGSize, axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: return size.height
+        case .vertical: return size.width
+        }
+    }
+
+    private static func cross(_ point: CGPoint, axis: Axis) -> CGFloat {
+        switch axis {
+        case .horizontal: return point.y
+        case .vertical: return point.x
         }
     }
 

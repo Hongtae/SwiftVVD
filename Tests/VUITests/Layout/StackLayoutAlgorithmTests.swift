@@ -85,6 +85,70 @@ private final class VerticalStackRangeLayoutEngine: LayoutEngine {
     }
 }
 
+private final class StackTrailingOverflowLayoutEngine: LayoutEngine {
+    let axis: Axis
+    let minimum: CGFloat
+    let ideal: CGFloat
+    let maximum: CGFloat
+    let crossLength: CGFloat
+    let priorityValue: Double
+    let guide: AlignmentKey
+    let guideValue: CGFloat
+    var proposals: [_ProposedSize] = []
+
+    init(
+        axis: Axis,
+        minimum: CGFloat,
+        ideal: CGFloat,
+        maximum: CGFloat,
+        crossLength: CGFloat,
+        priority: Double,
+        guide: AlignmentKey,
+        guideValue: CGFloat
+    ) {
+        self.axis = axis
+        self.minimum = minimum
+        self.ideal = ideal
+        self.maximum = maximum
+        self.crossLength = crossLength
+        self.priorityValue = priority
+        self.guide = guide
+        self.guideValue = guideValue
+    }
+
+    func layoutPriority() -> Double {
+        priorityValue
+    }
+
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        proposals.append(proposal)
+        let proposedMajor = axis == .horizontal
+            ? proposal.width
+            : proposal.height
+        let resolvedMajor: CGFloat
+        switch proposedMajor {
+        case nil:
+            resolvedMajor = ideal
+        case .some(.infinity):
+            resolvedMajor = maximum
+        case .some(let value):
+            resolvedMajor = min(maximum, max(minimum, value))
+        }
+        if axis == .horizontal {
+            return CGSize(width: resolvedMajor, height: crossLength)
+        } else {
+            return CGSize(width: crossLength, height: resolvedMajor)
+        }
+    }
+
+    func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        key == guide ? guideValue : nil
+    }
+}
+
 private enum NonlinearStackAlignmentID: AlignmentID {
     static func defaultValue(in context: ViewDimensions) -> CGFloat {
         context.height * 0.5
@@ -310,6 +374,259 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                     }
                 )
             }
+        }
+    }
+
+    func testTrailingCrossOverflowRemeasuresOnlyTheOverflowingChildOnBothAxes() {
+        withGraph { graph in
+            let verticalGuide = VerticalAlignment(
+                OutOfBoundsVerticalAlignmentID.self
+            )
+            let hA = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 10,
+                ideal: 30,
+                maximum: 60,
+                crossLength: 40,
+                priority: 1,
+                guide: verticalGuide.key,
+                guideValue: 40
+            )
+            let hB = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 20,
+                ideal: 40,
+                maximum: 80,
+                crossLength: 40,
+                priority: 0,
+                guide: verticalGuide.key,
+                guideValue: 0
+            )
+            let hSubviews = makeSubviews(
+                graph: graph,
+                engines: [hA, hB],
+                layoutDirection: .leftToRight
+            )
+            let hLayout = HStackLayout(
+                alignment: verticalGuide,
+                spacing: 5
+            )
+            var hCache = _StackLayoutImplementation.makeCache(
+                axis: .horizontal,
+                uniformSpacing: 5,
+                minorAxisAlignment: verticalGuide.key,
+                subviews: hSubviews,
+                resizeChildrenWithTrailingOverflow: true
+            )
+
+            XCTAssertEqual(
+                hLayout.sizeThatFits(
+                    proposal: ProposedViewSize(width: 100, height: 50),
+                    subviews: hSubviews,
+                    cache: &hCache
+                ),
+                CGSize(width: 100, height: 80)
+            )
+            XCTAssertFalse(hA.proposals.contains { $0.height == 20 })
+            XCTAssertEqual(hB.proposals.last, _ProposedSize(width: 35, height: 20))
+
+            let horizontalGuide = HorizontalAlignment(
+                OutOfBoundsHorizontalAlignmentID.self
+            )
+            let vA = StackTrailingOverflowLayoutEngine(
+                axis: .vertical,
+                minimum: 10,
+                ideal: 30,
+                maximum: 60,
+                crossLength: 40,
+                priority: 1,
+                guide: horizontalGuide.key,
+                guideValue: 40
+            )
+            let vB = StackTrailingOverflowLayoutEngine(
+                axis: .vertical,
+                minimum: 20,
+                ideal: 40,
+                maximum: 80,
+                crossLength: 40,
+                priority: 0,
+                guide: horizontalGuide.key,
+                guideValue: 0
+            )
+            let vSubviews = makeSubviews(
+                graph: graph,
+                engines: [vA, vB],
+                layoutDirection: .leftToRight
+            )
+            let vLayout = VStackLayout(
+                alignment: horizontalGuide,
+                spacing: 5
+            )
+            var vCache = _StackLayoutImplementation.makeCache(
+                axis: .vertical,
+                uniformSpacing: 5,
+                minorAxisAlignment: horizontalGuide.key,
+                subviews: vSubviews,
+                resizeChildrenWithTrailingOverflow: true
+            )
+
+            XCTAssertEqual(
+                vLayout.sizeThatFits(
+                    proposal: ProposedViewSize(width: 50, height: 100),
+                    subviews: vSubviews,
+                    cache: &vCache
+                ),
+                CGSize(width: 80, height: 100)
+            )
+            XCTAssertFalse(vA.proposals.contains { $0.width == 20 })
+            XCTAssertEqual(vB.proposals.last, _ProposedSize(width: 20, height: 35))
+        }
+    }
+
+    func testTrailingOverflowHonorsFlagAndSpanningChildGuards() {
+        withGraph { graph in
+            let guide = VerticalAlignment(
+                OutOfBoundsVerticalAlignmentID.self
+            )
+            let disabledA = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 10,
+                ideal: 30,
+                maximum: 60,
+                crossLength: 40,
+                priority: 1,
+                guide: guide.key,
+                guideValue: 40
+            )
+            let disabledB = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 20,
+                ideal: 40,
+                maximum: 80,
+                crossLength: 40,
+                priority: 0,
+                guide: guide.key,
+                guideValue: 0
+            )
+            let disabledSubviews = makeSubviews(
+                graph: graph,
+                engines: [disabledA, disabledB],
+                layoutDirection: .leftToRight
+            )
+            let layout = HStackLayout(alignment: guide, spacing: 5)
+            var disabledCache = _StackLayoutImplementation.makeCache(
+                axis: .horizontal,
+                uniformSpacing: 5,
+                minorAxisAlignment: guide.key,
+                subviews: disabledSubviews,
+                resizeChildrenWithTrailingOverflow: false
+            )
+            XCTAssertEqual(
+                layout.sizeThatFits(
+                    proposal: ProposedViewSize(width: 100, height: 50),
+                    subviews: disabledSubviews,
+                    cache: &disabledCache
+                ),
+                CGSize(width: 100, height: 80)
+            )
+            XCTAssertFalse(disabledB.proposals.contains { $0.height == 20 })
+
+            let spanningA = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 10,
+                ideal: 30,
+                maximum: 60,
+                crossLength: 80,
+                priority: 1,
+                guide: VerticalAlignment.center.key,
+                guideValue: 40
+            )
+            let spanningB = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 20,
+                ideal: 40,
+                maximum: 80,
+                crossLength: 40,
+                priority: 0,
+                guide: VerticalAlignment.center.key,
+                guideValue: 20
+            )
+            let spanningSubviews = makeSubviews(
+                graph: graph,
+                engines: [spanningA, spanningB],
+                layoutDirection: .leftToRight
+            )
+            var spanningCache = _StackLayoutImplementation.makeCache(
+                axis: .horizontal,
+                uniformSpacing: 5,
+                minorAxisAlignment: VerticalAlignment.center.key,
+                subviews: spanningSubviews,
+                resizeChildrenWithTrailingOverflow: true
+            )
+            XCTAssertEqual(
+                HStackLayout(alignment: .center, spacing: 5).sizeThatFits(
+                    proposal: ProposedViewSize(width: 100, height: 50),
+                    subviews: spanningSubviews,
+                    cache: &spanningCache
+                ),
+                CGSize(width: 100, height: 80)
+            )
+            XCTAssertFalse(spanningA.proposals.contains { $0.height != 50 })
+            XCTAssertFalse(spanningB.proposals.contains { $0.height != 50 })
+        }
+    }
+
+    func testTrailingOverflowPreservesUnspecifiedMajorProposal() {
+        withGraph { graph in
+            let guide = VerticalAlignment(
+                OutOfBoundsVerticalAlignmentID.self
+            )
+            let a = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 10,
+                ideal: 30,
+                maximum: 60,
+                crossLength: 40,
+                priority: 0,
+                guide: guide.key,
+                guideValue: 40
+            )
+            let b = StackTrailingOverflowLayoutEngine(
+                axis: .horizontal,
+                minimum: 20,
+                ideal: 40,
+                maximum: 80,
+                crossLength: 40,
+                priority: 0,
+                guide: guide.key,
+                guideValue: 0
+            )
+            let subviews = makeSubviews(
+                graph: graph,
+                engines: [a, b],
+                layoutDirection: .leftToRight
+            )
+            let layout = HStackLayout(alignment: guide, spacing: 5)
+            var cache = _StackLayoutImplementation.makeCache(
+                axis: .horizontal,
+                uniformSpacing: 5,
+                minorAxisAlignment: guide.key,
+                subviews: subviews,
+                resizeChildrenWithTrailingOverflow: true
+            )
+
+            XCTAssertEqual(
+                layout.sizeThatFits(
+                    proposal: ProposedViewSize(width: nil, height: 50),
+                    subviews: subviews,
+                    cache: &cache
+                ),
+                CGSize(width: 75, height: 80)
+            )
+            XCTAssertEqual(
+                b.proposals.last,
+                _ProposedSize(width: nil, height: 20)
+            )
         }
     }
 
