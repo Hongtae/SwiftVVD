@@ -32,6 +32,10 @@ private struct MergedElementPreferenceKey: PreferenceKey {
     }
 }
 
+private struct EncodableStableIdentityProbe: Hashable, Codable {
+    var value: Int
+}
+
 private struct ZeroCountProbeViewList: ViewList {
     func applyNodes(
         from: inout Int,
@@ -543,14 +547,8 @@ final class DynamicLayoutStateTests: XCTestCase {
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
             let root = _DisplayList_StableIdentityRoot()
-            let hash = StrongHash(words: (1, 2, 3, 4, 5))
             let scope = graph.makeInput(
-                value: _DisplayList_StableIdentityScope(
-                    root: root,
-                    hash: hash,
-                    map: _DisplayList_StableIdentityMap(),
-                    serial: 9
-                )
+                value: _DisplayList_StableIdentityScope(root: root)
             )
             root.scopes.append(WeakAttribute(scope))
 
@@ -558,11 +556,239 @@ final class DynamicLayoutStateTests: XCTestCase {
                 _DisplayList_StableIdentityScope.defaultValue.isInvalid
             )
             XCTAssertTrue(scope.value.root === root)
-            XCTAssertEqual(scope.value.hash, hash)
+            XCTAssertEqual(scope.value.hash, StrongHash(of: "root"))
             XCTAssertTrue(scope.value.map.isEmpty)
-            XCTAssertEqual(scope.value.serial, 9)
+            XCTAssertEqual(scope.value.serial, 0)
             XCTAssertFalse(root.scopes[0].isInvalid)
             XCTAssertNil(root.map)
+        }
+    }
+
+    func testStableIdentityNamespaceBuildsHierarchicalHashesAndRootMap()
+        throws {
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            let root = _DisplayList_StableIdentityRoot()
+            inputs.configureStableIDs(root: root)
+
+            XCTAssertTrue(
+                inputs.base.options.contains(.needsStableDisplayListIDs)
+            )
+            XCTAssertEqual(root.scopes.count, 1)
+            let rootScope = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value
+            XCTAssertEqual(rootScope.hash, StrongHash(of: "root"))
+
+            inputs.base.pushStableIndex(17)
+            let indexScope = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value
+            XCTAssertEqual(
+                indexScope.hash,
+                childStableHash(id: 17, parent: rootScope.hash)
+            )
+
+            let explicitID = EncodableStableIdentityProbe(value: 23)
+            inputs.base.pushStableID(explicitID)
+            let explicitScope = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value
+            XCTAssertEqual(
+                explicitScope.hash,
+                childStableHash(
+                    id: try StrongHash(encodable: explicitID),
+                    parent: indexScope.hash
+                )
+            )
+
+            inputs.base.pushStableType(Self.self)
+            let typeScope = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value
+            XCTAssertEqual(
+                typeScope.hash,
+                childStableHash(
+                    id: makeStableTypeData(Self.self),
+                    parent: explicitScope.hash
+                )
+            )
+            XCTAssertEqual(root.scopes.count, 4)
+
+            XCTAssertEqual(inputs.makeStableIdentity().serial, 1)
+            let firstIdentity = inputs.pushIdentity()
+            XCTAssertNil(root.map)
+            XCTAssertEqual(
+                root[firstIdentity],
+                _DisplayList_StableIdentity(
+                    hash: typeScope.hash,
+                    serial: 2
+                )
+            )
+            XCTAssertNotNil(root.map)
+
+            let secondIdentity = inputs.pushIdentity()
+            XCTAssertNil(root.map)
+            XCTAssertEqual(
+                root[secondIdentity],
+                _DisplayList_StableIdentity(
+                    hash: typeScope.hash,
+                    serial: 3
+                )
+            )
+            XCTAssertEqual(
+                root[firstIdentity],
+                _DisplayList_StableIdentity(
+                    hash: typeScope.hash,
+                    serial: 2
+                )
+            )
+        }
+    }
+
+    func testStableIdentityScopePushesAreNoOpsWithoutOption() {
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+
+            inputs.base.pushStableIndex(17)
+            inputs.base.pushStableID("row")
+            inputs.base.pushStableType(Self.self)
+
+            XCTAssertNil(inputs.base.stableIDScope)
+            XCTAssertTrue(
+                inputs.base[_DisplayList_StableIdentityScope.self].isInvalid
+            )
+            let firstIdentity = inputs.pushIdentity()
+            let secondIdentity = inputs.pushIdentity()
+            XCTAssertEqual(
+                secondIdentity.value,
+                firstIdentity.value &+ 1
+            )
+        }
+    }
+
+    func testStableIdentityScopeMutationDoesNotInvalidateGraphDependents()
+        throws {
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.configureStableIDs(
+                root: _DisplayList_StableIdentityRoot()
+            )
+            let scope = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            )
+            var evaluations = 0
+            let observedSerial = graph.makeRule {
+                evaluations += 1
+                return scope.value.serial
+            }
+
+            XCTAssertEqual(observedSerial.value, 0)
+            XCTAssertEqual(evaluations, 1)
+            XCTAssertEqual(inputs.makeStableIdentity().serial, 1)
+            XCTAssertEqual(
+                scope.valueAndFlags(
+                    options: AGValueOptions(rawValue: 0x4)
+                ).value.serial,
+                1
+            )
+
+            // Scope bookkeeping mutates the graph-owned payload in place. It
+            // does not publish an ordinary input change to dependent rules.
+            XCTAssertEqual(observedSerial.value, 0)
+            XCTAssertEqual(evaluations, 1)
+        }
+    }
+
+    func testStableIdentityRootKeepsEarlierScopeValueOnDuplicateMerge() {
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let root = _DisplayList_StableIdentityRoot()
+            let identity = _DisplayList_Identity(decodedValue: 41)
+            let firstStable = _DisplayList_StableIdentity(
+                hash: StrongHash(of: "first"),
+                serial: 1
+            )
+            let secondStable = _DisplayList_StableIdentity(
+                hash: StrongHash(of: "second"),
+                serial: 2
+            )
+            var firstScope = _DisplayList_StableIdentityScope(root: root)
+            var secondScope = _DisplayList_StableIdentityScope(root: root)
+            firstScope.map[identity] = firstStable
+            secondScope.map[identity] = secondStable
+            let first = Attribute(value: firstScope)
+            let second = Attribute(value: secondScope)
+            root.scopes = [WeakAttribute(first), WeakAttribute(second)]
+
+            XCTAssertEqual(root[identity], firstStable)
+        }
+    }
+
+    func testStableIdentityRootPrunesInvalidWeakScopesDuringMerge() {
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            let root = _DisplayList_StableIdentityRoot()
+            inputs.configureStableIDs(root: root)
+            root.scopes.append(WeakAttribute())
+
+            let identity = inputs.pushIdentity()
+            XCTAssertEqual(root.scopes.count, 2)
+            XCTAssertNotNil(root[identity])
+            XCTAssertEqual(root.scopes.count, 1)
+        }
+    }
+
+    func testIDViewPushesExplicitStableScopeBeforeChildList()
+        throws {
+        // ASSERTIONS dynamicViewIdentityProducerDisassemblyObserved
+        // ASSERTIONS stableIdentityNamespaceControlFlowObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeViewInputs(graph: graph)
+            let root = _DisplayList_StableIdentityRoot()
+            inputs.configureStableIDs(root: root)
+            let rootHash = try XCTUnwrap(
+                inputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value.hash
+            let idViewValue = IDView(EmptyView(), id: "row")
+            let idView = graph.makeInput(value: idViewValue)
+
+            _ = idViewValue.makeChildViewList(
+                metadata: (),
+                view: idView,
+                inputs: _ViewListInputs(from: inputs)
+            )
+
+            XCTAssertEqual(root.scopes.count, 2)
+            let childScope = try XCTUnwrap(
+                root.scopes.last?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value
+            XCTAssertEqual(
+                childScope.hash,
+                childStableHash(id: "row", parent: rootHash)
+            )
         }
     }
 
@@ -687,6 +913,16 @@ final class DynamicLayoutStateTests: XCTestCase {
             viewCount: viewCount,
             outputs: _ViewOutputs()
         )
+    }
+
+    private func childStableHash<ID: StronglyHashable>(
+        id: ID,
+        parent: StrongHash
+    ) -> StrongHash {
+        var hasher = StrongHasher()
+        hasher.combine(id)
+        hasher.combine(parent)
+        return hasher.finalize()
     }
 
     private func reusableItem(

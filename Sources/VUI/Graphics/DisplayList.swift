@@ -76,6 +76,36 @@ final class _DisplayList_StableIdentityRoot {
         scopes = []
         map = nil
     }
+
+    subscript(identity: _DisplayList_Identity)
+        -> _DisplayList_StableIdentity? {
+        guard _AGGraph.current != nil else {
+            fatalError(
+                "Stable identity lookup requires an active graph context."
+            )
+        }
+
+        if map == nil {
+            var merged = _DisplayList_StableIdentityMap()
+            var index = scopes.startIndex
+            while index < scopes.endIndex {
+                guard let attribute = scopes[index].attribute else {
+                    scopes.remove(at: index)
+                    continue
+                }
+
+                // Scope maps are bookkeeping values, not dependencies of the
+                // consumer that materializes the root cache.
+                let scope = attribute.valueAndFlags(
+                    options: AGValueOptions(rawValue: 0x4)
+                ).value
+                merged.formUnion(scope.map)
+                index += 1
+            }
+            map = merged
+        }
+        return map?[identity]
+    }
 }
 
 /// One hash namespace in the display-list stable-identity hierarchy.
@@ -94,6 +124,60 @@ struct _DisplayList_StableIdentityScope: GraphInput, _ViewTraitKey {
     var hash: StrongHash
     var map: _DisplayList_StableIdentityMap
     var serial: UInt32
+
+    init(root: _DisplayList_StableIdentityRoot) {
+        self.root = root
+        hash = StrongHash(of: "root")
+        map = _DisplayList_StableIdentityMap()
+        serial = 0
+    }
+
+    init<ID: StronglyHashable>(
+        id: ID,
+        parent: _DisplayList_StableIdentityScope
+    ) {
+        root = parent.root
+        var hasher = StrongHasher()
+        hasher.combine(id)
+        hasher.combine(parent.hash)
+        hash = hasher.finalize()
+        map = _DisplayList_StableIdentityMap()
+        serial = 0
+    }
+
+    mutating func makeIdentity() -> _DisplayList_StableIdentity {
+        serial &+= 1
+        return _DisplayList_StableIdentity(hash: hash, serial: serial)
+    }
+
+    mutating func pushIdentity() -> _DisplayList_Identity {
+        let identity = _DisplayList_Identity()
+        let stableIdentity = makeIdentity()
+        map[identity] = stableIdentity
+
+        // The next root lookup must include the newly-published local entry.
+        root.map = nil
+        return identity
+    }
+}
+
+extension Attribute
+where Value == _DisplayList_StableIdentityScope {
+    /// Accesses scope bookkeeping in place without publishing a copied input.
+    subscript() -> _DisplayList_StableIdentityScope {
+        get {
+            valueAndFlags(options: AGValueOptions(rawValue: 0x4)).value
+        }
+        _modify {
+            guard let graph = _AGGraph.current else {
+                fatalError(
+                    "Stable identity mutation requires an active graph context."
+                )
+            }
+            let pointer = graph.mutableValuePointer(for: self)
+            yield &pointer.pointee
+        }
+    }
 }
 
 extension _DisplayList_StableIdentity: ProtobufEncodableMessage, ProtobufDecodableMessage {

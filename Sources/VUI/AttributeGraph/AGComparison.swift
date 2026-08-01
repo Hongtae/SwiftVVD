@@ -82,6 +82,11 @@ final class _AGValueStorage<Value>: _AnyAGValueStorage {
         UnsafePointer(storage)
     }
 
+    /// Exposes initialized storage to narrowly-scoped graph bookkeeping paths.
+    var mutablePointer: UnsafeMutablePointer<Value> {
+        storage
+    }
+
     var anyValue: Any {
         storage.pointee
     }

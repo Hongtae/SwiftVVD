@@ -1174,12 +1174,11 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
                 return
             }
 
-            // Stable-ID namespace construction is a separate graph-input
-            // contract. Do not silently archive content with unstable IDs.
-            precondition(
-                !inputs.base.options.contains(.needsStableDisplayListIDs),
-                "Archived dynamic layout requires stable-identity scope construction."
-            )
+            var archivedInputs = inputs
+
+            // Archived transitions use a type-derived child namespace before
+            // the outer renderer effect materializes its content.
+            archivedInputs.base.pushStableType(Self.self)
 
             let archivedAnimation: Attribute<ViewListArchivedAnimation.Effect> =
                 graph.makeRule(
@@ -1191,7 +1190,7 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
             let makeElement = makeElt
             outputs = _RendererEffectSupport.makeView(
                 effect: _GraphValue(_attribute: archivedAnimation),
-                inputs: inputs
+                inputs: archivedInputs
             ) { _, archivedInputs in
                 var contentInputs = archivedInputs
 

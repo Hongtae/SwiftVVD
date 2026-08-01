@@ -246,7 +246,12 @@ struct IDView<Content, ID>: View, DynamicView where Content: View, ID: Hashable 
         view: Attribute<Self>,
         inputs: _ViewListInputs
     ) -> _ViewListOutputs {
-        Content._makeViewList(
+        var inputs = inputs
+
+        // Explicit view identity creates a child namespace before the content
+        // list is materialized when stable display identities are requested.
+        inputs.base.pushStableID(id)
+        return Content._makeViewList(
             view: _GraphValue(_attribute: view)[\.content],
             inputs: inputs
         )
@@ -582,6 +587,51 @@ extension _ViewListInputs {
 }
 
 extension _ViewInputs {
+    mutating func configureStableIDs(
+        root: _DisplayList_StableIdentityRoot
+    ) {
+        base.options.insert(.needsStableDisplayListIDs)
+        let scope = Attribute(
+            value: _DisplayList_StableIdentityScope(root: root)
+        )
+        let weakScope = WeakAttribute(scope)
+        base[_DisplayList_StableIdentityScope.self] = weakScope
+
+        // The graph owns the scope; the root keeps a weak index for lazy map
+        // assembly without extending the scope's graph lifetime.
+        root.scopes.append(weakScope)
+    }
+
+    mutating func pushIdentity() -> _DisplayList_Identity {
+        guard base.options.contains(.needsStableDisplayListIDs) else {
+            return _DisplayList_Identity()
+        }
+        guard var scope = base[
+            _DisplayList_StableIdentityScope.self
+        ].attribute else {
+            fatalError(
+                "Stable display identity requires a live scope."
+            )
+        }
+        return scope[].pushIdentity()
+    }
+
+    mutating func makeStableIdentity()
+        -> _DisplayList_StableIdentity {
+        guard var scope = base[
+            _DisplayList_StableIdentityScope.self
+        ].attribute else {
+            Log.error(
+                "Unable to make a stable display identity without a live scope."
+            )
+            return _DisplayList_StableIdentity(
+                hash: StrongHash(),
+                serial: 0
+            )
+        }
+        return scope[].makeIdentity()
+    }
+
     /// Create list inputs from these view inputs, carrying only the base context.
     var listInputs: _ViewListInputs { _ViewListInputs(from: self) }
 }

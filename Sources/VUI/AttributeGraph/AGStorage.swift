@@ -999,6 +999,35 @@ extension _AGGraph {
         return cachedValueAfterRead(id)
     }
 
+    /// Yields the graph-owned payload without publishing a new node value.
+    ///
+    /// Internal bookkeeping values use this path when their mutations must
+    /// remain invisible to ordinary dependency invalidation.
+    func mutableValuePointer<Value>(
+        for attribute: Attribute<Value>
+    ) -> UnsafeMutablePointer<Value> {
+        assert(_AGGraph.current === self)
+        attribute.identifier._debugValidate()
+
+        // Option 0x4 updates the value without installing an input edge.
+        _ = valueAndFlags(
+            for: attribute,
+            relativeTo: nil,
+            options: AGValueOptions(rawValue: 0x4)
+        )
+
+        let index = Int(attribute.identifier.rawValue)
+        guard slots.indices.contains(index),
+              let storage =
+                slots[index].node?.value as? _AGValueStorage<Value> else {
+            fatalError(
+                "mutableValuePointer requires a live graph-owned value of " +
+                    "\(Value.self)."
+            )
+        }
+        return storage.mutablePointer
+    }
+
     private func valueForPermanentInput(
         _ id: AGAttribute,
         evaluator: AGAttribute

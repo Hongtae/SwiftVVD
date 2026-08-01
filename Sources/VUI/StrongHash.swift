@@ -135,6 +135,33 @@ struct StrongHash: Equatable, Hashable, CustomStringConvertible, Codable {
 
 }
 
+/// Converts an arbitrary Encodable identity into deterministic hash data.
+///
+/// Callers own the fallback policy when the value cannot be encoded.
+func makeStableIDData<Value>(from value: Value) -> StrongHash? {
+    guard let encodable = value as? any Encodable else {
+        Log.warning(
+            "Unable to create a stable identity for \(Value.self): " +
+                "the value is not Encodable."
+        )
+        return nil
+    }
+
+    do {
+        return try StrongHash(encodable: encodable)
+    } catch {
+        Log.warning(
+            "Unable to encode a stable identity for \(Value.self): \(error)"
+        )
+        return nil
+    }
+}
+
+/// Returns the stable metadata hash used to scope type-derived identities.
+func makeStableTypeData(_ type: Any.Type) -> StrongHash {
+    StrongHash(stableTypeDataFor: type)
+}
+
 private enum StableTypeSignature {
     static func hash(for type: Any.Type) -> StrongHash? {
         let name: TypeName

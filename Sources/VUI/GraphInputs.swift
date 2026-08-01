@@ -458,6 +458,64 @@ public struct _GraphInputs: GraphReusable {
         }
     }
 
+    mutating func pushStableIndex(_ index: Int) {
+        guard options.contains(.needsStableDisplayListIDs) else { return }
+        pushScope(id: index)
+    }
+
+    mutating func pushStableID<ID: Hashable>(_ id: ID) {
+        guard options.contains(.needsStableDisplayListIDs) else { return }
+
+        // Prefer the identity's direct strong-hash witness. Other Encodable
+        // values are canonicalized before opening the child namespace.
+        if let stronglyHashable = id as? any StronglyHashable {
+            pushScope(id: stronglyHashable)
+            return
+        }
+
+        let hash = makeStableIDData(from: id) ?? StrongHash.random()
+        pushScope(id: hash)
+    }
+
+    mutating func pushStableType(_ type: Any.Type) {
+        guard options.contains(.needsStableDisplayListIDs) else { return }
+        pushScope(id: makeStableTypeData(type))
+    }
+
+    var stableIDScope:
+        WeakAttribute<_DisplayList_StableIdentityScope>? {
+        guard options.contains(.needsStableDisplayListIDs) else {
+            return nil
+        }
+        let scope = self[_DisplayList_StableIdentityScope.self]
+        return scope.isInvalid ? nil : scope
+    }
+
+    private mutating func pushScope<ID: StronglyHashable>(id: ID) {
+        let parentWeak = self[_DisplayList_StableIdentityScope.self]
+        guard let parentAttribute = parentWeak.attribute else {
+            fatalError(
+                "Stable identity scope push requires a live parent scope."
+            )
+        }
+
+        let parent = parentAttribute.valueAndFlags(
+            options: AGValueOptions(rawValue: 0x4)
+        ).value
+        let child = Attribute(
+            value: _DisplayList_StableIdentityScope(
+                id: id,
+                parent: parent
+            )
+        )
+        let childWeak = WeakAttribute(child)
+        self[_DisplayList_StableIdentityScope.self] = childWeak
+
+        // The graph owns the scope value; the root tracks only weak handles
+        // so discarded subtrees can be pruned during lazy map materialization.
+        parent.root.scopes.append(childWeak)
+    }
+
     // MARK: - merge(_:ignoringPhase:)
     //
     // Merges `other`'s fields into `self`:
