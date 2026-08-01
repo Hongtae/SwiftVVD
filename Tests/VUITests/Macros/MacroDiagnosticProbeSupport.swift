@@ -3,7 +3,9 @@ import XCTest
 
 #if os(macOS)
 func runMacroDiagnosticProbe(named name: String, source: String) throws -> String {
+    // The SwiftPM build plan belongs to the package root, not the test bundle.
     let packageRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()

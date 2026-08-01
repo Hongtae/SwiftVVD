@@ -44,7 +44,7 @@ let package = Package(
                  path: "SupportPackages/TinyGLTF"),
         .package(name: "Wayland",
                  path: "SupportPackages/Wayland"),
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.0-latest"),
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "603.0.2"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
