@@ -168,6 +168,18 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(LazyVStackLayout.layoutProperties.multipleViewAxes, .vertical)
         XCTAssertEqual(LazyVGridLayout.layoutProperties.axes, .vertical)
         XCTAssertEqual(LazyHGridLayout.layoutProperties.axes, .horizontal)
+        XCTAssertEqual(
+            LazyVGridLayout.layoutProperties.multipleViewAxes,
+            [.horizontal, .vertical]
+        )
+        XCTAssertEqual(
+            LazyHGridLayout.layoutProperties.multipleViewAxes,
+            [.horizontal, .vertical]
+        )
+        XCTAssertEqual(vGridLayout.headerAnchor, .leading)
+        XCTAssertEqual(vGridLayout.footerAnchor, .leading)
+        XCTAssertEqual(hGridLayout.headerAnchor, .top)
+        XCTAssertEqual(hGridLayout.footerAnchor, .top)
         XCTAssertTrue(LazyVStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyHStackLayout.AnimatableData.self == EmptyAnimatableData.self)
         XCTAssertTrue(LazyVGridLayout.AnimatableData.self == EmptyAnimatableData.self)
@@ -552,8 +564,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(
             geometry.data,
             [
-                HVGridGeometry(position: 0, size: 20, anchor: .leading),
-                HVGridGeometry(position: 24, size: 35, anchor: .trailing),
+                HVGridGeometry(position: 0, size: 20, anchor: .topLeading),
+                HVGridGeometry(position: 24, size: 35, anchor: .bottomTrailing),
                 HVGridGeometry(position: 65, size: 13.5, anchor: .trailing),
                 HVGridGeometry(position: 86.5, size: 13.5, anchor: .trailing),
             ]
@@ -570,6 +582,77 @@ final class LazyContainerSurfaceTests: XCTestCase {
             hLayout.minorGeometry(updatingSize: &hSize).data,
             [HVGridGeometry(position: 0, size: 14, anchor: .bottom)]
         )
+    }
+
+    func testHVGridMinorGeometryPreservesRawValuesAndFullAlignment() {
+        let layout = LazyVGridLayout(
+            columns: [
+                GridItem(.fixed(-5), spacing: -3, alignment: .topTrailing),
+                GridItem(.fixed(10), alignment: .bottomLeading),
+            ],
+            alignment: .leading,
+            spacing: nil,
+            pinnedViews: []
+        )
+
+        var size = CGFloat(20)
+        let geometry = layout.minorGeometry(updatingSize: &size)
+
+        XCTAssertEqual(size, 20)
+        XCTAssertEqual(
+            geometry.data,
+            [
+                HVGridGeometry(position: 0, size: -5, anchor: .topTrailing),
+                HVGridGeometry(position: -8, size: 10, anchor: .bottomLeading),
+            ]
+        )
+
+        let adaptive = LazyVGridLayout(
+            columns: [
+                GridItem(
+                    .adaptive(minimum: 10, maximum: -2),
+                    spacing: 8
+                ),
+            ],
+            alignment: .leading,
+            spacing: nil,
+            pinnedViews: []
+        )
+        var adaptiveSize = CGFloat(30)
+        XCTAssertEqual(
+            adaptive.minorGeometry(updatingSize: &adaptiveSize).data,
+            [
+                HVGridGeometry(position: 0, size: -2, anchor: .leading),
+                HVGridGeometry(position: 6, size: -2, anchor: .leading),
+            ]
+        )
+        XCTAssertEqual(adaptiveSize, 30)
+    }
+
+    func testHVGridMinorGeometryRejectsEmptyAndNonfiniteInputsWithoutMutation() {
+        let empty = LazyVGridLayout(
+            columns: [],
+            alignment: .leading,
+            spacing: nil,
+            pinnedViews: []
+        )
+        var emptySize = CGFloat(17)
+        let emptyGeometry = empty.minorGeometry(updatingSize: &emptySize)
+        XCTAssertEqual(emptyGeometry.count, 0)
+        XCTAssertTrue(emptyGeometry.data.isEmpty)
+        XCTAssertEqual(emptySize, 17)
+
+        let nonempty = LazyVGridLayout(
+            columns: [GridItem(.fixed(10))],
+            alignment: .leading,
+            spacing: nil,
+            pinnedViews: []
+        )
+        var infiniteSize = CGFloat.infinity
+        let infiniteGeometry = nonempty.minorGeometry(updatingSize: &infiniteSize)
+        XCTAssertEqual(infiniteGeometry.count, 0)
+        XCTAssertTrue(infiniteGeometry.data.isEmpty)
+        XCTAssertEqual(infiniteSize, .infinity)
     }
 
     func testHVGridMinorGeometryAlignsTracksInsideRequestedMinorSize() {
@@ -674,107 +757,81 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(hSize, 28)
     }
 
-    func testLazyGridLayoutNilSpacingDefaultsToEightInBothAxes() {
+    func testHVGridFlexibleMinorSizeMeasuresOneIdealSubviewPerDeclaredTrack() {
         let host = GraphHost()
 
         host.data.withCurrent {
             let graph = host.data.graph
-            func computer(for layout: _LazyGridLayout) -> LayoutComputer {
-                let children = Array(repeating: CGSize(width: 10, height: 10), count: 4).map { size in
-                    LayoutProxyAttributes(
-                        layoutComputer: graph.makeInput(value: LayoutComputer.fixed(size))
-                    )
-                }
-                let owner = graph.makeInput(value: ())
-                let environment = graph.makeInput(value: EnvironmentValues())
-                let context = AnyRuleContext(attribute: owner.identifier)
-                return LayoutComputer(
-                    ViewLayoutEngine(
-                        layout: layout,
-                        context: SizeAndSpacingContext(
-                            context: context,
-                            owner: owner.identifier,
-                            environment: environment
-                        ),
-                        children: LayoutProxyCollection(
-                            context: context,
-                            attributes: children
-                        )
-                    )
+            let sizes = [
+                CGSize(width: 11, height: 12),
+                CGSize(width: 21, height: 22),
+            ]
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
                 )
-            }
-
-            let vLayout = _LazyGridLayout(
-                axis: .vertical,
-                items: [GridItem(.fixed(10)), GridItem(.fixed(10))],
-                horizontalAlignment: .leading,
-                verticalAlignment: .top,
-                spacing: nil
             )
-            let vComputer = computer(for: vLayout)
-            let vSize = vComputer.sizeThatFits(.unspecified)
-            XCTAssertEqual(vSize, CGSize(width: 28, height: 28))
-            let vGeometries = vComputer.childGeometries(
-                at: ViewSize(vSize),
-                origin: .zero
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let horizontal = LazyHGridLayout(
+                rows: [
+                    GridItem(.fixed(1), spacing: 4),
+                    GridItem(.flexible(minimum: 1, maximum: 2)),
+                    GridItem(.adaptive(minimum: 1, maximum: 3)),
+                ],
+                alignment: .top,
+                spacing: nil,
+                pinnedViews: []
             )
             XCTAssertEqual(
-                vGeometries.map(\.origin),
-                [
-                    CGPoint(x: 0, y: 0),
-                    CGPoint(x: 18, y: 0),
-                    CGPoint(x: 0, y: 18),
-                    CGPoint(x: 18, y: 18),
-                ]
+                horizontal.flexibleMinorSize(subviews: subviews),
+                12 + 4 + 22 + Spacing.defaultValue.width
             )
+            XCTAssertEqual(cache.items.count, 2)
 
-            let hLayout = _LazyGridLayout(
-                axis: .horizontal,
-                items: [GridItem(.fixed(10)), GridItem(.fixed(10))],
-                horizontalAlignment: .leading,
-                verticalAlignment: .top,
-                spacing: nil
-            )
-            let hComputer = computer(for: hLayout)
-            let hSize = hComputer.sizeThatFits(.unspecified)
-            XCTAssertEqual(hSize, CGSize(width: 28, height: 28))
-            let hGeometries = hComputer.childGeometries(
-                at: ViewSize(hSize),
-                origin: .zero
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let vertical = LazyVGridLayout(
+                columns: [
+                    GridItem(.fixed(1), spacing: 3),
+                    GridItem(.flexible(minimum: 1, maximum: 2)),
+                ],
+                alignment: .leading,
+                spacing: nil,
+                pinnedViews: []
             )
             XCTAssertEqual(
-                hGeometries.map(\.origin),
-                [
-                    CGPoint(x: 0, y: 0),
-                    CGPoint(x: 0, y: 18),
-                    CGPoint(x: 18, y: 0),
-                    CGPoint(x: 18, y: 18),
-                ]
+                vertical.flexibleMinorSize(subviews: subviews),
+                11 + 3 + 21
             )
+            XCTAssertEqual(cache.items.count, 2)
 
-            let explicitZeroLayout = _LazyGridLayout(
-                axis: .vertical,
-                items: [GridItem(.fixed(10), spacing: 0), GridItem(.fixed(10))],
-                horizontalAlignment: .leading,
-                verticalAlignment: .top,
-                spacing: 0
-            )
-            let explicitZeroComputer = computer(for: explicitZeroLayout)
-            let explicitZeroSize = explicitZeroComputer.sizeThatFits(.unspecified)
-            XCTAssertEqual(explicitZeroSize, CGSize(width: 20, height: 20))
-            let explicitZeroGeometries = explicitZeroComputer.childGeometries(
-                at: ViewSize(explicitZeroSize),
-                origin: .zero
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let noTracks = LazyHGridLayout(
+                rows: [],
+                alignment: .top,
+                spacing: nil,
+                pinnedViews: []
             )
             XCTAssertEqual(
-                explicitZeroGeometries.map(\.origin),
-                [
-                    CGPoint(x: 0, y: 0),
-                    CGPoint(x: 10, y: 0),
-                    CGPoint(x: 0, y: 10),
-                    CGPoint(x: 10, y: 10),
-                ]
+                noTracks.flexibleMinorSize(subviews: subviews),
+                0
             )
+            XCTAssertTrue(cache.items.isEmpty)
         }
     }
 

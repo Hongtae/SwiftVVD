@@ -45,7 +45,7 @@ public struct LazyHGrid<Content>: View where Content: View {
 extension LazyHGrid: PrimitiveView, UnaryView {
 }
 
-struct LazyHGridLayout: HVGrid {
+struct LazyHGridLayout: HVGridLayoutStorage {
     var rows: [GridItem]
     var alignment: VerticalAlignment
     var spacing: CGFloat?
@@ -55,8 +55,8 @@ struct LazyHGridLayout: HVGrid {
     typealias AnimatableData = EmptyAnimatableData
     typealias Cache = _LazyStack_Cache<Self>
 
-    static var layoutProperties: _LazyLayout_Properties {
-        _LazyLayout_Properties(axes: .horizontal)
+    static var majorAxis: Axis {
+        .horizontal
     }
 
     var minorAxisAnchor: CGFloat {

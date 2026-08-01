@@ -246,6 +246,16 @@ public struct Alignment: Equatable {
     public static let bottomTrailing = Alignment(horizontal: .trailing, vertical: .bottom)
 }
 
+extension Alignment {
+    /// Projects both alignment guides into their normalized point.
+    var fraction: UnitPoint {
+        UnitPoint(
+            x: horizontal.fraction,
+            y: vertical.fraction
+        )
+    }
+}
+
 extension AlignmentKey: Sendable {}
 extension HorizontalAlignment: Sendable {}
 extension VerticalAlignment: Sendable {}

@@ -2,7 +2,7 @@
 //  File: UnitPoint.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -31,6 +31,18 @@ public struct UnitPoint: Hashable, Sendable {
     public static let topTrailing       = UnitPoint(x: 1.0, y: 0.0)
     public static let bottomLeading     = UnitPoint(x: 0.0, y: 1.0)
     public static let bottomTrailing    = UnitPoint(x: 1.0, y: 1.0)
+}
+
+extension UnitPoint {
+    /// Places the first component on `axis` and the second on its cross axis.
+    init(_ value: CGFloat, in axis: Axis, by crossValue: CGFloat) {
+        switch axis {
+        case .horizontal:
+            self.init(x: value, y: crossValue)
+        case .vertical:
+            self.init(x: crossValue, y: value)
+        }
+    }
 }
 
 extension UnitPoint: Animatable {
