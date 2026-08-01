@@ -908,14 +908,19 @@ class LocalizedTextStorage: AnyTextStorage {
 
     private func localizedBundle(for locale: Locale) -> Bundle {
         let rootBundle = bundle ?? .main
+        #if !canImport(Darwin)
+        // The compatibility resolver owns explicit locale selection and
+        // strings-dictionary loading on ports without localized initializers.
+        return rootBundle
+        #else
         let availableLocalizations = rootBundle.localizations
         guard !availableLocalizations.isEmpty else {
             return rootBundle
         }
 
-        var candidates = Bundle.preferredLocalizations(
+        var candidates = LocalizationResolver.localizationCandidates(
             from: availableLocalizations,
-            forPreferences: [locale.identifier]
+            for: locale
         )
         if let developmentLocalization = rootBundle.developmentLocalization,
            !candidates.contains(developmentLocalization) {
@@ -945,6 +950,7 @@ class LocalizedTextStorage: AnyTextStorage {
             }
         }
         return rootBundle
+        #endif
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {

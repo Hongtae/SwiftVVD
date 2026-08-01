@@ -10,10 +10,10 @@ import Foundation
 /// A testable counterpart for the localized-resource carrier missing from
 /// some Foundation ports.
 ///
-/// The current VUI consumer only needs stable value storage and equality.
-/// Table, bundle, comment, Codable, and full interpolation surfaces remain
-/// intentionally absent until the cross-platform localization resolver is
-/// implemented.
+/// The current VUI consumer needs stable value storage, equality, and
+/// resolution of that value through the shared compatibility resolver. Table,
+/// bundle, locale, comment, Codable, and full interpolation surfaces remain
+/// intentionally absent.
 public struct _LocalizedStringResource: Equatable {
     let value: _StringLocalizationValue
 

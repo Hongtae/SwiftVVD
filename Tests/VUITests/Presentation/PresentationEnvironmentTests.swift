@@ -157,9 +157,12 @@ final class PresentationEnvironmentTests: XCTestCase {
         let enteredChildGraph = DispatchSemaphore(value: 0)
         let releaseChildGraph = DispatchSemaphore(value: 0)
         let childGraphExited = DispatchSemaphore(value: 0)
-        let childGraph = child.viewGraph.data
+        // This test deliberately transfers one graph handle to the worker that
+        // owns its active current scope; production GraphHost.Data stays
+        // non-Sendable because this carrier is only a test synchronization aid.
+        let childGraph = UncheckedSendableValue(child.viewGraph.data)
         DispatchQueue.global().async {
-            childGraph.withCurrent {
+            childGraph.value.withCurrent {
                 enteredChildGraph.signal()
                 releaseChildGraph.wait()
             }
@@ -199,6 +202,14 @@ final class PresentationEnvironmentTests: XCTestCase {
         controller.forEachPresentationChild {
             drainPresentationEnvironmentUpdates(in: $0)
         }
+    }
+}
+
+private struct UncheckedSendableValue<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
     }
 }
 

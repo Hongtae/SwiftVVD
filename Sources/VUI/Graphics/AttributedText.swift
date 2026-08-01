@@ -151,6 +151,15 @@ private func _resolvedAttributedRuns(
     defaultTypefaces: [Typeface],
     context: GraphicsContext
 ) -> [GraphicsContext.ResolvedText.Run] {
+    #if os(Windows)
+    // The Windows Foundation dynamic library does not currently expose the
+    // metadata implementation required by attributed-run enumeration. Keep
+    // arbitrary attributed values renderable as text; localized placeholders
+    // are decomposed before they reach this generic storage boundary.
+    let text = String(value.characters)
+    guard !text.isEmpty, !defaultTypefaces.isEmpty else { return [] }
+    return [.text(defaultTypefaces, text)]
+    #else
     value.runs.compactMap { run -> GraphicsContext.ResolvedText.Run? in
         let text = String(value.characters[run.range])
         guard !text.isEmpty else { return nil }
@@ -190,6 +199,7 @@ private func _resolvedAttributedRuns(
         }
         return .styledText(typefaces, text, _TextAttributeValues(), attributes)
     }
+    #endif
 }
 
 final class AttributedStringTextStorage: AnyTextStorage {

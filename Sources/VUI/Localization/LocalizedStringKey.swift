@@ -81,6 +81,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
         bundle: Bundle,
         locale: Locale
     ) -> [ResolvedSegment] {
+#if canImport(Darwin)
         guard hasFormatting else {
             return [.attributedString(AttributedString(
                 localized: String.LocalizationValue(key),
@@ -128,6 +129,53 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             append(AttributedString(resolved[run.range]), to: &segments)
         }
         return segments
+#else
+        // Keep replacement metadata outside Foundation attributed storage so
+        // retained rich arguments can be substituted before generic lowering.
+        let localizationValue = hasFormatting
+            ? foundationLocalizationValue()
+            : String.LocalizationValue(key)
+        let resolved = localizationValue.resolvedLocalization(
+            replacements: hasFormatting ? arguments.map(\.replacement) : [],
+            applyReplacementIndexAttribute: hasFormatting,
+            table: table,
+            bundle: bundle,
+            locale: locale
+        )
+
+        var segments: [ResolvedSegment] = []
+        for run in resolved.runs {
+            let replacementIndex = run.replacementIndex.map { $0 - 1 }
+            if let replacementIndex,
+               arguments.indices.contains(replacementIndex) {
+                switch arguments[replacementIndex].storage {
+                case let .text(text, _):
+                    segments.append(.text(text.applyingPlaceholderIntent(
+                        run.presentationIntent
+                    )))
+                    continue
+                case let .attributedString(value):
+                    segments.append(.text(Text(value).applyingPlaceholderIntent(
+                        run.presentationIntent
+                    )))
+                    continue
+                case let .localizedStringResource(resource):
+                    segments.append(.text(Text(resource)))
+                    continue
+                case .value:
+                    break
+                }
+            }
+            if let intent = run.presentationIntent {
+                segments.append(.text(
+                    Text(verbatim: run.text).applyingPlaceholderIntent(intent)
+                ))
+            } else {
+                append(AttributedString(run.text), to: &segments)
+            }
+        }
+        return segments
+#endif
     }
 
     private func foundationLocalizationValue() -> String.LocalizationValue {
@@ -243,7 +291,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
             appendInterpolation(String(substring))
         }
 
-        #if canImport(Darwin)
+#if canImport(Darwin)
         public mutating func appendInterpolation<Subject>(
             _ subject: Subject,
             formatter: Formatter? = nil
@@ -257,7 +305,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
         ) where Subject: NSObject {
             appendValue(subject, formatter: formatter)
         }
-        #endif
+#endif
 
         public mutating func appendInterpolation<T>(_ value: T)
         where T: _FormatSpecifiable {
@@ -372,26 +420,45 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
 }
 
 private extension Text {
-    func applyingPlaceholderAttributes(from placeholder: AttributedString) -> Text {
-        var hasStrong = false
-        var hasEmphasis = false
-        for run in placeholder.runs {
-            guard let intent = run.inlinePresentationIntent else { continue }
-            hasStrong = hasStrong || intent.contains(.stronglyEmphasized)
-            hasEmphasis = hasEmphasis || intent.contains(.emphasized)
-        }
+    /// Applies localization-owned Markdown intent without overriding an
+    /// explicit style already carried by the interpolated Text value.
+    func applyingPlaceholderIntent(
+        _ intent: _InlinePresentationIntent?
+    ) -> Text {
+        guard let intent else { return self }
 
         var result = self
-        if hasStrong, boldValue == nil, fontWeight == nil {
+        if intent.contains(.stronglyEmphasized),
+           boldValue == nil,
+           fontWeight == nil {
             result = result.bold()
         }
-        if hasEmphasis, italicValue == nil {
+        if intent.contains(.emphasized), italicValue == nil {
             result = result.italic()
         }
         return result
     }
+
+#if canImport(Darwin)
+    func applyingPlaceholderAttributes(from placeholder: AttributedString) -> Text {
+        var intent = _InlinePresentationIntent()
+        for run in placeholder.runs {
+            guard let nativeIntent = run.inlinePresentationIntent else {
+                continue
+            }
+            if nativeIntent.contains(.stronglyEmphasized) {
+                intent.insert(.stronglyEmphasized)
+            }
+            if nativeIntent.contains(.emphasized) {
+                intent.insert(.emphasized)
+            }
+        }
+        return applyingPlaceholderIntent(intent.isEmpty ? nil : intent)
+    }
+#endif
 }
 
+#if canImport(Darwin)
 private extension AttributedString {
     func applyingPlaceholderAttributes(
         from placeholder: AttributedString
@@ -414,6 +481,7 @@ private extension AttributedString {
         return result
     }
 }
+#endif
 
 private struct UniqueSeedGenerator {
     var nextID = 0

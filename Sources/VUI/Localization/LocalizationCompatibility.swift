@@ -25,22 +25,22 @@ extension AttributedString {
     public typealias LocalizationOptions = _AttributedStringLocalizationOptions
 }
 
-// MARK: - Raw localization fallback
+// MARK: - Localized resolution
 
 extension AttributedString {
-    /// Returns the untranslated localization pattern until the platform
-    /// resolver implements table lookup and locale-sensitive formatting.
     public init(
         localized value: String.LocalizationValue,
         table: String? = nil,
         bundle: Bundle? = nil,
         locale: Locale? = nil
     ) {
-        self = value.unresolvedAttributedString()
+        self = value.resolvedAttributedString(
+            table: table,
+            bundle: bundle ?? .main,
+            locale: locale ?? .current
+        )
     }
 
-    /// Returns the untranslated localization pattern. Replacement values and
-    /// replacement-index attributes are deliberately deferred.
     public init(
         localized value: String.LocalizationValue,
         options: LocalizationOptions,
@@ -48,21 +48,30 @@ extension AttributedString {
         bundle: Bundle? = nil,
         locale: Locale? = nil
     ) {
-        self = value.unresolvedAttributedString()
+        self = value.resolvedAttributedString(
+            replacements: options.replacements ?? [],
+            applyReplacementIndexAttribute:
+                options.applyReplacementIndexAttribute,
+            table: table,
+            bundle: bundle ?? .main,
+            locale: locale ?? .current
+        )
     }
 
-    /// Returns the resource's untranslated value until resource lookup is
-    /// implemented by the cross-platform resolver.
+    /// Resolves the reduced resource carrier with its stored localization
+    /// value. Resource-specific table, bundle, and locale metadata are not
+    /// represented by this compatibility slice.
     public init(localized resource: LocalizedStringResource) {
-        self = resource.value.unresolvedAttributedString()
+        self = resource.value.resolvedAttributedString()
     }
 }
 
 extension String {
-    /// Returns the resource's untranslated value until resource lookup is
-    /// implemented by the cross-platform resolver.
+    /// Resolves the reduced resource carrier with its stored localization
+    /// value. Resource-specific table, bundle, and locale metadata are not
+    /// represented by this compatibility slice.
     public init(localized resource: LocalizedStringResource) {
-        self = resource.value.unresolvedString()
+        self = resource.value.resolvedString()
     }
 }
 

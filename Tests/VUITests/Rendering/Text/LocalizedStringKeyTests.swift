@@ -46,6 +46,12 @@ final class LocalizedStringKeyTests: XCTestCase {
         }
     }
 
+    private struct LocalizationRunRecord: Equatable {
+        var text: String
+        var replacementIndex: Int?
+        var intentRawValue: UInt?
+    }
+
     func testCarrierLayoutAndFieldsMatchObservedShape() {
         XCTAssertEqual(MemoryLayout<LocalizedStringKey>.size, 32)
         XCTAssertEqual(MemoryLayout<LocalizedStringKey>.stride, 32)
@@ -144,6 +150,7 @@ final class LocalizedStringKeyTests: XCTestCase {
         )
     }
 
+    #if canImport(Darwin)
     func testFormatterAndSubjectAreEvaluatedAtEachResolution() {
         let subject = MutableFormatSubject("initial")
         let formatter = RecordingFormatter(prefix: "first")
@@ -173,6 +180,7 @@ final class LocalizedStringKeyTests: XCTestCase {
             ["second:before-first-resolve", "third:before-second-resolve"]
         )
     }
+    #endif
 
     func testLocalizedPlaceholderPresentationIntentUsesArgumentPrecedence() {
         func resolvedTextArgument(_ key: LocalizedStringKey) -> Text {
@@ -188,7 +196,10 @@ final class LocalizedStringKeyTests: XCTestCase {
             return text
         }
 
-        func resolvedAttributedArgument(_ key: LocalizedStringKey) -> AttributedString {
+        #if canImport(Darwin)
+        func resolvedAttributedArgument(
+            _ key: LocalizedStringKey
+        ) -> AttributedString {
             let segments = key.resolve(
                 table: nil,
                 bundle: .module,
@@ -200,6 +211,7 @@ final class LocalizedStringKeyTests: XCTestCase {
             }
             return value
         }
+        #endif
 
         let plain = Text(verbatim: "value")
         let strong: LocalizedStringKey = "**\(plain)**"
@@ -230,6 +242,7 @@ final class LocalizedStringKeyTests: XCTestCase {
         let strongRegularFontAttributed: LocalizedStringKey =
             "**\(attributedRegularFont)**"
 
+        #if canImport(Darwin)
         let resolvedStrongAttributed = resolvedAttributedArgument(strongAttributed)
         XCTAssertTrue(resolvedStrongAttributed.runs.allSatisfy {
             $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
@@ -247,6 +260,14 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertTrue(resolvedStrongRegularFont.runs.allSatisfy {
             $0.font == Font.system(size: 20, weight: .regular)
         })
+        #else
+        XCTAssertEqual(resolvedTextArgument(strongAttributed).boldValue, true)
+        XCTAssertEqual(resolvedTextArgument(emphasisAttributed).italicValue, true)
+        XCTAssertEqual(
+            resolvedTextArgument(strongRegularFontAttributed).boldValue,
+            true
+        )
+        #endif
 
         guard let boldProvider = Font.system(size: 20).bold().provider.fontBox
                 as? SystemFontProvider,
@@ -308,6 +329,35 @@ final class LocalizedStringKeyTests: XCTestCase {
         environment.locale = Locale(identifier: "ko")
         XCTAssertEqual(Text(greeting, bundle: .module)._resolveText(in: environment), "안녕하세요")
         XCTAssertEqual(Text(items, bundle: .module)._resolveText(in: environment), "항목 3개")
+    }
+
+    func testCompatibilityLocaleMatcherMatchesFoundationSamples() {
+        let samples: [(available: [String], preference: String)] = [
+            (["en", "ko"], "ko"),
+            (["en", "ko"], "ko_KR"),
+            (["en", "ko"], "en_US"),
+            (["en-GB", "fr"], "en_AU"),
+            (["zh-Hans", "zh-Hant"], "zh_Hant_TW"),
+            (["zh-Hans", "zh-Hant"], "zh_TW"),
+        ]
+
+        for sample in samples {
+            XCTAssertEqual(
+                LocalizationResolver.explicitLocalization(
+                    from: sample.available,
+                    for: Locale(identifier: sample.preference)
+                ),
+                Bundle.preferredLocalizations(
+                    from: sample.available,
+                    forPreferences: [sample.preference]
+                ).first,
+                "\(sample.available), \(sample.preference)"
+            )
+        }
+        XCTAssertNil(LocalizationResolver.explicitLocalization(
+            from: ["en", "ko"],
+            for: Locale(identifier: "fr")
+        ))
     }
 
     func testStringDictionaryPluralRulesAreResolvedByFoundation() {
@@ -400,6 +450,7 @@ final class LocalizedStringKeyTests: XCTestCase {
             guard case let .text(text) = segment else { return nil }
             return text
         }
+        #if canImport(Darwin)
         let redRuns = segments.flatMap { segment -> [String] in
             guard case let .attributedString(value) = segment else { return [] }
             return value.runs.compactMap { run in
@@ -409,6 +460,12 @@ final class LocalizedStringKeyTests: XCTestCase {
         }
         XCTAssertEqual(textSegments, [embedded])
         XCTAssertEqual(redRuns, ["styled", "styled"])
+        #else
+        XCTAssertEqual(
+            textSegments.map { $0._resolveText(in: environment) },
+            ["styled", "first", "styled"]
+        )
+        #endif
     }
 
     func testFormatStyleArgumentsRetainTextAndAttributedOutput() {
@@ -473,6 +530,14 @@ final class LocalizedStringKeyTests: XCTestCase {
     func testPortableLocalizationCompatibilityCarriers() {
         let literal = _StringLocalizationValue("plain")
         XCTAssertEqual(literal.pattern, "plain")
+        XCTAssertFalse(literal.hasFormatting)
+        XCTAssertEqual(
+            _StringLocalizationValue("value %lld").resolvedString(
+                replacements: [Int64(42)],
+                locale: Locale(identifier: "en_US")
+            ),
+            "value %lld"
+        )
 
         var interpolation = _StringLocalizationValue.StringInterpolation(
             literalCapacity: 6,
@@ -484,10 +549,47 @@ final class LocalizedStringKeyTests: XCTestCase {
             stringInterpolation: interpolation
         )
         XCTAssertEqual(interpolated.pattern, "value %lld")
-        XCTAssertEqual(interpolated.unresolvedString(), "value %lld")
+        XCTAssertTrue(interpolated.hasFormatting)
         XCTAssertEqual(
-            String(interpolated.unresolvedAttributedString().characters),
-            "value %lld"
+            interpolated.resolvedString(
+                replacements: [Int64(42)],
+                locale: Locale(identifier: "en_US")
+            ),
+            "value 42"
+        )
+        let resolved = interpolated.resolvedLocalization(
+            replacements: [Int64(42)],
+            applyReplacementIndexAttribute: true,
+            locale: Locale(identifier: "en_US")
+        )
+        XCTAssertEqual(resolved.string, "value 42")
+        XCTAssertEqual(
+            resolved.runs.map {
+                LocalizationRunRecord(
+                    text: $0.text,
+                    replacementIndex: $0.replacementIndex,
+                    intentRawValue: $0.presentationIntent?.rawValue
+                )
+            },
+            [
+                LocalizationRunRecord(
+                    text: "value ",
+                    replacementIndex: nil,
+                    intentRawValue: nil
+                ),
+                LocalizationRunRecord(
+                    text: "42",
+                    replacementIndex: 1,
+                    intentRawValue: nil
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            String(interpolated.resolvedAttributedString(
+                replacements: [Int64(42)],
+                locale: Locale(identifier: "en_US")
+            ).characters),
+            "value 42"
         )
 
         let resource = _LocalizedStringResource(interpolated)
@@ -497,12 +599,6 @@ final class LocalizedStringKeyTests: XCTestCase {
         var options = _AttributedStringLocalizationOptions()
         XCTAssertNil(options.replacements)
         XCTAssertFalse(options.applyReplacementIndexAttribute)
-        let foundationOptions = AttributedString.LocalizationOptions()
-        XCTAssertNil(foundationOptions.replacements)
-        XCTAssertEqual(
-            options.applyReplacementIndexAttribute,
-            foundationOptions.applyReplacementIndexAttribute
-        )
         options.replacements = [Int64(42)]
         options.applyReplacementIndexAttribute = true
         XCTAssertEqual(options.replacements?.count, 1)
@@ -512,6 +608,69 @@ final class LocalizedStringKeyTests: XCTestCase {
         intent.formUnion(.stronglyEmphasized)
         XCTAssertTrue(intent.contains(.emphasized))
         XCTAssertTrue(intent.contains(.stronglyEmphasized))
+        XCTAssertEqual(_InlinePresentationIntent.emphasized.rawValue, 1)
+        XCTAssertEqual(_InlinePresentationIntent.stronglyEmphasized.rawValue, 2)
+        XCTAssertEqual(
+            AttributeScopes.FoundationAttributes
+                .ReplacementIndexAttribute.name,
+            "NSReplacementIndex"
+        )
+        XCTAssertEqual(
+            _InlinePresentationIntentAttribute.name,
+            "NSInlinePresentationIntent"
+        )
+
+        XCTAssertEqual(
+            _StringLocalizationValue("greeting").resolvedString(
+                bundle: .module,
+                locale: Locale(identifier: "en")
+            ),
+            "Hello"
+        )
+        XCTAssertEqual(
+            _StringLocalizationValue("greeting").resolvedString(
+                bundle: .module,
+                locale: Locale(identifier: "ko")
+            ),
+            "안녕하세요"
+        )
+
+        var pluralInterpolation =
+            _StringLocalizationValue.StringInterpolation(
+                literalCapacity: 7,
+                interpolationCount: 1
+            )
+        pluralInterpolation.appendLiteral("apples ")
+        pluralInterpolation.appendInterpolation(
+            placeholder: .int,
+            specifier: "%lld"
+        )
+        let plural = _StringLocalizationValue(
+            stringInterpolation: pluralInterpolation
+        )
+        XCTAssertEqual(
+            plural.resolvedString(
+                replacements: [Int64(1)],
+                bundle: .module,
+                locale: Locale(identifier: "en")
+            ),
+            "1 apple"
+        )
+        XCTAssertEqual(
+            plural.resolvedString(
+                replacements: [Int64(2)],
+                bundle: .module,
+                locale: Locale(identifier: "ko")
+            ),
+            "사과 2개"
+        )
+    }
+
+    #if canImport(Darwin)
+    func testLocalizationCompatibilityTypesMatchFoundation() {
+        let foundationOptions = AttributedString.LocalizationOptions()
+        XCTAssertNil(foundationOptions.replacements)
+        XCTAssertFalse(foundationOptions.applyReplacementIndexAttribute)
         XCTAssertEqual(
             _InlinePresentationIntent.emphasized.rawValue,
             InlinePresentationIntent.emphasized.rawValue
@@ -525,7 +684,324 @@ final class LocalizedStringKeyTests: XCTestCase {
             AttributeScopes.FoundationAttributes
                 .InlinePresentationIntentAttribute.name
         )
+        var nativeLiteralOptions = AttributedString.LocalizationOptions()
+        nativeLiteralOptions.replacements = [Int64(42)]
+        nativeLiteralOptions.applyReplacementIndexAttribute = true
+        let nativeLiteral = AttributedString(
+            localized: String.LocalizationValue("literal %d"),
+            options: nativeLiteralOptions,
+            locale: Locale(identifier: "en_US")
+        )
+        let compatibilityLiteral =
+            _StringLocalizationValue("literal %d").resolvedLocalization(
+                replacements: [Int64(42)],
+                applyReplacementIndexAttribute: true,
+                locale: Locale(identifier: "en_US")
+            )
+        XCTAssertEqual(
+            compatibilityLiteral.string,
+            String(nativeLiteral.characters)
+        )
+        XCTAssertEqual(
+            compatibilityLiteral.runs.map(\.replacementIndex),
+            nativeLiteral.runs.map(\.replacementIndex)
+        )
     }
+
+    func testLocalizationResolverMatchesFoundationReplacementRuns() {
+        // ASSERTIONS foundationLocalizationReplacementRunsObserved
+        // ASSERTIONS foundationLocalizationStringsDictionaryObserved
+        // ASSERTIONS foundationLocalizationLiteralFormatBoundaryObserved
+        func nativeRecords(
+            _ value: AttributedString
+        ) -> [LocalizationRunRecord] {
+            value.runs.map { run in
+                LocalizationRunRecord(
+                    text: String(value.characters[run.range]),
+                    replacementIndex: run.replacementIndex,
+                    intentRawValue: run.inlinePresentationIntent?.rawValue
+                )
+            }
+        }
+
+        func compatibilityRecords(
+            _ value: LocalizationResolver.Result
+        ) -> [LocalizationRunRecord] {
+            value.runs.map { run in
+                LocalizationRunRecord(
+                    text: run.text,
+                    replacementIndex: run.replacementIndex,
+                    intentRawValue: run.presentationIntent?.rawValue
+                )
+            }
+        }
+
+        func makeNativeRichValue() -> String.LocalizationValue {
+            var interpolation = String.LocalizationValue.StringInterpolation(
+                literalCapacity: 10,
+                interpolationCount: 3
+            )
+            interpolation.appendLiteral("rich ")
+            interpolation.appendInterpolation(
+                placeholder: .object,
+                specifier: "%@"
+            )
+            interpolation.appendLiteral(" ")
+            interpolation.appendInterpolation(
+                placeholder: .int,
+                specifier: "%lld"
+            )
+            interpolation.appendLiteral(" ")
+            interpolation.appendInterpolation(
+                placeholder: .object,
+                specifier: "%@"
+            )
+            return String.LocalizationValue(
+                stringInterpolation: interpolation
+            )
+        }
+
+        func makeCompatibilityRichValue() -> _StringLocalizationValue {
+            var interpolation =
+                _StringLocalizationValue.StringInterpolation(
+                    literalCapacity: 10,
+                    interpolationCount: 3
+                )
+            interpolation.appendLiteral("rich ")
+            interpolation.appendInterpolation(
+                placeholder: .object,
+                specifier: "%@"
+            )
+            interpolation.appendLiteral(" ")
+            interpolation.appendInterpolation(
+                placeholder: .int,
+                specifier: "%lld"
+            )
+            interpolation.appendLiteral(" ")
+            interpolation.appendInterpolation(
+                placeholder: .object,
+                specifier: "%@"
+            )
+            return _StringLocalizationValue(
+                stringInterpolation: interpolation
+            )
+        }
+
+        let locale = Locale(identifier: "en_US")
+        let richReplacements: [any CVarArg] = [
+            "first",
+            Int64(7),
+            "styled",
+        ]
+        var nativeRichOptions = AttributedString.LocalizationOptions()
+        nativeRichOptions.replacements = richReplacements
+        nativeRichOptions.applyReplacementIndexAttribute = true
+        let nativeRich = AttributedString(
+            localized: makeNativeRichValue(),
+            options: nativeRichOptions,
+            bundle: .module,
+            locale: locale
+        )
+        let compatibilityRich =
+            makeCompatibilityRichValue().resolvedLocalization(
+                replacements: richReplacements,
+                applyReplacementIndexAttribute: true,
+                bundle: .module,
+                locale: locale
+            )
+        XCTAssertEqual(
+            compatibilityRecords(compatibilityRich),
+            nativeRecords(nativeRich)
+        )
+
+        var nativeEscapedInterpolation =
+            String.LocalizationValue.StringInterpolation(
+                literalCapacity: 20,
+                interpolationCount: 1
+            )
+        nativeEscapedInterpolation.appendLiteral("literal %d and %@ ")
+        nativeEscapedInterpolation.appendInterpolation(
+            placeholder: .int,
+            specifier: "%lld"
+        )
+        let nativeEscapedValue = String.LocalizationValue(
+            stringInterpolation: nativeEscapedInterpolation
+        )
+        var compatibilityEscapedInterpolation =
+            _StringLocalizationValue.StringInterpolation(
+                literalCapacity: 20,
+                interpolationCount: 1
+            )
+        compatibilityEscapedInterpolation.appendLiteral("literal %d and %@ ")
+        compatibilityEscapedInterpolation.appendInterpolation(
+            placeholder: .int,
+            specifier: "%lld"
+        )
+        let compatibilityEscapedValue = _StringLocalizationValue(
+            stringInterpolation: compatibilityEscapedInterpolation
+        )
+        var nativeEscapedOptions = AttributedString.LocalizationOptions()
+        nativeEscapedOptions.replacements = [Int64(3)]
+        nativeEscapedOptions.applyReplacementIndexAttribute = true
+        let nativeEscaped = AttributedString(
+            localized: nativeEscapedValue,
+            options: nativeEscapedOptions,
+            locale: locale
+        )
+        let compatibilityEscaped =
+            compatibilityEscapedValue.resolvedLocalization(
+                replacements: [Int64(3)],
+                applyReplacementIndexAttribute: true,
+                locale: locale
+            )
+        XCTAssertEqual(
+            compatibilityRecords(compatibilityEscaped),
+            nativeRecords(nativeEscaped)
+        )
+
+        var nativeIntentInterpolation =
+            String.LocalizationValue.StringInterpolation(
+                literalCapacity: 6,
+                interpolationCount: 1
+            )
+        nativeIntentInterpolation.appendLiteral("***")
+        nativeIntentInterpolation.appendInterpolation(
+            placeholder: .object,
+            specifier: "%@"
+        )
+        nativeIntentInterpolation.appendLiteral("***")
+        let nativeIntentValue = String.LocalizationValue(
+            stringInterpolation: nativeIntentInterpolation
+        )
+        var compatibilityIntentInterpolation =
+            _StringLocalizationValue.StringInterpolation(
+                literalCapacity: 6,
+                interpolationCount: 1
+            )
+        compatibilityIntentInterpolation.appendLiteral("***")
+        compatibilityIntentInterpolation.appendInterpolation(
+            placeholder: .object,
+            specifier: "%@"
+        )
+        compatibilityIntentInterpolation.appendLiteral("***")
+        let compatibilityIntentValue = _StringLocalizationValue(
+            stringInterpolation: compatibilityIntentInterpolation
+        )
+        let intentReplacements: [any CVarArg] = ["\u{FFFC}"]
+        var nativeIntentOptions = AttributedString.LocalizationOptions()
+        nativeIntentOptions.replacements = intentReplacements
+        nativeIntentOptions.applyReplacementIndexAttribute = true
+        let nativeIntent = AttributedString(
+            localized: nativeIntentValue,
+            options: nativeIntentOptions,
+            locale: locale
+        )
+        let compatibilityIntent =
+            compatibilityIntentValue.resolvedLocalization(
+                replacements: intentReplacements,
+                applyReplacementIndexAttribute: true,
+                locale: locale
+            )
+        XCTAssertEqual(
+            compatibilityRecords(compatibilityIntent),
+            nativeRecords(nativeIntent)
+        )
+
+        func makeNativePluralValue() -> String.LocalizationValue {
+            var interpolation = String.LocalizationValue.StringInterpolation(
+                literalCapacity: 7,
+                interpolationCount: 1
+            )
+            interpolation.appendLiteral("apples ")
+            interpolation.appendInterpolation(
+                placeholder: .int,
+                specifier: "%lld"
+            )
+            return String.LocalizationValue(
+                stringInterpolation: interpolation
+            )
+        }
+
+        func makeCompatibilityPluralValue() -> _StringLocalizationValue {
+            var interpolation =
+                _StringLocalizationValue.StringInterpolation(
+                    literalCapacity: 7,
+                    interpolationCount: 1
+                )
+            interpolation.appendLiteral("apples ")
+            interpolation.appendInterpolation(
+                placeholder: .int,
+                specifier: "%lld"
+            )
+            return _StringLocalizationValue(
+                stringInterpolation: interpolation
+            )
+        }
+
+        for localeIdentifier in ["en", "ko"] {
+            for count: Int64 in [1, 2] {
+                let pluralLocale = Locale(identifier: localeIdentifier)
+                guard let localizationPath = Bundle.module.path(
+                    forResource: localeIdentifier,
+                    ofType: "lproj"
+                ),
+                let localizedBundle = Bundle(path: localizationPath) else {
+                    return XCTFail(
+                        "Missing \(localeIdentifier) localization bundle"
+                    )
+                }
+                let pluralReplacements: [any CVarArg] = [count]
+                var nativePluralOptions =
+                    AttributedString.LocalizationOptions()
+                nativePluralOptions.replacements = pluralReplacements
+                nativePluralOptions.applyReplacementIndexAttribute = true
+                let nativePlural = AttributedString(
+                    localized: makeNativePluralValue(),
+                    options: nativePluralOptions,
+                    bundle: localizedBundle,
+                    locale: pluralLocale
+                )
+                let compatibilityPlural =
+                    makeCompatibilityPluralValue().resolvedLocalization(
+                        replacements: pluralReplacements,
+                        applyReplacementIndexAttribute: true,
+                        bundle: localizedBundle,
+                        locale: pluralLocale
+                    )
+                XCTAssertEqual(
+                    compatibilityRecords(compatibilityPlural),
+                    nativeRecords(nativePlural),
+                    "\(localeIdentifier) count \(count)"
+                )
+
+                guard case let .resolved(loadedPattern) =
+                    LocalizationResolver.stringsDictionaryLookup(
+                        forKey: "apples %lld",
+                        table: nil,
+                        bundle: .module,
+                        localization: localeIdentifier,
+                        locale: pluralLocale,
+                        replacements: pluralReplacements
+                    ) else {
+                    return XCTFail(
+                        "Failed to load \(localeIdentifier) strings dictionary"
+                    )
+                }
+                let loadedPlural = LocalizationResolver.resolve(
+                    pattern: loadedPattern,
+                    replacements: pluralReplacements,
+                    locale: pluralLocale,
+                    applyReplacementIndexAttribute: true
+                )
+                XCTAssertEqual(
+                    compatibilityRecords(loadedPlural),
+                    nativeRecords(nativePlural),
+                    "loaded \(localeIdentifier) count \(count)"
+                )
+            }
+        }
+    }
+    #endif
 
     func testDateIntervalStorageInterpolationAndEnvironmentFormatting() {
         let defaults = EnvironmentValues()

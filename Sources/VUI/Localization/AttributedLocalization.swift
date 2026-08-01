@@ -11,8 +11,8 @@ import Foundation
 /// `LocalizedStringKey`.
 ///
 /// This testable counterpart records replacement inputs and the request for
-/// replacement-index attributes. The temporary non-Darwin resolver does not
-/// apply either option yet.
+/// replacement-index attributes. The non-Darwin compatibility initializer
+/// forwards both members to the shared resolver.
 public struct _AttributedStringLocalizationOptions {
     public var replacements: [any CVarArg]?
     public var applyReplacementIndexAttribute: Bool
