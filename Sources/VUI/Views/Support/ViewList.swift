@@ -1411,6 +1411,32 @@ protocol _ViewList_Elements {
 }
 
 extension _ViewList_Elements {
+    /// Visits every element and returns the output aggregated by the
+    /// conformer's traversal.
+    func makeAllElements(
+        inputs: _ViewInputs,
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs?
+    ) -> _ViewOutputs? {
+        makeAllElements(inputs: inputs, indirectMap: nil, body: body)
+    }
+
+    /// Visits every element while applying the supplied indirect-attribute map.
+    func makeAllElements(
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?,
+        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs?
+    ) -> _ViewOutputs? {
+        var from = 0
+        let (outputs, _) = makeElements(
+            from: &from,
+            inputs: inputs,
+            indirectMap: indirectMap
+        ) { elementInputs, makeView in
+            (body(elementInputs, makeView), true)
+        }
+        return outputs
+    }
+
     /// Creates a single element at `index`.
     /// The exact helper body and conformer override behavior are still partial.
     func makeOneElement(
@@ -1519,16 +1545,26 @@ struct MergedElements: _ViewList_Elements {
         indirectMap: IndirectAttributeMap?,
         body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "MergedElements.makeElements called outside an active AG context."
+            )
+        }
+        var collected: [_ViewOutputs] = []
         for output in outputs {
             switch output.views {
             case .staticList(let elems):
                 let (result, cont) = elems.makeElements(from: &from, inputs: inputs, indirectMap: indirectMap, body: body)
-                if !cont { return (result, false) }
+                if let result {
+                    collected.append(result)
+                }
+                if !cont {
+                    return (merge(collected, in: graph), false)
+                }
             case .dynamicList(let attr, _):
                 var traversalFrom = from
                 var remaining = from
                 let list = attr.value
-                var dynamicResult: _ViewOutputs?
                 let cont = _applySublists(in: list, from: &traversalFrom, listAttribute: attr) { sublist in
                     var elementFrom = remaining
                     let (result, shouldContinue) = sublist.elements.makeElements(
@@ -1537,15 +1573,38 @@ struct MergedElements: _ViewList_Elements {
                         indirectMap: indirectMap,
                         body: body
                     )
-                    dynamicResult = result
+                    if let result {
+                        collected.append(result)
+                    }
                     remaining = elementFrom
                     return shouldContinue
                 }
                 from = remaining
-                if !cont { return (dynamicResult, false) }
+                if !cont {
+                    return (merge(collected, in: graph), false)
+                }
             }
         }
-        return (nil, true)
+        return (merge(collected, in: graph), true)
+    }
+
+    private func merge(
+        _ outputs: [_ViewOutputs],
+        in graph: _AGGraph
+    ) -> _ViewOutputs? {
+        switch outputs.count {
+        case 0:
+            return nil
+        case 1:
+            return outputs[0]
+        default:
+            return _ViewOutputs(
+                preferences: PreferencesOutputs.merge(
+                    outputs.map(\.preferences),
+                    in: graph
+                )
+            )
+        }
     }
 }
 
@@ -2490,6 +2549,8 @@ func _forEachSublist(
         transform: _ViewList_TemporarySublistTransform()
     ) { _, _, node, transform in
         guard case .sublist(var sublist) = node else { return true }
+        // Empty sublists do not participate in element traversal.
+        guard sublist.count > 0 else { return true }
         transform.apply(to: &sublist)
         sublistTransform.apply(to: &sublist)
         return body(sublist)
@@ -2513,6 +2574,9 @@ func _applySublists(
         transform: _ViewList_TemporarySublistTransform()
     ) { _, _, node, transform in
         guard case .sublist(var sublist) = node else { return true }
+        // The count gate precedes transformation and callback dispatch, so an
+        // empty branch cannot become a zero-view dynamic container item.
+        guard sublist.count > 0 else { return true }
         transform.apply(to: &sublist)
         sublistTransform.apply(to: &sublist)
         return body(sublist)

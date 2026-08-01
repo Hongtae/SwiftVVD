@@ -88,6 +88,15 @@ extension _AGGraph {
         slots[index].node!.value = newValue
         if changed {
             slots[index].node!.valueVersion &+= 1
+            let transaction = slots[index].node!.transaction
+            let outputs = slots[index].node!.outputs
+            markChangedOutputEdges(
+                outputs,
+                transaction: transaction,
+                propagateTransaction: transaction != nil,
+                changedInput: id.rawValue
+            )
+            notifyCrossGraphObservers(for: id.rawValue, transaction: transaction)
         }
         return changed
     }
@@ -1750,6 +1759,32 @@ extension _AGGraph {
             propagateTransaction: propagateTransaction,
             inputsChanged: inputsChanged
         )
+    }
+
+    private func markChangedOutputEdges(
+        _ outputIDs: ContiguousArray<UInt32>,
+        transaction: Transaction? = nil,
+        propagateTransaction: Bool = false,
+        changedInput: UInt32
+    ) {
+        // Computed publication changes only direct edge records. Dirty-node
+        // traversal belongs to explicit invalidation paths.
+        guard !outputIDs.isEmpty else { return }
+
+        var visited = Set<UInt32>()
+        visited.reserveCapacity(outputIDs.count)
+        for rawID in outputIDs where visited.insert(rawID).inserted {
+            let index = Int(rawID)
+            guard slots.indices.contains(index),
+                  slots[index].node != nil else {
+                continue
+            }
+
+            markInputChanged(changedInput, forNodeAt: index)
+            if propagateTransaction {
+                slots[index].node!.transaction = transaction
+            }
+        }
     }
 
     private func markNeedsEvaluation(

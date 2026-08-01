@@ -64,6 +64,38 @@ struct _DisplayList_StableIdentityMap: Equatable {
     }
 }
 
+/// Shared owner for weak stable-identity scopes and their collected map.
+///
+/// Scopes are graph values, so the root retains only weak attribute handles.
+/// The map is materialized lazily by consumers that need archived identities.
+final class _DisplayList_StableIdentityRoot {
+    var scopes: [WeakAttribute<_DisplayList_StableIdentityScope>]
+    var map: _DisplayList_StableIdentityMap?
+
+    init() {
+        scopes = []
+        map = nil
+    }
+}
+
+/// One hash namespace in the display-list stable-identity hierarchy.
+///
+/// The same declaration is both a graph-input key and a view-trait key. Each
+/// channel carries a weak attribute so descendants can inherit a live scope
+/// without extending its graph lifetime.
+struct _DisplayList_StableIdentityScope: GraphInput, _ViewTraitKey {
+    typealias Value = WeakAttribute<_DisplayList_StableIdentityScope>
+
+    static var defaultValue: Value {
+        WeakAttribute()
+    }
+
+    var root: _DisplayList_StableIdentityRoot
+    var hash: StrongHash
+    var map: _DisplayList_StableIdentityMap
+    var serial: UInt32
+}
+
 extension _DisplayList_StableIdentity: ProtobufEncodableMessage, ProtobufDecodableMessage {
     func encode(to encoder: inout ProtobufEncoder) throws {
         encoder.encodeVarint(0x0a)
@@ -3846,6 +3878,8 @@ private extension DisplayList.Item {
 extension DisplayList {
     struct Key: PreferenceKey {
         typealias Value = DisplayList
+        // Removed dynamic items remain renderable until their transition ends.
+        static var _includesRemovedValues: Bool { true }
         static var defaultValue: DisplayList { DisplayList() }
 
         static func reduce(value: inout DisplayList, nextValue: () -> DisplayList) {

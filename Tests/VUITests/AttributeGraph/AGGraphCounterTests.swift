@@ -629,6 +629,28 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testChangedComputedValueDoesNotTransitivelyInvalidateLateOutputCycle() throws {
+        // ASSERTIONS attributeGraphLateOutputCycleCacheObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let storage = LateOutputStorage()
+
+        try ref.withCurrent {
+            let source = graph.makeInput(value: true)
+            let owner = graph.makeStatefulRule(
+                LateOutputOwnerRule(source: source, storage: storage),
+                initialValue: 0
+            )
+            storage.owner = owner
+
+            XCTAssertEqual(owner.value, 1)
+            let downstream = try XCTUnwrap(storage.downstream)
+            XCTAssertEqual(downstream.value, 1)
+            XCTAssertEqual(storage.childEvaluations, 1)
+            XCTAssertEqual(storage.downstreamEvaluations, 1)
+        }
+    }
+
     func testNonEquatableInputUsesGraphValueComparison() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1432,6 +1454,49 @@ private final class OutputPropagationRecorder {
     var intermediateEvaluations = 0
     var downstreamEvaluations = 0
     var sideEffectEvaluations = 0
+}
+
+private final class LateOutputStorage {
+    var owner: Attribute<Int>?
+    var downstream: Attribute<Int>?
+    var childEvaluations = 0
+    var downstreamEvaluations = 0
+}
+
+private struct LateOutputOwnerRule: StatefulRule {
+    typealias Value = Int
+
+    var source: Attribute<Bool>
+    var storage: LateOutputStorage
+
+    mutating func updateValue() {
+        guard source.value else {
+            value = 0
+            return
+        }
+        if storage.downstream == nil {
+            guard let graph = _AGGraph.current,
+                  let owner = storage.owner else {
+                preconditionFailure(
+                    "Late output construction requires its owner attribute."
+                )
+            }
+            let recorder = storage
+            let child = graph.makeRule {
+                recorder.childEvaluations += 1
+                return owner.value
+            }
+            let downstream = graph.makeRule {
+                recorder.downstreamEvaluations += 1
+                return child.value + 1
+            }
+            // Cache the owner's fallback through an edge that did not exist
+            // when this evaluation was originally invalidated.
+            _ = downstream.value
+            storage.downstream = downstream
+        }
+        value = 1
+    }
 }
 
 private final class NestedEvaluationDepthRecorder {

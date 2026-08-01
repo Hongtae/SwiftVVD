@@ -2413,36 +2413,27 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                         _childLayoutComputer: childLayoutComputer
                     )
                 )
-            }
+        }
         let geometryContext = dynamicInputs[ScrollableLayoutItemGeometryContextKey.self]
-        let containerInfo: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
-            DynamicContainerInfo(
-                viewListAttr: viewListAttr,
-                inputs: dynamicInputs,
-                parentSubgraph: AGSubgraph.current
-            )
+        let (
+            containerInfo,
+            containerOutputs
+        ) = DynamicContainer.makeContainer(
+            adaptor: DynamicLayoutViewAdaptor(_items: viewListAttr),
+            inputs: dynamicInputs
         )
         geometryContext?.containerInfo = containerInfo
 
-        var preferences = PreferencesOutputs()
-        var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
-        for keyType in inputs.preferences.keys.keys {
-            let nodeListAttr: Attribute<[AGWeakAttribute]> = graph.makeRule {
-                let info = containerInfo.value
-                return info.activeAndRemovedItems.flatMap { item in
-                    item.preferenceOutputs.flatMap { preferences in
-                        preferences.values(for: keyType).compactMap {
-                            graph.weakAttributeIfValid(for: $0)
-                        }
-                    }
-                }
+        // This pre-specialized scroll surface currently shares the dynamic
+        // view-list adaptor; its item geometry context supplies scroll placement.
+        var preferences = containerOutputs.preferences
+        let childScrollables = preferences
+            .value(for: ScrollablePreferenceKey.self)
+            .map {
+                Attribute<ScrollablePreferenceKey.Value>(
+                    identifier: $0
+                )
             }
-            let reducedID = _makeDynReduceAttr(keyType, nodeListAttr: nodeListAttr, in: graph)
-            preferences.append(keyType, node: reducedID)
-            if ObjectIdentifier(keyType) == ObjectIdentifier(ScrollablePreferenceKey.self) {
-                childScrollables = Attribute<ScrollablePreferenceKey.Value>(reducedID)
-            }
-        }
 
         let parentScrollable = inputs.weakScrollable
         let data = view[\.data]._attribute
@@ -2746,7 +2737,12 @@ private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, S
     }
 
     func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
-        containerInfo.value.item(for: subgraph)?.sourceID
+        containerInfo.value
+            .item(for: subgraph)?
+            .for(DynamicLayoutViewAdaptor.self)
+            .item
+            .id
+            .canonicalID
     }
 
     func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {

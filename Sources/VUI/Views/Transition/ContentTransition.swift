@@ -643,10 +643,6 @@ private struct ContentTransitionAddsDrawingGroupKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
-private struct ContentTransitionStateKey: EnvironmentKey {
-    static var defaultValue: ContentTransition.State { .defaultValue }
-}
-
 extension EnvironmentValues {
     public var contentTransition: ContentTransition {
         get { self[ContentTransitionKey.self] }
@@ -659,8 +655,10 @@ extension EnvironmentValues {
     }
 
     var contentTransitionState: ContentTransition.State {
-        get { self[ContentTransitionStateKey.self] }
-        set { self[ContentTransitionStateKey.self] = newValue }
+        // State is the environment key so every layout and interpolation
+        // consumer observes the same hidden transition state.
+        get { self[ContentTransition.State.self] }
+        set { self[ContentTransition.State.self] = newValue }
     }
 }
 

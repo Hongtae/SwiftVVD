@@ -1,8 +1,40 @@
 import XCTest
 @testable import VUI
 
+private extension DynamicContainerInfo
+    where A == DynamicLayoutViewAdaptor {
+    init(
+        viewListAttr: Attribute<any ViewList>,
+        inputs: _ViewInputs,
+        parentSubgraph: AGSubgraph? = AGSubgraph.current,
+        lastUniqueId: UInt32 = 0,
+        lastRemoved: UInt32 = 0
+    ) {
+        self.init(
+            adaptor: DynamicLayoutViewAdaptor(_items: viewListAttr),
+            inputs: inputs,
+            outputs: _ViewOutputs(),
+            parentSubgraph: parentSubgraph,
+            info: DynamicContainer.Info(),
+            lastUniqueId: lastUniqueId,
+            lastRemoved: lastRemoved,
+            lastResetSeed: .max,
+            needsPhaseUpdate: false
+        )
+    }
+}
+
+private extension DynamicContainer.ItemInfo {
+    var dynamicViewListID: _ViewList_ID.Canonical {
+        self.for(DynamicLayoutViewAdaptor.self).item.id.canonicalID
+    }
+}
+
 final class DynamicContainerRetainedRemovalTests: XCTestCase {
     func testAsymmetricTransitionKeepsBothApplySubtreesAcrossEveryPhase() {
+        // ASSERTIONS dynamicLayoutTransitionRuleObserved
+        // ASSERTIONS anyTransitionIdentityBodyMetadataObserved
+        // ASSERTIONS transitionHelperStartsIdentityObserved
         let insertion = CombiningTransition(
             transition1: ScaleTransition(0.65),
             transition2: OpacityTransition()
@@ -48,7 +80,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    func testErasedAsymmetricCombinedTransitionMaterializesConcretePhaseSetter() throws {
+    func testErasedAsymmetricCombinedTransitionMaterializesPhaseDrivenItem() throws {
         let graphHost = GraphHost()
         let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
@@ -75,7 +107,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             ).value
 
             let item = try XCTUnwrap(info.activeItems.first)
-            XCTAssertEqual(item.transitionPhaseSetters.count, 1)
+            XCTAssertTrue(
+                item.for(DynamicLayoutViewAdaptor.self).item.needsTransitions
+            )
             let boxType = String(reflecting: transition._transitionType)
             XCTAssertTrue(boxType.contains("TransitionBox<"), boxType)
             XCTAssertTrue(boxType.contains("AsymmetricTransition<"), boxType)
@@ -85,6 +119,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     func testDynamicContainerMaterializationUsesCapturedParentWithoutRuleOwnership() throws {
         // ASSERTIONS dynamicContainerMaterializationParentObserved
+        // ASSERTIONS dynamicContainerAdaptorOwnershipObserved
         let graphHost = GraphHost()
         let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
@@ -173,6 +208,61 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    func testDynamicContainerCountersWrapAndReserveZeroRemovalOrder() throws {
+        // ASSERTIONS wrappingIncrementAndBasePlusOffsetObserved
+        // ASSERTIONS nonzeroRemovalOrderingObserved
+        let graphHost = GraphHost()
+        let graph = graphHost.data.graph
+        let ref = _AGGraphContext(graph: graph)
+        var source: Attribute<any ViewList>!
+        var infoAttr: Attribute<DynamicContainer.Info>!
+
+        ref.withCurrent {
+            let inputs = makeGraphInputs(
+                graph: graph,
+                transaction: Transaction()
+            )
+            source = graph.makeInput(
+                value: makeTransitionList(inputs: inputs)
+            )
+            infoAttr = graph.makeStatefulRule(
+                DynamicContainerInfo(
+                    viewListAttr: source,
+                    inputs: makeViewInputs(graph: graph, base: inputs),
+                    lastUniqueId: .max,
+                    lastRemoved: .max
+                )
+            )
+
+            let initial = infoAttr.value
+            XCTAssertEqual(initial.activeItems.count, 1)
+            XCTAssertEqual(initial.items.first?.uniqueId, 0)
+        }
+
+        try Update.ensure {
+            try ref.withCurrent {
+                source.setValue(
+                    EmptyViewList(),
+                    transaction: Transaction(
+                        animation: .linear(duration: 0.02)
+                    )
+                )
+
+                let retained = infoAttr.value
+                XCTAssertEqual(retained.removedCount, 1)
+                let item = try XCTUnwrap(retained.items.first)
+                XCTAssertEqual(item.phase, .didDisappear)
+                XCTAssertEqual(item.removalOrder, 1)
+            }
+        }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        graphHost.flushTransactions()
+        ref.withCurrent {
+            XCTAssertTrue(infoAttr.value.items.isEmpty)
+        }
+    }
+
     func testRetainedTransitionRemovalQueuesDisappearAfterListenerInvalidatesRule() throws {
         let graphHost = GraphHost()
         let graph = graphHost.data.graph
@@ -247,6 +337,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedTransitionRemovalSetsDidDisappearPhaseBeforeCompletion() throws {
+        // ASSERTIONS dynamicLayoutTransitionRuleObserved
         let graphHost = GraphHost()
         let graph = graphHost.data.graph
         let ref = _AGGraphContext(graph: graph)
@@ -1231,7 +1322,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             let inserted = try XCTUnwrap(updated.activeItems.first)
             XCTAssertTrue(inserted.needsTransitions)
             XCTAssertEqual(inserted.phase, .willAppear)
-            XCTAssertFalse(inserted.transitionPhaseSetters.isEmpty)
             let removed = try XCTUnwrap(updated.activeAndRemovedItems.last)
             XCTAssertEqual(inserted.precedingViewCount, 0)
             XCTAssertEqual(
@@ -2483,7 +2573,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(retained.unusedCount, 0)
                 XCTAssertEqual(retained.items.map(\.phase), [.didDisappear, .didDisappear])
                 XCTAssertEqual(
-                    retained.items.map { $0.sourceID.explicitID as? String },
+                    retained.items.map {
+                        $0.dynamicViewListID.explicitID as? String
+                    },
                     ["first", "second"]
                 )
                 for item in retained.items {
@@ -2672,7 +2764,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinsertedInfo.unusedCount, 0)
             let reinserted = try XCTUnwrap(reinsertedInfo.items.first)
             XCTAssertTrue(reinserted === unusedItem)
-            XCTAssertEqual(reinserted.phase, .identity)
+            XCTAssertEqual(reinserted.phase, .willAppear)
+            // ASSERTIONS dynamicContainerUnusedReinsertionPhaseObserved
             XCTAssertNil(reinserted.listener)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear", "row appear"])
 
@@ -2759,7 +2852,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinsertedInfo.unusedCount, 0)
             let reinserted = try XCTUnwrap(reinsertedInfo.items.first)
             XCTAssertTrue(reinserted === unusedItem)
-            XCTAssertEqual(reinserted.phase, .identity)
+            XCTAssertEqual(reinserted.phase, .willAppear)
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear", "row appear"])
             XCTAssertEqual(delegate.events, ["change"])
 
@@ -2794,7 +2887,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(initial.removedCount, 0)
             XCTAssertEqual(initial.unusedCount, 0)
             XCTAssertEqual(
-                initial.items.map { $0.sourceID.explicitID as? String },
+                initial.items.map {
+                    $0.dynamicViewListID.explicitID as? String
+                },
                 ["first", "second"]
             )
         }
@@ -2810,7 +2905,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.sourceID.explicitID as? String },
+                retained.items.map {
+                    $0.dynamicViewListID.explicitID as? String
+                },
                 ["second", "first"]
             )
             XCTAssertEqual(retained.items.map(\.phase), [.identity, nil])
@@ -2828,7 +2925,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             let newestUnused = try XCTUnwrap(retained.items.first)
-            XCTAssertEqual(newestUnused.sourceID.explicitID as? String, "second")
+            XCTAssertEqual(
+                newestUnused.dynamicViewListID.explicitID as? String,
+                "second"
+            )
             XCTAssertNil(newestUnused.phase)
             XCTAssertNil(newestUnused.listener)
             XCTAssertGreaterThan(newestUnused.subgraph.nodes.count, 0)
@@ -2873,7 +2973,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 0)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.sourceID.explicitID as? String },
+                retained.items.map {
+                    $0.dynamicViewListID.explicitID as? String
+                },
                 ["second", "first"]
             )
             XCTAssertEqual(retained.items.map(\.phase), [.identity, nil])
@@ -2894,7 +2996,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(retained.removedCount, 1)
             XCTAssertEqual(retained.unusedCount, 1)
             XCTAssertEqual(
-                retained.items.map { $0.sourceID.explicitID as? String },
+                retained.items.map {
+                    $0.dynamicViewListID.explicitID as? String
+                },
                 ["second", "first"]
             )
             XCTAssertEqual(retained.items.map(\.phase), [.didDisappear, nil])
@@ -2917,7 +3021,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(finalized.removedCount, 0)
             XCTAssertEqual(finalized.unusedCount, 1)
             let retainedUnused = try XCTUnwrap(finalized.items.first)
-            XCTAssertEqual(retainedUnused.sourceID.explicitID as? String, "first")
+            XCTAssertEqual(
+                retainedUnused.dynamicViewListID.explicitID as? String,
+                "first"
+            )
             XCTAssertNil(retainedUnused.phase)
             XCTAssertEqual(secondRemoved.subgraph.nodes.count, 0)
             XCTAssertGreaterThan(firstUnused.subgraph.nodes.count, 0)
@@ -3141,7 +3248,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(reinserted.unusedCount, 0)
             let item = try XCTUnwrap(reinserted.items.first)
             XCTAssertTrue(item === unusedItem)
-            XCTAssertEqual(item.phase, .identity)
+            XCTAssertEqual(item.phase, .willAppear)
             XCTAssertEqual(
                 lifecycleEvents,
                 ["row appear", "row disappear", "row appear"]
@@ -3599,6 +3706,8 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testRetainedRemovalKeepsDisplayListPreferenceButFiltersOrdinaryPreferences() throws {
+        // ASSERTIONS dynamicContainerPreferenceCombinerObserved
+        // ASSERTIONS displayListIncludesRemovedValuesObserved
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
             rootViewType: EmptyView.self,
@@ -4242,7 +4351,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         zIndex: Double,
         phase: TransitionPhase?
     ) -> DynamicContainer.ItemInfo {
-        let sourceID = _ViewList_ID(explicitID: AnyHashable(id)).canonicalID
         let uniqueId = id.utf8.reduce(UInt32(2_166_136_261)) {
             ($0 ^ UInt32($1)) &* 16_777_619
         }
@@ -4251,9 +4359,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             uniqueId: uniqueId,
             viewCount: Int32(viewCount),
             outputs: _ViewOutputs(),
-            sourceID: sourceID,
-            layoutAttributes: [],
-            preferenceOutputs: [],
             zIndex: zIndex,
             phase: phase
         )
@@ -4561,14 +4666,37 @@ private final class DynamicContainerTransitionValueCapture {
     var animated: Attribute<DynamicContainerTransitionValueModifier>?
 }
 
-private struct DynamicContainerTransitionValueTransition: Transition {
+private struct DynamicContainerTransitionValueCaptureInput: GraphInput {
+    typealias Value = DynamicContainerTransitionValueCapture?
+
+    static var defaultValue: Value { nil }
+
+    static func valuesEqual(_ lhs: Value, _ rhs: Value) -> Bool {
+        lhs === rhs
+    }
+}
+
+private struct DynamicContainerTransitionValueCaptureModifier:
+    ViewModifier, _GraphInputsModifier
+{
+    typealias Body = Never
+
     var capture: DynamicContainerTransitionValueCapture
 
+    static func _makeInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs
+    ) {
+        inputs[DynamicContainerTransitionValueCaptureInput.self] =
+            modifier._attribute.value.capture
+    }
+}
+
+private struct DynamicContainerTransitionValueTransition: Transition {
     func body(content: Content, phase: TransitionPhase) -> some View {
         content.modifier(
             DynamicContainerTransitionValueModifier(
-                value: phase.isIdentity ? 1 : 0,
-                capture: capture
+                value: phase.isIdentity ? 1 : 0
             )
         )
     }
@@ -4576,7 +4704,6 @@ private struct DynamicContainerTransitionValueTransition: Transition {
 
 private struct DynamicContainerTransitionValueModifier: ViewModifier, Animatable {
     var value: Double
-    var capture: DynamicContainerTransitionValueCapture
 
     var animatableData: Double {
         get { value }
@@ -4592,7 +4719,14 @@ private struct DynamicContainerTransitionValueModifier: ViewModifier, Animatable
     ) -> _ViewOutputs {
         var animated = modifier
         Self._makeAnimatable(value: &animated, inputs: inputs.base)
-        let capture = modifier[\.capture]._attribute.value
+        guard let capture =
+                inputs.base[DynamicContainerTransitionValueCaptureInput.self]
+        else {
+            fatalError(
+                "DynamicContainerTransitionValueModifier requires its " +
+                    "test capture input."
+            )
+        }
         capture.source = modifier._attribute
         capture.animated = animated._attribute
         return _OpacityEffectSupport.makeView(
@@ -4614,13 +4748,16 @@ private struct DynamicContainerConditionalValueTransitionRoot: View {
                 Text("child")
                     .transition(
                         AnyTransition(
-                            DynamicContainerTransitionValueTransition(capture: capture)
+                            DynamicContainerTransitionValueTransition()
                         )
                     )
             } else {
                 Text("empty")
             }
         }
+        .modifier(
+            DynamicContainerTransitionValueCaptureModifier(capture: capture)
+        )
     }
 }
 
@@ -4636,9 +4773,7 @@ private struct DynamicContainerAsymmetricInsertionValueTransitionRoot: View {
                     .transition(
                         .asymmetric(
                             insertion: AnyTransition(
-                                DynamicContainerTransitionValueTransition(
-                                    capture: capture
-                                )
+                                DynamicContainerTransitionValueTransition()
                             )
                             .combined(with: .opacity),
                             removal: .move(edge: .trailing)
@@ -4647,6 +4782,9 @@ private struct DynamicContainerAsymmetricInsertionValueTransitionRoot: View {
                     )
             }
         }
+        .modifier(
+            DynamicContainerTransitionValueCaptureModifier(capture: capture)
+        )
     }
 }
 
@@ -4664,15 +4802,16 @@ private struct DynamicContainerZStackAsymmetricTransitionRoot: View {
                             insertion: .scale(scale: 0.65)
                                 .combined(with: .opacity),
                             removal: AnyTransition(
-                                DynamicContainerTransitionValueTransition(
-                                    capture: capture
-                                )
+                                DynamicContainerTransitionValueTransition()
                             )
                             .combined(with: .opacity)
                         )
                     )
             }
         }
+        .modifier(
+            DynamicContainerTransitionValueCaptureModifier(capture: capture)
+        )
     }
 }
 

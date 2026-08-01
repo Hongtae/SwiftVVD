@@ -1050,6 +1050,10 @@ class AnyTransitionBox {
         nil
     }
 
+    var isIdentity: Bool {
+        false
+    }
+
     func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
     }
 
@@ -1128,6 +1132,10 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
 
     override func base<T: Transition>(as type: T.Type) -> T? {
         base as? T
+    }
+
+    override var isIdentity: Bool {
+        Base.Body.self == PlaceholderContentView<Base>.self
     }
 
     override func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
@@ -1379,6 +1387,10 @@ public struct AnyTransition {
 
     func base<T: Transition>(as type: T.Type) -> T? {
         box.base(as: type)
+    }
+
+    var isIdentity: Bool {
+        box.isIdentity
     }
 
     func visit<Visitor: TransitionVisitor>(_ visitor: inout Visitor) {
