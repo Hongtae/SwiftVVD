@@ -59,6 +59,61 @@ private struct ZeroCountProbeViewList: ViewList {
     }
 }
 
+private struct ReusableDynamicContainerProbeItem: DynamicContainerItem {
+    var id: Int
+    var storageKind: Int
+    var reusableStorageKinds: Set<Int>
+    var viewCount: Int = 1
+    var needsTransitions: Bool = false
+
+    var count: Int { viewCount }
+
+    func matchesIdentity(of other: Self) -> Bool {
+        id == other.id
+    }
+
+    static var supportsReuse: Bool { true }
+
+    func canBeReused(by other: Self) -> Bool {
+        reusableStorageKinds.contains(other.storageKind)
+    }
+}
+
+private struct ReusableDynamicContainerProbeAdaptor:
+    DynamicContainerAdaptor {
+    typealias Item = ReusableDynamicContainerProbeItem
+    typealias Items = [Item]
+    typealias ItemLayout = Void
+
+    var source: Attribute<Items>
+
+    static var maxUnusedItems: Int { 1 }
+
+    mutating func updatedItems() -> Items? {
+        source.value
+    }
+
+    func foreachItem(items: Items, _ body: (Item) -> Void) {
+        items.forEach(body)
+    }
+
+    static func containsItem(_ items: Items, _ item: Item) -> Bool {
+        items.contains { item.matchesIdentity(of: $0) }
+    }
+
+    func makeItemLayout(
+        item: Item,
+        uniqueId: UInt32,
+        inputs: _ViewInputs,
+        containerInfo: Attribute<DynamicContainer.Info>,
+        containerInputs: (inout _ViewInputs) -> Void
+    ) -> (_ViewOutputs, Void) {
+        (_ViewOutputs(), ())
+    }
+
+    func removeItemLayout(uniqueId: UInt32, itemLayout: Void) {}
+}
+
 final class DynamicLayoutStateTests: XCTestCase {
     func testDynamicContainerIDUsesUniqueIDThenSignedViewIndexOrdering() {
         // ASSERTIONS dynamicLayoutStateOwnershipObserved
@@ -228,6 +283,200 @@ final class DynamicLayoutStateTests: XCTestCase {
         XCTAssertFalse(DynamicViewListItem.supportsReuse)
         XCTAssertFalse(item.canBeReused(by: item))
         XCTAssertNil(item.viewID)
+    }
+
+    func testDynamicContainerExactIdentityReordersWithoutResettingSlots() {
+        // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let first = reusableItem(id: 1)
+            let second = reusableItem(id: 2)
+            let source = graph.makeInput(value: [first, second])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+
+            let initial = info.value
+            XCTAssertEqual(initial.activeItems.map(\.uniqueId), [1, 2])
+
+            source.setValue([second, first])
+            let reordered = info.value
+
+            XCTAssertEqual(reordered.activeItems.map(\.uniqueId), [2, 1])
+            XCTAssertEqual(reordered.activeItems.map(\.resetSeed), [0, 0])
+        }
+    }
+
+    func testDynamicContainerExactIdentityOwnsMetadataCompatibility() {
+        // ASSERTIONS dynamicContainerReuseControlFlowObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let source = graph.makeInput(value: [reusableItem(id: 1)])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+            _ = info.value
+
+            source.setValue([
+                reusableItem(
+                    id: 1,
+                    viewCount: 2,
+                    needsTransitions: true
+                ),
+            ])
+            let updated = info.value
+            let slot = updated.activeItems[updated.activeItems.startIndex]
+
+            XCTAssertEqual(slot.uniqueId, 1)
+            XCTAssertEqual(slot.viewCount, 1)
+            XCTAssertFalse(slot.needsTransitions)
+            XCTAssertEqual(
+                slot.for(ReusableDynamicContainerProbeAdaptor.self)
+                    .item.count,
+                2
+            )
+            XCTAssertTrue(
+                slot.for(ReusableDynamicContainerProbeAdaptor.self)
+                    .item.needsTransitions
+            )
+        }
+    }
+
+    func testDynamicContainerReuseProtectsLaterIncomingIdentity() {
+        // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let first = reusableItem(
+                id: 1,
+                storageKind: 1,
+                reusableStorageKinds: [2]
+            )
+            let second = reusableItem(
+                id: 2,
+                storageKind: 1,
+                reusableStorageKinds: [2]
+            )
+            let source = graph.makeInput(value: [first, second])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+            _ = info.value
+
+            source.setValue([
+                reusableItem(
+                    id: 9,
+                    storageKind: 2,
+                    reusableStorageKinds: []
+                ),
+                reusableItem(
+                    id: 1,
+                    storageKind: 2,
+                    reusableStorageKinds: []
+                ),
+            ])
+            let updated = info.value
+
+            XCTAssertEqual(updated.activeItems.map(\.uniqueId), [2, 1])
+            XCTAssertEqual(
+                updated.activeItems
+                    .map { $0.for(ReusableDynamicContainerProbeAdaptor.self).item.id },
+                [9, 1]
+            )
+            XCTAssertEqual(updated.activeItems.map(\.resetSeed), [1, 0])
+        }
+    }
+
+    func testDynamicContainerGeneralReuseSkipsTransitionOwnedStorage() {
+        // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let source = graph.makeInput(value: [
+                reusableItem(
+                    id: 1,
+                    storageKind: 1,
+                    reusableStorageKinds: [2],
+                    needsTransitions: true
+                ),
+                reusableItem(
+                    id: 2,
+                    storageKind: 1,
+                    reusableStorageKinds: [2]
+                ),
+            ])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+            _ = info.value
+
+            source.setValue([
+                reusableItem(
+                    id: 9,
+                    storageKind: 2,
+                    reusableStorageKinds: []
+                ),
+            ])
+            let updated = info.value
+
+            XCTAssertEqual(updated.activeItems.map(\.uniqueId), [2])
+            XCTAssertEqual(
+                updated.activeItems.first?
+                    .for(ReusableDynamicContainerProbeAdaptor.self)
+                    .item.id,
+                9
+            )
+        }
+    }
+
+    func testDynamicContainerPrefersRetainedUnusedStorageForReuse() {
+        // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let first = reusableItem(
+                id: 1,
+                storageKind: 1,
+                reusableStorageKinds: [2]
+            )
+            let second = reusableItem(
+                id: 2,
+                storageKind: 1,
+                reusableStorageKinds: [2]
+            )
+            let source = graph.makeInput(value: [first, second])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+            _ = info.value
+
+            source.setValue([first])
+            let shrunk = info.value
+            XCTAssertEqual(shrunk.activeItems.map(\.uniqueId), [1])
+            XCTAssertEqual(shrunk.unusedCount, 1)
+            XCTAssertEqual(shrunk.items.last?.uniqueId, 2)
+            XCTAssertNil(shrunk.items.last?.phase)
+
+            source.setValue([
+                reusableItem(
+                    id: 9,
+                    storageKind: 2,
+                    reusableStorageKinds: []
+                ),
+            ])
+            let reused = info.value
+
+            XCTAssertEqual(reused.activeItems.map(\.uniqueId), [2])
+            XCTAssertEqual(reused.activeItems.first?.resetSeed, 2)
+            XCTAssertEqual(
+                reused.activeItems.first?
+                    .for(ReusableDynamicContainerProbeAdaptor.self)
+                    .item.id,
+                9
+            )
+        }
     }
 
     func testZeroCountSublistDoesNotReachTraversalCallback() {
@@ -437,6 +686,43 @@ final class DynamicLayoutStateTests: XCTestCase {
             uniqueId: uniqueId,
             viewCount: viewCount,
             outputs: _ViewOutputs()
+        )
+    }
+
+    private func reusableItem(
+        id: Int,
+        storageKind: Int = 1,
+        reusableStorageKinds: Set<Int> = [1],
+        viewCount: Int = 1,
+        needsTransitions: Bool = false
+    ) -> ReusableDynamicContainerProbeItem {
+        ReusableDynamicContainerProbeItem(
+            id: id,
+            storageKind: storageKind,
+            reusableStorageKinds: reusableStorageKinds,
+            viewCount: viewCount,
+            needsTransitions: needsTransitions
+        )
+    }
+
+    private func makeReusableContainer(
+        graph: _AGGraph,
+        source: Attribute<[ReusableDynamicContainerProbeItem]>
+    ) -> Attribute<DynamicContainer.Info> {
+        graph.makeStatefulRule(
+            DynamicContainerInfo(
+                adaptor: ReusableDynamicContainerProbeAdaptor(
+                    source: source
+                ),
+                inputs: makeViewInputs(graph: graph),
+                outputs: _ViewOutputs(),
+                parentSubgraph: AGSubgraph.current,
+                info: DynamicContainer.Info(),
+                lastUniqueId: 0,
+                lastRemoved: 0,
+                lastResetSeed: .max,
+                needsPhaseUpdate: false
+            )
         )
     }
 

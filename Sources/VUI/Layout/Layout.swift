@@ -1666,70 +1666,104 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         inactive: [DynamicContainer.ItemInfo],
         changed: Bool
     ) {
-        var incoming: [A.Item] = []
-        adaptor.foreachItem(items: items) {
-            incoming.append($0)
-        }
-
-        var used = Set<Int>()
-        var active: [DynamicContainer.ItemInfo] = []
+        // The active prefix is rebuilt in place. Items at or after the cursor
+        // remain eligible for exact matching, retained-unused reuse, or
+        // adaptor-approved active-slot reuse.
+        var pool = info.items
+        var activeCount = 0
         var changed = false
 
-        for newItem in incoming {
-            let matchingIndex = info.items.indices.first { index in
-                guard !used.contains(index) else {
-                    return false
+        // Traverse the adaptor's item representation directly so selection
+        // observes the adaptor-defined order without an intermediate owner.
+        let traversalAdaptor = adaptor
+        traversalAdaptor.foreachItem(items: items) { newItem in
+            var exactIndex: Int?
+            var unusedReuseIndex: Int?
+
+            if activeCount < pool.count {
+                for index in activeCount..<pool.count {
+                    let candidate = pool[index].for(A.self)
+                    if candidate.item.matchesIdentity(of: newItem) {
+                        exactIndex = index
+                        break
+                    }
+                    // Remember the first reusable retained slot while
+                    // continuing the scan so an exact identity still wins.
+                    if unusedReuseIndex == nil,
+                       candidate.phase == nil,
+                       candidate.item.canBeReused(by: newItem) {
+                        unusedReuseIndex = index
+                    }
                 }
-                return info.items[index]
-                    .for(A.self)
-                    .item
-                    .matchesIdentity(of: newItem)
             }
 
-            if let matchingIndex {
-                let item = info.items[matchingIndex].for(A.self)
-                guard let viewCount = Int32(exactly: newItem.count) else {
-                    preconditionFailure(
-                        "Dynamic container view count must fit Int32."
-                    )
+            if let exactIndex {
+                // Exact matches move into the active prefix before their typed
+                // payload is refreshed. Compatibility belongs to the item's
+                // identity contract, so retained metadata is not re-derived.
+                if exactIndex != activeCount {
+                    pool.swapAt(activeCount, exactIndex)
+                    changed = true
+                }
+                let item = pool[activeCount].for(A.self)
+                item.item = newItem
+                if item.phase != .identity {
+                    unremove(item, graph: graph)
+                    changed = true
+                }
+            } else {
+                var reuseIndex = unusedReuseIndex
+                if reuseIndex == nil, A.Item.supportsReuse {
+                    reuseIndex = (activeCount..<pool.count).first { index in
+                        let candidate = pool[index].for(A.self)
+                        // Do not steal transition-owned storage or an old
+                        // identity that appears later in the incoming items.
+                        return !candidate.needsTransitions &&
+                            candidate.item.canBeReused(by: newItem) &&
+                            !A.containsItem(items, candidate.item)
+                    }
                 }
 
-                if item.viewCount == viewCount &&
-                    item.needsTransitions == newItem.needsTransitions {
-                    used.insert(matchingIndex)
+                if let reuseIndex {
+                    let item = pool[reuseIndex].for(A.self)
+                    // Reuse refreshes the typed payload and reset phase before
+                    // moving the retained object into the active prefix.
                     item.item = newItem
-                    if item.zIndex != newItem.zIndex {
-                        item.zIndex = newItem.zIndex
-                        changed = true
+                    unremove(item, graph: graph)
+                    if activeCount < reuseIndex {
+                        pool.swapAt(activeCount, reuseIndex)
                     }
-                    if item.phase == .didDisappear || item.phase == nil {
-                        unremove(item, graph: graph)
-                        changed = true
+                    changed = true
+                } else {
+                    let item = makeItem(
+                        newItem,
+                        uniqueId: nextUniqueId(),
+                        container: container,
+                        disableTransitions: disableTransitions,
+                        graph: graph
+                    )
+                    pool.append(item)
+                    let appendedIndex = pool.index(before: pool.endIndex)
+                    if activeCount < appendedIndex {
+                        pool.swapAt(activeCount, appendedIndex)
                     }
-                    active.append(item)
-                    continue
+                    changed = true
                 }
-            } else if A.Item.supportsReuse {
-                preconditionFailure(
-                    "DynamicContainerItem reuse requires a probed adaptor-specific implementation."
-                )
             }
 
-            let item = makeItem(
-                newItem,
-                uniqueId: nextUniqueId(),
-                container: container,
-                disableTransitions: disableTransitions,
-                graph: graph
-            )
-            active.append(item)
-            changed = true
+            let activeItem = pool[activeCount]
+            if activeItem.zIndex != newItem.zIndex {
+                activeItem.zIndex = newItem.zIndex
+                changed = true
+            }
+            activeCount += 1
         }
 
-        let inactive = info.items.indices.compactMap { index in
-            used.contains(index) ? nil : info.items[index]
-        }
-        return (active, inactive, changed)
+        return (
+            Array(pool.prefix(activeCount)),
+            Array(pool.dropFirst(activeCount)),
+            changed
+        )
     }
 
     private mutating func unremove(
