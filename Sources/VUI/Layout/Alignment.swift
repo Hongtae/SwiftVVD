@@ -149,9 +149,6 @@ public struct HorizontalAlignment: Equatable {
         key.combineExplicit(values)
     }
 
-    var fraction: CGFloat {
-        key.fraction
-    }
 }
 
 public struct VerticalAlignment: Equatable {
@@ -209,16 +206,22 @@ public struct VerticalAlignment: Equatable {
         key.combineExplicit(values)
     }
 
+}
+
+/// Exposes the alignment key used by axis-generic layout algorithms.
+protocol AlignmentGuide {
+    var key: AlignmentKey { get }
+}
+
+extension HorizontalAlignment: AlignmentGuide {}
+extension VerticalAlignment: AlignmentGuide {}
+
+extension AlignmentGuide {
+    /// Projects the key's normalized position for axis-generic placement.
     var fraction: CGFloat {
         key.fraction
     }
 }
-
-/// Marker used by HVStack for its minor-axis alignment type.
-protocol AlignmentGuide {}
-
-extension HorizontalAlignment: AlignmentGuide {}
-extension VerticalAlignment: AlignmentGuide {}
 
 public struct Alignment: Equatable {
     public var horizontal: HorizontalAlignment

@@ -83,8 +83,43 @@ struct LayoutProxy: Equatable {
         return context[attr]
     }
 
+    func size(in proposal: _ProposedSize) -> CGSize {
+        layoutComputer.sizeThatFits(proposal)
+    }
+
+    var layoutPriority: Double {
+        layoutComputer.layoutPriority()
+    }
+
+    func spacing() -> Spacing {
+        layoutComputer.spacing()
+    }
+
+    func idealSize() -> CGSize {
+        size(in: .unspecified)
+    }
+
+    func lengthThatFits(_ proposal: _ProposedSize, in axis: Axis) -> CGFloat {
+        layoutComputer.lengthThatFits(proposal, in: axis)
+    }
+
     func dimensions(in proposal: _ProposedSize) -> ViewDimensions {
         layoutComputer.dimensions(in: proposal)
+    }
+
+    func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        layoutComputer.explicitAlignment(key, at: size)
+    }
+
+    var ignoresAutomaticPadding: Bool {
+        layoutComputer.ignoresAutomaticPadding()
+    }
+
+    var requiresSpacingProjection: Bool {
+        layoutComputer.requiresSpacingProjection()
     }
 
     /// Reads the list-level trait collection relative to the proxy owner.

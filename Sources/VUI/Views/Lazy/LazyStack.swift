@@ -1691,6 +1691,35 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         data.id
     }
 
+    var kind: Kind {
+        if data.section.isHeader {
+            return .header
+        }
+        return data.section.isFooter ? .footer : .normal
+    }
+
+    var sectionID: UInt32? {
+        data.section.id
+    }
+
+    /// Resolves the materialized child's layout computer while preserving the
+    /// evaluating rule that owns this lazy traversal.
+    var layout: LayoutProxy {
+        let item = cache.item(data: data)
+        return LayoutProxy(
+            context: context,
+            layoutComputer: item.outputs._layoutComputer.attribute
+        )
+    }
+
+    subscript<K>(key: K.Type) -> K.Value where K: _ViewTraitKey {
+        data.traits[key]
+    }
+
+    subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
+        data.traits[_LayoutTrait<K>.self]
+    }
+
     init(
         cache: LazyLayoutViewCache,
         context: AnyRuleContext,
@@ -1768,24 +1797,26 @@ struct _LazyLayout_Subview: LazyLayoutNamespace {
         predecessor: _LazyLayout_Subview?,
         uniformSpacing: CGFloat?
     ) -> (length: CGFloat, spacing: CGFloat) {
-        let item = cache.item(data: data)
-        let layoutComputer = item.outputs._layoutComputer.attribute?.value ?? .defaultValue
-        let length = layoutComputer.lengthThatFits(_ProposedSize(size), in: axis)
+        let layout = layout
+        let length = layout.lengthThatFits(_ProposedSize(size), in: axis)
         guard let predecessor else {
             return (length, 0)
         }
         if let uniformSpacing {
             return (length, uniformSpacing)
         }
-        let predecessorItem = predecessor.cache.item(data: predecessor.data)
-        let predecessorLayoutComputer =
-            predecessorItem.outputs._layoutComputer.attribute?.value ?? .defaultValue
+        let layoutDirection = context[cache._layoutDirection]
+        let spacing = predecessor.layout.spacing().distanceToSuccessorView(
+            along: axis,
+            layoutDirection: layoutDirection,
+            preferring: layout.spacing()
+        )
         return (
             length,
-            ViewSpacing(predecessorLayoutComputer.spacing()).distance(
-                to: ViewSpacing(layoutComputer.spacing()),
-                along: axis
-            )
+            spacing
+                ?? (axis == .horizontal
+                    ? Spacing.defaultValue.width
+                    : Spacing.defaultValue.height)
         )
     }
 
@@ -6090,43 +6121,68 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         context: _LazyLayout_SizeAndSpacingContext,
         cache: Cache
     ) -> CGSize {
-        let fallback = context.containerSize
-        let resolvedSize = proposedSize.replacingUnspecifiedDimensions(by: fallback)
-        let minor = lazyMinorProperties(size: resolvedSize, subviews: subviews)
-        var cache = cache
-        let placements = cache.place(
-            stack: self,
-            subviews: subviews,
-            from: 0,
-            position: 0,
-            visible: 0..<CGFloat.greatestFiniteMagnitude,
-            visibleLength: .infinity,
-            containerLength: lazyMajorLength(resolvedSize),
-            minor: minor,
-            pinnedViews: pinnedViews
-        )
-        let measuredMajor: CGFloat
-        if placements.validRect.isNull {
-            measuredMajor = 0
-        } else {
-            switch Self.majorAxis {
-            case .horizontal:
-                measuredMajor = max(0, placements.validRect.maxX)
-            case .vertical:
-                measuredMajor = max(0, placements.validRect.maxY)
-            }
-        }
+        let proposedMinor: CGFloat?
         switch Self.majorAxis {
         case .horizontal:
-            return CGSize(
-                width: proposedSize.width ?? measuredMajor,
-                height: proposedSize.height ?? minor.size
-            )
+            proposedMinor = proposedSize.height
         case .vertical:
-            return CGSize(
-                width: proposedSize.width ?? minor.size,
-                height: proposedSize.height ?? measuredMajor
+            proposedMinor = proposedSize.width
+        }
+
+        var minorSize = proposedMinor
+            ?? flexibleMinorSize(subviews: subviews)
+        guard let minor = resolveMinorProperties(
+            minorSize: &minorSize,
+            cache: cache
+        ) else {
+            return .zero
+        }
+
+        var cache = cache
+        if sufficientlyDiffers(
+            lazyMajorLength(context.containerSize),
+            cache.containerLength
+        ) {
+            cache.resetEstimates()
+        }
+
+        // Measure only the bounded estimate sample. The remaining groups use
+        // its average instead of materializing the full lazy list.
+        var position = CGFloat.zero
+        var index = 0
+        measureEstimates(
+            updatingPosition: &position,
+            index: &index,
+            minor: minor,
+            subviews: subviews,
+            cache: &cache
+        )
+
+        let average = cache.estimations.average
+        let estimatedCount = subviews.estimatedCount(
+            style: _ViewList_IteratorStyle(
+                value: UInt(minor.count) << 1
             )
+        )
+        let remainingCount = max(estimatedCount - index, 0)
+        let remainingGroupCount =
+            (remainingCount + minor.count - 1) / minor.count
+        let averageSpacing = average.spacing ?? 0
+        position += CGFloat(remainingGroupCount)
+            * (average.length + averageSpacing)
+        if index == 0,
+           average.spacing != nil,
+           remainingGroupCount > 0 {
+            position -= averageSpacing
+        }
+
+        let majorSize = ceil(position)
+        let resolvedMinor = max(proposedMinor ?? 0, minor.size)
+        switch Self.majorAxis {
+        case .horizontal:
+            return CGSize(width: majorSize, height: resolvedMinor)
+        case .vertical:
+            return CGSize(width: resolvedMinor, height: majorSize)
         }
     }
 
@@ -6808,19 +6864,64 @@ extension LazyHVStack {
     }
 
     static var layoutProperties: _LazyLayout_Properties {
-        switch majorAxis {
-        case .horizontal: _LazyLayout_Properties(axes: .horizontal)
-        case .vertical: _LazyLayout_Properties(axes: .vertical)
-        }
+        let axes = Axis.Set(majorAxis)
+        return _LazyLayout_Properties(
+            axes: axes,
+            multipleViewAxes: axes
+        )
     }
 
     var spacing: CGFloat? {
         base.spacing
     }
 
+    private var anchor: UnitPoint {
+        switch Self.majorAxis {
+        case .horizontal:
+            return UnitPoint(x: 0.5, y: base.alignment.fraction)
+        case .vertical:
+            return UnitPoint(x: base.alignment.fraction, y: 0.5)
+        }
+    }
+
+    var headerAnchor: UnitPoint {
+        anchor
+    }
+
+    var footerAnchor: UnitPoint {
+        anchor
+    }
+
     func flexibleMinorSize(subviews: _LazyLayout_Subviews) -> CGFloat {
-        _ = subviews
-        return .infinity
+        // The graph backend has no automatic deadline policy, but an existing
+        // cancellation still stops this bounded traversal at the same points.
+        if _AGGraph.currentUpdateContext != nil,
+           _AGGraphCancelUpdateIfNeeded() {
+            return 0
+        }
+
+        var result = CGFloat.zero
+        var from = 0
+        _ = subviews.apply(
+            from: &from,
+            style: _ViewList_IteratorStyle(value: 2)
+        ) { _, subview, stop in
+            if _AGGraph.currentUpdateContext != nil,
+               _AGGraphCancelUpdateIfNeeded() {
+                stop = true
+                return
+            }
+
+            let size = subview.layout.size(in: .unspecified)
+            switch Self.majorAxis {
+            case .horizontal:
+                result = size.height
+            case .vertical:
+                result = size.width
+            }
+            stop = true
+        }
+        return result
     }
 
     func minorGeometry(updatingSize size: inout CGFloat) -> (count: Int, data: CGFloat) {
@@ -6832,10 +6933,12 @@ extension LazyHVStack {
         predecessors: [_LazyLayout_Subview]?,
         minorGeometry: CGFloat
     ) -> (length: CGFloat, spacing: CGFloat) {
-        guard let first = subviews.first else {
-            return (0, 0)
+        // Lazy placement always supplies a nonempty minor group. Preserve the
+        // direct-index trap if that invariant is violated.
+        let first = subviews[0]
+        let predecessor = predecessors.map {
+            $0[$0.count - 1]
         }
-        let predecessor = predecessors?.last
         return first.lengthAndSpacing(
             size: Self.lazyStackPrefetchProposal(
                 from: ProposedViewSize(
@@ -6855,29 +6958,19 @@ extension LazyHVStack {
         minorGeometry: CGFloat,
         emit: (_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint) -> Void
     ) {
-        var offset = CGFloat.zero
-        let proposedSize = ProposedViewSize(
-            width: Self.majorAxis == .horizontal ? nil : minorGeometry,
-            height: Self.majorAxis == .horizontal ? minorGeometry : nil
+        _ = length
+        // One HV-stack minor group contains exactly one child. Group traversal
+        // and major-axis advancement remain the caller's responsibility.
+        emit(
+            subviews[0],
+            .zero,
+            _ProposedSize(
+                nil,
+                in: Self.majorAxis,
+                by: minorGeometry
+            ),
+            anchor
         )
-        for subview in subviews {
-            let point: CGPoint
-            switch Self.majorAxis {
-            case .horizontal:
-                point = CGPoint(x: offset, y: 0)
-            case .vertical:
-                point = CGPoint(x: 0, y: offset)
-            }
-            emit(subview, point, _ProposedSize(proposedSize), .topLeading)
-            let measured = subview.lengthAndSpacing(
-                size: proposedSize,
-                axis: Self.majorAxis,
-                predecessor: nil,
-                uniformSpacing: spacing
-            )
-            offset += measured.length + measured.spacing
-            if let length, offset >= length { break }
-        }
     }
 }
 

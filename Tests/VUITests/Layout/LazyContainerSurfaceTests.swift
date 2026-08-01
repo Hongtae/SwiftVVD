@@ -164,6 +164,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertEqual(hGridLayout.rows, [GridItem(.fixed(12), spacing: 3)])
         XCTAssertEqual(LazyHStackLayout.layoutProperties.axes, .horizontal)
         XCTAssertEqual(LazyVStackLayout.layoutProperties.axes, .vertical)
+        XCTAssertEqual(LazyHStackLayout.layoutProperties.multipleViewAxes, .horizontal)
+        XCTAssertEqual(LazyVStackLayout.layoutProperties.multipleViewAxes, .vertical)
         XCTAssertEqual(LazyVGridLayout.layoutProperties.axes, .vertical)
         XCTAssertEqual(LazyHGridLayout.layoutProperties.axes, .horizontal)
         XCTAssertTrue(LazyVStackLayout.AnimatableData.self == EmptyAnimatableData.self)
@@ -252,6 +254,282 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ).minorAxisAnchor,
             1
         )
+    }
+
+    func testLazyHVStackUsesAlignmentAnchorAndEmitsOnlyFirstMinorGroupSubview() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 0)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let first = _LazyLayout_Subview(
+                cache: cache,
+                context: context,
+                data: makeLazyData(
+                    graph: graph,
+                    id: _ViewList_ID(implicitID: 0)
+                ),
+                index: 0
+            )
+            let second = _LazyLayout_Subview(
+                cache: cache,
+                context: context,
+                data: makeLazyData(
+                    graph: graph,
+                    id: _ViewList_ID(implicitID: 1)
+                ),
+                index: 1
+            )
+
+            let horizontal = LazyHStackLayout(
+                base: _HStackLayout(alignment: .bottom, spacing: 7),
+                pinnedViews: []
+            )
+            XCTAssertEqual(horizontal.headerAnchor, .bottom)
+            XCTAssertEqual(horizontal.footerAnchor, .bottom)
+
+            var horizontalEmissions: [
+                (index: Int, point: CGPoint, proposal: _ProposedSize, anchor: UnitPoint)
+            ] = []
+            horizontal.place(
+                subviews: [first, second],
+                length: 1,
+                minorGeometry: 33
+            ) { subview, point, proposal, anchor in
+                horizontalEmissions.append(
+                    (subview.index, point, proposal, anchor)
+                )
+            }
+
+            XCTAssertEqual(horizontalEmissions.count, 1)
+            XCTAssertEqual(horizontalEmissions[0].index, 0)
+            XCTAssertEqual(horizontalEmissions[0].point, .zero)
+            XCTAssertEqual(
+                horizontalEmissions[0].proposal,
+                _ProposedSize(width: nil, height: 33)
+            )
+            XCTAssertEqual(horizontalEmissions[0].anchor, .bottom)
+
+            let vertical = LazyVStackLayout(
+                base: _VStackLayout(alignment: .trailing, spacing: 9),
+                pinnedViews: []
+            )
+            XCTAssertEqual(vertical.headerAnchor, .trailing)
+            XCTAssertEqual(vertical.footerAnchor, .trailing)
+
+            var verticalEmissions: [
+                (index: Int, point: CGPoint, proposal: _ProposedSize, anchor: UnitPoint)
+            ] = []
+            vertical.place(
+                subviews: [first, second],
+                length: 1,
+                minorGeometry: 44
+            ) { subview, point, proposal, anchor in
+                verticalEmissions.append(
+                    (subview.index, point, proposal, anchor)
+                )
+            }
+
+            XCTAssertEqual(verticalEmissions.count, 1)
+            XCTAssertEqual(verticalEmissions[0].index, 0)
+            XCTAssertEqual(verticalEmissions[0].point, .zero)
+            XCTAssertEqual(
+                verticalEmissions[0].proposal,
+                _ProposedSize(width: 44, height: nil)
+            )
+            XCTAssertEqual(verticalEmissions[0].anchor, .trailing)
+        }
+    }
+
+    func testLazyHVStackFlexibleMinorSizeReadsOnlyFirstSubviewIdealCrossAxis() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sizes = [
+                CGSize(width: 11, height: 12),
+                CGSize(width: 21, height: 22),
+                CGSize(width: 31, height: 32),
+            ]
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                )
+            )
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let horizontal = LazyHStackLayout(
+                base: _HStackLayout(),
+                pinnedViews: []
+            )
+
+            XCTAssertEqual(
+                horizontal.flexibleMinorSize(subviews: subviews),
+                sizes[0].height
+            )
+            XCTAssertEqual(cache.items.count, 1)
+            XCTAssertNotNil(
+                cache.items[
+                    _ViewList_ID(implicitID: 0).canonicalID
+                ]
+            )
+
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let vertical = LazyVStackLayout(
+                base: _VStackLayout(),
+                pinnedViews: []
+            )
+            XCTAssertEqual(
+                vertical.flexibleMinorSize(subviews: subviews),
+                sizes[0].width
+            )
+            XCTAssertEqual(cache.items.count, 1)
+
+            let empty = makeLazyCache(
+                host: host,
+                implicitID: 100,
+                list: EmptyViewList()
+            ).cache
+            empty.items.removeAll()
+            empty.lru.invalidate()
+            XCTAssertEqual(
+                vertical.flexibleMinorSize(
+                    subviews: empty.subviews(context: context)
+                ),
+                0
+            )
+            XCTAssertTrue(empty.items.isEmpty)
+        }
+    }
+
+    func testLazyStackSizeThatFitsUsesTwoGroupEstimateWithoutEagerMaterialization() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sizes = [
+                CGSize(width: 12, height: 10),
+                CGSize(width: 18, height: 20),
+                CGSize(width: 99, height: 30),
+                CGSize(width: 99, height: 40),
+                CGSize(width: 99, height: 50),
+            ]
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                )
+            )
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let sizeContext = _LazyLayout_SizeAndSpacingContext(
+                ruleContext: context,
+                environment: graph.makeInput(value: EnvironmentValues()),
+                containerSize: OptionalAttribute(
+                    graph.makeInput(
+                        value: ViewSize(width: 25, height: 100)
+                    )
+                )
+            )
+            let subviews = cache.subviews(context: context)
+            let vertical = LazyVStackLayout(
+                base: _VStackLayout(spacing: 4),
+                pinnedViews: []
+            )
+
+            let measured = vertical.sizeThatFits(
+                proposedSize: ProposedViewSize(width: 25, height: 400),
+                subviews: subviews,
+                context: sizeContext,
+                cache: _LazyStack_Cache<LazyVStackLayout>()
+            )
+
+            // The first two rows contribute 10 + (20 + 4). The remaining
+            // three rows use the sampled 15-point length and 4-point spacing.
+            XCTAssertEqual(measured, CGSize(width: 25, height: 91))
+            XCTAssertEqual(cache.items.count, 2)
+            XCTAssertNotNil(
+                cache.items[
+                    _ViewList_ID(implicitID: 0)
+                        .elementID(at: 0)
+                        .canonicalID
+                ]
+            )
+            XCTAssertNotNil(
+                cache.items[
+                    _ViewList_ID(implicitID: 0)
+                        .elementID(at: 1)
+                        .canonicalID
+                ]
+            )
+            XCTAssertNil(
+                cache.items[
+                    _ViewList_ID(implicitID: 0)
+                        .elementID(at: 2)
+                        .canonicalID
+                ]
+            )
+
+            cache.items.removeAll()
+            cache.lru.invalidate()
+            let retainedEstimate = vertical.sizeThatFits(
+                proposedSize: ProposedViewSize(width: 25, height: 400),
+                subviews: subviews,
+                context: sizeContext,
+                cache: _LazyStack_Cache<LazyVStackLayout>(
+                    containerLength: 100,
+                    estimations: EstimationCache(
+                        lengthToCount: [100: 1],
+                        spacingToCount: [4: 1]
+                    )
+                )
+            )
+            XCTAssertEqual(
+                retainedEstimate,
+                CGSize(width: 25, height: 516)
+            )
+            XCTAssertTrue(cache.items.isEmpty)
+
+            let resetEstimate = vertical.sizeThatFits(
+                proposedSize: ProposedViewSize(width: 25, height: 400),
+                subviews: subviews,
+                context: sizeContext,
+                cache: _LazyStack_Cache<LazyVStackLayout>(
+                    containerLength: 90,
+                    estimations: EstimationCache(
+                        lengthToCount: [100: 1],
+                        spacingToCount: [4: 1]
+                    )
+                )
+            )
+            XCTAssertEqual(resetEstimate, CGSize(width: 25, height: 91))
+            XCTAssertEqual(cache.items.count, 2)
+        }
     }
 
     func testHVGridMinorGeometryExpandsGridItemsIntoTrackGeometry() {
@@ -1961,7 +2239,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let item = try XCTUnwrap(cache.items[id.canonicalID])
                 let itemPlacement = try XCTUnwrap(item.pendingPlacement)
                 XCTAssertEqual(itemPlacement.proposedSize, CGSize(width: 80, height: 10))
-                XCTAssertEqual(itemPlacement.anchor, .topLeading)
+                XCTAssertEqual(itemPlacement.anchor, .center)
             }
             XCTAssertEqual(
                 cache.items[_ViewList_ID(implicitID: 0).elementID(at: 0).canonicalID]?.pendingPlacement?.anchorPosition,
@@ -7991,6 +8269,116 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyLayoutSubviewProjectsRoleSectionTraitsAndExplicitContextLayout() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let id = _ViewList_ID(implicitID: 45)
+            let (cache, item, _) = makeLazyCache(
+                host: host,
+                implicitID: id.index,
+                reuseIdentifier: id.reuseIdentifier
+            )
+            let layoutAttribute = graph.makeInput(
+                value: testLayoutComputer(
+                    sizeThatFits: { proposal in
+                        CGSize(
+                            width: proposal.width ?? 22,
+                            height: proposal.height ?? 33
+                        )
+                    },
+                    spacing: ViewSpacing(
+                        top: 3,
+                        leading: 5,
+                        bottom: 7,
+                        trailing: 11
+                    ).spacing,
+                    priority: 6,
+                    explicitAlignment: { _, _ in 9 }
+                )
+            )
+            item.outputs = _ViewOutputs(
+                layoutComputer: OptionalAttribute(layoutAttribute)
+            )
+
+            var traits = ViewTraitCollection()
+            traits[ZIndexTraitKey.self] = 12
+            traits[_LayoutTrait<LazySubviewTestLayoutValueKey>.self] = 27
+            let owner = graph.makeInput(value: ())
+            let context = AnyRuleContext(attribute: owner.identifier)
+            let subview = _LazyLayout_Subview(
+                cache: cache,
+                context: context,
+                data: makeLazyData(
+                    graph: graph,
+                    id: id,
+                    traits: traits,
+                    section: LazyLayoutCacheSection(
+                        id: 71,
+                        isHeader: true,
+                        isFooter: true
+                    )
+                ),
+                index: 4
+            )
+
+            XCTAssertEqual(subview.kind, .header)
+            XCTAssertEqual(subview.sectionID, 71)
+            XCTAssertEqual(subview[ZIndexTraitKey.self], 12)
+            XCTAssertEqual(subview[LazySubviewTestLayoutValueKey.self], 27)
+
+            let layout = subview.layout
+            XCTAssertEqual(layout.context.attribute, owner.identifier)
+            XCTAssertNotEqual(layout.context.attribute, layoutAttribute.identifier)
+            XCTAssertEqual(layout.size(in: .unspecified), CGSize(width: 22, height: 33))
+            XCTAssertEqual(layout.idealSize(), CGSize(width: 22, height: 33))
+            XCTAssertEqual(layout.layoutPriority, 6)
+            XCTAssertEqual(
+                layout.lengthThatFits(
+                    _ProposedSize(width: 40, height: nil),
+                    in: .horizontal
+                ),
+                40
+            )
+            XCTAssertEqual(layout.spacing(), layoutAttribute.value.spacing())
+            XCTAssertEqual(
+                layout.explicitAlignment(
+                    HorizontalAlignment.leading.key,
+                    at: ViewSize(width: 40, height: 33)
+                ),
+                9
+            )
+            XCTAssertFalse(layout.ignoresAutomaticPadding)
+            XCTAssertFalse(layout.requiresSpacingProjection)
+
+            let footer = _LazyLayout_Subview(
+                cache: cache,
+                context: context,
+                data: makeLazyData(
+                    graph: graph,
+                    id: id,
+                    section: LazyLayoutCacheSection(
+                        id: 72,
+                        isFooter: true
+                    )
+                ),
+                index: 4
+            )
+            XCTAssertEqual(footer.kind, .footer)
+            XCTAssertEqual(footer.sectionID, 72)
+
+            let normal = _LazyLayout_Subview(
+                cache: cache,
+                context: context,
+                data: makeLazyData(graph: graph, id: id),
+                index: 4
+            )
+            XCTAssertEqual(normal.kind, .normal)
+            XCTAssertNil(normal.sectionID)
+        }
+    }
+
     func testLazyLayoutSubviewLengthAndSpacingUsesLayoutAndPredecessorSpacing() {
         let host = GraphHost()
 
@@ -12662,7 +13050,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
             XCTAssertEqual(
                 layout.sizeThatFits(_ProposedSize(CGSize(width: 20, height: 20))),
-                CGSize(width: 20, height: 20)
+                CGSize(width: 20, height: 2)
             )
 
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
@@ -13724,6 +14112,10 @@ private struct SegmentedLayoutViewList: ViewList {
     var debugDescription: String {
         "SegmentedLayoutViewList(\(sizes.count))"
     }
+}
+
+private struct LazySubviewTestLayoutValueKey: LayoutValueKey {
+    static let defaultValue = -1
 }
 
 private func assertRemovableAttribute<T: RemovableAttribute>(_ type: T.Type) {}
