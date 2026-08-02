@@ -690,4 +690,3 @@ extension Spring {
         return (value, velocity)
     }
 }
-

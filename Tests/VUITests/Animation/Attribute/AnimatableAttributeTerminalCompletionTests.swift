@@ -1,7 +1,100 @@
 import XCTest
 @testable import VUI
 
+private final class PresentationDurationCountingAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    var presentationDurationCallCount = 0
+
+    override var duration: TimeInterval {
+        1
+    }
+
+    override func presentationDuration<Value>(
+        for value: Value
+    ) -> TimeInterval where Value: VectorArithmetic {
+        presentationDurationCallCount += 1
+        return 2
+    }
+
+    override func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        if time >= 2 {
+            return nil
+        }
+        if time >= duration {
+            context.isLogicallyComplete = true
+        }
+        var output = value
+        output.scale(by: max(time / duration, 0))
+        return output
+    }
+}
+
 final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
+    func testFreshLogicalActivationDoesNotResolvePresentationDuration() {
+        let box = PresentationDurationCountingAnimationBox()
+        let completionRecorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+        var transaction = Transaction(animation: Animation(box: box))
+        transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            completionRecorder.record("logical")
+        }
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: transaction
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+
+        XCTAssertEqual(box.presentationDurationCallCount, 0)
+        XCTAssertEqual(completionRecorder.events, [])
+    }
+
+    func testRetargetAfterLogicalDrainDoesNotResolvePresentationDuration() {
+        let box = PresentationDurationCountingAnimationBox()
+        let completionRecorder = AnimationCompletionRecorder()
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        XCTAssertEqual(harness.currentValue().opacity, 0)
+        var firstTransaction = Transaction(animation: Animation(box: box))
+        firstTransaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            completionRecorder.record("first logical")
+        }
+
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: firstTransaction
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+        harness.setTime(1.1)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(completionRecorder.events, ["first logical"])
+        XCTAssertEqual(box.presentationDurationCallCount, 0)
+
+        var replacementTransaction = Transaction(animation: Animation(box: box))
+        replacementTransaction.addAnimationCompletion(criteria: .logicallyComplete) {
+            completionRecorder.record("replacement logical")
+        }
+        harness.setSource(
+            _OpacityEffect(opacity: 0.25),
+            transaction: replacementTransaction
+        )
+        _ = harness.currentValue()
+        harness.finalizeTransactionBody()
+
+        XCTAssertEqual(box.presentationDurationCallCount, 0)
+        XCTAssertEqual(completionRecorder.events, ["first logical"])
+    }
+
     func testFiniteActiveCompletionDrainsSameBoundaryRemovedBeforeLogicalOnce() {
         let completionRecorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(

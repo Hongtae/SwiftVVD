@@ -976,17 +976,11 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     let response: TimeInterval
     let dampingFraction: Double
     let blendDuration: TimeInterval
-    let presentationDurationEstimate: TimeInterval
 
     init(response: TimeInterval, dampingFraction: Double, blendDuration: TimeInterval) {
         self.response = response
         self.dampingFraction = dampingFraction
         self.blendDuration = blendDuration
-        self.presentationDurationEstimate = fluidSpringSettlingDuration(
-            response: response,
-            dampingFraction: dampingFraction,
-            target: Double(1)
-        )
     }
 
     override var duration: TimeInterval {
@@ -994,7 +988,14 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override var presentationDuration: TimeInterval {
-        presentationDurationWithAliasFloor(max(duration, presentationDurationEstimate))
+        presentationDurationWithAliasFloor(max(
+            duration,
+            fluidSpringSettlingDuration(
+                response: response,
+                dampingFraction: dampingFraction,
+                target: Double(1)
+            )
+        ))
     }
 
     override var description: String {

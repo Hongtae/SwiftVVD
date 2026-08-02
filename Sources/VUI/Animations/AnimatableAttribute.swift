@@ -488,25 +488,55 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
         let completionStart = now
         let deadlineStartValue = merged ? mergedStart : start
         let deadlineInterval = animatableDelta(from: deadlineStartValue, to: target)
-        let presentationDuration = animation.box.presentationDuration(for: deadlineInterval)
-        let resolvedPresentationDuration = resolvedCompletionPresentationDuration(
-            previousAnimation: previousAnimation,
-            replacementAnimation: animation,
-            previousSamplingLayers: previousSamplingLayers,
-            valuePresentationDuration: presentationDuration
-        )
-        let deadline = completionStart + animation.box.duration
-        if resolvedPresentationDuration > presentationDuration {
-            deferredTerminalPresentationDeadline =
-                completionStart + resolvedPresentationDuration
+        var cachedPresentationDuration: TimeInterval?
+        func presentationDuration() -> TimeInterval {
+            if let cachedPresentationDuration {
+                return cachedPresentationDuration
+            }
+            let duration = animation.box.presentationDuration(for: deadlineInterval)
+            cachedPresentationDuration = duration
+            return duration
         }
-        velocityTrackingImmediateCompletionGroup = nil
-        var holdsCombinedResidualReplacementLogicalUntilPresentation = false
+        var cachedResolvedPresentationDuration: TimeInterval?
+        func resolvedPresentationDuration() -> TimeInterval {
+            if let cachedResolvedPresentationDuration {
+                return cachedResolvedPresentationDuration
+            }
+            let duration = resolvedCompletionPresentationDuration(
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation,
+                previousSamplingLayers: previousSamplingLayers,
+                valuePresentationDuration: presentationDuration()
+            )
+            cachedResolvedPresentationDuration = duration
+            return duration
+        }
+        let deadline = completionStart + animation.box.duration
         let existingRemovedOrderGenerations = Set(
             completionRecords
                 .filter { $0.criteria == .removed }
                 .map(\.orderGeneration)
         )
+        let preservesAllPendingDirectFluidSpringLogicalOnlyRecords =
+            previousAnimation?.box is FluidSpringAnimationBox &&
+            animation.box is FluidSpringAnimationBox &&
+            !completionRecords.isEmpty &&
+            completionRecords.allSatisfy {
+                $0.criteria != .removed &&
+                    !existingRemovedOrderGenerations.contains($0.orderGeneration)
+            }
+        if previousAnimation != nil,
+           !completionRecords.isEmpty,
+           !preservesAllPendingDirectFluidSpringLogicalOnlyRecords {
+            let valuePresentationDuration = presentationDuration()
+            let resolvedDuration = resolvedPresentationDuration()
+            if resolvedDuration > valuePresentationDuration {
+                deferredTerminalPresentationDeadline =
+                    completionStart + resolvedDuration
+            }
+        }
+        velocityTrackingImmediateCompletionGroup = nil
+        var holdsCombinedResidualReplacementLogicalUntilPresentation = false
         // The active AnimatorState owns sampling and listener movement. The
         // outer completion records own deadlines across retargets, so each
         // branch below only rewrites copied record ownership; it does not move
@@ -565,11 +595,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
                     replacementAnimation: animation
                 )
             )
-        } else if shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
+        } else if let customReplacementCompletionGroup,
+                  shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
             previousAnimation: previousAnimation,
             replacementAnimation: animation,
-            presentationDuration: resolvedPresentationDuration
-        ), let customReplacementCompletionGroup {
+            presentationDuration: resolvedPresentationDuration()
+        ) {
             let oldGenerations = customReplacementCompletionGroup.oldGenerations
                 .union([customReplacementCompletionGroup.replacementGeneration])
                 .sorted()
@@ -770,7 +801,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             previousAnimation: previousAnimation,
             replacementAnimation: animation
         ), let previousGeneration {
-            let completionDeadline = completionStart + max(animation.box.duration, presentationDuration)
+            let completionDeadline = completionStart + max(
+                animation.box.duration,
+                presentationDuration()
+            )
             for index in completionRecords.indices
                 where completionRecords[index].criteria != .removed &&
                 completionRecords[index].orderGeneration != previousGeneration {
@@ -781,7 +815,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             previousAnimation: previousAnimation,
             replacementAnimation: animation
         ), let previousGeneration {
-            let completionDeadline = completionStart + max(animation.box.duration, presentationDuration)
+            let completionDeadline = completionStart + max(
+                animation.box.duration,
+                presentationDuration()
+            )
             for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
                 if completionRecords[index].criteria == .removed {
                     completionRecords[index].deadline = completionDeadline
@@ -790,13 +827,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
                     completionRecords[index].deadline = completionDeadline
                 }
             }
-        } else if merged,
+        } else if !completionRecords.isEmpty,
+           !preservesAllPendingDirectFluidSpringLogicalOnlyRecords,
+           merged,
            shouldMoveMergedCompletionRecordsToPresentation(
                previousAnimation: previousAnimation,
                replacementAnimation: animation,
-               presentationDuration: resolvedPresentationDuration
+               presentationDuration: resolvedPresentationDuration()
            ) {
-            let presentationDeadline = completionStart + resolvedPresentationDuration
+            let presentationDeadline = completionStart + resolvedPresentationDuration()
             if shouldGroupResidualWrapperReplacementCompletionRecords(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
@@ -829,12 +868,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
                     completionRecords[index].deadline = presentationDeadline
                 }
             }
-        } else if shouldMoveResidualCompletionRecordsToPresentation(
+        } else if !completionRecords.isEmpty &&
+                  !preservesAllPendingDirectFluidSpringLogicalOnlyRecords &&
+                  previousAnimation != nil &&
+                  shouldMoveResidualCompletionRecordsToPresentation(
             previousAnimation: previousAnimation,
             replacementAnimation: animation,
-            presentationDuration: resolvedPresentationDuration
+            presentationDuration: resolvedPresentationDuration()
         ) {
-            let presentationDeadline = completionStart + resolvedPresentationDuration
+            let presentationDeadline = completionStart + resolvedPresentationDuration()
             if shouldGroupResidualWrapperReplacementCompletionRecords(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
@@ -929,10 +971,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
         startValue = activeStart
         targetValue = target
         let activeInterval = animatableDelta(from: activeStart, to: target)
-        let presentationDeadline = completionStart + max(
-            animation.box.duration,
-            resolvedPresentationDuration
-        )
+        func presentationDeadline() -> Time {
+            completionStart + max(
+                animation.box.duration,
+                resolvedPresentationDuration()
+            )
+        }
         let holdsNewLogicalUntilPresentation =
             shouldHoldDefaultReplacementCompletionUntilPresentation(
                 previousAnimation: previousAnimation,
@@ -975,7 +1019,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule, Obs
             }
             return completesWithoutWaitingForSamplingWindow
                 ? completionStart
-                : registeredDeadline ?? (waitsForPresentation ? presentationDeadline : deadline)
+                : registeredDeadline ?? (waitsForPresentation ? presentationDeadline() : deadline)
         }
         // New records stay at the front so same-generation ties preserve the
         // newest registration before the final criterion ordering pass.
