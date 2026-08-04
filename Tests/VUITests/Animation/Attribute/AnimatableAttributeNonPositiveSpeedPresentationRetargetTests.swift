@@ -62,12 +62,12 @@ final class AnimatableAttributeNonPositiveSpeedPresentationRetargetTests: XCTest
         harness.finalizeTransactionBody()
         harness.flushCompletionActions()
 
-        harness.setTime(retargetTime + 0.21)
+        harness.advanceTime(to: retargetTime + 0.21)
         let midRetarget = harness.currentValue().opacity
         XCTAssertGreaterThan(midRetarget, retargetStart + 0.15, label, file: file, line: line)
         XCTAssertGreaterThan(midRetarget, 0.45, label, file: file, line: line)
 
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         let finalOldPresentation = harness.currentValue().opacity
         XCTAssertEqual(finalOldPresentation, 1.0, accuracy: 0.000_001, label, file: file, line: line)
     }
@@ -104,12 +104,12 @@ final class AnimatableAttributeNonPositiveSpeedPresentationRetargetTests: XCTest
         harness.finalizeTransactionBody()
         harness.flushCompletionActions()
 
-        harness.setTime(retargetTime + 0.20)
+        harness.advanceTime(to: retargetTime + 0.20)
         let midRetarget = harness.currentValue().opacity
         XCTAssertLessThan(midRetarget, -0.15, label, file: file, line: line)
         XCTAssertGreaterThan(midRetarget, -0.35, label, file: file, line: line)
 
-        harness.setTime(retargetTime + 0.50)
+        harness.advanceTime(to: retargetTime + 0.50)
         let finalReplacement = harness.currentValue().opacity
         XCTAssertEqual(finalReplacement, -0.5, accuracy: 0.000_001, label, file: file, line: line)
     }
@@ -120,7 +120,7 @@ final class AnimatableAttributeNonPositiveSpeedPresentationRetargetTests: XCTest
     ) {
         var time = 1.0 / 60.0
         while time <= endTime {
-            harness.setTime(time)
+            harness.advanceTime(to: time)
             _ = harness.currentValue()
             time += 1.0 / 60.0
         }

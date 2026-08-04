@@ -249,7 +249,7 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
     weak var scope: MatchedGeometryScope?
     var frameIndex: Int
     var listeners: [AnimationListener] = []
-    var animatorState: AnimatorState<ViewFrame>?
+    var animatorState: AnimatorState<ViewFrame.AnimatableData>?
     var resetSeed: UInt32 = 0
     var lastSourceAttribute = AGWeakAttribute.invalid
 
@@ -350,7 +350,7 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
         if let animatorState {
             var interval = target.animatableData
             interval -= previousTarget.animatableData
-            _ = animatorState.combine(
+            animatorState.combine(
                 newAnimation: animation,
                 newInterval: interval,
                 at: currentTime,
@@ -364,7 +364,8 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
                 animation: animation,
                 interval: interval,
                 at: currentTime,
-                in: transaction
+                in: transaction,
+                finishingDefinition: ViewFrame.self
             )
         }
     }
@@ -373,13 +374,14 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
         guard let animatorState else {
             return
         }
-        let continues = animatorState.update(
-            value: &target,
+        var data = target.animatableData
+        let isComplete = animatorState.update(
+            &data,
             at: time.value,
-            environment: environment,
-            advancesDelayedSecondSample: true
+            environment: environment
         )
-        if continues {
+        if !isComplete {
+            target.animatableData = data
             animatorState.nextUpdate()
         } else {
             self.animatorState = nil
@@ -406,9 +408,8 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
     }
 
     private mutating func removeAnimationListeners() {
-        let actions = listeners.flatMap { $0.animationWasRemoved() }
+        listeners.forEach { $0.animationWasRemoved() }
         listeners.removeAll()
-        enqueueAnimationCompletionActions(actions)
     }
 
     private mutating func finishAnimation() {

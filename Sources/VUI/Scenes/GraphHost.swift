@@ -1059,9 +1059,15 @@ class GraphHost: CustomReflectable {
     private static func scheduleGlobalTransactionFlush() {
         guard !globalTransactionState.isFlushScheduled else { return }
         globalTransactionState.isFlushScheduled = true
-        MainRunLoopObserverScheduler.shared.schedule {
+        scheduleMainRunLoopObserver {
             Self.flushGlobalTransactions()
         }
+    }
+
+    fileprivate static func scheduleMainRunLoopObserver(
+        _ action: @escaping @Sendable () -> Void
+    ) {
+        MainRunLoopObserverScheduler.shared.schedule(action)
     }
 
     private final class MainRunLoopObserverScheduler: @unchecked Sendable {
@@ -1079,10 +1085,17 @@ class GraphHost: CustomReflectable {
             if Thread.isMainThread {
                 enqueueObserverAction(action)
             } else {
-                RunLoop.main.perform(inModes: [.common], block: action)
+                let scheduler = self
+                RunLoop.main.perform(inModes: [.common]) {
+                    scheduler.enqueueObserverAction(action)
+                }
             }
             #else
-            RunLoop.main.perform(action)
+            RunLoop.main.perform {
+                Update.ensure {
+                    action()
+                }
+            }
             #endif
         }
 
@@ -1180,7 +1193,23 @@ protocol GraphDelegate: AnyObject {
     func beginTransaction()
 }
 
+private final class GraphDelegateBox: @unchecked Sendable {
+    let value: any GraphDelegate
+
+    init(_ value: any GraphDelegate) {
+        self.value = value
+    }
+}
+
 extension GraphDelegate {
-    func beginTransaction() {}
+    func beginTransaction() {
+        let delegate = GraphDelegateBox(self)
+        GraphHost.scheduleMainRunLoopObserver {
+            delegate.value.updateGraph { host in
+                host.flushTransactions()
+            }
+        }
+    }
+
     func preferencesDidChange() {}
 }

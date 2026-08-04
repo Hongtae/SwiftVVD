@@ -141,7 +141,7 @@ final class AnimatableAttributeResidualSpringCrossRetargetCompletionTests: XCTes
         harness.finalizeTransactionBody()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         let retargetStartValue = harness.currentValue().opacity
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
@@ -161,25 +161,25 @@ final class AnimatableAttributeResidualSpringCrossRetargetCompletionTests: XCTes
 
         let replacementLogical = retargetTime + replacementAnimation.box.duration
         let oldLogical = oldAnimation.box.duration
-        let replacementFinal = retargetTime + replacementAnimation.box.presentationDuration(
+        let replacementFinal = retargetTime + replacementAnimation.box.terminalSamplingHorizon(
             for: target - retargetStartValue
         )
         XCTAssertLessThan(replacementLogical, replacementFinal, label, file: file, line: line)
 
-        harness.setTime(replacementLogical + frame)
+        harness.advanceTime(to: replacementLogical + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, expectedEventsAfterReplacementLogical, label, file: file, line: line)
 
         if let expectedEventsAfterOldLogical {
             XCTAssertLessThan(oldLogical, replacementFinal, label, file: file, line: line)
-            harness.setTime(oldLogical + frame)
+            harness.advanceTime(to: oldLogical + frame)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(recorder.events, expectedEventsAfterOldLogical, label, file: file, line: line)
         } else {
             XCTAssertGreaterThan(oldLogical, replacementFinal, label, file: file, line: line)
-            harness.setTime((replacementLogical + replacementFinal) / 2)
+            harness.advanceTime(to: (replacementLogical + replacementFinal) / 2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(recorder.events, expectedEventsAfterReplacementLogical, label, file: file, line: line)
@@ -189,7 +189,7 @@ final class AnimatableAttributeResidualSpringCrossRetargetCompletionTests: XCTes
         var sampleTime = replacementFinal + frame
         let lastSampleTime = replacementFinal + 2.0
         while sampleTime <= lastSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.contains("replacement removed") {

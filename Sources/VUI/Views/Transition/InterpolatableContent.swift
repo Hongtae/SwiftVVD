@@ -66,12 +66,6 @@ extension DisplayList {
             var nextTime: Time
             var numericValue: Float?
 
-            // Backend-local state that remains outside the private five-field
-            // recording carrier until its producers are modeled.
-            var animation: InterpolatorAnimation?
-            var contentsScale: Float
-            var version: DisplayList.Version?
-
             var displayList: DisplayList {
                 get { list }
                 set {
@@ -84,19 +78,13 @@ extension DisplayList {
             init(
                 displayList: DisplayList = DisplayList(),
                 origin: CGPoint = .zero,
-                numericValue: Float? = nil,
-                animation: InterpolatorAnimation? = nil,
-                contentsScale: Float = 1,
-                version: DisplayList.Version? = nil
+                numericValue: Float? = nil
             ) {
                 self.list = displayList
                 self.origin = origin
                 self.rbList = nil
                 self.nextTime = .infinity
                 self.numericValue = numericValue
-                self.animation = animation
-                self.contentsScale = contentsScale
-                self.version = version
             }
 
             mutating func preparedList(
@@ -108,7 +96,9 @@ extension DisplayList {
                     return local.list
                 }
 
-                var prepared = renderer.sample(list: list, at: time)
+                var prepared = renderer.sample(list: list, at: time).translated(
+                    by: CGSize(width: origin.x, height: origin.y)
+                )
                 prepared.numericValue = numericValue
                 nextTime = renderer.nextTime
                 let contents = DisplayList.LocalContents(list: prepared)
@@ -120,30 +110,30 @@ extension DisplayList {
         // Retained outgoing contents plus transition/interpolator state.
         struct Removed {
             var contents: Contents
-            var state: ContentTransition.State
-            var rbTransition: RBTransition
             var interpolator: RBDisplayListInterpolator?
-            var animation: Animation?
-            var startTime: Time
-            var activeDuration: Double
+            var transition: RBTransition?
+            var animation: RBAnimation
+            var listener: AnimationListener?
+            var begin: Time
+            var duration: Double
             var phase: Phase
         }
 
-        private(set) var contents: Contents
-        private(set) var currentTime: Time
-        private(set) var maxDuration: Double
-        private(set) var nextUpdateTime: Time
-        private(set) var removed: [Removed]
-        private(set) var renderer: DisplayList.GraphicsRenderer?
-        private(set) var needsUpdate: Bool
+        fileprivate(set) var contents: Contents
+        fileprivate(set) var removed: [Removed]
+        fileprivate(set) var time: Time
+        fileprivate(set) var renderer: DisplayList.GraphicsRenderer?
+        fileprivate(set) var contentSeed: DisplayList.Seed
+        fileprivate(set) var supportsVFD: Bool
+        fileprivate(set) var needsUpdate: Bool
 
         init() {
             self.contents = Contents()
-            self.currentTime = .zero
-            self.maxDuration = .infinity
-            self.nextUpdateTime = .infinity
             self.removed = []
+            self.time = .zero
             self.renderer = nil
+            self.contentSeed = DisplayList.Seed()
+            self.supportsVFD = false
             self.needsUpdate = true
         }
 
@@ -151,74 +141,41 @@ extension DisplayList {
             removed.count
         }
 
+        var nextUpdateTime: Time {
+            removed.reduce(.infinity) { result, removal in
+                guard removal.duration >= 0 else {
+                    return result
+                }
+                return min(
+                    result,
+                    Time(seconds: removal.begin.seconds + removal.duration)
+                )
+            }
+        }
+
         mutating func setDisplayList(
             _ list: DisplayList,
-            origin: CGPoint,
-            version: DisplayList.Version? = nil,
-            state: ContentTransition.State? = nil,
-            animation: Animation? = nil,
-            numericValue: Float? = nil
+            origin: CGPoint
         ) {
-            guard !contents.matches(list: list, origin: origin, version: version) else {
-                contents.numericValue = numericValue
+            guard contents.list != list || contents.origin != origin else {
                 return
-            }
-
-            if let removedState = state, !contents.displayList.isEmptyForInterpolation {
-                // Coalesce an unprepared tail and keep the prepared history
-                // bounded before appending the new removal.
-                if removed.last?.phase == .pending {
-                    removed.removeLast()
-                } else if removed.count >= 8 {
-                    remove(prefix: 0)
-                }
-                removed.append(
-                    Removed(
-                        contents: contents,
-                        state: removedState,
-                        rbTransition: removedState.transition.rbTransition,
-                        interpolator: nil,
-                        animation: animation,
-                        startTime: .zero,
-                        activeDuration: -1,
-                        phase: .pending
-                    )
-                )
             }
 
             contents = Contents(
                 displayList: list,
                 origin: origin,
-                numericValue: numericValue,
-                animation: animation.map { InterpolatorAnimation(animation: $0) },
-                contentsScale: contents.contentsScale,
-                version: version
+                numericValue: contents.numericValue
             )
-            if state == nil {
-                // Layout can refine the endpoint during the preparation passes.
-                // Only the last removal targets the current contents. Earlier
-                // entries target the following retained contents and must keep
-                // their historical endpoints across later refinements.
-                removed.last?.interpolator?.setTo(list)
+            if !removed.isEmpty {
+                removed[removed.index(before: removed.endIndex)].interpolator = nil
             }
-            maxDuration = .infinity
             needsUpdate = true
         }
 
         mutating func updateInterpolators(
             contentsScale: Float,
-            maxDuration: Double,
-            time: Time = .zero
+            maxDuration: Double
         ) {
-            let timeChanged = currentTime.seconds != time.seconds
-            self.contents.contentsScale = contentsScale
-            self.maxDuration = maxDuration
-            self.currentTime = time
-
-            if timeChanged && !removed.isEmpty {
-                needsUpdate = true
-            }
-
             guard needsUpdate else { return }
             needsUpdate = false
 
@@ -240,23 +197,23 @@ extension DisplayList {
                 switch removed[index].phase {
                 case .pending:
                     removed[index].phase = .first
-                    removed[index].startTime = currentTime
+                    removed[index].begin = time
                 case .first:
                     removed[index].phase = .second
-                    removed[index].startTime = currentTime
+                    removed[index].begin = time
                 case .second:
                     removed[index].phase = .running
-                    let preparationDuration = currentTime.seconds - removed[index].startTime.seconds
+                    let preparationDuration = time.seconds - removed[index].begin.seconds
                     if preparationDuration > 1.0 / 30.0 {
-                        removed[index].startTime = currentTime
+                        removed[index].begin = time
                     }
                 case .running:
                     break
                 }
 
-                if removed[index].activeDuration >= 0,
-                   currentTime.seconds - removed[index].startTime.seconds >=
-                    removed[index].activeDuration {
+                if removed[index].duration >= 0,
+                   time.seconds - removed[index].begin.seconds >=
+                    removed[index].duration {
                     remove(prefix: index)
                     composedPresentation = nil
                     index = removed.startIndex
@@ -268,26 +225,13 @@ extension DisplayList {
                 } else {
                     removed[index].contents.preparedList(
                         using: renderer,
-                        at: currentTime
+                        at: time
                     )
                 }
-                let hasFollowingRemoval =
-                    index < removed.index(before: removed.endIndex)
                 if let currentInterpolator = removed[index].interpolator {
                     let updatedInterpolator = currentInterpolator.copy()
                         as! RBDisplayListInterpolator
-                    // Intermediate renderer contents are local to the following
-                    // endpoint. Typed text lists retain scene coordinates here,
-                    // so align that source before flattening its presentation.
-                    let alignsIntermediateSource = hasFollowingRemoval &&
-                        currentInterpolator.requiresIntermediateTextAlignment
-                    updatedInterpolator.setFrom(
-                        alignsIntermediateSource
-                            ? from.aligningInterpolationCenter(
-                                to: currentInterpolator.to
-                            )
-                            : from
-                    )
+                    updatedInterpolator.setFrom(from)
                     removed[index].interpolator = updatedInterpolator
                 } else {
                     let logicalFrom = if composedPresentation == nil {
@@ -295,47 +239,41 @@ extension DisplayList {
                     } else {
                         removed[index].contents.preparedList(
                             using: renderer,
-                            at: currentTime
+                            at: time
                         )
                     }
                     let nextIndex = removed.index(after: index)
                     let to = if nextIndex < removed.endIndex {
                         removed[nextIndex].contents.preparedList(
                             using: renderer,
-                            at: currentTime
+                            at: time
                         )
                     } else {
                         contents.preparedList(
                             using: renderer,
-                            at: currentTime
+                            at: time
                         )
                     }
                     var options: [RBDisplayListInterpolatorOptionKey: Any] = [
-                        .transition: removed[index].rbTransition,
+                        .animation: removed[index].animation,
                     ]
-                    if let animation = removed[index].animation {
-                        options[.animation] = animation.rbAnimation
+                    if let transition = removed[index].transition {
+                        options[.transition] = transition
                     }
                     let interpolator = RBDisplayListInterpolator(
                         from: logicalFrom,
                         to: to,
                         options: options
                     )
-                    let alignsIntermediateSource = hasFollowingRemoval &&
-                        interpolator.requiresIntermediateTextAlignment
-                    if composedPresentation != nil || alignsIntermediateSource {
-                        interpolator.setFrom(
-                            alignsIntermediateSource
-                                ? from.aligningInterpolationCenter(to: to)
-                                : from
-                        )
+                    if composedPresentation != nil {
+                        interpolator.setFrom(from)
                     }
                     removed[index].interpolator = interpolator
-                    let interpolatorDuration = removed[index].interpolator?.activeDuration ?? 0
+                    let interpolatorDuration = interpolator.activeDuration
                     let contentDuration = interpolatorDuration > 0
                         ? interpolatorDuration
-                        : removed[index].interpolator?.animation?.activeDuration ?? 0
-                    removed[index].activeDuration = min(
+                        : interpolator.animation?.activeDuration ?? 0
+                    removed[index].duration = min(
                         maxDuration,
                         contentDuration
                     )
@@ -344,8 +282,8 @@ extension DisplayList {
                    let interpolator = removed[index].interpolator {
                     let elapsed = Float(
                         max(
-                            currentTime.seconds -
-                                removed[index].startTime.seconds,
+                            time.seconds -
+                                removed[index].begin.seconds,
                             0
                         )
                     )
@@ -355,7 +293,6 @@ extension DisplayList {
                 }
                 index = removed.index(after: index)
             }
-            updateNextUpdateTime()
         }
 
         mutating func updateOutput(
@@ -369,273 +306,290 @@ extension DisplayList {
                 return false
             }
 
-            if let removal = removed.last,
-               !removal.state.transition.isIdentity,
-               !removal.rbTransition.effects.isEmpty {
-                let elapsed = Float(max(currentTime.seconds - removal.startTime.seconds, 0))
-                let contents = removal.interpolator?.copyContents(withProgress: elapsed)
-                    ?? removal.contents.displayList
-                list.appendEffect(
-                    .contentTransition(removal.state),
-                    contents: contents
+            let index = removed.index(before: removed.endIndex)
+            if removed.count == 1,
+               removed[index].interpolator?.onlyFades != false,
+               idsAreDisjoint(
+                   removed[index].contents.list,
+                   contents.list
+               ) {
+                let progress = removed[index].animation.evaluateAtTime(
+                    time.seconds - removed[index].begin.seconds
+                )
+                let oldOrigin = CGPoint(
+                    x: contentOffset.width +
+                        removed[index].contents.origin.x -
+                        contents.origin.x,
+                    y: contentOffset.height +
+                        removed[index].contents.origin.y -
+                        contents.origin.y
+                )
+                let currentOrigin = CGPoint(
+                    x: contentOffset.width,
+                    y: contentOffset.height
+                )
+                var output = DisplayList()
+                output.appendEffect(
+                    .opacity(1 - progress),
+                    contents: removed[index].contents.list,
+                    frame: CGRect(origin: oldOrigin, size: frame.size),
+                    version: version
+                )
+                output.appendEffect(
+                    .opacity(progress),
+                    contents: contents.list,
+                    frame: CGRect(origin: currentOrigin, size: frame.size),
+                    version: version
+                )
+                output.numericValue = contents.numericValue
+                list = output
+                return true
+            }
+
+            guard let interpolator = removed[index].interpolator else {
+                list = DisplayList()
+                return true
+            }
+
+            let elapsed = Float(max(time.seconds - removed[index].begin.seconds, 0))
+            let sampledBounds = interpolator.boundingRect(
+                withProgress: elapsed
+            )
+            let bounds = (
+                sampledBounds.isNull ? CGRect.zero : sampledBounds
+            ).integral
+            let sampled = interpolator
+                .copyContents(withProgress: elapsed)
+            if supportsVFD,
+               let viewGraph = GraphHost.currentHost as? ViewGraph {
+                viewGraph.nextUpdate.views.maxVelocity(
+                    interpolator.maxAbsoluteVelocity(
+                        withProgress: elapsed
+                    )
                 )
             }
+
+            var options = rasterizationOptions
+            options.flags.insert(.rgbaContext)
+            let content = DisplayList.Content(
+                drawing: DisplayList.LocalContents(list: sampled),
+                origin: bounds.origin,
+                options: options,
+                seed: DisplayList.Seed(version)
+            )
+            let outputOffset = CGSize(
+                width: contentOffset.width - contents.origin.x,
+                height: contentOffset.height - contents.origin.y
+            )
+            let outputFrame = bounds.offsetBy(
+                dx: outputOffset.width,
+                dy: outputOffset.height
+            )
+            var output = DisplayList()
+            output.items.append(DisplayList.Item(
+                content: content,
+                frame: outputFrame,
+                identity: .none,
+                version: version
+            ))
+            output.interpolationBounds = outputFrame
+            output.numericValue = sampled.numericValue
+            list = output
             return true
         }
 
+        mutating func reset() {
+            for removal in removed {
+                removal.listener?.animationWasRemoved()
+            }
+            removed.removeAll(keepingCapacity: true)
+            renderer = nil
+            needsUpdate = true
+        }
+
         mutating func invalidateContentsScale() {
-            contents.contentsScale = 0
+            contents.rbList = nil
+            contents.nextTime = .infinity
+            for index in removed.indices {
+                removed[index].contents.rbList = nil
+                removed[index].contents.nextTime = .infinity
+                removed[index].interpolator = nil
+            }
             needsUpdate = true
         }
 
         mutating func remove(prefix: Int) {
             precondition(prefix >= removed.startIndex)
             precondition(prefix < removed.endIndex)
+            for removal in removed[...prefix] {
+                removal.listener?.animationWasRemoved()
+            }
             removed.removeFirst(prefix + 1)
             // Every retained entry must be rebuilt from the new first source.
             for index in removed.indices {
                 removed[index].interpolator = nil
             }
             needsUpdate = true
-            updateNextUpdateTime()
-        }
-
-        private mutating func updateNextUpdateTime() {
-            guard !removed.isEmpty else {
-                nextUpdateTime = .infinity
-                return
-            }
-
-            var nextTime = Time.infinity
-            for removal in removed where removal.activeDuration >= 0 {
-                let candidate = Time(seconds: removal.startTime.seconds + removal.activeDuration)
-                if candidate < nextTime {
-                    nextTime = candidate
-                }
-            }
-            nextUpdateTime = nextTime
         }
 
     }
 
-    // Base interpolator group hook installed on display-list output preferences.
     class InterpolatorGroup {
         var maxDuration: Double
 
-        var hasActiveInterpolators: Bool {
-            false
+        var features: DisplayList.Features {
+            []
         }
 
-        var activeSourceBounds: CGRect? {
-            nil
+        var properties: DisplayList.Properties {
+            []
         }
 
         init(maxDuration: Double = .infinity) {
             self.maxDuration = maxDuration
         }
 
+        func reset() {
+        }
+
         func nextUpdate(after time: Time) -> Time {
-            Time(seconds: .infinity)
-        }
-
-        func updateTime(_ time: Time) {
-        }
-
-        func discardActiveInterpolators() {
-        }
-
-        func apply(to list: DisplayList) -> DisplayList {
-            list
-        }
-
-        func setCurrentContents(
-            contentSeed: DisplayList.Seed,
-            target: DisplayList,
-            transition: ContentTransition,
-            supportsVFD: Bool,
-            rasterizationOptions: RasterizationOptions
-        ) {
-        }
-
-        func setCurrentContents(
-            contentSeed: DisplayList.Seed,
-            target: DisplayList,
-            transition: ContentTransition,
-            time: Time,
-            supportsVFD: Bool,
-            rasterizationOptions: RasterizationOptions
-        ) {
-            setCurrentContents(
-                contentSeed: contentSeed,
-                target: target,
-                transition: transition,
-                supportsVFD: supportsVFD,
-                rasterizationOptions: rasterizationOptions
-            )
-            updateTime(time)
+            .infinity
         }
 
         func update(
             contentSeed: DisplayList.Seed,
-            current: DisplayList,
-            target: DisplayList,
-            state: ContentTransition.State,
-            time: Time = .zero,
-            animatesSize: Bool,
-            defersRender: Bool,
+            transition: ContentTransition,
+            animation: Animation?,
+            listener: AnimationListener?,
+            contentsScale: Float,
+            rasterizationOptions: RasterizationOptions,
             supportsVFD: Bool
-        ) -> DisplayList {
-            guard !state.transition.isIdentity else {
-                return target
-            }
-            return DisplayList.effect(
-                .contentTransition(state),
-                contents: target
-            )
+        ) {
+        }
+
+        func rewriteInterpolation(
+            serial: UInt32,
+            list: inout DisplayList,
+            time: Attribute<Time>,
+            frame: CGRect,
+            contentOrigin: CGPoint,
+            contentOffset: CGSize,
+            version: DisplayList.Version
+        ) -> Bool {
+            false
+        }
+
+        func apply(to item: inout DisplayList.Item) {
         }
     }
 
-    // Single-display-list interpolator group used by interpolatable content output rules.
     final class UnaryInterpolatorGroup: InterpolatorGroup {
         private(set) var layer = InterpolatorLayer()
-        private(set) var features: UInt16 = 0
-        private(set) var properties: UInt32 = 0
-        private(set) var lastContentSeed = DisplayList.Seed()
-        private(set) var supportsVariableFrameDuration = false
+        private(set) var contentSeed = DisplayList.Seed()
+        private(set) var contentsScale: Float = 0
         private(set) var rasterizationOptions = RasterizationOptions()
 
-        override init(maxDuration: Double = .infinity) {
-            super.init(maxDuration: maxDuration)
-        }
-
-        override var hasActiveInterpolators: Bool {
-            layer.removedCount > 0
-        }
-
-        override var activeSourceBounds: CGRect? {
-            layer.removed.first?.interpolator?.from.interpolationBounds
-        }
-
-        override func discardActiveInterpolators() {
-            if layer.removedCount > 0 {
-                layer.remove(prefix: layer.removedCount - 1)
+        override var features: DisplayList.Features {
+            var result = layer.contents.list.interpolationFeatures
+            for removal in layer.removed {
+                result.formUnion(removal.contents.list.interpolationFeatures)
             }
+            return result
+        }
+
+        override var properties: DisplayList.Properties {
+            []
+        }
+
+        override func reset() {
+            layer.reset()
         }
 
         override func nextUpdate(after time: Time) -> Time {
-            layer.removedCount == 0 ? layer.currentTime : layer.nextUpdateTime
-        }
-
-        func reset() {
-            layer = InterpolatorLayer()
-            features = 0
-            properties = 0
-            lastContentSeed = DisplayList.Seed()
-            supportsVariableFrameDuration = false
-            rasterizationOptions = RasterizationOptions()
-            maxDuration = .infinity
-        }
-
-        override func updateTime(_ time: Time) {
-            layer.updateInterpolators(
-                contentsScale: layer.contents.contentsScale,
-                maxDuration: maxDuration,
-                time: time
-            )
-            scheduleNextUpdate(after: time)
-        }
-
-        override func setCurrentContents(
-            contentSeed: DisplayList.Seed,
-            target: DisplayList,
-            transition: ContentTransition,
-            supportsVFD: Bool,
-            rasterizationOptions: RasterizationOptions
-        ) {
-            lastContentSeed = contentSeed
-            supportsVariableFrameDuration = supportsVFD
-            self.rasterizationOptions = rasterizationOptions
-            layer.setDisplayList(
-                target,
-                origin: .zero,
-                version: DisplayList.Version(value: Int(contentSeed.value)),
-                numericValue: transition.numericValue
-            )
+            layer.removed.isEmpty ? layer.time : layer.nextUpdateTime
         }
 
         override func update(
             contentSeed: DisplayList.Seed,
-            current: DisplayList,
-            target: DisplayList,
-            state: ContentTransition.State,
-            time: Time = .zero,
-            animatesSize: Bool,
-            defersRender: Bool,
+            transition: ContentTransition,
+            animation: Animation?,
+            listener: AnimationListener?,
+            contentsScale: Float,
+            rasterizationOptions: RasterizationOptions,
             supportsVFD: Bool
-        ) -> DisplayList {
-            let previousContentSeed = lastContentSeed
-            lastContentSeed = contentSeed
-            supportsVariableFrameDuration = supportsVFD
-            rasterizationOptions = state.rasterizationOptions
+        ) {
+            if layer.contentSeed != contentSeed, let animation {
+                if layer.removed.last?.phase == .pending {
+                    layer.remove(prefix: layer.removed.index(before: layer.removed.endIndex))
+                } else if layer.removed.count >= 8 {
+                    layer.remove(prefix: layer.removed.startIndex)
+                }
 
-            layer.setDisplayList(
-                current,
-                origin: .zero,
-                version: DisplayList.Version(value: Int(previousContentSeed.value)),
-                numericValue: layer.contents.numericValue
-            )
-            layer.setDisplayList(
-                target,
-                origin: .zero,
-                version: DisplayList.Version(value: Int(contentSeed.value)),
-                state: state,
-                animation: state.animation,
-                numericValue: state.transition.numericValue
-            )
+                listener?.animationWasAdded()
+                layer.removed.append(
+                    InterpolatorLayer.Removed(
+                        contents: layer.contents,
+                        interpolator: nil,
+                        transition: transition.rbTransition,
+                        animation: animation.rbAnimation,
+                        listener: listener,
+                        begin: .zero,
+                        duration: -1,
+                        phase: .pending
+                    )
+                )
+                layer.needsUpdate = true
+            }
+
+            layer.contentSeed = contentSeed
+            layer.supportsVFD = supportsVFD
+            layer.contents.numericValue = transition.numericValue
+            self.contentSeed = contentSeed
+            if self.contentsScale != contentsScale {
+                self.contentsScale = contentsScale
+                layer.invalidateContentsScale()
+            }
+            self.rasterizationOptions = rasterizationOptions
+        }
+
+        override func rewriteInterpolation(
+            serial: UInt32,
+            list: inout DisplayList,
+            time: Attribute<Time>,
+            frame: CGRect,
+            contentOrigin: CGPoint,
+            contentOffset: CGSize,
+            version: DisplayList.Version
+        ) -> Bool {
+            layer.setDisplayList(list, origin: contentOrigin)
+            guard !layer.removed.isEmpty else {
+                return false
+            }
+
+            let currentTime = time.value
+            if layer.time != currentTime {
+                layer.time = currentTime
+                layer.needsUpdate = true
+            }
+            guard let viewGraph = GraphHost.currentHost as? ViewGraph else {
+                fatalError(
+                    "UnaryInterpolatorGroup.rewriteInterpolation requires an active ViewGraph host."
+                )
+            }
+            viewGraph.nextUpdate.views.at(currentTime)
             layer.updateInterpolators(
-                contentsScale: 1,
-                maxDuration: maxDuration,
-                time: time
+                contentsScale: contentsScale,
+                maxDuration: maxDuration
             )
-            scheduleNextUpdate(after: time)
-
-            _ = super.update(
-                contentSeed: contentSeed,
-                current: current,
-                target: target,
-                state: state,
-                time: time,
-                animatesSize: animatesSize,
-                defersRender: defersRender,
-                supportsVFD: supportsVFD
-            )
-            return apply(to: target)
-        }
-
-        func apply(to list: inout DisplayList.Item) {
-        }
-
-        override func apply(to list: DisplayList) -> DisplayList {
-            var output = DisplayList()
-            let replacedCurrent = layer.updateOutput(
-                list: &output,
-                frame: .zero,
-                contentOffset: .zero,
-                version: DisplayList.Version(value: 0),
+            return layer.updateOutput(
+                list: &list,
+                frame: frame,
+                contentOffset: contentOffset,
+                version: version,
                 rasterizationOptions: rasterizationOptions
             )
-            return replacedCurrent ? output : list
         }
 
-        private func scheduleNextUpdate(after time: Time) {
-            let nextTime = nextUpdate(after: time)
-            guard time < nextTime,
-                  nextTime.seconds.isFinite,
-                  let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
-                return
-            }
-            viewGraph.nextUpdate.views.at(nextTime)
-        }
     }
 }
 
@@ -656,368 +610,453 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
     }
 
     private(set) var layers: [Layer] = []
-    private(set) var contentsScale: Float = 1
+    private(set) var contentsScale: Float = 0
     private(set) var rasterizationOptions = RasterizationOptions()
     private(set) var serial: UInt32 = 0
     private(set) var cursor: Int32 = 0
 
-    override var hasActiveInterpolators: Bool {
-        layers.contains { $0.state.removedCount > 0 }
-    }
-
-    override var activeSourceBounds: CGRect? {
-        layers.lazy.compactMap {
-            $0.state.removed.first?.interpolator?.from.interpolationBounds
-        }.first
-    }
-
-    override func discardActiveInterpolators() {
-        for index in layers.indices {
-            let removedCount = layers[index].state.removedCount
-            if removedCount > 0 {
-                layers[index].state.remove(prefix: removedCount - 1)
+    override var features: DisplayList.Features {
+        layers.reduce(into: DisplayList.Features()) { result, layer in
+            result.formUnion(layer.state.contents.list.interpolationFeatures)
+            for removal in layer.state.removed {
+                result.formUnion(removal.contents.list.interpolationFeatures)
             }
+        }
+    }
+
+    override var properties: DisplayList.Properties {
+        []
+    }
+
+    override func reset() {
+        for index in layers.indices {
+            layers[index].state.reset()
         }
     }
 
     override func nextUpdate(after time: Time) -> Time {
         layers.reduce(.infinity) { result, layer in
             let candidate = layer.state.removedCount == 0
-                ? layer.state.currentTime
+                ? layer.state.time
                 : layer.state.nextUpdateTime
             return min(result, candidate)
         }
     }
 
-    override func updateTime(_ time: Time) {
-        for index in layers.indices {
-            layers[index].state.updateInterpolators(
-                contentsScale: contentsScale,
-                maxDuration: maxDuration,
-                time: time
-            )
-        }
-        scheduleNextUpdate(after: time)
-    }
+    func addLayer(
+        id: _ShapeStyle_LayerID,
+        style: _ShapeStyle_Pack.Style?
+    ) -> UInt32 {
+        let index = Int(cursor)
+        cursor += 1
 
-    override func setCurrentContents(
-        contentSeed: DisplayList.Seed,
-        target: DisplayList,
-        transition: ContentTransition,
-        supportsVFD: Bool,
-        rasterizationOptions: RasterizationOptions
-    ) {
-        let index = currentLayerIndex()
-        self.rasterizationOptions = rasterizationOptions
-        layers[index].state.setDisplayList(
-            target,
-            origin: .zero,
-            version: DisplayList.Version(value: Int(contentSeed.value)),
-            numericValue: transition.numericValue
-        )
-    }
-
-    override func update(
-        contentSeed: DisplayList.Seed,
-        current: DisplayList,
-        target: DisplayList,
-        state: ContentTransition.State,
-        time: Time = .zero,
-        animatesSize: Bool,
-        defersRender: Bool,
-        supportsVFD: Bool
-    ) -> DisplayList {
-        let index = currentLayerIndex()
-        rasterizationOptions = state.rasterizationOptions
-        let previousVersion = layers[index].state.contents.version ?? DisplayList.Version()
-        let previousNumericValue = layers[index].state.contents.numericValue
-
-        layers[index].state.setDisplayList(
-            current,
-            origin: .zero,
-            version: previousVersion,
-            numericValue: previousNumericValue
-        )
-        layers[index].state.setDisplayList(
-            target,
-            origin: .zero,
-            version: DisplayList.Version(value: Int(contentSeed.value)),
-            state: state,
-            animation: state.animation,
-            numericValue: state.transition.numericValue
-        )
-        layers[index].state.updateInterpolators(
-            contentsScale: contentsScale,
-            maxDuration: maxDuration,
-            time: time
-        )
-        scheduleNextUpdate(after: time)
-
-        _ = super.update(
-            contentSeed: contentSeed,
-            current: current,
-            target: target,
-            state: state,
-            time: time,
-            animatesSize: animatesSize,
-            defersRender: defersRender,
-            supportsVFD: supportsVFD
-        )
-        return apply(to: target)
-    }
-
-    override func apply(to list: DisplayList) -> DisplayList {
-        var output = DisplayList()
-        var replacedCurrent = false
-        for index in layers.indices {
-            replacedCurrent = layers[index].state.updateOutput(
-                list: &output,
-                frame: .zero,
-                contentOffset: .zero,
-                version: DisplayList.Version(value: Int(serial)),
-                rasterizationOptions: rasterizationOptions
-            ) || replacedCurrent
-        }
-        return replacedCurrent ? output : list
-    }
-
-    private func currentLayerIndex() -> Int {
-        if layers.isEmpty {
+        if index == layers.count {
+            let layerSerial = serial
+            serial &+= 1
             layers.append(
                 Layer(
-                    id: .unstyled,
-                    serial: serial,
-                    style: nil,
+                    id: id,
+                    serial: layerSerial,
+                    style: style,
                     state: DisplayList.InterpolatorLayer(),
                     isRemoved: false
                 )
             )
+            return layerSerial
         }
-        cursor = 0
-        return 0
+
+        precondition(index < layers.count)
+        guard layers[index].id == id else {
+            layers[index].isRemoved = true
+            fatalError(
+                "Shape-style layer replacement requires the rendered-layer producer."
+            )
+        }
+        layers[index].style = style
+        layers[index].isRemoved = false
+        return layers[index].serial
     }
 
-    private func scheduleNextUpdate(after time: Time) {
-        let nextTime = nextUpdate(after: time)
-        guard time < nextTime,
-              nextTime.seconds.isFinite,
-              let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
-            return
+    func finishLayers() {
+        let firstUnused = Int(cursor)
+        if firstUnused < layers.count {
+            for index in firstUnused..<layers.count {
+                layers[index].isRemoved = true
+            }
+            cursor = 0
+            fatalError(
+                "Shape-style layer retirement requires the rendered-layer producer."
+            )
         }
-        viewGraph.nextUpdate.views.at(nextTime)
+        cursor = 0
+    }
+
+    override func update(
+        contentSeed: DisplayList.Seed,
+        transition: ContentTransition,
+        animation: Animation?,
+        listener: AnimationListener?,
+        contentsScale: Float,
+        rasterizationOptions: RasterizationOptions,
+        supportsVFD: Bool
+    ) {
+        for index in layers.indices {
+            if layers[index].state.contentSeed != contentSeed,
+               let animation {
+                if layers[index].state.removed.last?.phase == .pending {
+                    let last = layers[index].state.removed.index(
+                        before: layers[index].state.removed.endIndex
+                    )
+                    layers[index].state.remove(prefix: last)
+                } else if layers[index].state.removed.count >= 8 {
+                    layers[index].state.remove(
+                        prefix: layers[index].state.removed.startIndex
+                    )
+                }
+
+                listener?.animationWasAdded()
+                layers[index].state.removed.append(
+                    DisplayList.InterpolatorLayer.Removed(
+                        contents: layers[index].state.contents,
+                        interpolator: nil,
+                        transition: transition.rbTransition,
+                        animation: animation.rbAnimation,
+                        listener: listener,
+                        begin: .zero,
+                        duration: -1,
+                        phase: .pending
+                    )
+                )
+                layers[index].state.needsUpdate = true
+            }
+            layers[index].state.contentSeed = contentSeed
+            layers[index].state.supportsVFD = supportsVFD
+            layers[index].state.contents.numericValue = transition.numericValue
+        }
+        if self.contentsScale != contentsScale {
+            self.contentsScale = contentsScale
+            for index in layers.indices {
+                layers[index].state.invalidateContentsScale()
+            }
+        }
+        self.rasterizationOptions = rasterizationOptions
+    }
+
+    override func rewriteInterpolation(
+        serial: UInt32,
+        list: inout DisplayList,
+        time: Attribute<Time>,
+        frame: CGRect,
+        contentOrigin: CGPoint,
+        contentOffset: CGSize,
+        version: DisplayList.Version
+    ) -> Bool {
+        guard let index = layers.firstIndex(where: { $0.serial == serial }) else {
+            list = DisplayList()
+            return false
+        }
+
+        layers[index].state.setDisplayList(list, origin: contentOrigin)
+        guard !layers[index].state.removed.isEmpty else {
+            return false
+        }
+
+        let currentTime = time.value
+        if layers[index].state.time != currentTime {
+            layers[index].state.time = currentTime
+            layers[index].state.needsUpdate = true
+        }
+        guard let viewGraph = GraphHost.currentHost as? ViewGraph else {
+            fatalError(
+                "_ShapeStyle_InterpolatorGroup.rewriteInterpolation requires an active ViewGraph host."
+            )
+        }
+        viewGraph.nextUpdate.views.at(currentTime)
+        layers[index].state.updateInterpolators(
+            contentsScale: contentsScale,
+            maxDuration: maxDuration
+        )
+        return layers[index].state.updateOutput(
+            list: &list,
+            frame: frame,
+            contentOffset: contentOffset,
+            version: version,
+            rasterizationOptions: rasterizationOptions
+        )
     }
 }
 
 private extension DisplayList {
-    var isEmptyForInterpolation: Bool {
-        items.isEmpty && debugItems.isEmpty && effects.isEmpty && interpolationBounds == nil
-    }
-
-    func aligningInterpolationCenter(to target: DisplayList) -> DisplayList {
-        guard let sourceBounds = interpolationBounds,
-              let targetBounds = target.interpolationBounds else {
-            return self
-        }
-        let offset = CGSize(
-            width: targetBounds.midX - sourceBounds.midX,
-            height: targetBounds.midY - sourceBounds.midY
-        )
-        guard offset.width != 0 || offset.height != 0 else {
-            return self
-        }
-        return translated(by: offset)
-    }
-}
-
-private extension DisplayList.InterpolatorLayer.Contents {
-    func matches(
-        list: DisplayList,
-        origin: CGPoint,
-        version: DisplayList.Version?
+    func forEachIdentity(
+        _ body: (_DisplayList_Identity, inout Bool) -> Void
     ) -> Bool {
-        displayList.hasSameInterpolationSurface(as: list) &&
-            self.origin == origin &&
-            self.version?.value == version?.value
+        for item in items where !item.forEachIdentity(body) {
+            return false
+        }
+        return true
+    }
+
+    var interpolationFeatures: Features {
+        items.reduce(into: Features()) { result, item in
+            result.formUnion(item.interpolationFeatures)
+        }
     }
 }
 
-// Stateful _AGGraph rule that observes content, transaction, time, and environment inputs
-// and rewrites DisplayList.Key output when content transitions are active.
+private extension DisplayList.Item {
+    func forEachIdentity(
+        _ body: (_DisplayList_Identity, inout Bool) -> Void
+    ) -> Bool {
+        if identity != .none {
+            var stop = false
+            body(identity, &stop)
+            if stop {
+                return false
+            }
+        }
+
+        switch value {
+        case let .content(content):
+            switch content.value {
+            case let .flattened(contents, _, _):
+                return contents.forEachIdentity(body)
+            case .backend, .color, .shape, .image, .style, .crossFade,
+                 .text, .drawing:
+                return true
+            }
+        case let .effect(effect, contents):
+            if case let .mask(mask, _) = effect,
+               !mask.forEachIdentity(body) {
+                return false
+            }
+            return contents.forEachIdentity(body)
+        case let .states(states):
+            for (_, contents) in states where !contents.forEachIdentity(body) {
+                return false
+            }
+            return true
+        case .empty:
+            return true
+        }
+    }
+
+    var interpolationFeatures: DisplayList.Features {
+        switch value {
+        case .content:
+            return []
+        case let .effect(effect, contents):
+            var result = contents.interpolationFeatures
+            switch effect {
+            case .animation:
+                result.insert(.animations)
+            case .state:
+                result.insert(.stateEffects)
+            case .interpolatorRoot:
+                result.insert(.interpolatorRoots)
+            case .interpolatorLayer:
+                result.insert(.interpolatorLayers)
+            default:
+                break
+            }
+            return result
+        case let .states(states):
+            return states.reduce(into: [.states]) { result, state in
+                result.formUnion(state.1.interpolationFeatures)
+            }
+        case .empty:
+            return []
+        }
+    }
+}
+
+private func idsAreDisjoint(
+    _ lhs: DisplayList,
+    _ rhs: DisplayList
+) -> Bool {
+    var identities: [_DisplayList_Identity] = []
+    _ = lhs.forEachIdentity { identity, _ in
+        identities.append(identity)
+    }
+    guard !identities.isEmpty else {
+        return true
+    }
+    identities = identities.enumerated().sorted {
+        if $0.element.value != $1.element.value {
+            return $0.element.value < $1.element.value
+        }
+        return $0.offset < $1.offset
+    }.map(\.element)
+
+    var disjoint = true
+    _ = rhs.forEachIdentity { identity, stop in
+        var lowerBound = identities.startIndex
+        var upperBound = identities.endIndex
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if identities[middle].value < identity.value {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        if lowerBound < identities.endIndex,
+           identities[lowerBound] == identity {
+            disjoint = false
+            stop = true
+        }
+    }
+    return disjoint
+}
+
 private struct InterpolatedDisplayList<Content: InterpolatableContent>: StatefulRule {
     typealias Value = DisplayList
 
     var group: DisplayList.InterpolatorGroup
-    var displayList: Attribute<DisplayList>
-    var content: Attribute<Content>
-    var environment: Attribute<EnvironmentValues>
-    var time: Attribute<Time>
-    var phase: Attribute<Phase>
-    var transaction: Attribute<Transaction>
-    var position: Attribute<CGPoint>
-    var animatedPosition: OptionalAttribute<CGPoint>
-    var containerPosition: Attribute<CGPoint>
-    var animatedSize: OptionalAttribute<ViewSize>
-    var presentationDisplayList: OptionalAttribute<DisplayList>
-    var size: Attribute<ViewSize>
-    var pixelLength: Attribute<CGFloat>
+    var _content: Attribute<Content>
+    var _position: Attribute<CGPoint>
+    var _animatedPosition: Attribute<CGPoint>
+    var _containerPosition: Attribute<CGPoint>
+    var _size: Attribute<CGSize>
+    var _phase: Attribute<Phase>
+    var _time: Attribute<Time>
+    var _transaction: Attribute<Transaction>
+    var _environment: Attribute<EnvironmentValues>
+    var _pixelLength: Attribute<CGFloat>
+    var _list: OptionalAttribute<DisplayList>
     var animatesSize: Bool
     var defersRender: Bool
     var supportsVFD: Bool
-
-    private var previousContent: Content?
-    private var previousSize: CGSize?
-    private var previousDisplayList: DisplayList?
-    private var contentSeed = DisplayList.Seed()
-
-    init(
-        group: DisplayList.InterpolatorGroup,
-        displayList: Attribute<DisplayList>,
-        content: Attribute<Content>,
-        environment: Attribute<EnvironmentValues>,
-        time: Attribute<Time>,
-        phase: Attribute<Phase>,
-        transaction: Attribute<Transaction>,
-        position: Attribute<CGPoint>,
-        animatedPosition: OptionalAttribute<CGPoint>,
-        containerPosition: Attribute<CGPoint>,
-        animatedSize: OptionalAttribute<ViewSize>,
-        presentationDisplayList: OptionalAttribute<DisplayList>,
-        size: Attribute<ViewSize>,
-        pixelLength: Attribute<CGFloat>,
-        animatesSize: Bool,
-        defersRender: Bool,
-        supportsVFD: Bool
-    ) {
-        self.group = group
-        self.displayList = displayList
-        self.content = content
-        self.environment = environment
-        self.time = time
-        self.phase = phase
-        self.transaction = transaction
-        self.position = position
-        self.animatedPosition = animatedPosition
-        self.containerPosition = containerPosition
-        self.animatedSize = animatedSize
-        self.presentationDisplayList = presentationDisplayList
-        self.size = size
-        self.pixelLength = pixelLength
-        self.animatesSize = animatesSize
-        self.defersRender = defersRender
-        self.supportsVFD = supportsVFD
-    }
+    var lastContent: Content?
+    var lastSize: CGSize
+    var resetSeed: UInt32
+    var contentVersion: DisplayList.Version
 
     mutating func updateValue() {
-        let targetContent = content.value
-        let targetList = displayList.value
-        let currentEnvironment = environment.value
-        let currentTransaction = transaction.value
-        let currentSize = size.value.value
-        _ = phase.value
-        let modelPosition = position.value
-        let presentationPosition = animatedPosition.value ?? modelPosition
-        _ = containerPosition.value
-        let presentationSize = animatedSize.value?.value ?? currentSize
-        _ = pixelLength.value
-        let currentPresentationList = presentationDisplayList.value ?? targetList
-        // The active interpolator keeps endpoint contents in model geometry.
-        // Compensate the centered local size presentation before applying the
-        // surrounding frame's presentation position.
-        let localContentOffset = CGSize(
-            width: (presentationSize.width - currentSize.width) * 0.5,
-            height: (presentationSize.height - currentSize.height) * 0.5
-        )
-        let presentationOffset = CGSize(
-            width: presentationPosition.x - modelPosition.x
-                + localContentOffset.width,
-            height: presentationPosition.y - modelPosition.y
-                + localContentOffset.height
-        )
-        var state = currentEnvironment.contentTransitionState
-        var transition = currentTransaction.disablesContentTransitions
-            ? ContentTransition.identity
-            : currentEnvironment.contentTransition
+        let currentResetSeed = _phase.value.resetSeed
+        if resetSeed != currentResetSeed {
+            resetSeed = currentResetSeed
+            lastContent = nil
+            contentVersion = DisplayList.Version()
+            group.reset()
+        }
 
+        let targetContent = _content.value
+        let targetSize = _size.value
+        let environment = _environment.value
+        let transaction = _transaction.value
+        let updateVersion = DisplayList.Version(forUpdate: ())
+
+        var transitionState = environment.contentTransitionState
+        var transition = environment.contentTransition
         if transition == ContentTransition.defaultTransition {
             transition = Content.defaultTransition
         }
-        transition.applyEnvironmentValues(
-            style: state.style,
-            layoutDirection: currentEnvironment.layoutDirection
+        transitionState.transition = transition
+
+        var animation: Animation?
+        var listener: AnimationListener?
+        let contentChanged = lastContent?.requiresTransition(
+            to: targetContent
+        ) ?? true
+        let sizeChanged = lastContent != nil && lastSize != targetSize
+        if contentChanged || sizeChanged {
+            contentVersion = updateVersion
+        }
+
+        if let previous = lastContent,
+           !transaction.disablesContentTransitions,
+           contentChanged ||
+            (sizeChanged && previous.appliesTransitionsForSizeChanges) {
+            previous.modifyTransition(
+                state: &transitionState,
+                to: targetContent
+            )
+            animation = transaction.animation ??
+                previous.defaultAnimation(to: targetContent)
+            if transitionState.transition.isIdentity {
+                animation = nil
+            }
+            if previous.addsDrawingGroup ||
+                environment.contentTransitionAddsDrawingGroup {
+                transitionState.options.insert(.addsDrawingGroup)
+            }
+            if transitionState.transition.symbolReplaceConfiguration != nil {
+                transitionState.options.insert(.animatesDifferentContent)
+            }
+            listener = transaction.combinedAnimationListener
+        }
+        transitionState.animation = animation
+        transitionState.transition.applyEnvironmentValues(
+            style: transitionState.style,
+            layoutDirection: environment.layoutDirection
         )
-        state.transition = transition
-        if transition.symbolReplaceConfiguration != nil {
-            state.options.insert(.animatesDifferentContent)
-        }
-        state.animation = currentTransaction.effectiveAnimation
 
-        var appliesTransition = false
-        var contentChanged = false
-        var sizeChanged = false
-        if let previousContent {
-            contentChanged = previousContent.requiresTransition(to: targetContent)
-            sizeChanged = previousSize.map { $0 != currentSize } ?? false
-            let retargetsActiveSizeTransition = !contentChanged &&
-                sizeChanged &&
-                group.hasActiveInterpolators
-            let shouldTransition = !currentTransaction.disablesContentTransitions
-                && !retargetsActiveSizeTransition
-                && (contentChanged || (sizeChanged && previousContent.appliesTransitionsForSizeChanges))
+        lastContent = targetContent
+        lastSize = targetSize
 
-            if shouldTransition {
-                var modifiedState = state
-                previousContent.modifyTransition(state: &modifiedState, to: targetContent)
-                if modifiedState.animation == nil {
-                    modifiedState.animation = previousContent.defaultAnimation(to: targetContent)
-                }
-                if previousContent.addsDrawingGroup || currentEnvironment.contentTransitionAddsDrawingGroup {
-                    modifiedState.options.insert(.addsDrawingGroup)
-                }
-                state = modifiedState
-                appliesTransition = !modifiedState.transition.isIdentity &&
-                    modifiedState.animation != nil
-            }
-        }
-        let previousList = previousDisplayList
-        let displayListChanged = previousList.map {
-            !$0.hasSameInterpolationSurface(as: targetList)
-        } ?? true
-        if previousList == nil || contentChanged || sizeChanged || displayListChanged {
-            contentSeed = DisplayList.Seed(decodedValue: contentSeed.value &+ 1)
-        }
+        let pixelLength = _pixelLength.value
+        let contentsScale = Float(1 / pixelLength)
+        group.update(
+            contentSeed: DisplayList.Seed(contentVersion),
+            transition: transitionState.transition,
+            animation: animation,
+            listener: listener,
+            contentsScale: contentsScale,
+            rasterizationOptions: transitionState.rasterizationOptions,
+            supportsVFD: supportsVFD
+        )
 
-        var output: DisplayList
-        if appliesTransition {
-            output = group.update(
-                contentSeed: contentSeed,
-                current: previousList ?? targetList,
-                target: targetList,
-                state: state,
-                time: time.value,
-                animatesSize: animatesSize,
-                defersRender: defersRender,
-                supportsVFD: supportsVFD
+        let animatedPosition = _animatedPosition.value
+        let containerPosition = _containerPosition.value
+        let finalTranslation = CGSize(
+            width: animatedPosition.x - containerPosition.x,
+            height: animatedPosition.y - containerPosition.y
+        )
+
+        var contentOrigin = CGPoint.zero
+        var contentOffset = CGSize.zero
+        if !animatesSize {
+            let position = _position.value
+            let roundedPosition = CGPoint(
+                x: Self.round(position.x, to: pixelLength),
+                y: Self.round(position.y, to: pixelLength)
             )
-            .translated(by: presentationOffset)
-        } else {
-            group.setCurrentContents(
-                contentSeed: contentSeed,
-                target: targetList,
-                transition: state.transition,
-                supportsVFD: supportsVFD,
-                rasterizationOptions: state.rasterizationOptions
+            contentOrigin = CGPoint(
+                x: roundedPosition.x - containerPosition.x,
+                y: roundedPosition.y - containerPosition.y
             )
-            if group.hasActiveInterpolators {
-                group.updateTime(time.value)
-            }
-            output = group.hasActiveInterpolators
-                ? group.apply(to: targetList).translated(by: presentationOffset)
-                : currentPresentationList
+            contentOffset = CGSize(
+                width: contentOrigin.x - finalTranslation.width,
+                height: contentOrigin.y - finalTranslation.height
+            )
         }
-        previousContent = targetContent
-        previousSize = currentSize
-        previousDisplayList = targetList
+
+        var output = _list.value ?? DisplayList()
+        let frame = CGRect(origin: contentOrigin, size: targetSize)
+        if defersRender {
+            output = DisplayList.effect(
+                .interpolatorRoot(group, contentOrigin, contentOffset),
+                contents: output
+            )
+        } else if output.interpolationFeatures.contains(.interpolatorLayers) {
+            _ = output.rewriteInterpolation(
+                group: group,
+                time: _time,
+                frame: frame,
+                contentOrigin: contentOrigin,
+                contentOffset: contentOffset,
+                version: updateVersion
+            )
+        }
+        output.translate(by: finalTranslation, version: updateVersion)
         _AGGraph.setStatefulOutput(output)
+    }
+
+    private static func round(
+        _ value: CGFloat,
+        to pixelLength: CGFloat
+    ) -> CGFloat {
+        floor((value + pixelLength * 0.5) / pixelLength) * pixelLength
     }
 }
 
@@ -1026,9 +1065,6 @@ extension _ViewOutputs {
         _ group: DisplayList.InterpolatorGroup,
         content: Attribute<Content>,
         inputs: _ViewInputs,
-        animatedPosition: Attribute<CGPoint>? = nil,
-        animatedSize: Attribute<ViewSize>? = nil,
-        presentationDisplayList: Attribute<DisplayList>? = nil,
         animatesSize: Bool,
         defersRender: Bool
     ) {
@@ -1039,31 +1075,126 @@ extension _ViewOutputs {
             return
         }
 
-        let environment = inputs.base.cachedEnvironment.value.environment
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let animatedPosition = cachedEnvironment.animatedPosition(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
+        let environment = cachedEnvironment.environment
+        let size = graph.subscriptNode(
+            parent: inputs.size,
+            keyPath: \ViewSize.value
+        )
         let pixelLength: Attribute<CGFloat> = graph.makeRule {
             environment.value.animationPixelLength
         }
         let interpolated = graph.makeStatefulRule(
             InterpolatedDisplayList(
                 group: group,
-                displayList: displayList,
-                content: content,
-                environment: environment,
-                time: inputs.base.time,
-                phase: inputs.base.phase,
-                transaction: inputs.base.transaction,
-                position: inputs.position,
-                animatedPosition: OptionalAttribute(animatedPosition),
-                containerPosition: inputs.containerPosition,
-                animatedSize: OptionalAttribute(animatedSize),
-                presentationDisplayList: OptionalAttribute(presentationDisplayList),
-                size: inputs.size,
-                pixelLength: pixelLength,
+                _content: content,
+                _position: inputs.position,
+                _animatedPosition: animatedPosition,
+                _containerPosition: inputs.containerPosition,
+                _size: size,
+                _phase: inputs.base.phase,
+                _time: inputs.base.time,
+                _transaction: inputs.base.transaction,
+                _environment: environment,
+                _pixelLength: pixelLength,
+                _list: OptionalAttribute(displayList),
                 animatesSize: animatesSize,
                 defersRender: defersRender,
-                supportsVFD: inputs.supportsVFD
+                supportsVFD: inputs.supportsVFD,
+                lastContent: nil,
+                lastSize: .zero,
+                resetSeed: 0,
+                contentVersion: DisplayList.Version()
             )
         )
         preferences.setValue(interpolated.identifier, for: DisplayList.Key.self)
+    }
+}
+
+private extension DisplayList {
+    mutating func rewriteInterpolation(
+        group: InterpolatorGroup,
+        time: Attribute<Time>,
+        frame: CGRect,
+        contentOrigin: CGPoint,
+        contentOffset: CGSize,
+        version: Version
+    ) -> Bool {
+        var rewritten = false
+
+        for index in items.indices {
+            switch items[index].value {
+            case let .effect(.interpolatorLayer(owner, serial), contents)
+                where owner === group:
+                var contents = contents
+                rewritten = group.rewriteInterpolation(
+                    serial: serial,
+                    list: &contents,
+                    time: time,
+                    frame: items[index].frame,
+                    contentOrigin: contentOrigin,
+                    contentOffset: contentOffset,
+                    version: version
+                ) || rewritten
+                items[index].value = .effect(.identity, contents)
+                items[index].frame = contents.interpolationBounds ??
+                    items[index].frame
+            case let .effect(effect, contents):
+                var contents = contents
+                rewritten = contents.rewriteInterpolation(
+                    group: group,
+                    time: time,
+                    frame: frame,
+                    contentOrigin: contentOrigin,
+                    contentOffset: contentOffset,
+                    version: version
+                ) || rewritten
+                items[index].value = .effect(effect, contents)
+            case let .states(states):
+                var states = states
+                for stateIndex in states.indices {
+                    rewritten = states[stateIndex].1.rewriteInterpolation(
+                        group: group,
+                        time: time,
+                        frame: frame,
+                        contentOrigin: contentOrigin,
+                        contentOffset: contentOffset,
+                        version: version
+                    ) || rewritten
+                }
+                items[index].value = .states(states)
+            case .content, .empty:
+                break
+            }
+            group.apply(to: &items[index])
+        }
+        return rewritten
+    }
+
+}
+
+extension DisplayList {
+    mutating func translate(by offset: CGSize, version: Version) {
+        for index in items.indices {
+            items[index].frame.origin.x += offset.width
+            items[index].frame.origin.y += offset.height
+            if items[index].version < version {
+                items[index].version = version
+            }
+        }
+        for index in debugItems.indices {
+            debugItems[index].frame.origin.x += offset.width
+            debugItems[index].frame.origin.y += offset.height
+            if debugItems[index].version < version {
+                debugItems[index].version = version
+            }
+        }
+        interpolationBounds = interpolationBounds?.offsetBy(
+            dx: offset.width,
+            dy: offset.height
+        )
     }
 }

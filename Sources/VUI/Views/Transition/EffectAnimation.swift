@@ -80,7 +80,7 @@ struct EffectAnimator<AnimationValue: EffectAnimation>:
     _DisplayList_AnyEffectAnimator
 {
     private enum State {
-        case active(AnimatorState<AnimationValue.Value>)
+        case active(AnimatorState<AnimationValue.Value.AnimatableData>)
         case pending
         case finished
     }
@@ -106,7 +106,11 @@ struct EffectAnimator<AnimationValue: EffectAnimation>:
                     animation: animation.animation,
                     interval: interval,
                     at: time,
-                    in: Transaction()
+                    in: Transaction(),
+                    finishingDefinition: AnimationValue.Value.self as?
+                        any AnimationFinishingDefinition<
+                            AnimationValue.Value.AnimatableData
+                        >.Type
                 )
             )
             return (AnimationValue.effect(value: animation.from, size: size), false)
@@ -114,7 +118,7 @@ struct EffectAnimator<AnimationValue: EffectAnimation>:
         case let .active(animator):
             var value = animation.to
             var data = value.animatableData
-            if animator.update(&data, at: time, environment: nil) {
+            if !animator.update(&data, at: time, environment: nil) {
                 value.animatableData = data
                 return (AnimationValue.effect(value: value, size: size), false)
             }

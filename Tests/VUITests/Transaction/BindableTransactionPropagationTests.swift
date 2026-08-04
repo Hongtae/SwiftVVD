@@ -99,9 +99,6 @@ final class BindableTransactionPropagationTests: XCTestCase {
         )
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-        XCTAssertEqual(events, ["returned"])
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(events, ["returned", "local completion"])
     }
 
@@ -141,9 +138,6 @@ final class BindableTransactionPropagationTests: XCTestCase {
         )
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-        XCTAssertEqual(events, ["body", "returned", "local completion"])
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(events, ["body", "returned", "local completion", "ambient completion"])
     }
 

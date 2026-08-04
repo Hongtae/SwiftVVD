@@ -394,6 +394,32 @@ struct DisplayList: Equatable, CustomStringConvertible {
         static let defaultValue = Options()
     }
 
+    struct Features: OptionSet, Sendable {
+        var rawValue: UInt16
+
+        init(rawValue: UInt16) {
+            self.rawValue = rawValue
+        }
+
+        static let required = Features(rawValue: 0x0001)
+        static let animations = Features(rawValue: 0x0004)
+        static let dynamicContent = Features(rawValue: 0x0008)
+        static let interpolatorLayers = Features(rawValue: 0x0010)
+        static let interpolatorRoots = Features(rawValue: 0x0020)
+        static let stateEffects = Features(rawValue: 0x0040)
+        static let states = Features(rawValue: 0x0080)
+        static let flattened = Features(rawValue: 0x0200)
+        static let platformViews = Features(rawValue: 0x0400)
+    }
+
+    struct Properties: OptionSet, Sendable {
+        var rawValue: UInt32
+
+        init(rawValue: UInt32) {
+            self.rawValue = rawValue
+        }
+    }
+
     // Compact change token used by interpolation groups to detect display-list content updates.
     struct Seed: Equatable, Hashable {
         private(set) var value: UInt16
@@ -1834,8 +1860,36 @@ struct DisplayList: Equatable, CustomStringConvertible {
             )
         }
 
-        func callAsFunction(_ context: GraphicsContext) {
+        func presentationContext(from context: GraphicsContext) -> GraphicsContext {
+            let recordedBounds: CGRect?
+            switch value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case let .effect(_, contents):
+                recordedBounds = contents.interpolationBounds
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds,
+                  !recordedBounds.isNull else {
+                return context
+            }
+            let offset = CGSize(
+                width: frame.origin.x - recordedBounds.origin.x,
+                height: frame.origin.y - recordedBounds.origin.y
+            )
+            guard offset.width != 0 || offset.height != 0 else {
+                return context
+            }
             var context = context
+            context.translateBy(x: offset.width, y: offset.height)
+            return context
+        }
+
+        func callAsFunction(_ context: GraphicsContext) {
+            var context = presentationContext(from: context)
             context.opacity *= Double(opacity)
             guard context.opacity > 0 else { return }
             switch value {
@@ -2053,6 +2107,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         bounds: CGRect,
         placementRect: CGRect? = nil,
         opacity: Float = 1,
+        version: Version = Version(),
         environment: EnvironmentValues? = nil
     ) {
         let commandBounds = Self.itemRecordBounds(bounds)
@@ -2070,6 +2125,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             frame: placementRect,
             command: command,
             environment: environment,
+            version: version,
             opacity: opacity
         ))
         recordInterpolationBounds(commandBounds)
@@ -2099,6 +2155,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         bounds: CGRect,
         displayBounds: CGRect? = nil,
         seed: Seed,
+        version: Version = Version(),
         environment: EnvironmentValues? = nil
     ) {
         guard let bounds = Self.itemRecordBounds(bounds) else { return }
@@ -2116,7 +2173,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
             shading: foreground,
             command: command,
             seed: seed,
-            environment: environment
+            environment: environment,
+            version: version
         ))
         recordInterpolationBounds(commandBounds)
     }
@@ -3310,7 +3368,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             context: GraphicsContext,
             includeDebug: Bool
         ) {
-            var context = context
+            var context = item.presentationContext(from: context)
             context.opacity *= Double(item.opacity)
             guard context.opacity > 0 else { return }
             switch item.value {
@@ -3981,7 +4039,21 @@ struct ResourceList {
         // Resource work can publish graph mutations after view construction. Retaining
         // the owning transaction keeps publication and dependent layout in one host scope.
         var transaction: Transaction
+        var updatesGraph: Bool
+        var isPending: () -> Bool
         var body: (GraphicsContext) -> Void
+
+        init(
+            transaction: Transaction,
+            updatesGraph: Bool = true,
+            isPending: @escaping () -> Bool = { true },
+            body: @escaping (GraphicsContext) -> Void
+        ) {
+            self.transaction = transaction
+            self.updatesGraph = updatesGraph
+            self.isPending = isPending
+            self.body = body
+        }
 
         func callAsFunction(_ context: GraphicsContext) {
             body(context)

@@ -36,6 +36,7 @@ private final class ScrollViewInputRecorder {
     var phaseStateAttribute: AGAttribute?
     var transform: Attribute<ViewTransform>?
     var safeAreaInsets: Attribute<SafeAreaInsets>?
+    var containerPosition: Attribute<CGPoint>?
     var containerSize: Attribute<ViewSize>?
 }
 
@@ -59,6 +60,7 @@ private struct ScrollViewRecordingContent: View, TestPrimitiveView {
         recorder.phaseStateAttribute = inputs.base.scrollPhaseState.attribute?.identifier
         recorder.transform = inputs.transform
         recorder.safeAreaInsets = inputs.safeAreaInsets.attribute
+        recorder.containerPosition = inputs.containerPosition
         recorder.containerSize = inputs.containerSize.attribute
 
         let layout = graph.makeRule {
@@ -630,7 +632,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
-    func testVStackPreservesNearestContainerSizeForChildren() throws {
+    // ASSERTIONS layoutChildContainerInputPropagationObserved
+    func testVStackPreservesNearestContainerInputsForChildren() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             let recorder = ScrollViewInputRecorder()
@@ -647,9 +650,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
             inputs.size = graph.makeInput(
                 value: ViewSize(width: 520, height: 470)
             )
+            let containerPosition = graph.makeInput(
+                value: CGPoint(x: 20, y: 30)
+            )
             let containerSize = graph.makeInput(
                 value: ViewSize(width: 900, height: 470)
             )
+            inputs.containerPosition = containerPosition
             inputs.containerSize = OptionalAttribute(containerSize)
 
             _ = type(of: stack)._makeView(
@@ -658,13 +665,18 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             XCTAssertEqual(
+                try XCTUnwrap(recorder.containerPosition).identifier,
+                containerPosition.identifier
+            )
+            XCTAssertEqual(
                 try XCTUnwrap(recorder.containerSize).identifier,
                 containerSize.identifier
             )
         }
     }
 
-    func testDynamicVStackPreservesNearestContainerSizeForChildren() throws {
+    // ASSERTIONS layoutChildContainerInputPropagationObserved
+    func testDynamicVStackPreservesNearestContainerInputsForChildren() throws {
         let host = GraphHost()
         try host.data.withCurrent {
             let graph = host.data.graph
@@ -688,9 +700,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 inputs.size = graph.makeInput(
                     value: ViewSize(width: 520, height: 470)
                 )
+                let containerPosition = graph.makeInput(
+                    value: CGPoint(x: 20, y: 30)
+                )
                 let containerSize = graph.makeInput(
                     value: ViewSize(width: 900, height: 470)
                 )
+                inputs.containerPosition = containerPosition
                 inputs.containerSize = OptionalAttribute(containerSize)
 
                 let outputs = type(of: stack)._makeView(
@@ -699,6 +715,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 )
                 _ = outputs._layoutComputer.attribute?.value
 
+                XCTAssertEqual(
+                    try XCTUnwrap(recorder.containerPosition).identifier,
+                    containerPosition.identifier
+                )
                 XCTAssertEqual(
                     try XCTUnwrap(recorder.containerSize).identifier,
                     containerSize.identifier

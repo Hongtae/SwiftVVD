@@ -89,7 +89,7 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
@@ -113,7 +113,7 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
             ]
         )
 
-        harness.setTime(oldAnimation.box.duration - frame)
+        harness.advanceTime(to: oldAnimation.box.duration - frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -124,7 +124,7 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
             ]
         )
 
-        harness.setTime(oldAnimation.box.duration + frame)
+        harness.advanceTime(to: oldAnimation.box.duration + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -167,7 +167,7 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
@@ -185,12 +185,12 @@ final class AnimatableAttributeFiniteWrapperRetargetCriteriaTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementBoundary - frame)
+        harness.advanceTime(to: replacementBoundary - frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementBoundary + max(0.10, frame))
+        harness.advanceTime(to: replacementBoundary + max(0.10, frame))
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(

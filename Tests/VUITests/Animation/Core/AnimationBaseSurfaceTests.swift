@@ -45,16 +45,16 @@ final class AnimationBaseSurfaceTests: XCTestCase {
 
         XCTAssertEqual(defaultBox.duration, fluidBase.duration, accuracy: 0.000_000_000_001)
         XCTAssertEqual(
-            defaultBox.presentationDuration,
-            fluidBase.presentationDuration,
+            defaultBox.terminalSamplingHorizon,
+            fluidBase.terminalSamplingHorizon,
             accuracy: 0.000_000_000_001
         )
         XCTAssertEqual(
-            defaultBox.presentationDuration(for: Double(1)),
-            fluidBase.presentationDuration(for: Double(1)),
+            defaultBox.terminalSamplingHorizon(for: Double(1)),
+            fluidBase.terminalSamplingHorizon(for: Double(1)),
             accuracy: 0.000_000_000_001
         )
-        XCTAssertGreaterThan(defaultBox.presentationDuration(for: Double(1)), defaultBox.duration)
+        XCTAssertGreaterThan(defaultBox.terminalSamplingHorizon(for: Double(1)), defaultBox.duration)
 
         let progress = 0.30
         XCTAssertEqual(
@@ -81,7 +81,7 @@ final class AnimationBaseSurfaceTests: XCTestCase {
                 as? FluidSpringAnimationBox
         )
         XCTAssertEqual(fluid.duration, 0.30, accuracy: 0.000_000_000_001)
-        XCTAssertGreaterThan(fluid.presentationDuration(for: Double(1)), fluid.duration)
+        XCTAssertGreaterThan(fluid.terminalSamplingHorizon(for: Double(1)), fluid.duration)
 
         var fluidContext = AnimationContext<Double>()
         let fluidOvershoot = try XCTUnwrap(
@@ -116,8 +116,8 @@ final class AnimationBaseSurfaceTests: XCTestCase {
             ).box as? SpringAnimationBox
         )
 
-        let directPresentationDuration = direct.presentationDuration(for: Double(1))
-        let aliasPresentationDuration = alias.presentationDuration(for: Double(1))
+        let directPresentationDuration = direct.terminalSamplingHorizon(for: Double(1))
+        let aliasPresentationDuration = alias.terminalSamplingHorizon(for: Double(1))
         XCTAssertGreaterThan(directPresentationDuration, direct.duration)
         XCTAssertGreaterThan(alias.duration, direct.duration)
         XCTAssertEqual(aliasPresentationDuration, directPresentationDuration, accuracy: 0.03)
@@ -426,6 +426,40 @@ final class AnimationBaseSurfaceTests: XCTestCase {
             return XCTFail("Expected circular ease-in-out descriptor, got \(circular)")
         }
         XCTAssertEqual(circularDuration, negative)
+    }
+
+    func testUnitCurveCubicExecutionUsesNativeClampingAndQuantization() {
+        let precision = 1.0 / 1_048_576.0
+        let ease = UnitCurve.easeInOut
+
+        XCTAssertEqual(ease.value(at: -0.25), 0)
+        XCTAssertEqual(ease.velocity(at: -0.25), 0)
+        XCTAssertEqual(ease.value(at: 0.333_333), 243_033 * precision)
+        XCTAssertEqual(ease.velocity(at: 0.333_333), 1_461_093 * precision)
+        XCTAssertEqual(ease.value(at: 0.731_25), 891_525 * precision)
+        XCTAssertEqual(ease.velocity(at: 0.731_25), 1_194_546 * precision)
+        XCTAssertEqual(ease.value(at: 1.25), 1)
+        XCTAssertEqual(ease.velocity(at: 1.25), 0)
+
+        let clampedX = UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: -0.4, y: 1.3),
+            endControlPoint: UnitPoint(x: 1.4, y: -0.2)
+        )
+        XCTAssertEqual(clampedX.value(at: 0.125), 535_889 * precision)
+        XCTAssertEqual(clampedX.velocity(at: 0.125), 1_007_286 * precision)
+        XCTAssertEqual(clampedX.value(at: 0.5), 563_610 * precision)
+        XCTAssertEqual(clampedX.velocity(at: 0.5), -262_144 * precision)
+        XCTAssertEqual(clampedX.value(at: 1), 1)
+        XCTAssertEqual(clampedX.velocity(at: 1), .infinity)
+
+        guard case let .bezier(_, start, end) =
+                Animation.timingCurve(clampedX, duration: 0.4).function else {
+            return XCTFail("Expected cubic UnitCurve to lower to a bezier descriptor.")
+        }
+        XCTAssertEqual(start.x, -0.4, accuracy: 0.000_000_000_001)
+        XCTAssertEqual(start.y, 1.3, accuracy: 0.000_000_000_001)
+        XCTAssertEqual(end.x, 1.4, accuracy: 0.000_000_000_001)
+        XCTAssertEqual(end.y, -0.2, accuracy: 0.000_000_000_001)
     }
 
     func testCircularUnitCurveAnimationBoxSamplesValueAndVelocity() throws {

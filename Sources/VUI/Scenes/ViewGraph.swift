@@ -51,6 +51,7 @@ protocol ViewGraphOwner: AnyObject {
 // ViewRendererHost - extends root-value updating and graph ownership with a responder tree root.
 protocol ViewRendererHost: ViewGraphOwner, ViewGraphRootValueUpdater {
     var responderNode: ResponderNode? { get }
+    var sceneResources: SceneResources { get }
 }
 
 // ViewGraphDelegate - update scheduling callbacks for the view graph.
@@ -218,6 +219,10 @@ struct ImageRendererHostViewGraph: ViewGraphFeature {
 // keeps the shared host lifecycle surface so scheduling can be tightened later.
 class ViewGraphHost: GraphHost, ViewGraphOwner {
 
+    struct Phase: Equatable {
+        var base = _GraphInputs.Phase()
+    }
+
     weak var delegate: (any ViewGraphHostDelegate)?
     weak var renderDelegate: (any ViewGraphRenderDelegate)?
     weak var updateDelegate: (any ViewGraphRootValueUpdater)?
@@ -326,6 +331,17 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         canStartUpdateTimer = true
     }
 
+    func setEnvironment(
+        _ environment: EnvironmentValues,
+        wrapper: ViewGraphHostEnvironmentWrapper
+    ) {
+        viewGraph.updateGraphPhase(
+            oldParentPhase: parentPhase,
+            newParentPhase: wrapper.phase.base
+        )
+        viewGraph.envAttr?.setValue(environment)
+    }
+
     /// Central AG evaluation entry point for host-driven output updates.
     ///
     /// Current flow:
@@ -357,6 +373,30 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         }
     }
 
+}
+
+class ViewGraphHostEnvironmentWrapper: NSObject, NSSecureCoding {
+    var environment: EnvironmentValues
+    var phase: ViewGraphHost.Phase
+
+    override init() {
+        self.environment = EnvironmentValues()
+        self.phase = ViewGraphHost.Phase()
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        self.environment = EnvironmentValues()
+        self.phase = ViewGraphHost.Phase()
+        super.init()
+    }
+
+    static var supportsSecureCoding: Bool {
+        true
+    }
+
+    func encode(with coder: NSCoder) {
+    }
 }
 
 private final class ViewGraphDisplayLink {
@@ -965,7 +1005,12 @@ class ViewGraph: ViewGraphHost {
                     guard let host = self?.rendererHost as? WindowController else { return }
                     let value = sheetAttr.value
                     let transaction = _AGGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
-                    host.updateSheetPresentation(value, transaction: transaction)
+                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
+                    host.updateSheetPresentation(
+                        value,
+                        transaction: transaction,
+                        viewPhase: viewPhase
+                    )
                 }
             }
 
@@ -981,7 +1026,12 @@ class ViewGraph: ViewGraphHost {
                 }
                 g.makeSideEffectRule { [weak self] in
                     guard let host = self?.rendererHost as? WindowController else { return }
-                    host.updateAlertPresentation(Array(alertAttr.value.values.map { $0.preference }))
+                    let alerts = Array(alertAttr.value.values.map { $0.preference })
+                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
+                    host.updateAlertPresentation(
+                        alerts,
+                        viewPhase: viewPhase
+                    )
                 }
             }
 
@@ -997,8 +1047,12 @@ class ViewGraph: ViewGraphHost {
                 }
                 g.makeSideEffectRule { [weak self] in
                     guard let host = self?.rendererHost as? WindowController else { return }
+                    let dialogs = Array(dialogAttr.value.values.map { $0.preference })
+                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
                     host.updateConfirmationDialogPresentation(
-                        Array(dialogAttr.value.values.map { $0.preference }))
+                        dialogs,
+                        viewPhase: viewPhase
+                    )
                 }
             }
 

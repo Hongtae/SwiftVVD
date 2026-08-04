@@ -3,6 +3,11 @@ import XCTest
 @testable import VUI
 
 final class CodableAnimationTests: XCTestCase {
+    // ASSERTIONS codableAnimationCarrierMetadataObserved
+    func testCodableAnimationTagStoresRawValue() {
+        XCTAssertEqual(CodableAnimation.Tag(rawValue: 7).rawValue, 7)
+    }
+
     func testLeafCarrierDefaultsElideAllPayloadFields() throws {
         let linear = UnitCurve.CubicSolver(
             startControlPoint: .zero,
@@ -206,6 +211,63 @@ final class CodableAnimationTests: XCTestCase {
         )
 
         XCTAssertEqual(data, Data([0x3a, 0x00]))
+    }
+
+    // ASSERTIONS codableAnimationWitnessDispatchObserved
+    func testCodableAnimationUsesWitnessDispatchForUnsupportedAndLogicalBases() throws {
+        for animation in [
+            Animation.timingCurve(.circularEaseIn, duration: 0.3),
+            Animation(NonEncodableAnimation()),
+        ] {
+            XCTAssertEqual(
+                try ProtobufEncoder.encoding(CodableAnimation(animation)),
+                Data([0x3a, 0x00])
+            )
+        }
+
+        let base = Animation.linear(duration: 1)
+        XCTAssertEqual(
+            try ProtobufEncoder.encoding(
+                CodableAnimation(base.logicallyComplete(after: 0.1))
+            ),
+            try ProtobufEncoder.encoding(CodableAnimation(base))
+        )
+
+        let delayedBase = base.delay(2)
+        for animation in [
+            base.logicallyComplete(after: 0.1).delay(2),
+            delayedBase.logicallyComplete(after: 0.1),
+        ] {
+            XCTAssertEqual(
+                try ProtobufEncoder.encoding(CodableAnimation(animation)),
+                try ProtobufEncoder.encoding(CodableAnimation(delayedBase))
+            )
+        }
+
+        XCTAssertEqual(
+            try ProtobufEncoder.encoding(
+                CodableAnimation(Animation(NonEncodableAnimation()).delay(2))
+            ),
+            try ProtobufEncoder.encoding(
+                CodableAnimation(Animation.default.delay(2))
+            )
+        )
+    }
+
+    // ASSERTIONS codableAnimationProtobufObserved
+    func testEmptyModifierEnvelopesDecodeWithoutApplyingModifier() throws {
+        let base = Animation.linear(duration: 1)
+        let baseData = try ProtobufEncoder.encoding(CodableAnimation(base))
+
+        for animation in [base.delay(0), base.speed(0)] {
+            var expected = baseData
+            expected.append(contentsOf: [0x42, 0x00])
+            let data = try ProtobufEncoder.encoding(CodableAnimation(animation))
+            XCTAssertEqual(data, expected)
+
+            var decoder = ProtobufDecoder(data)
+            XCTAssertEqual(try CodableAnimation(from: &decoder).base, base)
+        }
     }
 
     private func encode<Message: ProtobufEncodableMessage>(

@@ -77,6 +77,8 @@ extension Animation {
 
 public struct UnitCurve: Sendable, Hashable {
     struct CubicSolver: Sendable, Hashable {
+        private static let precision = 1.0 / 1_048_576.0
+
         let ax, bx, cx, ay, by, cy: Double
 
         init(startControlPoint: UnitPoint, endControlPoint: UnitPoint) {
@@ -92,6 +94,22 @@ public struct UnitCurve: Sendable, Hashable {
             ay = 1.0 - cy - by
         }
 
+        init(
+            clampingStartControlPoint startControlPoint: UnitPoint,
+            endControlPoint: UnitPoint
+        ) {
+            self.init(
+                startControlPoint: UnitPoint(
+                    x: min(max(startControlPoint.x, 0), 1),
+                    y: startControlPoint.y
+                ),
+                endControlPoint: UnitPoint(
+                    x: min(max(endControlPoint.x, 0), 1),
+                    y: endControlPoint.y
+                )
+            )
+        }
+
         var controlPointsForAnimation: (startControlPoint: CGPoint, endControlPoint: CGPoint) {
             let first = CGPoint(x: cx / 3.0, y: cy / 3.0)
             let second = CGPoint(
@@ -101,35 +119,31 @@ public struct UnitCurve: Sendable, Hashable {
             return (first, second)
         }
 
-        func solve(x: Double, epsilon: Double = 1e-6) -> Double {
-            if x <= 0 { return 0 }
-            if x >= 1 { return 1 }
-            return sampleY(solveCurveX(x, epsilon: epsilon))
+        func solve(x: Double) -> Double {
+            value(at: x)
         }
 
-        func derivative(x: Double, epsilon: Double = 1e-6) -> Double {
-            if x <= 0 { return derivative(at: 0) }
-            if x >= 1 { return derivative(at: 1) }
-            return derivative(at: solveCurveX(x, epsilon: epsilon))
+        func value(at progress: Double) -> Double {
+            Self.quantize(
+                sampleY(solveX(progress, epsilon: Self.precision))
+            )
+        }
+
+        func velocity(at progress: Double) -> Double {
+            let parameter = solveX(progress, epsilon: Self.precision)
+            let dx = sampleDerivativeX(parameter)
+            let dy = sampleDerivativeY(parameter)
+            if dx == dy {
+                return 1
+            }
+            if dx == 0 {
+                return dy < 0 ? -.infinity : .infinity
+            }
+            return Self.quantize(dy / dx)
         }
 
         func yDerivative(atX x: Double, epsilon: Double = 1e-6) -> Double {
-            if x <= 0 { return sampleDerivativeY(0) }
-            if x >= 1 { return sampleDerivativeY(1) }
-            return sampleDerivativeY(solveCurveX(x, epsilon: epsilon))
-        }
-
-        private func derivative(at t: Double) -> Double {
-            let dx = sampleDerivativeX(t)
-            let dy = sampleDerivativeY(t)
-
-            if abs(dx) > 1e-12 {
-                return dy / dx
-            }
-            if abs(dy) <= 1e-12 {
-                return t <= 0 ? 1 : 0
-            }
-            return dy > 0 ? .infinity : -.infinity
+            sampleDerivativeY(solveX(x, epsilon: epsilon))
         }
 
         private func sampleX(_ t: Double) -> Double {
@@ -148,26 +162,33 @@ public struct UnitCurve: Sendable, Hashable {
             (3.0 * ay * t + 2.0 * by) * t + cy
         }
 
-        private func solveCurveX(_ x: Double, epsilon: Double) -> Double {
+        private func solveX(_ x: Double, epsilon: Double) -> Double {
             var t = x
             for _ in 0..<8 {
                 let x2 = sampleX(t) - x
                 if abs(x2) < epsilon { return t }
                 let d2 = sampleDerivativeX(t)
-                if abs(d2) < 1e-6 { break }
+                if abs(d2) < epsilon { break }
                 t -= x2 / d2
             }
 
+            guard x >= 0, x <= 1 else {
+                return 0
+            }
             var low: Double = 0
             var high: Double = 1
             t = x
-            while low < high {
+            for _ in 0..<1024 where low < high {
                 let x2 = sampleX(t)
                 if abs(x2 - x) < epsilon { return t }
                 if x > x2 { low = t } else { high = t }
                 t = (high - low) * 0.5 + low
             }
             return t
+        }
+
+        private static func quantize(_ value: Double) -> Double {
+            (value / precision).rounded() * precision
         }
     }
 
@@ -198,9 +219,9 @@ public struct UnitCurve: Sendable, Hashable {
             return progress
         case let .bezier(startControlPoint, endControlPoint):
             return CubicSolver(
-                startControlPoint: startControlPoint,
+                clampingStartControlPoint: startControlPoint,
                 endControlPoint: endControlPoint
-            ).solve(x: progress)
+            ).value(at: min(max(progress, 0), 1))
         case .circularEaseIn:
             return 1 - sqrt(1 - progress * progress)
         case .circularEaseOut:
@@ -222,9 +243,9 @@ public struct UnitCurve: Sendable, Hashable {
             return 1
         case let .bezier(startControlPoint, endControlPoint):
             return CubicSolver(
-                startControlPoint: startControlPoint,
+                clampingStartControlPoint: startControlPoint,
                 endControlPoint: endControlPoint
-            ).derivative(x: progress)
+            ).velocity(at: min(max(progress, 0), 1))
         case .circularEaseIn:
             return Self.circularVelocity(numerator: progress, denominator: 1 - progress * progress)
         case .circularEaseOut:
@@ -324,111 +345,4 @@ extension UnitCurve {
     public static let circularEaseIn = UnitCurve(function: .circularEaseIn)
     public static let circularEaseOut = UnitCurve(function: .circularEaseOut)
     public static let circularEaseInOut = UnitCurve(function: .circularEaseInOut)
-}
-
-struct TimingFunction {
-    private let ax, bx, cx, ay, by, cy: Double
-
-    /// Initializer for custom control points (P1 and P2).
-    ///
-    /// Standard Presets (c1x, c1y, c2x, c2y):
-    /// - Linear:      (0.00, 0.00, 1.00, 1.00)
-    /// - Ease-In:     (0.42, 0.00, 1.00, 1.00)
-    /// - Ease-Out:    (0.00, 0.00, 0.58, 1.00)
-    /// - Ease-In-Out: (0.42, 0.00, 0.58, 1.00)
-    ///
-    /// Material Design / Modern UI:
-    /// - FastOutSlowIn: (0.40, 0.00, 0.20, 1.00) // Standard Easing
-    init(controlPoints c1x: Double, _ c1y: Double, _ c2x: Double, _ c2y: Double) {
-        cx = 3.0 * c1x
-        bx = 3.0 * (c2x - c1x) - cx
-        ax = 1.0 - cx - bx
-        cy = 3.0 * c1y
-        by = 3.0 * (c2y - c1y) - cy
-        ay = 1.0 - cy - by
-    }
-
-    init(controlPoints startControlPoint: UnitPoint, _ endControlPoint: UnitPoint) {
-        self.init(
-            controlPoints: Double(startControlPoint.x),
-            Double(startControlPoint.y),
-            Double(endControlPoint.x),
-            Double(endControlPoint.y)
-        )
-    }
-
-    /// Transforms time ratio (0-1) to eased progress weight (0-1).
-    /// - Parameters:
-    ///   - x: The current time ratio (0.0 to 1.0).
-    ///   - epsilon: The required precision. Defaults to 1e-6 for UI tasks.
-    func solve(x: Double, epsilon: Double = 1e-6) -> Double {
-        if x <= 0 { return 0 }
-        if x >= 1 { return 1 }
-        return sampleY(solveCurveX(x, epsilon: epsilon))
-    }
-
-    /// Computes the derivative (velocity) at a given time ratio.
-    /// - Parameters:
-    ///   - x: The current time ratio (0.0 to 1.0).
-    ///   - epsilon: The required precision. Defaults to 1e-6 for UI tasks.
-    /// - Returns: The rate of change (dy/dx) at the given time.
-    func derivative(x: Double, epsilon: Double = 1e-6) -> Double {
-        if x <= 0 { return derivative(at: 0) }
-        if x >= 1 { return derivative(at: 1) }
-
-        let t = solveCurveX(x, epsilon: epsilon)
-        return derivative(at: t)
-    }
-
-    private func derivative(at t: Double) -> Double {
-        let dx = sampleDerivativeX(t)
-        let dy = sampleDerivativeY(t)
-
-        if abs(dx) > 1e-12 {
-            return dy / dx
-        }
-        if abs(dy) <= 1e-12 {
-            return t <= 0 ? 1 : 0
-        }
-        return dy > 0 ? .infinity : -.infinity
-    }
-
-    private func sampleX(_ t: Double) -> Double {
-        return ((ax * t + bx) * t + cx) * t
-    }
-
-    private func sampleY(_ t: Double) -> Double {
-        return ((ay * t + by) * t + cy) * t
-    }
-
-    private func sampleDerivativeX(_ t: Double) -> Double {
-        return (3.0 * ax * t + 2.0 * bx) * t + cx
-    }
-
-    private func sampleDerivativeY(_ t: Double) -> Double {
-        return (3.0 * ay * t + 2.0 * by) * t + cy
-    }
-
-    private func solveCurveX(_ x: Double, epsilon: Double) -> Double {
-        var t = x
-        // 1. Newton's Method for fast convergence
-        for _ in 0..<8 {
-            let x2 = sampleX(t) - x
-            if abs(x2) < epsilon { return t }
-            let d2 = sampleDerivativeX(t)
-            if abs(d2) < 1e-6 { break }
-            t -= x2 / d2
-        }
-
-        // 2. Bisection Fallback for guaranteed reliability
-        var low: Double = 0, high: Double = 1
-        t = x
-        while low < high {
-            let x2 = sampleX(t)
-            if abs(x2 - x) < epsilon { return t }
-            if x > x2 { low = t } else { high = t }
-            t = (high - low) * 0.5 + low
-        }
-        return t
-    }
 }

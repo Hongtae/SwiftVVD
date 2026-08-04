@@ -30,20 +30,16 @@ extension Bindable where Value: AnyObject {
         let getter = { value[keyPath: keyPath] }
         let setter = { (newValue: Subject, transaction: Transaction) in
             if !transaction.isEmpty, Transaction.current.isEmpty {
-                Transaction.withScopedThreadTransaction(transaction, finalizesCompletions: true) {
-                    Transaction.ThreadStorage.markMutation(for: Transaction.current)
+                Transaction.withScopedThreadTransaction(transaction) {
                     value[keyPath: keyPath] = newValue
                 }
             } else {
-                Transaction.ThreadStorage.markMutation(for: transaction)
                 value[keyPath: keyPath] = newValue
             }
         }
         return Binding<Subject>(
             get: getter,
-            set: setter,
-            passesLocalTransactionToSetter: false,
-            finalizesLocalTransactionAfterSetter: false
+            set: setter
         )
     }
 }

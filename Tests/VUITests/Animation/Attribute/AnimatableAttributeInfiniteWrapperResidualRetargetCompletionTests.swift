@@ -238,7 +238,7 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         let replacementStart = 0.45
-        harness.setTime(replacementStart)
+        harness.advanceTime(to: replacementStart)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -255,7 +255,7 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
 
         let logicalBoundary = replacementStart + replacementAnimation.box.duration +
             replacementAnimation.box.defaultDisplayFrameInterval
-        harness.setTime(logicalBoundary)
+        harness.advanceTime(to: logicalBoundary)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["\(replacementLabel) logical"], file: file, line: line)
@@ -263,11 +263,11 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         var finalValue: Double?
         var sampleTime = logicalBoundary + replacementAnimation.box.defaultDisplayFrameInterval
         let finalSampleTime = replacementStart + max(
-            replacementAnimation.box.presentationDuration(for: Double(2.0)),
-            replacementAnimation.box.presentationDuration
+            replacementAnimation.box.terminalSamplingHorizon(for: Double(2.0)),
+            replacementAnimation.box.terminalSamplingHorizon
         ) + 2.0
         while sampleTime <= finalSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.count == 4 {
@@ -324,7 +324,7 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         let replacementStart = 0.45
-        harness.setTime(replacementStart)
+        harness.advanceTime(to: replacementStart)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -342,11 +342,11 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         var finalValue: Double?
         var sampleTime = replacementStart + replacementAnimation.box.defaultDisplayFrameInterval
         let finalSampleTime = replacementStart + max(
-            replacementAnimation.box.presentationDuration(for: Double(2.0)),
-            replacementAnimation.box.presentationDuration
+            replacementAnimation.box.terminalSamplingHorizon(for: Double(2.0)),
+            replacementAnimation.box.terminalSamplingHorizon
         ) + 2.0
         while sampleTime <= finalSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.count == 4 {
@@ -407,7 +407,7 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
         let replacementStart = 0.45
-        harness.setTime(replacementStart)
+        harness.advanceTime(to: replacementStart)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -425,11 +425,11 @@ final class AnimatableAttributeInfiniteWrapperResidualRetargetCompletionTests: X
         var finalValue: Double?
         var sampleTime = replacementStart + replacementAnimation.box.defaultDisplayFrameInterval
         let finalSampleTime = replacementStart + max(
-            replacementAnimation.box.presentationDuration(for: Double(2.0)),
-            replacementAnimation.box.presentationDuration
+            replacementAnimation.box.terminalSamplingHorizon(for: Double(2.0)),
+            replacementAnimation.box.terminalSamplingHorizon
         ) + 2.0
         while sampleTime <= finalSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.count == 4 {

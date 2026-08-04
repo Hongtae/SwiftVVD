@@ -54,8 +54,15 @@ enum TypefaceGlyph {
     case vector(VectorTypeface.GlyphData)
 }
 
+struct TypefaceGlyphMetrics {
+    var advance: CGSize
+    var ascender: CGFloat
+    var descender: CGFloat
+}
+
 protocol Typeface {
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph?
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics?
     func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
     func hasGlyph(for: UnicodeScalar) -> Bool
 
@@ -71,6 +78,24 @@ protocol Typeface {
 }
 
 extension Typeface {
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        guard let glyph = glyph(for: c) else { return nil }
+        switch glyph {
+        case let .texture(data):
+            return TypefaceGlyphMetrics(
+                advance: data.advance,
+                ascender: data.ascender,
+                descender: data.descender
+            )
+        case let .vector(data):
+            return TypefaceGlyphMetrics(
+                advance: data.metrics.advance,
+                ascender: data.metrics.ascender,
+                descender: data.metrics.descender
+            )
+        }
+    }
+
     var resolvedMetrics: ResolvedFontMetrics {
         ResolvedFontMetrics(
             capHeight: ascender,
@@ -178,11 +203,114 @@ extension VVDFontBackedTypeface {
     }
 }
 
+private struct ScaleInvariantTypefaceMetrics {
+    let font: VVD.Font
+    let renderScale: CGFloat
+    let embolden: CGFloat
+
+    var lineHeight: CGFloat {
+        font.height * renderScale
+    }
+
+    var ascender: CGFloat {
+        font.ascender * renderScale
+    }
+
+    var descender: CGFloat {
+        font.descender * renderScale
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        let metrics = font.baseMetrics
+        let capHeight = font.glyphMetrics(
+            for: UnicodeScalar("H"),
+            embolden: embolden
+        )?.bearing.y ?? metrics.ascender
+        return ResolvedFontMetrics(
+            capHeight: capHeight * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale,
+            leading: max(
+                metrics.height - (metrics.ascender - metrics.descender),
+                0
+            ) * renderScale
+        )
+    }
+
+    func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        guard let metrics = font.glyphMetrics(
+            for: scalar,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        font.kernAdvance(left: left, right: right) * renderScale
+    }
+}
+
 struct TextureTypeface: VVDFontBackedTypeface {
     let textureFont: VVD.TextureFont
+    private let layoutMetrics: ScaleInvariantTypefaceMetrics?
     typealias GlyphData = VVD.TextureFont.GlyphData
 
+    init(
+        textureFont: VVD.TextureFont,
+        layoutFont: VVD.Font? = nil,
+        renderScale: CGFloat = 1,
+        logicalEmbolden: CGFloat = 0
+    ) {
+        self.textureFont = textureFont
+        self.layoutMetrics = layoutFont.map {
+            ScaleInvariantTypefaceMetrics(
+                font: $0,
+                renderScale: renderScale,
+                embolden: logicalEmbolden
+            )
+        }
+    }
+
     var font: VVD.Font { textureFont }
+
+    var lineHeight: CGFloat {
+        layoutMetrics?.lineHeight ?? font.height
+    }
+
+    var ascender: CGFloat {
+        layoutMetrics?.ascender ?? font.ascender
+    }
+
+    var descender: CGFloat {
+        layoutMetrics?.descender ?? font.descender
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        layoutMetrics?.resolvedMetrics ?? {
+            let metrics = font.baseMetrics
+            let capHeight = font.glyphMetrics(
+                for: UnicodeScalar("H")
+            )?.bearing.y ?? metrics.ascender
+            return ResolvedFontMetrics(
+                capHeight: capHeight,
+                ascender: metrics.ascender,
+                descender: metrics.descender,
+                leading: max(
+                    metrics.height - (metrics.ascender - metrics.descender),
+                    0
+                )
+            )
+        }()
+    }
 
     func hasGlyph(for c: UnicodeScalar) -> Bool {
         textureFont.hasGlyph(for: c)
@@ -195,6 +323,31 @@ struct TextureTypeface: VVDFontBackedTypeface {
         return nil
     }
 
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(for: c)
+        }
+        guard let metrics = textureFont.glyphMetrics(
+            for: c,
+            embolden: textureFont.boldStrength
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        layoutMetrics?.kernAdvance(left: left, right: right)
+            ?? font.kernAdvance(left: left, right: right)
+    }
+
     func purgeResources(reason: ResourcePurgeReason) {
         textureFont.clearCache()
     }
@@ -204,6 +357,7 @@ final class VectorTypeface: VVDFontBackedTypeface {
     let font: VVD.Font
     let embolden: CGFloat
     let outlineThickness: CGFloat
+    private let layoutMetrics: ScaleInvariantTypefaceMetrics?
 
     struct GlyphData: @unchecked Sendable {
         let metrics: VVD.Font.GlyphMetrics
@@ -219,17 +373,80 @@ final class VectorTypeface: VVDFontBackedTypeface {
 
     init(font: VVD.Font,
          embolden: CGFloat = 0,
-         outlineThickness: CGFloat = 0) {
+         outlineThickness: CGFloat = 0,
+         layoutFont: VVD.Font? = nil,
+         renderScale: CGFloat = 1,
+         logicalEmbolden: CGFloat? = nil) {
         self.font = font
         self.embolden = embolden
         self.outlineThickness = outlineThickness
+        self.layoutMetrics = layoutFont.map {
+            ScaleInvariantTypefaceMetrics(
+                font: $0,
+                renderScale: renderScale,
+                embolden: logicalEmbolden ?? embolden
+            )
+        }
+    }
+
+    var lineHeight: CGFloat {
+        layoutMetrics?.lineHeight ?? font.height
+    }
+
+    var ascender: CGFloat {
+        layoutMetrics?.ascender ?? font.ascender
+    }
+
+    var descender: CGFloat {
+        layoutMetrics?.descender ?? font.descender
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        layoutMetrics?.resolvedMetrics ?? {
+            let metrics = font.baseMetrics
+            let capHeight = font.glyphMetrics(
+                for: UnicodeScalar("H"),
+                embolden: embolden
+            )?.bearing.y ?? metrics.ascender
+            return ResolvedFontMetrics(
+                capHeight: capHeight,
+                ascender: metrics.ascender,
+                descender: metrics.descender,
+                leading: max(
+                    metrics.height - (metrics.ascender - metrics.descender),
+                    0
+                )
+            )
+        }()
     }
 
     func hasGlyph(for c: UnicodeScalar) -> Bool {
-        guard font.hasGlyph(for: c) else {
-            return false
+        font.hasGlyph(for: c)
+    }
+
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(for: c)
         }
-        return glyph(for: c) != nil
+        guard let metrics = font.glyphMetrics(
+            for: c,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        layoutMetrics?.kernAdvance(left: left, right: right)
+            ?? font.kernAdvance(left: left, right: right)
     }
 
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
@@ -300,7 +517,10 @@ protocol TypefaceProvider {
     func hash(into hasher: inout Hasher)
     func resolved(in environment: EnvironmentValues) -> Self
 
-    func makeTypeface(_: AppContext, displayScale: CGFloat) -> Typeface?
+    func makeTypeface(
+        _: AppContext,
+        dpi: UInt32
+    ) -> Typeface?
 
     var isShareable: Bool { get }
 }
@@ -376,8 +596,12 @@ struct SystemFontProvider: TypefaceProvider {
         hasher.combine(isItalic)
     }
 
-    func makeTypeface(_ context: AppContext,
-                      displayScale: CGFloat) -> Typeface? {
+    func makeTypeface(
+        _ context: AppContext,
+        dpi: UInt32
+    ) -> Typeface? {
+        precondition(dpi > 0, "The font DPI must be positive.")
+        let contentScaleFactor = CGFloat(dpi) / CGFloat(defaultDPI)
         if let url = isItalic ? defaultItalicFontURL : defaultFontURL {
             var data = context.resourceData(forURL: url)
             if data == nil {
@@ -393,7 +617,14 @@ struct SystemFontProvider: TypefaceProvider {
                 }
             }
             if let data {
-                let dpi = CGFloat(defaultDPI) * displayScale
+                let logicalEmbolden = Self.embolden(for: self.weight)
+                guard let layoutFont = VVD.Font(data: data) else {
+                    return nil
+                }
+                layoutFont.setStyle(
+                    pointSize: self.size,
+                    dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+                )
                 switch renderingMode {
                 case .automatic:
                     fatalError("Unresolved font rendering mode")
@@ -403,23 +634,36 @@ struct SystemFontProvider: TypefaceProvider {
                                                      data: data) else {
                         return nil
                     }
-                    font.boldStrength = Self.embolden(for: self.weight)
-                    font.outlineThickness = options.outlineThickness
+                    font.boldStrength =
+                        logicalEmbolden * contentScaleFactor
+                    font.outlineThickness =
+                        options.outlineThickness * contentScaleFactor
                     font.isBitmapPreferred = options.isBitmapPreferred
                     font.isColorEnabled = options.isColorEnabled
                     font.setStyle(pointSize: self.size,
-                                  dpi: (UInt32(dpi), UInt32(dpi)))
-                    return TextureTypeface(textureFont: font)
+                                  dpi: (dpi, dpi))
+                    return TextureTypeface(
+                        textureFont: font,
+                        layoutFont: layoutFont,
+                        renderScale: contentScaleFactor,
+                        logicalEmbolden: logicalEmbolden
+                    )
                 case let .vector(options):
                     guard let font = VVD.Font(data: data) else {
                         return nil
                     }
                     font.setStyle(pointSize: self.size,
-                                  dpi: (UInt32(dpi), UInt32(dpi)))
+                                  dpi: (dpi, dpi))
                     return VectorTypeface(
                         font: font,
-                        embolden: Self.embolden(for: self.weight),
-                        outlineThickness: options.outlineThickness)
+                        embolden:
+                            logicalEmbolden * contentScaleFactor,
+                        outlineThickness:
+                            options.outlineThickness * contentScaleFactor,
+                        layoutFont: layoutFont,
+                        renderScale: contentScaleFactor,
+                        logicalEmbolden: logicalEmbolden
+                    )
                 }
             }
         }
@@ -449,8 +693,10 @@ struct CustomFontProvider: TypefaceProvider {
         hasher.combine(size)
     }
 
-    func makeTypeface(_ context: AppContext,
-                      displayScale: CGFloat) -> Typeface? {
+    func makeTypeface(
+        _ context: AppContext,
+        dpi: UInt32
+    ) -> Typeface? {
         nil
     }
 }
@@ -477,8 +723,12 @@ struct FixedFontProvider: TypefaceProvider {
         face.hashIdentity(into: &hasher)
     }
 
-    func makeTypeface(_: AppContext,
-                      displayScale: CGFloat) -> Typeface? { self.face }
+    func makeTypeface(
+        _: AppContext,
+        dpi: UInt32
+    ) -> Typeface? {
+        self.face
+    }
 
     var isShareable: Bool { false }
 }
@@ -502,44 +752,76 @@ class AnyFontBox: @unchecked Sendable {
         AnyFontBox(fontBox.resolved(in: environment))
     }
 
-    func makeTypeface(_ context: AppContext,
-                      displayScale: CGFloat) -> Typeface? {
-        fontBox.makeTypeface(context, displayScale: displayScale)
+    func makeTypeface(
+        _ context: AppContext,
+        dpi: UInt32
+    ) -> Typeface? {
+        fontBox.makeTypeface(
+            context,
+            dpi: dpi
+        )
     }
     var isShareable: Bool { fontBox.isShareable }
 }
 
 public struct Font: Hashable, Sendable {
     let provider: AnyFontBox
-    let displayScale: CGFloat
 
-    init(provider: AnyFontBox, displayScale: CGFloat) {
+    init(provider: AnyFontBox) {
         self.provider = provider
-        self.displayScale = displayScale
     }
 
     public static func == (lhs: Font, rhs: Font) -> Bool {
-        lhs.provider.isEqual(to: rhs.provider) &&
-        lhs.displayScale == rhs.displayScale
+        lhs.provider.isEqual(to: rhs.provider)
     }
 
     public func hash(into hasher: inout Hasher) {
         provider.hash(into: &hasher)
-        hasher.combine(displayScale)
     }
 
-    func typeface(forContext context: SceneResources) -> Typeface? {
+    func typeface(
+        forContext context: SceneResources,
+        contentScaleFactor: CGFloat
+    ) -> Typeface? {
+        precondition(
+            contentScaleFactor.isFinite && contentScaleFactor > 0,
+            "The font content scale factor must be positive and finite."
+        )
+        let scaledDPI = (CGFloat(defaultDPI) * contentScaleFactor).rounded()
+        precondition(
+            scaledDPI <= CGFloat(UInt32.max),
+            "The font content scale factor exceeds the backend DPI range."
+        )
+        let dpi = UInt32(max(scaledDPI, 1))
+        return typeface(forContext: context, dpi: dpi)
+    }
+
+    func typeface(
+        forContext context: SceneResources,
+        dpi: UInt32
+    ) -> Typeface? {
+        precondition(dpi > 0, "The font DPI must be positive.")
         guard let app = appContext else { return nil }
         if provider.isShareable {
-            if let typeface = context.cachedTypefaces[self] {
+            let key = SceneResources.TypefaceKey(
+                font: self,
+                dpi: dpi
+            )
+            if let typeface = context.cachedTypefaces[key] {
                 return typeface
             }
-            if let typeface = provider.makeTypeface(app, displayScale: self.displayScale) {
-                context.cachedTypefaces[self] = typeface
+            if let typeface = provider.makeTypeface(
+                app,
+                dpi: key.dpi
+            ) {
+                context.cachedTypefaces[key] = typeface
                 return typeface
             }
         } else {
-            return provider.makeTypeface(app, displayScale: self.displayScale)
+            return provider.makeTypeface(
+                app,
+                dpi: dpi
+            )
         }
         return nil
     }
@@ -548,13 +830,8 @@ public struct Font: Hashable, Sendable {
         []
     }
 
-    func displayScale(_ scale: CGFloat) -> Font {
-        Font(provider: self.provider, displayScale: scale)
-    }
-
     func resolved(in environment: EnvironmentValues) -> Font {
-        Font(provider: provider.resolved(in: environment),
-             displayScale: displayScale)
+        Font(provider: provider.resolved(in: environment))
     }
 
     var pointSizeForSymbolMetrics: CGFloat? {
@@ -628,7 +905,7 @@ extension Font {
 
     public init(_ font: TextureFont) {
         let fontBox = FixedFontProvider(TextureTypeface(textureFont: font))
-        self.init(provider: AnyFontBox(fontBox), displayScale: 1)
+        self.init(provider: AnyFontBox(fontBox))
     }
 
     public init(vector font: VVD.Font,
@@ -639,7 +916,7 @@ extension Font {
             embolden: embolden,
             outlineThickness: outlineThickness)
         let fontBox = FixedFontProvider(typeface)
-        self.init(provider: AnyFontBox(fontBox), displayScale: 1)
+        self.init(provider: AnyFontBox(fontBox))
     }
 
     static func pointSize(for style: TextStyle) -> CGFloat {
@@ -669,7 +946,7 @@ extension Font {
                                           weight: weight(for: style),
                                           design: design,
                                           renderingMode: .automatic)
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func system(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
@@ -677,7 +954,7 @@ extension Font {
                                           weight: weight,
                                           design: design,
                                           renderingMode: .automatic)
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func bitmap(_ style: Font.TextStyle,
@@ -707,7 +984,7 @@ extension Font {
                 outlineThickness: outlineThickness,
                 isBitmapPreferred: isBitmapPreferred,
                 isColorEnabled: isColorEnabled)))
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func vector(_ style: Font.TextStyle,
@@ -729,22 +1006,22 @@ extension Font {
             design: design,
             renderingMode: .vector(.init(
                 outlineThickness: outlineThickness)))
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func custom(_ name: String, size: CGFloat, relativeTo textStyle: Font.TextStyle) -> Font {
         let provider = CustomFontProvider(name: name, size: pointSize(for: textStyle) + size)
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func custom(_ name: String, fixedSize: CGFloat) -> Font {
         let provider = CustomFontProvider(name: name, size: fixedSize)
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 
     public static func custom(_ name: String, size: CGFloat) -> Font {
         let provider = CustomFontProvider(name: name, size: size)
-        return Font(provider: AnyFontBox(provider), displayScale: 1)
+        return Font(provider: AnyFontBox(provider))
     }
 }
 
@@ -774,8 +1051,7 @@ extension Font {
                 design: system.design,
                 renderingMode: system.renderingMode,
                 isItalic: system.isItalic
-            )),
-            displayScale: displayScale
+            ))
         )
     }
 
@@ -803,8 +1079,7 @@ extension Font {
                 design: system.design,
                 renderingMode: system.renderingMode,
                 isItalic: true
-            )),
-            displayScale: displayScale
+            ))
         )
     }
 

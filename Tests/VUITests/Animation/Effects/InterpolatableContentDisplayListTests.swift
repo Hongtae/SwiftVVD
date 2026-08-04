@@ -106,7 +106,210 @@ private extension EnvironmentValues {
     }
 }
 
+private final class InterpolatorGroupRewriteContext {
+    let rendererHost: TestViewRendererHost
+    let viewGraph: ViewGraph
+    let time: Attribute<Time>
+
+    init() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        var time: Attribute<Time>!
+        viewGraph.data.withCurrent {
+            time = viewGraph.data.graph.makeInput(value: .zero)
+        }
+
+        self.rendererHost = rendererHost
+        self.viewGraph = viewGraph
+        self.time = time
+    }
+
+    @discardableResult
+    func rewrite(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        list: DisplayList,
+        at currentTime: Time,
+        contentOrigin: CGPoint = .zero,
+        contentOffset: CGSize = .zero,
+        frame: CGRect? = nil
+    ) -> DisplayList {
+        var output = list
+        viewGraph.data.withCurrent {
+            time.setValue(currentTime)
+            _ = group.rewriteInterpolation(
+                serial: 0,
+                list: &output,
+                time: time,
+                frame: frame ?? list.interpolationBounds ?? .zero,
+                contentOrigin: contentOrigin,
+                contentOffset: contentOffset,
+                version: DisplayList.Version(forUpdate: ())
+            )
+        }
+        return output
+    }
+
+    @discardableResult
+    func synchronize(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        seed: DisplayList.Seed,
+        target: DisplayList,
+        transition: ContentTransition,
+        at currentTime: Time,
+        supportsVFD: Bool = false,
+        rasterizationOptions: RasterizationOptions = RasterizationOptions(),
+        contentOrigin: CGPoint = .zero,
+        contentOffset: CGSize = .zero,
+        frame: CGRect? = nil
+    ) -> DisplayList {
+        let target = versioned(target, for: seed)
+        group.update(
+            contentSeed: seed,
+            transition: transition,
+            animation: nil,
+            listener: nil,
+            contentsScale: 1,
+            rasterizationOptions: rasterizationOptions,
+            supportsVFD: supportsVFD
+        )
+        return rewrite(
+            group,
+            list: target,
+            at: currentTime,
+            contentOrigin: contentOrigin,
+            contentOffset: contentOffset,
+            frame: frame
+        )
+    }
+
+    @discardableResult
+    func transition(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        seed: DisplayList.Seed,
+        from current: DisplayList,
+        to target: DisplayList,
+        state: ContentTransition.State,
+        at currentTime: Time,
+        supportsVFD: Bool = false,
+        currentOrigin: CGPoint = .zero,
+        targetOrigin: CGPoint = .zero,
+        contentOffset: CGSize = .zero,
+        frame: CGRect? = nil
+    ) -> DisplayList {
+        let current = versioned(current, for: group.layer.contentSeed)
+        let target = versioned(target, for: seed)
+        if group.layer.contents.list != current {
+            _ = synchronize(
+                group,
+                seed: group.layer.contentSeed,
+                target: current,
+                transition: state.transition,
+                at: currentTime,
+                supportsVFD: supportsVFD,
+                rasterizationOptions: state.rasterizationOptions,
+                contentOrigin: currentOrigin
+            )
+        }
+        group.update(
+            contentSeed: seed,
+            transition: state.transition,
+            animation: state.animation,
+            listener: nil,
+            contentsScale: 1,
+            rasterizationOptions: state.rasterizationOptions,
+            supportsVFD: supportsVFD
+        )
+        return rewrite(
+            group,
+            list: target,
+            at: currentTime,
+            contentOrigin: targetOrigin,
+            contentOffset: contentOffset,
+            frame: frame
+        )
+    }
+
+    @discardableResult
+    func advance(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        to currentTime: Time,
+        contentOrigin: CGPoint = .zero,
+        contentOffset: CGSize = .zero,
+        frame: CGRect? = nil
+    ) -> DisplayList {
+        rewrite(
+            group,
+            list: group.layer.contents.list,
+            at: currentTime,
+            contentOrigin: contentOrigin,
+            contentOffset: contentOffset,
+            frame: frame
+        )
+    }
+
+    private func versioned(
+        _ list: DisplayList,
+        for seed: DisplayList.Seed
+    ) -> DisplayList {
+        var list = list
+        let version = DisplayList.Version(value: Int(seed.value))
+        for index in list.items.indices {
+            list.items[index].version = version
+        }
+        return list
+    }
+}
+
+private struct InterpolatorGroupBodyVisitor: AttributeBodyVisitor {
+    var group: DisplayList.InterpolatorGroup?
+
+    mutating func visit<Body: _AttributeBody>(body: UnsafePointer<Body>) {
+        group = Mirror(reflecting: body.pointee).children.first {
+            $0.label == "group"
+        }?.value as? DisplayList.InterpolatorGroup
+    }
+}
+
 final class InterpolatableContentDisplayListTests: XCTestCase {
+    private lazy var interpolationContext = InterpolatorGroupRewriteContext()
+
+    @discardableResult
+    private func beginTransition(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        from current: DisplayList,
+        to target: DisplayList,
+        state: ContentTransition.State,
+        seed: DisplayList.Seed? = nil,
+        at time: Time = .zero,
+        supportsVFD: Bool = false
+    ) -> DisplayList {
+        interpolationContext.transition(
+            group,
+            seed: seed ?? DisplayList.Seed(
+                decodedValue: group.layer.contentSeed.value &+ 1
+            ),
+            from: current,
+            to: target,
+            state: state,
+            at: time,
+            supportsVFD: supportsVFD
+        )
+    }
+
+    @discardableResult
+    private func updateInterpolators(
+        _ group: DisplayList.UnaryInterpolatorGroup,
+        at time: Time
+    ) -> DisplayList {
+        interpolationContext.advance(group, to: time)
+    }
+
     func testInterpolatorLayerPhaseCaseOrderMatchesRuntimeSurface() {
         typealias LayerPhase = DisplayList.InterpolatorLayer.Phase
 
@@ -146,10 +349,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             using: renderer,
             at: Time(seconds: 10)
         )
+        let translated = list.translated(
+            by: CGSize(width: 5, height: 7)
+        )
 
-        XCTAssertTrue(first.hasSameInterpolationSurface(as: list))
+        XCTAssertTrue(first.hasSameInterpolationSurface(as: translated))
         XCTAssertEqual(first.numericValue, 12.5)
-        XCTAssertTrue(second.hasSameInterpolationSurface(as: list))
+        XCTAssertTrue(second.hasSameInterpolationSurface(as: translated))
         XCTAssertEqual(second.numericValue, 12.5)
         XCTAssertTrue((firstContents as AnyObject?) === (contents.rbList as AnyObject?))
         XCTAssertTrue(contents.nextTime.seconds.isInfinite)
@@ -161,25 +367,23 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         var target = DisplayList()
         target.appendDebugItem(bounds: CGRect(x: 20, y: 0, width: 10, height: 10)) { _ in }
 
-        var layer = DisplayList.InterpolatorLayer()
-        layer.setDisplayList(source, origin: .zero)
-        layer.setDisplayList(
-            target,
-            origin: .zero,
-            state: ContentTransition.State(transition: .opacity),
-            animation: .linear(duration: 0.25)
+        let group = DisplayList.UnaryInterpolatorGroup(maxDuration: 1)
+        beginTransition(
+            group,
+            from: source,
+            to: target,
+            state: ContentTransition.State(
+                transition: .opacity,
+                animation: .linear(duration: 0.25)
+            )
         )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: 1,
-            time: .zero
-        )
+        updateInterpolators(group, at: .zero)
 
-        XCTAssertNotNil(layer.renderer)
-        XCTAssertNotNil(layer.contents.rbList)
-        XCTAssertNotNil(layer.removed.first?.contents.rbList)
-        XCTAssertTrue(layer.contents.nextTime.seconds.isInfinite)
-        XCTAssertTrue(layer.removed.first?.contents.nextTime.seconds.isInfinite == true)
+        XCTAssertNotNil(group.layer.renderer)
+        XCTAssertNotNil(group.layer.contents.rbList)
+        XCTAssertNotNil(group.layer.removed.first?.contents.rbList)
+        XCTAssertTrue(group.layer.contents.nextTime.seconds.isInfinite)
+        XCTAssertTrue(group.layer.removed.first?.contents.nextTime.seconds.isInfinite == true)
     }
 
     func testInterpolatorLayerContentsRefreshesAtRendererDeadlineThenReusesFinishedContents() {
@@ -398,7 +602,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertEqual(opacity.itemRecords.first?.opacity, 0.25)
     }
 
-    func testDisplayListItemCommandsParticipateInLayerSurfaceMatching() {
+    func testInterpolatorLayerUsesItemIdentityAndVersionEquality() {
         var layer = DisplayList.InterpolatorLayer()
         let first = makeDisplayList(
             debugItemCount: 0,
@@ -416,24 +620,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             itemKind: .image
         )
 
-        layer.setDisplayList(
-            first,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
-        layer.setDisplayList(
-            sameSurface,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
+        layer.setDisplayList(first, origin: .zero)
+        layer.setDisplayList(sameSurface, origin: .zero)
         XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .shapeFill)
 
-        layer.setDisplayList(
-            changedKind,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
+        layer.setDisplayList(changedKind, origin: .zero)
+        XCTAssertEqual(
+            layer.contents.displayList.itemRecords.first?.kind,
+            .shapeFill
         )
-        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .image)
         XCTAssertEqual(layer.removedCount, 0)
     }
 
@@ -2469,7 +2664,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertNil(identityMultiply.itemRecords.first?.colorFilter)
     }
 
-    func testDisplayListEffectItemRecordKindParticipatesInSurfaceMatching() {
+    func testInterpolatorLayerIgnoresBackendEffectRecordWhenItemVersionMatches() {
         var layer = DisplayList.InterpolatorLayer()
         let opacity = makeDisplayList(
             debugItemCount: 0,
@@ -2490,29 +2685,20 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             itemEffectKind: .blur
         )
 
-        layer.setDisplayList(
-            opacity,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
-        layer.setDisplayList(
-            sameOpacity,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
+        layer.setDisplayList(opacity, origin: .zero)
+        layer.setDisplayList(sameOpacity, origin: .zero)
         XCTAssertEqual(layer.contents.displayList.itemRecords.first?.effectKind, .opacity)
 
-        layer.setDisplayList(
-            blur,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
+        layer.setDisplayList(blur, origin: .zero)
         XCTAssertEqual(layer.contents.displayList.itemRecords.first?.kind, .effect)
-        XCTAssertEqual(layer.contents.displayList.itemRecords.first?.effectKind, .blur)
+        XCTAssertEqual(
+            layer.contents.displayList.itemRecords.first?.effectKind,
+            .opacity
+        )
         XCTAssertEqual(layer.removedCount, 0)
     }
 
-    func testDisplayListEffectRecordsParticipateInSurfaceMatching() {
+    func testInterpolatorLayerIgnoresEffectPayloadWhenItemVersionMatches() {
         var layer = DisplayList.InterpolatorLayer()
         let contents = makeDisplayList(debugItemCount: 0, itemCount: 1, itemKind: .shapeFill)
         let opacityEffect = DisplayList.effect(
@@ -2528,28 +2714,16 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             contents: contents
         )
 
-        layer.setDisplayList(
-            opacityEffect,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
-        layer.setDisplayList(
-            sameOpacityEffect,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
+        layer.setDisplayList(opacityEffect, origin: .zero)
+        layer.setDisplayList(sameOpacityEffect, origin: .zero)
         XCTAssertEqual(layer.contents.displayList.effects.count, 1)
 
-        layer.setDisplayList(
-            identityEffect,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
-        )
+        layer.setDisplayList(identityEffect, origin: .zero)
         XCTAssertEqual(layer.contents.displayList.effects.count, 1)
         XCTAssertEqual(layer.removedCount, 0)
         switch layer.contents.displayList.effects.first?.effect {
         case let .contentTransition(state):
-            XCTAssertEqual(state.transition, .identity)
+            XCTAssertEqual(state.transition, .opacity)
         default:
             XCTFail("Expected content-transition effect record.")
         }
@@ -4024,30 +4198,26 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
         state.animation = .linear(duration: 1.2)
 
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 1),
-            current: source,
-            target: firstTarget,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 1),
+            from: source,
+            to: firstTarget,
             state: state,
-            time: .zero,
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: .zero
         )
-        unary.updateTime(Time(seconds: 0.01))
-        unary.updateTime(Time(seconds: 0.02))
-        unary.updateTime(Time(seconds: 0.22))
+        interpolationContext.advance(unary, to: Time(seconds: 0.01))
+        interpolationContext.advance(unary, to: Time(seconds: 0.02))
+        interpolationContext.advance(unary, to: Time(seconds: 0.22))
 
         state.transition = .numericText(value: 1264)
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 2),
-            current: firstTarget,
-            target: secondTarget,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 2),
+            from: firstTarget,
+            to: secondTarget,
             state: state,
-            time: Time(seconds: 0.22),
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: Time(seconds: 0.22)
         )
 
         let retargeted = try XCTUnwrap(
@@ -4080,15 +4250,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 transition: .numericText(value: Double(targetValue))
             )
             state.animation = .linear(duration: 1.2)
-            _ = unary.update(
-                contentSeed: DisplayList.Seed(decodedValue: UInt16(step)),
-                current: current,
-                target: target,
+            _ = interpolationContext.transition(
+                unary,
+                seed: DisplayList.Seed(decodedValue: UInt16(step)),
+                from: current,
+                to: target,
                 state: state,
-                time: .zero,
-                animatesSize: false,
-                defersRender: false,
-                supportsVFD: false
+                at: .zero
             )
 
             let presentation = try XCTUnwrap(
@@ -4515,14 +4683,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertTrue(base === unary)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 0)
 
-        unary.updateTime(Time(seconds: 1.25))
-        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 1.25)
+        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 0)
 
         unary.maxDuration = 0.5
         unary.reset()
-        XCTAssertTrue(unary.maxDuration.isInfinite)
+        XCTAssertEqual(unary.maxDuration, 0.5)
         XCTAssertEqual(unary.layer.removedCount, 0)
-        XCTAssertFalse(unary.supportsVariableFrameDuration)
+        XCTAssertFalse(unary.layer.supportsVFD)
 
         let shapeStyle = _ShapeStyle_InterpolatorGroup()
         let shapeStyleBase: DisplayList.InterpolatorGroup = shapeStyle
@@ -5967,197 +6134,102 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testInterpolatorLayerStagesRemovalAndPreservesShortPreparationBegin() {
-        var layer = DisplayList.InterpolatorLayer()
-        let current = makeDisplayList(debugItemCount: 1)
-        let target = makeDisplayList(debugItemCount: 2)
+        let group = DisplayList.UnaryInterpolatorGroup()
+        let current = makeDisplayList(debugItemCount: 1, itemCount: 1)
+        let target = makeDisplayList(debugItemCount: 2, itemCount: 2)
         var state = ContentTransition.State(transition: .opacity)
         state.animation = .linear(duration: 0.2)
 
-        layer.setDisplayList(current, origin: .zero)
-        layer.setDisplayList(
-            target,
-            origin: .zero,
+        beginTransition(
+            group,
+            from: current,
+            to: target,
             state: state,
-            animation: state.animation
-        )
-        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1))
-
-        XCTAssertEqual(layer.removed.first?.phase, .first)
-        XCTAssertEqual(layer.removed.first?.startTime.seconds, 1)
-        XCTAssertNotNil(layer.removed.first?.interpolator)
-
-        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1))
-        XCTAssertEqual(layer.removed.first?.phase, .first)
-
-        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1.01))
-        XCTAssertEqual(layer.removed.first?.phase, .second)
-        XCTAssertEqual(layer.removed.first?.startTime.seconds ?? .nan, 1.01, accuracy: 0.000_001)
-
-        layer.updateInterpolators(contentsScale: 1, maxDuration: .infinity, time: Time(seconds: 1.02))
-        XCTAssertEqual(layer.removed.first?.phase, .running)
-        XCTAssertEqual(layer.removed.first?.startTime.seconds ?? .nan, 1.01, accuracy: 0.000_001)
-        XCTAssertEqual(layer.nextUpdateTime.seconds, 1.21, accuracy: 0.000_001)
-    }
-
-    func testInterpolatorLayerPreparationRefinementUpdatesCreatedTarget() throws {
-        var layer = DisplayList.InterpolatorLayer()
-        let current = makeDisplayList(debugItemCount: 1)
-        let provisionalTarget = makeDisplayList(debugItemCount: 2)
-        let refinedTarget = makeDisplayList(debugItemCount: 3)
-        var state = ContentTransition.State(transition: .opacity)
-        state.animation = .linear(duration: 0.2)
-
-        layer.setDisplayList(current, origin: .zero)
-        layer.setDisplayList(
-            provisionalTarget,
-            origin: .zero,
-            state: state,
-            animation: state.animation
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 1)
+            at: Time(seconds: 1)
         )
 
-        XCTAssertEqual(layer.removed.first?.phase, .first)
-        let interpolator = try XCTUnwrap(layer.removed.first?.interpolator)
+        XCTAssertEqual(group.layer.removed.first?.phase, .first)
+        XCTAssertEqual(group.layer.removed.first?.begin.seconds, 1)
+        XCTAssertNotNil(group.layer.removed.first?.interpolator)
+
+        updateInterpolators(group, at: Time(seconds: 1))
+        XCTAssertEqual(group.layer.removed.first?.phase, .first)
+
+        updateInterpolators(group, at: Time(seconds: 1.01))
+        XCTAssertEqual(group.layer.removed.first?.phase, .second)
         XCTAssertEqual(
-            interpolator.copyContents(withProgress: 1).debugItems.count,
-            2
+            group.layer.removed.first?.begin.seconds ?? .nan,
+            1.01,
+            accuracy: 0.000_001
         )
 
-        layer.setDisplayList(refinedTarget, origin: .zero)
-
-        XCTAssertEqual(layer.removed.first?.phase, .first)
-        XCTAssertTrue(layer.removed.first?.interpolator === interpolator)
+        updateInterpolators(group, at: Time(seconds: 1.02))
+        XCTAssertEqual(group.layer.removed.first?.phase, .running)
         XCTAssertEqual(
-            interpolator.copyContents(withProgress: 1).debugItems.count,
-            3
-        )
-    }
-
-    func testInterpolatorLayerRefinementUpdatesOnlyCurrentEndpoint() throws {
-        var layer = DisplayList.InterpolatorLayer()
-        let initial = makeDisplayList(debugItemCount: 1)
-        let firstTarget = makeDisplayList(debugItemCount: 2)
-        let secondTarget = makeDisplayList(debugItemCount: 3)
-        let refinedSecondTarget = makeDisplayList(debugItemCount: 4)
-        var state = ContentTransition.State(transition: .opacity)
-        state.animation = .linear(duration: 20)
-
-        layer.setDisplayList(initial, origin: .zero)
-        layer.setDisplayList(
-            firstTarget,
-            origin: .zero,
-            state: state,
-            animation: state.animation
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: .zero
-        )
-
-        layer.setDisplayList(
-            secondTarget,
-            origin: .zero,
-            state: state,
-            animation: state.animation
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 0.1)
-        )
-
-        XCTAssertEqual(layer.removedCount, 2)
-        let historical = try XCTUnwrap(
-            layer.removed.first?.interpolator
-        )
-        let current = try XCTUnwrap(
-            layer.removed.last?.interpolator
+            group.layer.removed.first?.begin.seconds ?? .nan,
+            1.01,
+            accuracy: 0.000_001
         )
         XCTAssertEqual(
-            historical.copyContents(withProgress: 20).debugItems.count,
-            2
-        )
-        XCTAssertEqual(
-            current.copyContents(withProgress: 20).debugItems.count,
-            3
-        )
-
-        layer.setDisplayList(refinedSecondTarget, origin: .zero)
-
-        XCTAssertTrue(layer.removed.first?.interpolator === historical)
-        XCTAssertTrue(layer.removed.last?.interpolator === current)
-        XCTAssertEqual(
-            historical.copyContents(withProgress: 20).debugItems.count,
-            2
-        )
-        XCTAssertEqual(
-            current.copyContents(withProgress: 20).debugItems.count,
-            4
+            group.layer.nextUpdateTime.seconds,
+            1.21,
+            accuracy: 0.000_001
         )
     }
 
     func testUnaryInterpolatorGroupTracksLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
         let current = makeDisplayList(debugItemCount: 1)
-        let target = makeDisplayList(debugItemCount: 2)
+        let target = makeDisplayList(debugItemCount: 2, itemCount: 2)
         var state = ContentTransition.State(
             transition: .opacity,
             options: .addsDrawingGroup
         )
         state.animation = .linear(duration: 0.2)
 
-        let output = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 5),
-            current: current,
-            target: target,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 5),
+            from: current,
+            to: target,
             state: state,
-            time: Time(seconds: 2),
-            animatesSize: false,
-            defersRender: false,
+            at: Time(seconds: 2),
             supportsVFD: true
         )
 
-        XCTAssertEqual(unary.lastContentSeed, DisplayList.Seed(decodedValue: 5))
-        XCTAssertTrue(unary.supportsVariableFrameDuration)
+        XCTAssertEqual(unary.contentSeed, DisplayList.Seed(decodedValue: 5))
+        XCTAssertTrue(unary.layer.supportsVFD)
         XCTAssertTrue(unary.rasterizationOptions.isAccelerated)
         XCTAssertEqual(unary.layer.contents.displayList.debugItems.count, 2)
         XCTAssertEqual(unary.layer.removedCount, 1)
-        XCTAssertEqual(unary.layer.removed.first?.rbTransition.method, ContentTransition.Method.none.method)
-        XCTAssertEqual(unary.layer.removed.first?.rbTransition.effects.first?.type, ContentTransition.EffectType.opacity.type)
-        XCTAssertEqual(unary.layer.currentTime.seconds, 2)
-        XCTAssertEqual(unary.layer.removed.first?.startTime.seconds, 2)
+        XCTAssertEqual(unary.layer.removed.first?.transition?.method, ContentTransition.Method.none.method)
+        XCTAssertEqual(unary.layer.removed.first?.transition?.effects.first?.type, ContentTransition.EffectType.opacity.type)
+        XCTAssertEqual(unary.layer.time.seconds, 2)
+        XCTAssertEqual(unary.layer.removed.first?.begin.seconds, 2)
         XCTAssertNotNil(unary.layer.removed.first?.interpolator)
         XCTAssertTrue(unary.layer.removed.first?.interpolator?.onlyFades ?? false)
         XCTAssertNotNil(unary.layer.removed.first?.interpolator?.options[.transition])
         XCTAssertNotNil(unary.layer.removed.first?.interpolator?.animation)
         XCTAssertNil(unary.layer.removed.first?.interpolator?.options[.rasterizationScale])
         XCTAssertEqual(unary.layer.removed.first?.interpolator?.animation?.activeDuration, 0.2)
-        XCTAssertEqual(unary.layer.removed.first?.activeDuration, 0.2)
+        XCTAssertEqual(unary.layer.removed.first?.duration, 0.2)
         XCTAssertEqual(unary.layer.removed.first?.phase, .first)
         XCTAssertEqual(unary.layer.nextUpdateTime.seconds, 2.2, accuracy: 0.000_001)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.2, accuracy: 0.000_001)
-        XCTAssertEqual(unary.layer.removed.first?.interpolator?.copyContents(withProgress: 0).debugItems.count, 1)
-        XCTAssertEqual(unary.layer.removed.first?.interpolator?.copyContents(withProgress: 0.1).debugItems.count, 1)
-        XCTAssertEqual(unary.layer.removed.first?.interpolator?.contents(withProgress: 0.2).debugItems.count, 2)
         XCTAssertFalse(unary.layer.needsUpdate)
-        XCTAssertEqual(output.effects.count, 1)
-        XCTAssertEqual(output.effects.first?.contents.debugItems.count, 1)
 
-        unary.updateTime(Time(seconds: 2.1))
+        interpolationContext.advance(unary, to: Time(seconds: 2.1))
         XCTAssertEqual(unary.layer.removed.first?.phase, .second)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.3, accuracy: 0.000_001)
 
-        unary.updateTime(Time(seconds: 2.3))
+        interpolationContext.advance(unary, to: Time(seconds: 2.3))
         XCTAssertEqual(unary.layer.removed.first?.phase, .running)
-        XCTAssertEqual(unary.layer.removed.first?.startTime.seconds ?? .nan, 2.3, accuracy: 0.000_001)
+        XCTAssertEqual(unary.layer.removed.first?.begin.seconds ?? .nan, 2.3, accuracy: 0.000_001)
 
-        unary.updateTime(Time(seconds: 2.5))
-        let completedOutput = unary.apply(to: target)
+        let completedOutput = interpolationContext.advance(
+            unary,
+            to: Time(seconds: 2.5)
+        )
         XCTAssertEqual(unary.layer.removedCount, 0)
         XCTAssertTrue(unary.layer.nextUpdateTime.seconds.isInfinite)
         XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 2.5, accuracy: 0.000_001)
@@ -6165,138 +6237,385 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         unary.reset()
         XCTAssertEqual(unary.layer.removedCount, 0)
-        XCTAssertFalse(unary.supportsVariableFrameDuration)
+        XCTAssertTrue(unary.layer.supportsVFD)
+    }
+
+    // ASSERTIONS unaryInterpolatorGroupCurrentAndRemovedMetadataObserved
+    func testUnaryInterpolatorGroupFeaturesFollowCurrentAndRemovedContents() {
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        let body = makeDisplayList(debugItemCount: 1)
+        let source = DisplayList.effect(
+            .state(StrongHash(words: (1, 2, 3, 4, 5))),
+            contents: body
+        )
+        let target = makeDisplayList(debugItemCount: 2)
+        let transition = ContentTransition.State(
+            transition: .opacity,
+            animation: .linear(duration: 0.2)
+        )
+
+        _ = interpolationContext.synchronize(
+            unary,
+            seed: DisplayList.Seed(),
+            target: source,
+            transition: transition.transition,
+            at: .zero
+        )
+        XCTAssertTrue(unary.features.contains(.stateEffects))
+
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 1),
+            from: source,
+            to: target,
+            state: transition,
+            at: .zero
+        )
+        XCTAssertTrue(unary.features.contains(.stateEffects))
+
+        interpolationContext.advance(unary, to: Time(seconds: 0.01))
+        interpolationContext.advance(unary, to: Time(seconds: 0.02))
+        interpolationContext.advance(unary, to: Time(seconds: 0.22))
+
+        XCTAssertEqual(unary.layer.removedCount, 0)
+        XCTAssertFalse(unary.features.contains(.stateEffects))
+    }
+
+    // ASSERTIONS displayListIdentityTraversalObserved
+    // ASSERTIONS interpolatorLayerDisjointIdentityObserved
+    // ASSERTIONS interpolatorLayerFastFadeOutputObserved
+    func testInterpolatorLayerUsesTwoOpacityItemsOnlyForDisjointFadeContents() throws {
+        let sourceBounds = CGRect(x: 2, y: 4, width: 10, height: 20)
+        let targetBounds = CGRect(x: 20, y: 30, width: 40, height: 50)
+        let sourceOrigin = CGPoint(x: 3, y: 5)
+        let targetOrigin = CGPoint(x: 11, y: 13)
+        let contentOffset = CGSize(width: 40, height: 50)
+        let frame = CGRect(x: 90, y: 80, width: 60, height: 70)
+        let state = ContentTransition.State(
+            transition: .opacity,
+            animation: .linear(duration: 0.2)
+        )
+
+        let disjoint = DisplayList.UnaryInterpolatorGroup()
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: sourceBounds
+        )
+        let target = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: targetBounds
+        )
+        let output = interpolationContext.transition(
+            disjoint,
+            seed: DisplayList.Seed(decodedValue: 7),
+            from: source,
+            to: target,
+            state: state,
+            at: Time(seconds: 1),
+            currentOrigin: sourceOrigin,
+            targetOrigin: targetOrigin,
+            contentOffset: contentOffset,
+            frame: frame
+        )
+
+        XCTAssertEqual(output.items.count, 2)
+        let effects = output.effects
+        XCTAssertEqual(effects.count, 2)
+        guard case let .opacity(outgoingOpacity) = effects[0].effect,
+              case let .opacity(incomingOpacity) = effects[1].effect else {
+            return XCTFail("Expected the disjoint fade fast path.")
+        }
+        XCTAssertEqual(outgoingOpacity, 1, accuracy: 0.000_001)
+        XCTAssertEqual(incomingOpacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(
+            effects[0].frame,
+            CGRect(
+                x: contentOffset.width + sourceOrigin.x - targetOrigin.x,
+                y: contentOffset.height + sourceOrigin.y - targetOrigin.y,
+                width: frame.width,
+                height: frame.height
+            )
+        )
+        XCTAssertEqual(
+            effects[1].frame,
+            CGRect(
+                x: contentOffset.width,
+                y: contentOffset.height,
+                width: frame.width,
+                height: frame.height
+            )
+        )
+        XCTAssertEqual(effects[0].version, effects[1].version)
+
+        let sharedIdentity = _DisplayList_Identity()
+        var overlappingSource = source
+        var overlappingTarget = target
+        overlappingSource.items[0].identity = sharedIdentity
+        overlappingTarget.items[0].identity = sharedIdentity
+        let overlapping = DisplayList.UnaryInterpolatorGroup()
+        let overlappingOutput = interpolationContext.transition(
+            overlapping,
+            seed: DisplayList.Seed(decodedValue: 8),
+            from: overlappingSource,
+            to: overlappingTarget,
+            state: state,
+            at: Time(seconds: 2)
+        )
+
+        XCTAssertEqual(overlappingOutput.items.count, 1)
+        let overlappingItem = try XCTUnwrap(overlappingOutput.items.first)
+        guard case let .content(content) = overlappingItem.value,
+              case .drawing = content.value else {
+            return XCTFail("An overlapping identity must use interpolated drawing output.")
+        }
+    }
+
+    // ASSERTIONS interpolatorLayerDrawingOutputObserved
+    func testInterpolatorLayerGeneralOutputUsesOneVersionSeededRGBAContentsItem() throws {
+        let sourceBounds = CGRect(x: 2, y: 4, width: 10, height: 20)
+        let targetBounds = CGRect(x: 20, y: 30, width: 40, height: 50)
+        let sourceOrigin = CGPoint(x: 3, y: 5)
+        let targetOrigin = CGPoint(x: 11, y: 13)
+        let contentOffset = CGSize(width: 40, height: 50)
+        let frame = CGRect(x: 90, y: 80, width: 60, height: 70)
+        let transition = ContentTransition(
+            method: .diff,
+            effects: [
+                ContentTransition.Effect(
+                    type: ContentTransition.EffectType(type: 3),
+                    begin: 0,
+                    duration: 0,
+                    events: 3
+                ),
+            ]
+        )
+        let state = ContentTransition.State(
+            transition: transition,
+            animation: .linear(duration: 0.2),
+            options: .addsDrawingGroup
+        )
+        let group = DisplayList.UnaryInterpolatorGroup()
+        let source = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: sourceBounds
+        )
+        let target = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: targetBounds
+        )
+
+        let output = interpolationContext.transition(
+            group,
+            seed: DisplayList.Seed(decodedValue: 9),
+            from: source,
+            to: target,
+            state: state,
+            at: Time(seconds: 3),
+            currentOrigin: sourceOrigin,
+            targetOrigin: targetOrigin,
+            contentOffset: contentOffset,
+            frame: frame
+        )
+
+        XCTAssertEqual(output.items.count, 1)
+        let item = try XCTUnwrap(output.items.first)
+        guard case let .content(content) = item.value,
+              case let .drawing(contents, origin, options) = content.value,
+              let local = contents as? DisplayList.LocalContents else {
+            return XCTFail("Expected one backend drawing contents item.")
+        }
+
+        let sampledBounds = sourceBounds.offsetBy(
+            dx: sourceOrigin.x,
+            dy: sourceOrigin.y
+        )
+        let drawingBounds = sampledBounds.integral
+        XCTAssertEqual(origin, drawingBounds.origin)
+        XCTAssertEqual(
+            item.frame,
+            drawingBounds.offsetBy(
+                dx: contentOffset.width - targetOrigin.x,
+                dy: contentOffset.height - targetOrigin.y
+            )
+        )
+        XCTAssertEqual(
+            local.list.interpolationBounds,
+            sampledBounds
+        )
+        XCTAssertTrue(options.flags.contains(.rgbaContext))
+        XCTAssertTrue(options.flags.contains(.isAccelerated))
+        XCTAssertFalse(options.flags.contains(.requiresLayer))
+        XCTAssertEqual(content.seed, DisplayList.Seed(item.version))
+        XCTAssertEqual(output.interpolationBounds, item.frame)
+    }
+
+    // ASSERTIONS displayListFrameOnlyTranslationObserved
+    func testDisplayListTranslateMovesFramesAndVersionWithoutTransformingPayload() throws {
+        let bounds = CGRect(x: 2, y: 4, width: 10, height: 20)
+        var list = makeDisplayList(
+            debugItemCount: 0,
+            itemCount: 1,
+            bounds: bounds,
+            itemKind: .shapeFill
+        )
+        list.items[0].version = DisplayList.Version(value: 5)
+        let command = list.items[0].command
+
+        list.translate(
+            by: CGSize(width: 30, height: -7),
+            version: DisplayList.Version(value: 9)
+        )
+
+        let translated = try XCTUnwrap(list.items.first)
+        XCTAssertEqual(
+            translated.frame,
+            bounds.offsetBy(dx: 30, dy: -7)
+        )
+        XCTAssertEqual(translated.version, DisplayList.Version(value: 9))
+        XCTAssertEqual(translated.command, command)
+        XCTAssertEqual(
+            list.interpolationBounds,
+            bounds.offsetBy(dx: 30, dy: -7)
+        )
+
+        list.translate(
+            by: CGSize(width: -5, height: 2),
+            version: DisplayList.Version(value: 3)
+        )
+        XCTAssertEqual(
+            list.items.first?.frame,
+            bounds.offsetBy(dx: 25, dy: -5)
+        )
+        XCTAssertEqual(
+            list.items.first?.version,
+            DisplayList.Version(value: 9)
+        )
+        XCTAssertEqual(list.items.first?.command, command)
     }
 
     func testInterpolatorLayerReplacesPendingRemovalAndBoundsPreparedQueue() {
-        var layer = DisplayList.InterpolatorLayer()
         var state = ContentTransition.State(transition: .opacity)
         state.animation = .linear(duration: 20)
 
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 1),
-            origin: .zero,
-            version: DisplayList.Version(value: 0)
+        let pendingGroup = DisplayList.UnaryInterpolatorGroup()
+        let initial = makeDisplayList(debugItemCount: 0, itemCount: 1)
+        _ = interpolationContext.synchronize(
+            pendingGroup,
+            seed: DisplayList.Seed(),
+            target: initial,
+            transition: state.transition,
+            at: .zero
         )
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 2),
-            origin: .zero,
-            version: DisplayList.Version(value: 1),
-            state: state,
-            animation: state.animation
-        )
-        XCTAssertEqual(layer.removedCount, 1)
-        XCTAssertEqual(layer.removed.first?.phase, .pending)
-
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 3),
-            origin: .zero,
-            version: DisplayList.Version(value: 2),
-            state: state,
-            animation: state.animation
-        )
-        XCTAssertEqual(layer.removedCount, 1)
-        XCTAssertEqual(layer.removed.first?.contents.version?.value, 1)
-
-        layer.updateInterpolators(
+        pendingGroup.update(
+            contentSeed: DisplayList.Seed(decodedValue: 1),
+            transition: state.transition,
+            animation: state.animation,
+            listener: nil,
             contentsScale: 1,
-            maxDuration: .infinity,
-            time: .zero
+            rasterizationOptions: state.rasterizationOptions,
+            supportsVFD: false
         )
-        for step in 3...9 {
-            layer.setDisplayList(
-                makeDisplayList(
-                    debugItemCount: 0,
-                    itemCount: step + 1
-                ),
-                origin: .zero,
-                version: DisplayList.Version(value: step),
-                state: state,
-                animation: state.animation
+        XCTAssertEqual(pendingGroup.layer.removedCount, 1)
+        XCTAssertEqual(pendingGroup.layer.removed.first?.phase, .pending)
+
+        pendingGroup.update(
+            contentSeed: DisplayList.Seed(decodedValue: 2),
+            transition: state.transition,
+            animation: state.animation,
+            listener: nil,
+            contentsScale: 1,
+            rasterizationOptions: state.rasterizationOptions,
+            supportsVFD: false
+        )
+        XCTAssertEqual(pendingGroup.layer.removedCount, 1)
+        XCTAssertEqual(
+            pendingGroup.layer.removed.first?.contents.displayList.items.count,
+            1
+        )
+
+        let preparedGroup = DisplayList.UnaryInterpolatorGroup()
+        var current = initial
+        var target = initial
+        for step in 1...9 {
+            current = target
+            target = makeDisplayList(
+                debugItemCount: 0,
+                itemCount: step + 1
             )
-            layer.updateInterpolators(
-                contentsScale: 1,
-                maxDuration: .infinity,
-                time: Time(seconds: Double(step) * 0.01)
+            beginTransition(
+                preparedGroup,
+                from: current,
+                to: target,
+                state: state,
+                at: Time(seconds: Double(step) * 0.01)
             )
         }
-        XCTAssertEqual(layer.removedCount, 8)
-        XCTAssertEqual(layer.removed.first?.contents.version?.value, 1)
-
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 11),
-            origin: .zero,
-            version: DisplayList.Version(value: 10),
-            state: state,
-            animation: state.animation
+        XCTAssertEqual(preparedGroup.layer.removedCount, 8)
+        XCTAssertEqual(
+            preparedGroup.layer.removed.first?.contents.displayList.items.count,
+            2
         )
-        XCTAssertEqual(layer.removedCount, 8)
-        XCTAssertEqual(layer.removed.first?.contents.version?.value, 2)
-        XCTAssertTrue(layer.removed.allSatisfy { $0.interpolator == nil })
-        XCTAssertTrue(layer.needsUpdate)
+
+        current = target
+        target = makeDisplayList(debugItemCount: 0, itemCount: 11)
+        beginTransition(
+            preparedGroup,
+            from: current,
+            to: target,
+            state: state,
+            at: Time(seconds: 0.1)
+        )
+        XCTAssertEqual(preparedGroup.layer.removedCount, 8)
+        XCTAssertEqual(
+            preparedGroup.layer.removed.first?.contents.displayList.items.count,
+            3
+        )
+        XCTAssertNotNil(preparedGroup.layer.removed.last?.interpolator)
     }
 
     func testInterpolatorLayerExpiryRemovesThroughCurrentEntryAndRebuildsTail() {
-        var layer = DisplayList.InterpolatorLayer()
+        let group = DisplayList.UnaryInterpolatorGroup()
         var state = ContentTransition.State(transition: .opacity)
         state.animation = .linear(duration: 0.1)
 
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 1),
-            origin: .zero,
-            version: DisplayList.Version(value: 0)
+        let first = makeDisplayList(debugItemCount: 0, itemCount: 1)
+        let second = makeDisplayList(debugItemCount: 0, itemCount: 2)
+        let third = makeDisplayList(debugItemCount: 0, itemCount: 3)
+        beginTransition(
+            group,
+            from: first,
+            to: second,
+            state: state
         )
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 2),
-            origin: .zero,
-            version: DisplayList.Version(value: 1),
+        updateInterpolators(group, at: Time(seconds: 0.01))
+        updateInterpolators(group, at: Time(seconds: 0.02))
+
+        beginTransition(
+            group,
+            from: second,
+            to: third,
             state: state,
-            animation: state.animation
+            at: Time(seconds: 0.02)
         )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: .zero
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 0.01)
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 0.02)
-        )
+        let staleTailInterpolator = group.layer.removed.last?.interpolator
+        XCTAssertEqual(group.layer.removedCount, 2)
 
-        layer.setDisplayList(
-            makeDisplayList(debugItemCount: 0, itemCount: 3),
-            origin: .zero,
-            version: DisplayList.Version(value: 2),
-            state: state,
-            animation: state.animation
-        )
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 0.02)
-        )
-        let staleTailInterpolator = layer.removed.last?.interpolator
-        XCTAssertEqual(layer.removedCount, 2)
+        updateInterpolators(group, at: Time(seconds: 0.12))
 
-        layer.updateInterpolators(
-            contentsScale: 1,
-            maxDuration: .infinity,
-            time: Time(seconds: 0.12)
+        XCTAssertEqual(group.layer.removedCount, 1)
+        XCTAssertEqual(
+            group.layer.removed.first?.contents.displayList.items.count,
+            2
         )
-
-        XCTAssertEqual(layer.removedCount, 1)
-        XCTAssertEqual(layer.removed.first?.contents.version?.value, 1)
-        XCTAssertNotNil(layer.removed.first?.interpolator)
+        XCTAssertNotNil(group.layer.removed.first?.interpolator)
         XCTAssertFalse(
-            staleTailInterpolator === layer.removed.first?.interpolator
+            staleTailInterpolator === group.layer.removed.first?.interpolator
         )
-        XCTAssertTrue(layer.needsUpdate)
+        XCTAssertTrue(group.layer.needsUpdate)
     }
 
     func testUnaryInterpolatorGroupComposesActivePresentationIntoAnimatedRetarget() throws {
@@ -6319,19 +6638,17 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         var state = ContentTransition.State(transition: .interpolate)
         state.animation = .linear(duration: 2)
 
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 1),
-            current: source,
-            target: firstTarget,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 1),
+            from: source,
+            to: firstTarget,
             state: state,
-            time: .zero,
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: .zero
         )
-        unary.updateTime(Time(seconds: 0.01))
-        unary.updateTime(Time(seconds: 0.02))
-        unary.updateTime(Time(seconds: 1.01))
+        interpolationContext.advance(unary, to: Time(seconds: 0.01))
+        interpolationContext.advance(unary, to: Time(seconds: 0.02))
+        interpolationContext.advance(unary, to: Time(seconds: 1.01))
 
         let firstPresentation = try XCTUnwrap(
             unary.layer.removed.last?.interpolator?.copyContents(withProgress: 1)
@@ -6339,19 +6656,17 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let firstPresentationBounds = try XCTUnwrap(firstPresentation.interpolationBounds)
         XCTAssertEqual(firstPresentationBounds.minX, 50, accuracy: 0.001)
 
-        let output = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 2),
-            current: firstTarget,
-            target: secondTarget,
+        let output = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 2),
+            from: firstTarget,
+            to: secondTarget,
             state: state,
-            time: Time(seconds: 1.01),
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: Time(seconds: 1.01)
         )
 
         XCTAssertEqual(unary.layer.removedCount, 2)
-        XCTAssertEqual(output.effects.count, 1)
+        XCTAssertEqual(output.effects.count, 0)
         let firstRemoval = try XCTUnwrap(unary.layer.removed.first?.interpolator)
         XCTAssertEqual(
             try XCTUnwrap(firstRemoval.to.interpolationBounds).minX,
@@ -6394,15 +6709,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         for step in 1...12 {
             let target = textList(at: CGFloat(step * 20))
-            _ = unary.update(
-                contentSeed: DisplayList.Seed(decodedValue: UInt16(step)),
-                current: current,
-                target: target,
+            _ = interpolationContext.transition(
+                unary,
+                seed: DisplayList.Seed(decodedValue: UInt16(step)),
+                from: current,
+                to: target,
                 state: state,
-                time: Time(seconds: currentTime),
-                animatesSize: false,
-                defersRender: false,
-                supportsVFD: false
+                at: Time(seconds: currentTime)
             )
 
             let retainedCount = min(step, 8)
@@ -6416,9 +6729,18 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                     $0.effectKind == .crossFade
                 }
             )
-            unary.updateTime(Time(seconds: currentTime + 0.01))
-            unary.updateTime(Time(seconds: currentTime + 0.02))
-            unary.updateTime(Time(seconds: currentTime + 0.25))
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.01)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.02)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.25)
+            )
             currentTime += 0.25
             current = target
         }
@@ -6450,40 +6772,44 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         var state = ContentTransition.State(transition: .text)
         state.animation = .easeInOut(duration: 1.4)
 
-        unary.setCurrentContents(
-            contentSeed: DisplayList.Seed(decodedValue: 0),
+        _ = interpolationContext.synchronize(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 0),
             target: compact,
             transition: .text,
-            time: .zero,
+            at: .zero,
             supportsVFD: false,
             rasterizationOptions: RasterizationOptions()
         )
 
         for action in 0..<16 {
             let time = 2.0 + Double(action) * 0.12
-            unary.updateTime(Time(seconds: time))
+            interpolationContext.advance(unary, to: Time(seconds: time))
             let target = action.isMultiple(of: 2) ? expanded : compact
-            _ = unary.update(
-                contentSeed: DisplayList.Seed(decodedValue: UInt16(action + 1)),
-                current: current,
-                target: target,
+            _ = interpolationContext.transition(
+                unary,
+                seed: DisplayList.Seed(decodedValue: UInt16(action + 1)),
+                from: current,
+                to: target,
                 state: state,
-                time: Time(seconds: time),
-                animatesSize: false,
-                defersRender: false,
-                supportsVFD: false
+                at: Time(seconds: time)
             )
-            unary.updateTime(Time(seconds: time + 0.001))
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: time + 0.001)
+            )
             current = target
         }
 
-        unary.updateTime(Time(seconds: 3.92))
-        unary.updateTime(Time(seconds: 4.04))
-        unary.updateTime(Time(seconds: 5.55))
-        let output = unary.apply(to: current)
+        interpolationContext.advance(unary, to: Time(seconds: 3.92))
+        interpolationContext.advance(unary, to: Time(seconds: 4.04))
+        let output = interpolationContext.advance(
+            unary,
+            to: Time(seconds: 5.55)
+        )
         XCTAssertEqual(unary.layer.removedCount, 0)
-        XCTAssertTrue(output.hasSameInterpolationSurface(as: compact))
-        XCTAssertFalse(output.hasSameInterpolationSurface(as: expanded))
+        XCTAssertEqual(output.interpolationBounds, compact.interpolationBounds)
+        XCTAssertNotEqual(output.interpolationBounds, expanded.interpolationBounds)
     }
 
     func testUnaryInterpolatorGroupRebasesExistingInterpolatorFromComposedPresentation() throws {
@@ -6506,28 +6832,24 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         var state = ContentTransition.State(transition: .interpolate)
         state.animation = .linear(duration: 2)
 
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 1),
-            current: source,
-            target: firstTarget,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 1),
+            from: source,
+            to: firstTarget,
             state: state,
-            time: .zero,
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: .zero
         )
-        unary.updateTime(Time(seconds: 0.01))
-        unary.updateTime(Time(seconds: 0.02))
-        unary.updateTime(Time(seconds: 0.5))
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 2),
-            current: firstTarget,
-            target: secondTarget,
+        interpolationContext.advance(unary, to: Time(seconds: 0.01))
+        interpolationContext.advance(unary, to: Time(seconds: 0.02))
+        interpolationContext.advance(unary, to: Time(seconds: 0.5))
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 2),
+            from: firstTarget,
+            to: secondTarget,
             state: state,
-            time: Time(seconds: 0.5),
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: Time(seconds: 0.5)
         )
 
         let initialSecond = try XCTUnwrap(
@@ -6537,7 +6859,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             initialSecond.from.interpolationBounds
         )
 
-        unary.updateTime(Time(seconds: 0.75))
+        interpolationContext.advance(unary, to: Time(seconds: 0.75))
 
         let updatedSecond = try XCTUnwrap(
             unary.layer.removed.last?.interpolator
@@ -6555,7 +6877,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let firstRemoval = try XCTUnwrap(unary.layer.removed.first)
         let firstInterpolator = try XCTUnwrap(firstRemoval.interpolator)
         let elapsed = Float(
-            unary.layer.currentTime.seconds - firstRemoval.startTime.seconds
+            unary.layer.time.seconds - firstRemoval.begin.seconds
         )
         let expectedSource = firstInterpolator
             .copyContents(withProgress: elapsed)
@@ -6577,20 +6899,27 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 "\(step)",
                 numericValue: Float(step)
             )
-            _ = unary.update(
-                contentSeed: DisplayList.Seed(decodedValue: UInt16(step)),
-                current: current,
-                target: target,
+            _ = interpolationContext.transition(
+                unary,
+                seed: DisplayList.Seed(decodedValue: UInt16(step)),
+                from: current,
+                to: target,
                 state: state,
-                time: Time(seconds: currentTime),
-                animatesSize: false,
-                defersRender: false,
-                supportsVFD: false
+                at: Time(seconds: currentTime)
             )
 
-            unary.updateTime(Time(seconds: currentTime + 0.01))
-            unary.updateTime(Time(seconds: currentTime + 0.02))
-            unary.updateTime(Time(seconds: currentTime + 0.05))
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.01)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.02)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.05)
+            )
             currentTime += 0.05
             current = target
 
@@ -6625,30 +6954,31 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testUnaryInterpolatorGroupSetCurrentContentsSynchronizesLayerState() {
+    func testUnaryInterpolatorGroupUpdateThenRewriteSynchronizesLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
-        let target = makeDisplayList(debugItemCount: 2)
+        let target = makeDisplayList(debugItemCount: 2, itemCount: 2)
         var rasterizationOptions = RasterizationOptions()
         rasterizationOptions.isAccelerated = true
         rasterizationOptions.alphaOnly = true
 
-        unary.setCurrentContents(
-            contentSeed: DisplayList.Seed(decodedValue: 11),
+        _ = interpolationContext.synchronize(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 11),
             target: target,
             transition: .numericText(value: 12.5),
-            time: Time(seconds: 3.5),
+            at: Time(seconds: 3.5),
             supportsVFD: true,
             rasterizationOptions: rasterizationOptions
         )
 
-        XCTAssertEqual(unary.lastContentSeed, DisplayList.Seed(decodedValue: 11))
-        XCTAssertTrue(unary.supportsVariableFrameDuration)
+        XCTAssertEqual(unary.contentSeed, DisplayList.Seed(decodedValue: 11))
+        XCTAssertTrue(unary.layer.supportsVFD)
         XCTAssertEqual(unary.rasterizationOptions, rasterizationOptions)
-        XCTAssertEqual(unary.layer.contents.version?.value, 11)
+        XCTAssertEqual(unary.layer.contentSeed.value, 11)
         XCTAssertEqual(unary.layer.contents.numericValue, 12.5)
         XCTAssertEqual(unary.layer.contents.displayList.debugItems.count, 2)
-        XCTAssertEqual(unary.layer.currentTime.seconds, 3.5)
-        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 3.5)
+        XCTAssertEqual(unary.layer.time.seconds, 0)
+        XCTAssertEqual(unary.nextUpdate(after: Time(seconds: 9)).seconds, 0)
     }
 
     func testUnaryInterpolatorGroupRetainsNumericValuesForBothTransitionEndpoints() throws {
@@ -6656,26 +6986,26 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let source = makeDisplayList(debugItemCount: 1)
         let target = makeDisplayList(debugItemCount: 2)
 
-        unary.setCurrentContents(
-            contentSeed: DisplayList.Seed(decodedValue: 1),
+        _ = interpolationContext.synchronize(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 1),
             target: source,
             transition: .numericText(value: 17),
-            time: .zero,
+            at: .zero,
             supportsVFD: false,
             rasterizationOptions: RasterizationOptions()
         )
 
-        _ = unary.update(
-            contentSeed: DisplayList.Seed(decodedValue: 2),
-            current: source,
-            target: target,
+        _ = interpolationContext.transition(
+            unary,
+            seed: DisplayList.Seed(decodedValue: 2),
+            from: source,
+            to: target,
             state: ContentTransition.State(
                 transition: .numericText(value: 0),
                 animation: .linear(duration: 1)
             ),
-            animatesSize: false,
-            defersRender: false,
-            supportsVFD: false
+            at: .zero
         )
 
         XCTAssertEqual(try XCTUnwrap(unary.layer.removed.first).contents.numericValue, 17)
@@ -6690,46 +7020,71 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testInterpolatorLayerOnlyRetainsWhenTransitionStateIsSupplied() {
-        var layer = DisplayList.InterpolatorLayer()
-        let first = makeDisplayList(debugItemCount: 1)
-        let second = makeDisplayList(debugItemCount: 1)
+    func testInterpolatorLayerOnlyRetainsWhenTransitionIsBegun() {
+        let group = DisplayList.UnaryInterpolatorGroup()
+        let first = makeDisplayList(debugItemCount: 1, itemCount: 1)
+        let second = makeDisplayList(debugItemCount: 1, itemCount: 1)
 
-        layer.setDisplayList(
-            first,
-            origin: .zero,
-            version: DisplayList.Version(value: 1)
+        _ = interpolationContext.synchronize(
+            group,
+            seed: DisplayList.Seed(decodedValue: 1),
+            target: first,
+            transition: .identity,
+            at: .zero
         )
-        layer.setDisplayList(
-            second,
-            origin: .zero,
-            version: DisplayList.Version(value: 2)
-        )
-
-        XCTAssertEqual(layer.removedCount, 0)
-        XCTAssertEqual(layer.contents.version?.value, 2)
-
-        layer.setDisplayList(
-            first,
-            origin: .zero,
-            version: DisplayList.Version(value: 3),
-            state: ContentTransition.State(transition: .opacity)
+        _ = interpolationContext.synchronize(
+            group,
+            seed: DisplayList.Seed(decodedValue: 2),
+            target: second,
+            transition: .identity,
+            at: .zero
         )
 
-        XCTAssertEqual(layer.removedCount, 1)
-        XCTAssertEqual(layer.removed.first?.contents.version?.value, 2)
-        XCTAssertEqual(layer.contents.version?.value, 3)
+        XCTAssertEqual(group.layer.removedCount, 0)
+        XCTAssertEqual(group.layer.contentSeed.value, 2)
+
+        _ = interpolationContext.transition(
+            group,
+            seed: DisplayList.Seed(decodedValue: 3),
+            from: second,
+            to: first,
+            state: ContentTransition.State(
+                transition: .opacity,
+                animation: .linear(duration: 1)
+            ),
+            at: .zero
+        )
+
+        XCTAssertEqual(group.layer.removedCount, 1)
+        XCTAssertEqual(
+            group.layer.removed.first?.contents.displayList.items.first?
+                .version.value,
+            2
+        )
+        XCTAssertEqual(group.layer.contentSeed.value, 3)
     }
 
     func testInterpolatedDisplayListRetainsPreviousListOnFirstSameSurfaceChange() throws {
-        let graph = _AGGraph()
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let firstList = makeDisplayList(debugItemCount: 1)
-            let secondList = makeDisplayList(debugItemCount: 1)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = DisplayList.UnaryInterpolatorGroup()
+            let firstList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 1
+            )
+            let secondList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 2
+            )
             let displayList = graph.makeInput(value: firstList)
             let content = graph.makeInput(value: VersionedTransitionContent(value: 0))
-            let group = DisplayList.UnaryInterpolatorGroup()
             let inputs = makeViewInputs(graph: graph)
             var outputs = _ViewOutputs()
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
@@ -6744,21 +7099,31 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
-            XCTAssertEqual(group.layer.contents.version?.value, 1)
+            XCTAssertEqual(output.value.effects.count, 1)
+            let initialSeed = group.layer.contentSeed
 
             displayList.setValue(secondList)
             content.setValue(VersionedTransitionContent(value: 1))
             let updated = output.value
 
             XCTAssertEqual(updated.effects.count, 1)
-            XCTAssertEqual(updated.effects.first?.contents.debugItems.count, 1)
-            XCTAssertEqual(group.lastContentSeed.value, 2)
+            XCTAssertNotEqual(group.contentSeed, initialSeed)
             XCTAssertEqual(group.layer.removedCount, 1)
-            XCTAssertEqual(group.layer.removed.first?.contents.version?.value, 1)
-            XCTAssertEqual(group.layer.contents.version?.value, 2)
-            XCTAssertEqual(group.layer.removed.first?.interpolator?.from.debugItems.count, 1)
-            XCTAssertEqual(group.layer.removed.first?.interpolator?.to.debugItems.count, 1)
+            XCTAssertEqual(
+                group.layer.removed.first?.contents.displayList.items.first?
+                    .version.value,
+                1
+            )
+            XCTAssertEqual(
+                group.layer.removed.first?.interpolator?.from.items.first?
+                    .version.value,
+                1
+            )
+            XCTAssertEqual(
+                group.layer.removed.first?.interpolator?.to.items.first?
+                    .version.value,
+                2
+            )
         }
     }
 
@@ -6789,23 +7154,35 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             inputs.base.time.setValue(Time(seconds: 1))
 
             XCTAssertFalse(output.valueState.rawValue & 1 != 0)
-            XCTAssertFalse(group.hasActiveInterpolators)
+            XCTAssertEqual(group.layer.removedCount, 0)
         }
     }
 
     func testInterpolatedDisplayListReadsTimeWhileActiveThenReleasesDependency() throws {
-        let graph = _AGGraph()
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let firstList = makeDisplayList(debugItemCount: 1)
-            let secondList = makeDisplayList(debugItemCount: 1)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = DisplayList.UnaryInterpolatorGroup()
+            let firstList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 1
+            )
+            let secondList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 2
+            )
             let displayList = graph.makeInput(value: firstList)
             let content = graph.makeInput(value: VersionedTransitionContent(value: 0))
             let inputs = makeViewInputs(graph: graph)
             var transaction = Transaction()
             transaction.animation = .linear(duration: 0.2)
             inputs.base.transaction.setValue(transaction)
-            let group = DisplayList.UnaryInterpolatorGroup()
             var outputs = _ViewOutputs()
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
@@ -6827,7 +7204,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 transaction: transaction
             )
             _ = output.value
-            XCTAssertTrue(group.hasActiveInterpolators)
+            XCTAssertGreaterThan(group.layer.removedCount, 0)
 
             inputs.base.time.setValue(Time(seconds: 0.01))
             XCTAssertTrue(output.valueState.rawValue & 1 != 0)
@@ -6838,7 +7215,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             inputs.base.time.setValue(Time(seconds: 0.22))
             XCTAssertTrue(output.valueState.rawValue & 1 != 0)
             _ = output.value
-            XCTAssertFalse(group.hasActiveInterpolators)
+            XCTAssertEqual(group.layer.removedCount, 0)
 
             inputs.base.time.setValue(Time(seconds: 0.23))
             XCTAssertTrue(output.valueState.rawValue & 1 != 0)
@@ -6848,27 +7225,55 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
-    func testResolvedStyledTextTransitionRetargetsGeometryWithoutAccumulatingRemovedLayers() throws {
-        let graph = _AGGraph()
+    func testResolvedStyledTextTransitionRetargetComposesMultipleRemovedLayers() throws {
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let initialList = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 10, y: 10, width: 86, height: 17)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = _ShapeStyle_InterpolatorGroup()
+            let serial = group.addLayer(id: .unstyled, style: nil)
+            group.finishLayers()
+            let initialContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 10, y: 10, width: 86, height: 17)
+                ),
+                version: 1
             )
-            let firstTarget = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 10, y: 10, width: 70, height: 17)
+            let firstTargetContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 10, y: 10, width: 70, height: 17)
+                ),
+                version: 2
             )
-            let retargeted = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 9, y: 10, width: 69, height: 17)
+            let retargetedContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 9, y: 10, width: 69, height: 17)
+                ),
+                version: 3
+            )
+            let initialList = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: initialContents
+            )
+            let firstTarget = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: firstTargetContents
+            )
+            let retargeted = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: retargetedContents
             )
             let displayList = graph.makeInput(value: initialList)
             let content = graph.makeInput(
                 value: ResolvedStyledText(version: 1, transitionText: "Remove Child")
             )
-            let group = DisplayList.UnaryInterpolatorGroup()
             let inputs = makeViewInputs(graph: graph)
             var transaction = Transaction()
             transaction.animation = .easeInOut(duration: 5)
@@ -6887,7 +7292,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
 
             displayList.setValue(firstTarget, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 70, height: 17), transaction: transaction)
@@ -6896,10 +7301,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                 transaction: transaction
             )
             XCTAssertEqual(output.value.effects.count, 1)
-            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
             XCTAssertEqual(
-                group.layer.removed.first?.interpolator?.to.interpolationBounds,
-                firstTarget.interpolationBounds
+                group.layers[0].state.removed.first?.interpolator?
+                    .to.interpolationBounds,
+                firstTargetContents.interpolationBounds
             )
 
             inputs.base.time.setValue(Time(seconds: 0.01))
@@ -6910,35 +7316,72 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             displayList.setValue(retargeted, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 69, height: 17), transaction: transaction)
             XCTAssertEqual(output.value.effects.count, 1)
-            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 2)
             XCTAssertEqual(
-                group.layer.removed.first?.interpolator?.to.interpolationBounds,
-                retargeted.interpolationBounds
+                group.layers[0].state.removed.last?.interpolator?
+                    .to.interpolationBounds,
+                retargetedContents.interpolationBounds
             )
         }
     }
 
     func testResolvedStyledTextContentChangeComposesActiveSizeOnlyTransition() throws {
-        let graph = _AGGraph()
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let compactList = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 319, y: 249, width: 31, height: 10)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = _ShapeStyle_InterpolatorGroup()
+            let serial = group.addLayer(id: .unstyled, style: nil)
+            group.finishLayers()
+            let compactContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 319, y: 249, width: 31, height: 10)
+                ),
+                version: 1
             )
-            let expandedList = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 372, y: 249, width: 35, height: 10)
+            let changedCompactContents = versionedDisplayList(
+                compactContents,
+                version: 2
             )
-            let residualList = makeDisplayList(
-                debugItemCount: 1,
-                bounds: CGRect(x: 372, y: 249, width: 35.1, height: 10)
+            let expandedContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 372, y: 249, width: 35, height: 10)
+                ),
+                version: 3
+            )
+            let residualContents = versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: 1,
+                    itemCount: 1,
+                    bounds: CGRect(x: 372, y: 249, width: 35.1, height: 10)
+                ),
+                version: 4
+            )
+            let compactList = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: compactContents
+            )
+            let changedCompactList = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: changedCompactContents
+            )
+            let expandedList = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: expandedContents
+            )
+            let residualList = DisplayList.effect(
+                .interpolatorLayer(group, serial),
+                contents: residualContents
             )
             let displayList = graph.makeInput(value: compactList)
             let content = graph.makeInput(
                 value: ResolvedStyledText(version: 1, transitionText: "compact")
             )
-            let group = DisplayList.UnaryInterpolatorGroup()
             let inputs = makeViewInputs(graph: graph)
             var transaction = Transaction()
             transaction.animation = .linear(duration: 0.2)
@@ -6957,15 +7400,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
 
-            displayList.setValue(compactList, transaction: transaction)
+            displayList.setValue(changedCompactList, transaction: transaction)
             content.setValue(
                 ResolvedStyledText(version: 2, transitionText: "expanded"),
                 transaction: transaction
             )
             XCTAssertEqual(output.value.effects.count, 1)
-            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
 
             inputs.base.time.setValue(Time(seconds: 0.01))
             _ = output.value
@@ -6975,24 +7418,27 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             inputs.base.time.setValue(Time(seconds: 0.22))
             displayList.setValue(expandedList, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 35, height: 10), transaction: transaction)
-            XCTAssertEqual(output.value.effects.count, 0)
-            XCTAssertEqual(group.layer.removedCount, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
 
             inputs.base.time.setValue(Time(seconds: 0.23))
             displayList.setValue(residualList, transaction: transaction)
             inputs.size.setValue(ViewSize(width: 35.1, height: 10), transaction: transaction)
             XCTAssertEqual(output.value.effects.count, 1)
-            XCTAssertEqual(group.layer.removedCount, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 2)
 
             content.setValue(
                 ResolvedStyledText(version: 3, transitionText: "compact"),
                 transaction: transaction
             )
             XCTAssertEqual(output.value.effects.count, 1)
-            XCTAssertEqual(group.layer.removedCount, 2)
+            XCTAssertEqual(group.layers[0].state.removedCount, 3)
             XCTAssertEqual(
-                try XCTUnwrap(group.layer.removed.last?.interpolator?.from.interpolationBounds).width,
-                try XCTUnwrap(expandedList.interpolationBounds).width,
+                try XCTUnwrap(
+                    group.layers[0].state.removed.last?
+                        .interpolator?.from.interpolationBounds
+                ).width,
+                try XCTUnwrap(compactContents.interpolationBounds).width,
                 accuracy: 0.001
             )
         }
@@ -7003,11 +7449,21 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         InterpolatableContentProbeLog.reset()
 
         try _AGGraph.withCurrent(graph) {
-            let firstList = makeDisplayList(debugItemCount: 1)
-            let secondList = makeDisplayList(debugItemCount: 1)
+            let group = DisplayList.UnaryInterpolatorGroup()
+            let firstList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 1
+            )
+            let secondList = makeInterpolatorLayerDisplayList(
+                group: group,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 2
+            )
             let displayList = graph.makeInput(value: firstList)
             let content = graph.makeInput(value: ProbeInterpolatableContent(value: 0))
-            let group = DisplayList.UnaryInterpolatorGroup()
             var outputs = _ViewOutputs()
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
@@ -7021,7 +7477,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
+            let initialSeed = group.layer.contentSeed
 
             displayList.setValue(secondList)
             content.setValue(ProbeInterpolatableContent(value: 1))
@@ -7029,14 +7486,15 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             XCTAssertEqual(InterpolatableContentProbeLog.modifyTransitionCalls, 1)
             XCTAssertEqual(InterpolatableContentProbeLog.defaultAnimationCalls, 1)
-            XCTAssertEqual(updated.effects.count, 0)
+            XCTAssertEqual(updated.effects.count, 1)
             XCTAssertEqual(group.layer.removedCount, 0)
-            XCTAssertEqual(group.layer.contents.version?.value, 2)
+            XCTAssertNotEqual(group.layer.contentSeed, initialSeed)
+            XCTAssertEqual(group.layer.contents.displayList.items.count, 1)
             XCTAssertEqual(group.layer.contents.displayList.debugItems.count, 1)
         }
     }
 
-    func testUnaryInterpolatorGroupSchedulesViewGraphLayerDeadline() {
+    func testUnaryInterpolatorGroupRewriteSchedulesCurrentViewTime() {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
         rendererHost.storage = viewGraph
@@ -7046,40 +7504,102 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let target = makeDisplayList(debugItemCount: 2)
         var state = ContentTransition.State(transition: .opacity)
         state.animation = .linear(duration: 0.2)
+        var time: Attribute<Time>!
 
         viewGraph.data.withCurrent {
-            _ = unary.update(
-                contentSeed: DisplayList.Seed(decodedValue: 7),
-                current: current,
-                target: target,
-                state: state,
-                time: Time(seconds: 2),
-                animatesSize: false,
-                defersRender: false,
+            time = viewGraph.data.graph.makeInput(value: Time(seconds: 2))
+            unary.update(
+                contentSeed: DisplayList.Seed(),
+                transition: state.transition,
+                animation: nil,
+                listener: nil,
+                contentsScale: 1,
+                rasterizationOptions: state.rasterizationOptions,
                 supportsVFD: false
+            )
+            var initial = current
+            _ = unary.rewriteInterpolation(
+                serial: 0,
+                list: &initial,
+                time: time,
+                frame: current.interpolationBounds ?? .zero,
+                contentOrigin: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(forUpdate: ())
+            )
+            unary.update(
+                contentSeed: DisplayList.Seed(decodedValue: 7),
+                transition: state.transition,
+                animation: state.animation,
+                listener: nil,
+                contentsScale: 1,
+                rasterizationOptions: state.rasterizationOptions,
+                supportsVFD: false
+            )
+            var output = target
+            _ = unary.rewriteInterpolation(
+                serial: 0,
+                list: &output,
+                time: time,
+                frame: target.interpolationBounds ?? .zero,
+                contentOrigin: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(forUpdate: ())
             )
         }
 
-        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.2, accuracy: 0.000_001)
+        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2, accuracy: 0.000_001)
+        XCTAssertEqual(unary.nextUpdate(after: .zero).seconds, 2.2, accuracy: 0.000_001)
 
         viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
         viewGraph.data.withCurrent {
-            unary.updateTime(Time(seconds: 2.01))
+            time.setValue(Time(seconds: 2.01))
+            var output = target
+            _ = unary.rewriteInterpolation(
+                serial: 0,
+                list: &output,
+                time: time,
+                frame: target.interpolationBounds ?? .zero,
+                contentOrigin: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(forUpdate: ())
+            )
+        }
+        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.01, accuracy: 0.000_001)
+        XCTAssertEqual(unary.nextUpdate(after: .zero).seconds, 2.21, accuracy: 0.000_001)
+
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+        viewGraph.data.withCurrent {
+            time.setValue(Time(seconds: 2.02))
+            var output = target
+            _ = unary.rewriteInterpolation(
+                serial: 0,
+                list: &output,
+                time: time,
+                frame: target.interpolationBounds ?? .zero,
+                contentOrigin: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(forUpdate: ())
+            )
+        }
+        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.02, accuracy: 0.000_001)
+
+        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
+        viewGraph.data.withCurrent {
+            time.setValue(Time(seconds: 2.21))
+            var output = target
+            _ = unary.rewriteInterpolation(
+                serial: 0,
+                list: &output,
+                time: time,
+                frame: target.interpolationBounds ?? .zero,
+                contentOrigin: .zero,
+                contentOffset: .zero,
+                version: DisplayList.Version(forUpdate: ())
+            )
         }
         XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.21, accuracy: 0.000_001)
-
-        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
-        viewGraph.data.withCurrent {
-            unary.updateTime(Time(seconds: 2.02))
-        }
-        XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 2.21, accuracy: 0.000_001)
-
-        viewGraph.nextUpdate = (ViewGraph.NextUpdate(), ViewGraph.NextUpdate())
-        viewGraph.data.withCurrent {
-            unary.updateTime(Time(seconds: 2.21))
-            _ = unary.apply(to: target)
-        }
-        XCTAssertTrue(viewGraph.nextUpdate.views.time.seconds.isInfinite)
+        XCTAssertEqual(unary.layer.removedCount, 0)
     }
 
     func testResolvedImageInterpolatableContentSurface() {
@@ -7191,40 +7711,18 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
     }
 
-    func testApplyInterpolatorGroupUsesPresentationListOutsideContentTransition() throws {
-        let graph = _AGGraph()
-
-        try _AGGraph.withCurrent(graph) {
-            let logicalList = makeDisplayList(debugItemCount: 1)
-            let presentationList = makeDisplayList(debugItemCount: 3)
-            let displayList = graph.makeInput(value: logicalList)
-            let presentationDisplayList = graph.makeInput(value: presentationList)
-            let content = graph.makeInput(value: ProbeInterpolatableContent(value: 0))
-            let inputs = makeViewInputs(graph: graph)
-            var outputs = _ViewOutputs()
-            outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
-
-            outputs.applyInterpolatorGroup(
-                DisplayList.InterpolatorGroup(),
-                content: content,
-                inputs: inputs,
-                presentationDisplayList: presentationDisplayList,
-                animatesSize: false,
-                defersRender: false
-            )
-
-            let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-            let output = Attribute<DisplayList>(outputID).value
-            XCTAssertTrue(output.effects.isEmpty)
-            XCTAssertEqual(output.debugItems.count, presentationList.debugItems.count)
-            XCTAssertEqual(output.interpolationBounds, presentationList.interpolationBounds)
-        }
-    }
-
+    // ASSERTIONS shapeStyleUnstyledTextLayerObserved
     func testTextMakeViewAppliesResolvedStyledTextInterpolator() throws {
-        let graph = _AGGraph()
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
 
-        try _AGGraph.withCurrent(graph) {
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
             let text = graph.makeInput(value: Text("Hello"))
             let outputs = Text._makeView(
                 view: _GraphValue(_attribute: text),
@@ -7234,10 +7732,24 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(outputs.preferences.values(for: ResourceList.Key.self).count, 1)
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             XCTAssertTrue(graph.debugDescription(for: outputID).contains("(stateful)"))
-            XCTAssertEqual(Attribute<DisplayList>(outputID).value.items.count, 0)
+            var groupVisitor = InterpolatorGroupBodyVisitor()
+            outputID.visitBody(&groupVisitor)
+            let group = try XCTUnwrap(
+                groupVisitor.group as? _ShapeStyle_InterpolatorGroup
+            )
+            let output = Attribute<DisplayList>(outputID).value
+            XCTAssertEqual(group.layers.count, 1)
+            XCTAssertEqual(group.layers[0].id, .unstyled)
+            XCTAssertEqual(output.items.count, 1)
+            if case let .effect(.identity, contents) = output.items[0].value {
+                XCTAssertLessThanOrEqual(contents.items.count, 1)
+            } else {
+                XCTFail("missing rewritten text interpolation layer")
+            }
         }
     }
 
+    // ASSERTIONS shapeStyleUnstyledImageLayerObserved
     func testImageMakeViewAppliesResolvedImageInterpolator() throws {
         let graph = _AGGraph()
 
@@ -7256,7 +7768,20 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertEqual(Attribute<ResourceList>(resourceID).value.items.count, 1)
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             XCTAssertTrue(graph.debugDescription(for: outputID).contains("(stateful)"))
-            XCTAssertEqual(Attribute<DisplayList>(outputID).value.items.count, 0)
+            var groupVisitor = InterpolatorGroupBodyVisitor()
+            outputID.visitBody(&groupVisitor)
+            let group = try XCTUnwrap(
+                groupVisitor.group as? _ShapeStyle_InterpolatorGroup
+            )
+            let output = Attribute<DisplayList>(outputID).value
+            XCTAssertEqual(group.layers.count, 1)
+            XCTAssertEqual(group.layers[0].id, .unstyled)
+            XCTAssertEqual(output.items.count, 1)
+            if case let .effect(.identity, contents) = output.items[0].value {
+                XCTAssertLessThanOrEqual(contents.items.count, 1)
+            } else {
+                XCTFail("missing rewritten image interpolation layer")
+            }
         }
     }
 
@@ -7354,11 +7879,29 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
-    func testResolvedStyledTextInterpolatorEmitsContentTransitionEffect() throws {
-        let graph = _AGGraph()
+    func testResolvedStyledTextInterpolatorUpdatesShapeStyleLayer() throws {
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let sourceList = makeDisplayList(debugItemCount: 1)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = _ShapeStyle_InterpolatorGroup()
+            let serial = group.addLayer(id: .unstyled, style: nil)
+            group.finishLayers()
+            let sourceList = makeInterpolatorLayerDisplayList(
+                group: group,
+                serial: serial,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 1
+            )
+            let targetList = makeInterpolatorLayerDisplayList(
+                group: group,
+                serial: serial,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 2
+            )
             let displayList = graph.makeInput(value: sourceList)
             let content = graph.makeInput(value: ResolvedStyledText(version: 0))
             let inputs = makeViewInputs(graph: graph)
@@ -7369,7 +7912,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
             outputs.applyInterpolatorGroup(
-                DisplayList.InterpolatorGroup(),
+                group,
                 content: content,
                 inputs: inputs,
                 animatesSize: false,
@@ -7378,34 +7921,58 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
 
-            content.setValue(ResolvedStyledText(version: 1))
+            displayList.setValue(targetList, transaction: transaction)
+            content.setValue(
+                ResolvedStyledText(version: 1),
+                transaction: transaction
+            )
             let updated = output.value
-            XCTAssertEqual(updated.debugItems.count, 0)
             XCTAssertEqual(updated.effects.count, 1)
-            XCTAssertEqual(updated.effects.first?.contents.debugItems.count, sourceList.debugItems.count)
-            var renderItemCount = 0
-            updated.forEachRenderItem { _ in
-                renderItemCount += 1
-            }
-            XCTAssertEqual(renderItemCount, sourceList.debugItems.count)
-            switch updated.effects.first?.effect {
-            case let .some(.contentTransition(state)):
-                XCTAssertEqual(state.transition, .text)
-            case .none:
-                XCTFail("missing content-transition effect")
-            default:
-                XCTFail("unexpected content-transition effect")
-            }
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
+            XCTAssertEqual(
+                group.layers[0].state.removed.first?.transition?.method,
+                ContentTransition.Method.none.method
+            )
+            XCTAssertEqual(
+                group.layers[0].state.removed.first?.interpolator?
+                    .to.items.first?.version.value,
+                2
+            )
         }
     }
 
     func testResolvedStyledTextInterpolatorUsesItsDedicatedTransactionAttribute() throws {
-        let graph = _AGGraph()
+        let (viewGraph, rendererHost) = makeInterpolationViewGraph()
+        _ = rendererHost
 
-        try _AGGraph.withCurrent(graph) {
-            let sourceList = makeDisplayList(debugItemCount: 1)
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let group = _ShapeStyle_InterpolatorGroup()
+            let serial = group.addLayer(id: .unstyled, style: nil)
+            group.finishLayers()
+            let sourceList = makeInterpolatorLayerDisplayList(
+                group: group,
+                serial: serial,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 1
+            )
+            let animatedList = makeInterpolatorLayerDisplayList(
+                group: group,
+                serial: serial,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 2
+            )
+            let immediateList = makeInterpolatorLayerDisplayList(
+                group: group,
+                serial: serial,
+                debugItemCount: 1,
+                itemCount: 1,
+                version: 3
+            )
             let displayList = graph.makeInput(value: sourceList)
             let content = graph.makeInput(value: ResolvedStyledText(version: 0))
             let transaction = graph.makeInput(value: Transaction())
@@ -7415,7 +7982,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             outputs.preferences.append(DisplayList.Key.self, node: displayList.identifier)
 
             outputs.applyInterpolatorGroup(
-                DisplayList.InterpolatorGroup(),
+                group,
                 content: content,
                 inputs: inputs,
                 animatesSize: false,
@@ -7424,29 +7991,36 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
-            XCTAssertEqual(output.value.effects.count, 0)
+            XCTAssertEqual(output.value.effects.count, 1)
 
             var animatedTransaction = Transaction()
             animatedTransaction.animation = .linear(duration: 5)
             transaction.setValue(animatedTransaction)
+            displayList.setValue(animatedList, transaction: animatedTransaction)
             content.setValue(ResolvedStyledText(version: 1), transaction: animatedTransaction)
 
-            let animated = output.value
-            guard case let .some(.contentTransition(animatedState)) = animated.effects.first?.effect else {
-                return XCTFail("missing animated text content transition")
-            }
+            _ = output.value
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
             XCTAssertEqual(
-                try XCTUnwrap(animatedState.animation).box.duration,
+                try XCTUnwrap(
+                    group.layers[0].state.removed.first
+                ).animation.activeDuration,
                 5,
                 accuracy: 0.000_001
             )
 
             transaction.setValue(Transaction())
+            displayList.setValue(immediateList)
             content.setValue(ResolvedStyledText(version: 2))
 
             let immediate = output.value
-            XCTAssertEqual(immediate.effects.count, 0)
-            XCTAssertEqual(immediate.debugItems.count, 1)
+            XCTAssertEqual(immediate.effects.count, 1)
+            XCTAssertEqual(group.layers[0].state.removedCount, 1)
+            XCTAssertEqual(
+                group.layers[0].state.contents.displayList.items.first?
+                    .version.value,
+                3
+            )
         }
     }
 
@@ -7497,8 +8071,59 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
             XCTAssertEqual(InterpolatableContentProbeLog.modifyTransitionCalls, 1)
             XCTAssertEqual(InterpolatableContentProbeLog.defaultAnimationCalls, 1)
-            XCTAssertEqual(updated.effects.count, 0)
+            XCTAssertEqual(updated.effects.count, 1)
+            if case .some(.interpolatorRoot) = updated.effects.first?.effect {
+            } else {
+                XCTFail("missing deferred interpolation root")
+            }
         }
+    }
+
+    private func makeInterpolatorLayerDisplayList(
+        group: DisplayList.InterpolatorGroup,
+        serial: UInt32 = 0,
+        debugItemCount: Int,
+        itemCount: Int,
+        bounds: CGRect = CGRect(x: 0, y: 0, width: 10, height: 10),
+        version: Int
+    ) -> DisplayList {
+        DisplayList.effect(
+            .interpolatorLayer(group, serial),
+            contents: versionedDisplayList(
+                makeDisplayList(
+                    debugItemCount: debugItemCount,
+                    itemCount: itemCount,
+                    bounds: bounds
+                ),
+                version: version
+            )
+        )
+    }
+
+    private func makeInterpolationViewGraph() -> (
+        viewGraph: ViewGraph,
+        rendererHost: TestViewRendererHost
+    ) {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        return (viewGraph, rendererHost)
+    }
+
+    private func versionedDisplayList(
+        _ list: DisplayList,
+        version: Int
+    ) -> DisplayList {
+        var list = list
+        let version = DisplayList.Version(value: version)
+        for index in list.items.indices {
+            list.items[index].version = version
+        }
+        return list
     }
 
     private func makeDisplayList(

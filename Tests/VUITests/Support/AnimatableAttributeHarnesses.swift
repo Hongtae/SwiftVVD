@@ -10,6 +10,7 @@ final class AnimatableAttributeHarness {
     private var phase: Attribute<Phase>!
     private var transaction: Attribute<Transaction>!
     private var animated: Attribute<_OpacityEffect>!
+    private var currentTimeSeconds: Double = 0
 
     init(initialValue: _OpacityEffect) {
         let viewGraph = ViewGraph(
@@ -131,6 +132,25 @@ final class AnimatableAttributeHarness {
         viewGraph.data.withCurrent {
             time.setValue(Time(seconds: seconds))
         }
+        currentTimeSeconds = seconds
+    }
+
+    func advanceTime(
+        to seconds: Double,
+        frameInterval: Double = 1.0 / 120.0
+    ) {
+        precondition(frameInterval > 0)
+        guard seconds > currentTimeSeconds else {
+            setTime(seconds)
+            return
+        }
+        var sampleTime = currentTimeSeconds + frameInterval
+        while sampleTime < seconds {
+            setTime(sampleTime)
+            _ = currentValue()
+            sampleTime += frameInterval
+        }
+        setTime(seconds)
     }
 
     func bumpPhaseResetSeed() {
@@ -161,7 +181,6 @@ final class AnimatableAttributeHarness {
     }
 
     func finalizeTransactionBody() {
-        Transaction.dispatchPendingListeners().forEach { $0() }
         flushCompletionActions()
     }
 
@@ -183,6 +202,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
     private var phase: Attribute<Phase>!
     private var transaction: Attribute<Transaction>!
     private var animated: Attribute<Value>!
+    private var currentTimeSeconds: Double = 0
 
     init(initialValue: Value) {
         let viewGraph = ViewGraph(
@@ -240,6 +260,25 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
         viewGraph.data.withCurrent {
             time.setValue(Time(seconds: seconds))
         }
+        currentTimeSeconds = seconds
+    }
+
+    func advanceTime(
+        to seconds: Double,
+        frameInterval: Double = 1.0 / 120.0
+    ) {
+        precondition(frameInterval > 0)
+        guard seconds > currentTimeSeconds else {
+            setTime(seconds)
+            return
+        }
+        var sampleTime = currentTimeSeconds + frameInterval
+        while sampleTime < seconds {
+            setTime(sampleTime)
+            _ = currentValue()
+            sampleTime += frameInterval
+        }
+        setTime(seconds)
     }
 
     func nextUpdateInterval() -> Double {
@@ -255,7 +294,6 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
     }
 
     func finalizeTransactionBody() {
-        Transaction.dispatchPendingListeners().forEach { $0() }
         flushCompletionActions()
     }
 
@@ -279,6 +317,7 @@ final class DualAnimatableAttributeHarness {
     private var secondTransaction: Attribute<Transaction>!
     private var firstAnimated: Attribute<_OpacityEffect>!
     private var secondAnimated: Attribute<_OpacityEffect>!
+    private var currentTimeSeconds: Double = 0
 
     init(firstInitialValue: _OpacityEffect, secondInitialValue: _OpacityEffect) {
         let viewGraph = ViewGraph(
@@ -356,6 +395,26 @@ final class DualAnimatableAttributeHarness {
             firstTime.setValue(Time(seconds: seconds))
             secondTime.setValue(Time(seconds: seconds))
         }
+        currentTimeSeconds = seconds
+    }
+
+    func advanceTime(
+        to seconds: Double,
+        frameInterval: Double = 1.0 / 120.0
+    ) {
+        precondition(frameInterval > 0)
+        guard seconds > currentTimeSeconds else {
+            setTime(seconds)
+            return
+        }
+        var sampleTime = currentTimeSeconds + frameInterval
+        while sampleTime < seconds {
+            setTime(sampleTime)
+            _ = currentFirstValue()
+            _ = currentSecondValue()
+            sampleTime += frameInterval
+        }
+        setTime(seconds)
     }
 
     func setFirstTime(_ seconds: Double) {
@@ -383,7 +442,6 @@ final class DualAnimatableAttributeHarness {
     }
 
     func finalizeTransactionBody() {
-        Transaction.dispatchPendingListeners().forEach { $0() }
         flushCompletionActions()
     }
 
@@ -409,6 +467,7 @@ final class AnimatableFrameAttributeHarness {
     private var animatedSize: Attribute<ViewSize>!
     private var animatedFrame: Attribute<ViewFrame>!
     private var cachedFrame: CachedEnvironment.AnimatedFrame!
+    private var currentTimeSeconds: Double = 0
 
     init(
         initialPosition: CGPoint,
@@ -516,6 +575,25 @@ final class AnimatableFrameAttributeHarness {
         viewGraph.data.withCurrent {
             time.setValue(Time(seconds: seconds))
         }
+        currentTimeSeconds = seconds
+    }
+
+    func advanceTime(
+        to seconds: Double,
+        frameInterval: Double = 1.0 / 120.0
+    ) {
+        precondition(frameInterval > 0)
+        guard seconds > currentTimeSeconds else {
+            setTime(seconds)
+            return
+        }
+        var sampleTime = currentTimeSeconds + frameInterval
+        while sampleTime < seconds {
+            setTime(sampleTime)
+            _ = currentFrame()
+            sampleTime += frameInterval
+        }
+        setTime(seconds)
     }
 
     func bumpPhaseResetSeed() {
@@ -556,6 +634,7 @@ final class AnimatableFrameAttributeHarness {
 
 final class TestViewRendererHost: ViewRendererHost {
     var storage: ViewGraph!
+    let sceneResources = SceneResources()
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()

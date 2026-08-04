@@ -836,11 +836,10 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
 
         XCTAssertEqual(completions, [])
 
-        let actions = listener.animationWasRemoved()
+        listener.animationWasRemoved()
 
         XCTAssertEqual(completions, [true])
-        XCTAssertEqual(actions.count, 0)
-        XCTAssertEqual(listener.animationWasRemoved().count, 0)
+        listener.animationWasRemoved()
     }
 
     func testCompletionListenerFallbackDoesNotUseDidFireGate() {
@@ -854,7 +853,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         listener.fireNoAnimationFallback()
 
         XCTAssertEqual(completions, [false, false])
-        XCTAssertEqual(listener.animationWasRemoved().count, 0)
+        listener.animationWasRemoved()
     }
 
     func testCompletionListenerRemovalBeforeAddDecrementsActiveCount() {
@@ -864,7 +863,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             completions.append(didAnimate)
         }
 
-        XCTAssertEqual(listener.animationWasRemoved().count, 0)
+        listener.animationWasRemoved()
 
         let count = Mirror(reflecting: listener).children
             .first { $0.label == "count" }?.value as? Int
@@ -1358,9 +1357,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
 
             XCTAssertFalse(viewGraph.hasPendingTransactions)
 
-            let actions = listener?.animationWasRemoved() ?? []
-            XCTAssertEqual(actions.count, 0)
-            actions.forEach { $0() }
+            listener?.animationWasRemoved()
 
             XCTAssertTrue(viewGraph.hasPendingTransactions)
             XCTAssertNil(completion.value)
@@ -1410,7 +1407,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             ambient[PhaseAnimatorTransactionWidthKey.self] = 128
             var mergedMutationDidRun = false
             withTransaction(ambient) {
-                XCTAssertEqual(listener.animationWasRemoved().count, 0)
+                listener.animationWasRemoved()
                 viewGraph.asyncTransaction(
                     Transaction(),
                     id: Transaction.id,

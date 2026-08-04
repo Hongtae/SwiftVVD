@@ -96,12 +96,12 @@ final class BindingPropagationTransactionTests: XCTestCase {
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: false),
-                .init(hasAnimation: true, disablesAnimations: false),
+                .init(hasAnimation: false, disablesAnimations: false),
             ]
         )
     }
 
-    func testCollectionElementLocalCompletionFallsBackWhenLocalTransactionIsIgnored() {
+    func testCollectionElementIgnoredLocalTransactionUsesStandaloneListenerFinalization() {
         let recorder = BindingPropagationRecorder([0.0])
         let binding = recorder.binding
         var events: [String] = []
@@ -154,12 +154,12 @@ final class BindingPropagationTransactionTests: XCTestCase {
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: false, disablesAnimations: false),
                 .init(hasAnimation: true, disablesAnimations: false),
-                .init(hasAnimation: true, disablesAnimations: false),
+                .init(hasAnimation: false, disablesAnimations: false),
             ]
         )
     }
 
-    func testCollectionDynamicMemberLocalCompletionFallsBackWhenLocalTransactionIsIgnored() {
+    func testCollectionDynamicMemberIgnoredLocalTransactionUsesStandaloneListenerFinalization() {
         let recorder = BindingPropagationRecorder([BindingPropagationModel(value: 0)])
         let binding = recorder.binding
         var events: [String] = []

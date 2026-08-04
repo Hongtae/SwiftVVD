@@ -82,11 +82,18 @@ extension GraphicsContext {
 
             private let state: Mutex<State>
             let scaleFactor: CGFloat
+            let displayScale: CGFloat
             let drawMissingGlyphs: Bool
 
-            init(runs: [Run], scaleFactor: CGFloat, drawMissingGlyphs: Bool) {
+            init(
+                runs: [Run],
+                scaleFactor: CGFloat,
+                displayScale: CGFloat,
+                drawMissingGlyphs: Bool
+            ) {
                 self.state = Mutex(State(runs: runs))
                 self.scaleFactor = scaleFactor
+                self.displayScale = displayScale
                 self.drawMissingGlyphs = drawMissingGlyphs
             }
 
@@ -150,16 +157,29 @@ extension GraphicsContext {
 
         private let storage: Storage
 
-        init(runs: [Run], scaleFactor: CGFloat, drawMissingGlyphs: Bool = false) {
+        init(
+            runs: [Run],
+            scaleFactor: CGFloat,
+            displayScale: CGFloat? = nil,
+            drawMissingGlyphs: Bool = false
+        ) {
+            let displayScale = displayScale ?? scaleFactor
+            precondition(
+                scaleFactor.isFinite && scaleFactor > 0 &&
+                    displayScale.isFinite && displayScale > 0,
+                "Resolved text scales must be positive and finite."
+            )
             self.storage = Storage(
                 runs: runs,
                 scaleFactor: scaleFactor,
+                displayScale: displayScale,
                 drawMissingGlyphs: drawMissingGlyphs
             )
         }
 
         var runs: [Run] { storage.runs }
         var scaleFactor: CGFloat { storage.scaleFactor }
+        var displayScale: CGFloat { storage.displayScale }
         fileprivate var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
         var attributedStorage: NSAttributedString {
@@ -226,10 +246,21 @@ extension GraphicsContext {
             var lastBaseline: CGFloat
         }
 
+        private static func pixelLimit(_ value: CGFloat) -> Int {
+            if value > CGFloat(Int.max) {
+                return .max
+            }
+            return Int(ceil(max(value, 0)))
+        }
+
+        private func alignedWidth(_ width: CGFloat) -> CGFloat {
+            ceil(max(width, 0) * displayScale) / displayScale
+        }
+
         func layoutMetrics(in size: CGSize) -> LayoutMetrics {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
-            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(
                 maxWidth: maxWidth,
@@ -251,8 +282,10 @@ extension GraphicsContext {
                 lastBaseline = .zero
             }
             let inverseScale = 1 / scaleFactor
+            var logicalSize = pixelSize * inverseScale
+            logicalSize.width = alignedWidth(logicalSize.width)
             return LayoutMetrics(
-                size: pixelSize * inverseScale,
+                size: logicalSize,
                 firstBaseline: firstBaseline * inverseScale,
                 lastBaseline: lastBaseline * inverseScale
             )
@@ -268,13 +301,18 @@ extension GraphicsContext {
             var width: Int = .max
             var height: Int = .max
             if let w = maxWidth, w < CGFloat(width) {
-                width = Int(w * self.scaleFactor)
+                width = Self.pixelLimit(w * self.scaleFactor)
             }
             if let h = maxHeight, h < CGFloat(height) {
                 height = Int(h * self.scaleFactor)
             }
             let scale = 1.0 / self.scaleFactor
-            return self.sizeInPixel(maxWidth: width, maxHeight: height) * scale
+            var size = self.sizeInPixel(
+                maxWidth: width,
+                maxHeight: height
+            ) * scale
+            size.width = alignedWidth(size.width)
+            return size
         }
 
         public func firstBaseline(in size: CGSize) -> CGFloat {
@@ -303,6 +341,7 @@ extension GraphicsContext {
             }
 
             enum Content {
+                case unresolved
                 case texture(TextureContent)
                 case vector(VectorContent)
                 case attachment(AttachmentContent)
@@ -325,7 +364,7 @@ extension GraphicsContext {
                     return data.offset
                 case .attachment(let data):
                     return data.offset
-                case .vector, .missing:
+                case .unresolved, .vector, .missing:
                     return .zero
                 }
             }
@@ -347,7 +386,7 @@ extension GraphicsContext {
         func glyphAtoms(in size: CGSize) -> [GlyphAtom] {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
-            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lines = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
             let scale = 1 / scaleFactor
@@ -450,27 +489,17 @@ extension GraphicsContext {
                 var face1 = prevFace
                 var char1 = prevChar
 
-                // Text rendering currently supports texture glyphs only.
-                func textureGlyph(_ face: any Typeface, _ c: UnicodeScalar) -> TextureTypeface.GlyphData? {
-                    if case let .texture(data) = face.glyph(for: c) {
-                        return data
-                    }
-                    return nil
-                }
-
                 for char2 in unicodeScalars {
                     let face2 = faces.first { $0.hasGlyph(for: char2) } ?? faces[0]
 
                     let makeGlyph = drawMissingGlyphs || face2.hasGlyph(for: char2) == true
 
                     var glyph = Glyph(scalar: char2, face: face2)
-                    if makeGlyph, let data = textureGlyph(face2, char2) {
-                        glyph.content = .texture(.init(texture: data.texture,
-                                                       frame: data.frame,
-                                                       offset: data.offset))
-                        glyph.advance = data.advance
-                        glyph.ascender = data.ascender
-                        glyph.descender = data.descender
+                    if makeGlyph, let metrics = face2.glyphMetrics(for: char2) {
+                        glyph.content = .unresolved
+                        glyph.advance = metrics.advance
+                        glyph.ascender = metrics.ascender
+                        glyph.descender = metrics.descender
                         if let face1, face1.isEqual(to: face2) {
                             glyph.kerning = face1.kernAdvance(left: char1, right: char2)
                         } else {
@@ -514,10 +543,19 @@ extension GraphicsContext {
             return _lineWrap(lineGlyphs, maxWidth: maxWidth, maxHeight: maxHeight)
         }
 
+        func prepareResources() {
+            for line in makeGlyphs() {
+                for glyph in line.glyphs {
+                    guard case .unresolved = glyph.content else { continue }
+                    _ = glyph.face.glyph(for: glyph.scalar)
+                }
+            }
+        }
+
         func makeDrawing(in size: CGSize) -> Drawing {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
-            let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+            let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
             return makeDrawing(lineGlyphs: lineGlyphs)
@@ -534,60 +572,95 @@ extension GraphicsContext {
 
             var quads: [Quad] = []
             var attachments: [Drawing.Attachment] = []
+
+            func appendTexture(
+                texture: Texture?,
+                frame textureBounds: CGRect,
+                offset: CGPoint,
+                baseline: CGPoint,
+                foregroundColor: Color?
+            ) {
+                guard let texture else { return }
+                let colorGlyphs: Bool
+                switch texture.pixelFormat {
+                case .r8Unorm:
+                    colorGlyphs = false
+                case .bgra8Unorm, .bgra8Unorm_srgb:
+                    colorGlyphs = true
+                default:
+                    assertionFailure(
+                        "Unsupported glyph texture format: \(texture.pixelFormat)"
+                    )
+                    return
+                }
+
+                let invW = 1.0 / Float(texture.width)
+                let invH = 1.0 / Float(texture.height)
+                let pad: CGFloat = 1
+                let textureFrame = textureBounds.insetBy(dx: -pad, dy: -pad)
+                let frame = CGRect(
+                    x: baseline.x,
+                    y: baseline.y - offset.y,
+                    width: textureBounds.width,
+                    height: textureBounds.height
+                ).insetBy(dx: -pad, dy: -pad)
+                let uvMinX = Float(textureFrame.minX) * invW
+                let uvMinY = Float(textureFrame.minY) * invH
+                let uvMaxX = Float(textureFrame.maxX) * invW
+                let uvMaxY = Float(textureFrame.maxY) * invH
+                let lt = Drawing.Vertex(
+                    position: CGPoint(x: frame.minX, y: frame.minY),
+                    texcoord: (uvMinX, uvMinY)
+                )
+                let rt = Drawing.Vertex(
+                    position: CGPoint(x: frame.maxX, y: frame.minY),
+                    texcoord: (uvMaxX, uvMinY)
+                )
+                let lb = Drawing.Vertex(
+                    position: CGPoint(x: frame.minX, y: frame.maxY),
+                    texcoord: (uvMinX, uvMaxY)
+                )
+                let rb = Drawing.Vertex(
+                    position: CGPoint(x: frame.maxX, y: frame.maxY),
+                    texcoord: (uvMaxX, uvMaxY)
+                )
+                quads.append(Quad(
+                    vertices: [lb, lt, rb, rb, lt, rt],
+                    texture: texture,
+                    colorGlyphs: colorGlyphs,
+                    foregroundColor: foregroundColor
+                ))
+            }
+
             Self.forEachGlyph(in: lineGlyphs) { glyph, baseline in
                 switch glyph.content {
-                case let .texture(data):
+                case .unresolved:
                     guard glyph.scalar != UnicodeScalar(0),
-                          let texture = data.texture else {
+                          case let .texture(data) = glyph.face.glyph(
+                            for: glyph.scalar
+                          ) else {
                         return
                     }
-                    let colorGlyphs: Bool
-                    switch texture.pixelFormat {
-                    case .r8Unorm:
-                        colorGlyphs = false
-                    case .bgra8Unorm, .bgra8Unorm_srgb:
-                        colorGlyphs = true
-                    default:
-                        assertionFailure("Unsupported glyph texture format: \(texture.pixelFormat)")
-                        return
-                    }
-
-                    let invW = 1.0 / Float(texture.width)
-                    let invH = 1.0 / Float(texture.height)
-                    let pad: CGFloat = 1
-                    let textureFrame = data.frame.insetBy(dx: -pad, dy: -pad)
-                    let frame = CGRect(
-                        x: baseline.x,
-                        y: baseline.y - data.offset.y,
-                        width: data.frame.width,
-                        height: data.frame.height
-                    ).insetBy(dx: -pad, dy: -pad)
-                    let uvMinX = Float(textureFrame.minX) * invW
-                    let uvMinY = Float(textureFrame.minY) * invH
-                    let uvMaxX = Float(textureFrame.maxX) * invW
-                    let uvMaxY = Float(textureFrame.maxY) * invH
-                    let lt = Drawing.Vertex(
-                        position: CGPoint(x: frame.minX, y: frame.minY),
-                        texcoord: (uvMinX, uvMinY)
-                    )
-                    let rt = Drawing.Vertex(
-                        position: CGPoint(x: frame.maxX, y: frame.minY),
-                        texcoord: (uvMaxX, uvMinY)
-                    )
-                    let lb = Drawing.Vertex(
-                        position: CGPoint(x: frame.minX, y: frame.maxY),
-                        texcoord: (uvMinX, uvMaxY)
-                    )
-                    let rb = Drawing.Vertex(
-                        position: CGPoint(x: frame.maxX, y: frame.maxY),
-                        texcoord: (uvMaxX, uvMaxY)
-                    )
-                    quads.append(Quad(
-                        vertices: [lb, lt, rb, rb, lt, rt],
-                        texture: texture,
-                        colorGlyphs: colorGlyphs,
+                    appendTexture(
+                        texture: data.texture,
+                        frame: data.frame,
+                        offset: data.offset,
+                        baseline: CGPoint(
+                            x: baseline.x + data.offset.x,
+                            y: baseline.y
+                        ),
                         foregroundColor: glyph.foregroundColor
-                    ))
+                    )
+
+                case let .texture(data):
+                    guard glyph.scalar != UnicodeScalar(0) else { return }
+                    appendTexture(
+                        texture: data.texture,
+                        frame: data.frame,
+                        offset: data.offset,
+                        baseline: baseline,
+                        foregroundColor: glyph.foregroundColor
+                    )
 
                 case let .attachment(data):
                     guard glyph.scalar == UnicodeScalar(0),

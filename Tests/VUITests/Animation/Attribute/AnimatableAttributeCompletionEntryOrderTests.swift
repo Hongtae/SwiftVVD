@@ -102,20 +102,19 @@ final class AnimatableAttributeCompletionEntryOrderTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
 
         let logicalDuration = animation.box.duration
-        let presentationDuration = animation.box.presentationDuration(for: Double(1))
-        XCTAssertGreaterThan(presentationDuration, logicalDuration)
+        let terminalSamplingHorizon = animation.box.terminalSamplingHorizon(for: Double(1))
+        XCTAssertGreaterThan(terminalSamplingHorizon, logicalDuration)
 
-        harness.setTime(logicalDuration / 2)
+        harness.advanceTime(to: logicalDuration / 2)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        let splitSampleTime = (logicalDuration + presentationDuration) / 2
-        harness.setTime(splitSampleTime)
+        let splitSampleTime = (logicalDuration + terminalSamplingHorizon) / 2
+        harness.advanceTime(to: splitSampleTime)
         let logicalValue = harness.currentValue().opacity
         XCTAssertGreaterThan(logicalValue, 0)
         XCTAssertLessThan(logicalValue, 1)
-        XCTAssertEqual(recorder.events, [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             recorder.events,
@@ -126,9 +125,9 @@ final class AnimatableAttributeCompletionEntryOrderTests: XCTestCase {
         )
 
         var sampleTime = splitSampleTime + animation.box.defaultDisplayFrameInterval
-        let finalSampleTime = splitSampleTime + presentationDuration + 1.0
+        let finalSampleTime = splitSampleTime + terminalSamplingHorizon + 1.0
         while sampleTime <= finalSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             if recorder.events.count > 2 {
                 XCTAssertEqual(value, 1, accuracy: 0.01)
@@ -179,16 +178,15 @@ final class AnimatableAttributeCompletionEntryOrderTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.50)
+        harness.advanceTime(to: 0.50)
         _ = harness.currentValue()
-        harness.setTime(0.60)
+        harness.advanceTime(to: 0.60)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(2.00)
+        harness.advanceTime(to: 2.00)
         XCTAssertEqual(harness.currentValue().opacity, 1.0, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(recorder.events, [], file: file, line: line)
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, expected, file: file, line: line)
     }

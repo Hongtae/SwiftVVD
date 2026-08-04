@@ -108,3 +108,27 @@ func isLinkedOnOrAfter(_ semantics: Semantics) -> Bool {
 func isDeployedOnOrAfter(_ semantics: Semantics) -> Bool {
     isRuntimeBaselineOnOrAfter(semantics)
 }
+
+/// A designer-selected UI profile.
+///
+/// The profile is independent of the host device and changes only when the
+/// application writes a different value into the environment.
+public enum InterfaceProfile: Hashable, Sendable, CaseIterable {
+    case desktop
+    case mobile
+    case tablet
+    case handheld
+    case vr
+}
+
+private struct InterfaceProfileKey: EnvironmentKey {
+    static let defaultValue: InterfaceProfile = .desktop
+}
+
+public extension EnvironmentValues {
+    /// The explicit UI profile selected by the application.
+    var interfaceProfile: InterfaceProfile {
+        get { self[InterfaceProfileKey.self] }
+        set { self[InterfaceProfileKey.self] = newValue }
+    }
+}

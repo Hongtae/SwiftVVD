@@ -11,48 +11,23 @@ import Foundation
     public var transaction: Transaction
     var location: AnyLocation<Value>
     var _value: Value
-    var passesLocalTransactionToSetter: Bool
-    var finalizesLocalTransactionAfterSetter: Bool
 
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.transaction = Transaction()
-        self.passesLocalTransactionToSetter = false
-        self.finalizesLocalTransactionAfterSetter = true
         self.location = LocationBox(location: FunctionalLocation(
             get: get,
             set: { value, transaction in
                 set(value)
-            },
-            marksMutation: false
+            }
         ))
         self._value = self.location.getValue()
     }
 
     public init(get: @escaping () -> Value, set: @escaping (Value, Transaction) -> Void) {
         self.transaction = Transaction()
-        self.passesLocalTransactionToSetter = true
-        self.finalizesLocalTransactionAfterSetter = true
         self.location = LocationBox(location: FunctionalLocation(
             get: get,
-            set: set,
-            marksMutation: false
-        ))
-        self._value = self.location.getValue()
-    }
-
-    init(
-        get: @escaping () -> Value,
-        set: @escaping (Value, Transaction) -> Void,
-        passesLocalTransactionToSetter: Bool,
-        finalizesLocalTransactionAfterSetter: Bool
-    ) {
-        self.transaction = Transaction()
-        self.passesLocalTransactionToSetter = passesLocalTransactionToSetter
-        self.finalizesLocalTransactionAfterSetter = finalizesLocalTransactionAfterSetter
-        self.location = LocationBox(location: FunctionalLocation(
-            get: get,
-            set: set,
-            marksMutation: false
+            set: set
         ))
         self._value = self.location.getValue()
     }
@@ -61,8 +36,6 @@ import Foundation
         self.transaction = Transaction()
         self.location = location
         self._value = location.getValue()
-        self.passesLocalTransactionToSetter = false
-        self.finalizesLocalTransactionAfterSetter = false
     }
 
     public static func constant(_ value: Value) -> Binding<Value> {
@@ -74,15 +47,7 @@ import Foundation
             location.getValue()
         }
         nonmutating set {
-            let shouldFinalizeLocalTransactionAfterSetter =
-                finalizesLocalTransactionAfterSetter
-                && !transaction.isEmpty
-                && (passesLocalTransactionToSetter || Transaction.current.isEmpty)
-            let setterTransaction = passesLocalTransactionToSetter ? transaction : resolvedTransaction
-            location.setValue(newValue, transaction: setterTransaction)
-            if shouldFinalizeLocalTransactionAfterSetter {
-                finalizeAnimationCompletions(in: transaction)
-            }
+            location.setValue(newValue, transaction: transaction)
         }
     }
 
@@ -96,21 +61,7 @@ import Foundation
     }
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
-        let location = self.location
-        let getter = {
-            location.getValue()[keyPath: keyPath]
-        }
-        let setter = { value, transaction in
-            var enclosingValue = location.getValue()
-            enclosingValue[keyPath: keyPath] = value
-            location.setValue(enclosingValue, transaction: transaction)
-        }
-        return Binding<Subject>(
-            get: getter,
-            set: setter,
-            passesLocalTransactionToSetter: false,
-            finalizesLocalTransactionAfterSetter: false
-        )
+        projecting(keyPath)
     }
 }
 
@@ -156,7 +107,7 @@ extension Binding: Collection where Value: MutableCollection {
         let setter = { newValue in
             var enclosingValue = location.getValue()
             enclosingValue[position] = newValue
-            location.setValue(enclosingValue, transaction: resolvedTransaction)
+            location.setValue(enclosingValue, transaction: transaction)
         }
         return Binding<Value>.Element(get: getter, set: setter)
     }
@@ -186,18 +137,6 @@ extension Binding {
         return binding
     }
 
-    private var resolvedTransaction: Transaction {
-        let current = Transaction.current
-        guard !transaction.isEmpty else {
-            return current
-        }
-        guard current.isEmpty else {
-            finalizeAnimationCompletions(in: transaction)
-            return current
-        }
-        return transaction
-    }
-
     public func transaction(_ transaction: Transaction) -> Binding<Value> {
         var binding = self
         binding.transaction = transaction
@@ -211,49 +150,16 @@ extension Binding {
 
 extension Binding {
     public init<V>(_ base: Binding<V>) where Value == V? {
-        let location = base.location
-        self.init(
-            get: {
-                location.getValue()
-            },
-            set: { newValue, transaction in
-                location.setValue(newValue ?? location.getValue(), transaction: transaction)
-            },
-            passesLocalTransactionToSetter: false,
-            finalizesLocalTransactionAfterSetter: true
-        )
-        self.transaction = base.transaction
+        self = base.projecting(BindingOperations.ToOptional<V>())
     }
 
     public init?(_ base: Binding<Value?>) {
-        let location = base.location
-        guard location.getValue() != nil else { return nil }
-        self.init(
-            get: {
-                location.getValue()!
-            },
-            set: { newValue, transaction in
-                location.setValue(newValue, transaction: transaction)
-            },
-            passesLocalTransactionToSetter: false,
-            finalizesLocalTransactionAfterSetter: true
-        )
-        self.transaction = base.transaction
+        guard base.wrappedValue != nil else { return nil }
+        self = base.projecting(BindingOperations.ForceUnwrapping<Value>())
     }
 
     public init<V>(_ base: Binding<V>) where Value == AnyHashable, V: Hashable {
-        let location = base.location
-        self.init(
-            get: {
-                AnyHashable(location.getValue())
-            },
-            set: { newValue, transaction in
-                location.setValue(newValue.base as! V, transaction: transaction)
-            },
-            passesLocalTransactionToSetter: false,
-            finalizesLocalTransactionAfterSetter: true
-        )
-        self.transaction = base.transaction
+        self = base.projecting(BindingOperations.ToAnyHashable<V>())
     }
 }
 

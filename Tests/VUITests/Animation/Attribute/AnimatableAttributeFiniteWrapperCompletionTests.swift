@@ -68,12 +68,12 @@ final class AnimatableAttributeFiniteWrapperCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(preBoundaryTime)
+        harness.advanceTime(to: preBoundaryTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(boundaryTime)
+        harness.advanceTime(to: boundaryTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -86,7 +86,7 @@ final class AnimatableAttributeFiniteWrapperCompletionTests: XCTestCase {
             line: line
         )
 
-        harness.setTime(boundaryTime + 0.50)
+        harness.advanceTime(to: boundaryTime + 0.50)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(

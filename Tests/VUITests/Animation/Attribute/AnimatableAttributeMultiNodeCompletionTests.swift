@@ -20,13 +20,13 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
             secondTransaction: slowTransaction
         )
 
-        harness.setTime(0.30)
+        harness.advanceTime(to: 0.30)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.65)
+        harness.advanceTime(to: 0.65)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
@@ -67,7 +67,7 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
         var didObserveFastSnap = false
         while sampleTime <= fluidAnimation.box.duration + 0.50,
               recorder.events.isEmpty {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let firstValue = harness.currentFirstValue()
             _ = harness.currentSecondValue()
             if firstValue.opacity == 1.0 {
@@ -80,9 +80,9 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
         XCTAssertEqual(recorder.events, ["shared logical"])
 
         var didObserveFluidSnap = false
-        let finalSampleTime = fluidAnimation.box.presentationDuration(for: Double(1.0)) + 1.0
+        let finalSampleTime = fluidAnimation.box.terminalSamplingHorizon(for: Double(1.0)) + 1.0
         while sampleTime <= finalSampleTime && recorder.events == ["shared logical"] {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             _ = harness.currentFirstValue()
             let secondValue = harness.currentSecondValue()
             if secondValue.opacity == 1.0 {
@@ -124,7 +124,7 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.30)
+        harness.advanceTime(to: 0.30)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
@@ -156,13 +156,13 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
             secondTransaction: parent
         )
 
-        harness.setTime(0.30)
+        harness.advanceTime(to: 0.30)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.95)
+        harness.advanceTime(to: 0.95)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
@@ -195,13 +195,13 @@ final class AnimatableAttributeMultiNodeCompletionTests: XCTestCase {
             secondTransaction: parent
         )
 
-        harness.setTime(0.30)
+        harness.advanceTime(to: 0.30)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.95)
+        harness.advanceTime(to: 0.95)
         _ = harness.currentFirstValue()
         _ = harness.currentSecondValue()
         harness.flushCompletionActions()

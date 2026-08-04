@@ -442,6 +442,10 @@ final class _PropertyListTracker {
 }
 
 extension PropertyList {
+    typealias Tracker = _PropertyListTracker
+}
+
+extension PropertyList {
     fileprivate var id: UniqueID? {
         elements?.id
     }

@@ -1128,6 +1128,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
     }
 
     // ASSERTIONS matchedGeometryReplacementCompletionRuntimeObserved
+    // ASSERTIONS matchedGeometrySharedFrameListenerOwnershipObserved
     @MainActor
     func testPublicReplacementPreservesReplacementThenOriginalCompletionOrder() throws {
         let recorder = AnimationCompletionRecorder()
@@ -1154,6 +1155,16 @@ final class MatchedGeometryEffectTests: XCTestCase {
             tick &+= 1
         }
 
+        func advance(from start: Double, through end: Double) {
+            let interval = 1.0 / 60.0
+            var time = start + interval
+            while time < end {
+                update(time)
+                time += interval
+            }
+            update(end)
+        }
+
         update(0)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.20))
         update(0)
@@ -1169,7 +1180,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         update(0)
         XCTAssertEqual(recorder.events, [])
 
-        update(0.25)
+        advance(from: 0, through: 0.25)
         try XCTUnwrap(probe.setStage)(
             2,
             completionTransaction(
@@ -1181,7 +1192,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         update(0.25)
         XCTAssertEqual(recorder.events, [])
 
-        update(0.70)
+        advance(from: 0.25, through: 0.70)
         XCTAssertEqual(
             recorder.events,
             [
@@ -1190,7 +1201,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             ]
         )
 
-        update(1.05)
+        advance(from: 0.70, through: 1.05)
         XCTAssertEqual(
             recorder.events,
             [
@@ -2015,6 +2026,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
 
     // ASSERTIONS matchedGeometryMidflightRetainedRegistrationReinsertObserved
     // ASSERTIONS matchedGeometryMidflightIncomingFrameAnimationObserved
+    // ASSERTIONS matchedGeometryMidflightActivationTransactionObserved
     @MainActor
     func testMidflightSourceThenReverseSeparatesRetainedAndReinsertedPresentations() throws {
         let probe = MatchedGeometryNonSourceRuntimeProbe()
@@ -2044,11 +2056,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
             var id: AGAttribute
             var frame: ViewFrame
             var target: ViewFrame
-            var hasAnimation: Bool
             var isBeingRemoved: Bool
 
             var description: String {
-                "id=\(id) frame=\(frame) target=\(target) animation=\(hasAnimation) removed=\(isBeingRemoved)"
+                "id=\(id) frame=\(frame) target=\(target) removed=\(isBeingRemoved)"
             }
         }
 
@@ -2060,7 +2071,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
                         let frame = graph.weakAttributeIfValid(for: entry.frame),
                         let position = graph.weakAttributeIfValid(for: entry.targetPosition),
                         let size = graph.weakAttributeIfValid(for: entry.targetSize),
-                        let transaction = graph.weakAttributeIfValid(for: entry.transaction),
                         let phase = graph.weakAttributeIfValid(for: entry.phase)
                     else {
                         return nil
@@ -2072,7 +2082,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
                             origin: Attribute<CGPoint>(position.toStrong()).value,
                             size: Attribute<ViewSize>(size.toStrong()).value
                         ),
-                        hasAnimation: Attribute<Transaction>(transaction.toStrong()).value.animation != nil,
                         isBeingRemoved: Attribute<Phase>(phase.toStrong()).value.isBeingRemoved
                     )
                 }
@@ -2103,7 +2112,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
         for snapshot in activation {
             XCTAssertEqual(snapshot.frame.origin.x, activationOrigin.x, accuracy: 0.001, "\(activation)")
             XCTAssertEqual(snapshot.frame.origin.y, activationOrigin.y, accuracy: 0.001, "\(activation)")
-            XCTAssertTrue(snapshot.hasAnimation, "\(activation)")
         }
         XCTAssertEqual(Set(activation.map(\.target.origin.x)).count, 2, "\(activation)")
         XCTAssertLessThan(try XCTUnwrap(activation.map(\.target.origin.x).min()), activationOrigin.x)

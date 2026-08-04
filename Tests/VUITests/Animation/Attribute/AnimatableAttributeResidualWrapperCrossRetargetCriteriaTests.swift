@@ -126,11 +126,11 @@ final class AnimatableAttributeResidualWrapperCrossRetargetCriteriaTests: XCTest
 
         let oldEnd = max(
             oldAnimation.box.duration,
-            oldAnimation.box.presentationDuration(for: 1.0)
+            oldAnimation.box.terminalSamplingHorizon(for: 1.0)
         )
         let replacementEnd = retargetTime + max(
             replacementAnimation.box.duration,
-            replacementAnimation.box.presentationDuration(for: target - retargetStartValue)
+            replacementAnimation.box.terminalSamplingHorizon(for: target - retargetStartValue)
         )
         let lastSampleTime = max(oldEnd, replacementEnd) + 3.0
 

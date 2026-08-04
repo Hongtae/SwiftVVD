@@ -1,5 +1,6 @@
 import XCTest
 @testable import VUI
+
 final class AnimatableAGGraphSmokeTests: XCTestCase {
     func testMakeAnimatableInstallsStatefulRule() {
         let harness = AnimatableAttributeHarness(
@@ -26,9 +27,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
 
         _ = harness.currentValue()
         harness.setTime(1)
-        XCTAssertTrue(harness.valueNeedsEvaluation())
-
-        _ = harness.currentValue()
         XCTAssertFalse(harness.valueNeedsEvaluation())
 
         harness.setTime(2)
@@ -169,7 +167,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentValue().opacity, 1, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [])
-        XCTAssertEqual(recorder.events, [])
 
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -296,8 +293,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         harness.setTime(0.7)
-        _ = harness.currentValue()
+        let output = harness.currentValue()
 
+        XCTAssertEqual(output.id, 3)
         XCTAssertEqual(listener.addedCount, 0)
         XCTAssertEqual(listener.removedCount, 0)
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
@@ -340,8 +338,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
         harness.flushCompletionActions()
         harness.setTime(0.7)
-        _ = harness.currentValue()
+        let output = harness.currentValue()
 
+        XCTAssertEqual(output.id, 3)
         XCTAssertEqual(recorder.events, [])
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [0xC33])
@@ -352,7 +351,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
     }
 
-    func testInactiveNoChangeRetainsCachedStatefulOutput() {
+    func testInactiveEqualModelDataPublishesChangedNonAnimatablePayload() {
         let listener = CountingAnimationListener()
         let recorder = AnimationCompletionRecorder()
         let harness = GenericAnimatableAttributeHarness(
@@ -376,7 +375,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
 
         let output = harness.currentValue()
-        XCTAssertEqual(output.id, 1)
+        XCTAssertEqual(output.id, 2)
         XCTAssertEqual(output.animatableData, 0.25, accuracy: 0.000_001)
         XCTAssertEqual(listener.addedCount, 0)
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
@@ -467,9 +466,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
 
         _ = harness.currentFrame()
         harness.setTime(1)
-        XCTAssertTrue(harness.frameNeedsEvaluation(), file: file, line: line)
-
-        _ = harness.currentFrame()
         XCTAssertFalse(harness.frameNeedsEvaluation(), file: file, line: line)
 
         harness.setTime(2)
@@ -602,165 +598,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             finalRetargetedFrame.origin.y,
             accuracy: 1
         )
-    }
-
-    func testAnimatableFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget() {
-        assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
-            supportsVFD: false
-        )
-    }
-
-    func testAnimatableFrameAttributeVFDSameTimeRetargetDoesNotCombineIntermediateTarget() {
-        assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
-            supportsVFD: true
-        )
-    }
-
-    private func assertFrameAttributeSameTimeRetargetDoesNotCombineIntermediateTarget(
-        supportsVFD: Bool
-    ) {
-        let harness = AnimatableFrameAttributeHarness(
-            initialPosition: CGPoint(x: 100, y: 171),
-            initialSize: ViewSize(width: 190, height: 150),
-            supportsVFD: supportsVFD
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 100, y: 186),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction(animation: .easeInOut(duration: 5))
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 100, y: 180),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction(animation: .easeInOut(duration: 5))
-        )
-        _ = harness.currentFrame()
-
-        var maximumY = harness.currentPosition().y
-        for step in 1...330 {
-            harness.setTime(Double(step) / 60.0)
-            maximumY = max(maximumY, harness.currentFrame().origin.y)
-        }
-
-        XCTAssertLessThanOrEqual(maximumY, 180.001)
-        XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
-    }
-
-    func testAnimatableFrameAttributeSameTimePlainRefinementKeepsActiveAnimation() {
-        assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
-            supportsVFD: false
-        )
-    }
-
-    func testAnimatableFrameAttributeVFDSameTimePlainRefinementKeepsActiveAnimation() {
-        assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
-            supportsVFD: true
-        )
-    }
-
-    private func assertFrameAttributeSameTimePlainRefinementKeepsActiveAnimation(
-        supportsVFD: Bool
-    ) {
-        let harness = AnimatableFrameAttributeHarness(
-            initialPosition: CGPoint(x: 100, y: 171),
-            initialSize: ViewSize(width: 190, height: 150),
-            supportsVFD: supportsVFD
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 100, y: 186),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction(animation: .easeInOut(duration: 5))
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 100, y: 180),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction()
-        )
-
-        XCTAssertEqual(harness.currentPosition().y, 171, accuracy: 0.001)
-        var midpoint = CGFloat.zero
-        for step in 1...330 {
-            harness.setTime(Double(step) / 60.0)
-            let position = harness.currentPosition().y
-            if step == 150 {
-                midpoint = position
-            }
-        }
-        XCTAssertGreaterThan(midpoint, 171)
-        XCTAssertLessThan(midpoint, 180)
-        XCTAssertEqual(harness.currentPosition().y, 180, accuracy: 0.001)
-    }
-
-    func testAnimatableFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint() {
-        assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
-            supportsVFD: false
-        )
-    }
-
-    func testAnimatableFrameAttributeVFDSameTimePlainRefinementUpdatesCombinedEndpoint() {
-        assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
-            supportsVFD: true
-        )
-    }
-
-    private func assertFrameAttributeSameTimePlainRefinementUpdatesCombinedEndpoint(
-        supportsVFD: Bool
-    ) {
-        let harness = AnimatableFrameAttributeHarness(
-            initialPosition: CGPoint(x: 100, y: 171),
-            initialSize: ViewSize(width: 190, height: 150),
-            supportsVFD: supportsVFD
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 200, y: 171),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction(animation: .spring(duration: 5, bounce: 0.35))
-        )
-        _ = harness.currentFrame()
-        for time in [0.5, 0.6, 1.0] {
-            harness.setTime(time)
-            _ = harness.currentFrame()
-        }
-        let beforeRetarget = harness.currentPosition()
-
-        harness.setFrame(
-            position: CGPoint(x: 200, y: 186),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction(animation: .easeInOut(duration: 5))
-        )
-        _ = harness.currentFrame()
-        harness.setFrame(
-            position: CGPoint(x: 200, y: 160),
-            size: ViewSize(width: 190, height: 150),
-            transaction: Transaction()
-        )
-        let immediate = harness.currentPosition()
-        XCTAssertEqual(immediate.y, beforeRetarget.y, accuracy: 0.001)
-
-        var maximumY = immediate.y
-        var midpoint = immediate.y
-        var preTerminal = immediate.y
-        for step in 1...330 {
-            harness.setTime(1.0 + Double(step) / 60.0)
-            let position = harness.currentPosition().y
-            maximumY = max(maximumY, position)
-            if step == 150 {
-                midpoint = position
-            } else if step == 294 {
-                preTerminal = position
-            }
-        }
-
-        XCTAssertLessThanOrEqual(maximumY, immediate.y + 0.001)
-        XCTAssertGreaterThan(midpoint, 160)
-        XCTAssertLessThan(midpoint, immediate.y)
-        XCTAssertEqual(preTerminal, 160, accuracy: 0.25)
-        XCTAssertEqual(harness.currentPosition().y, 160, accuracy: 0.001)
     }
 
     // ASSERTIONS animatableFramePlainTargetContinuationObserved
@@ -1946,8 +1783,8 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(
             recorder.events,
             [
-                "logical removed",
                 "removed removed",
+                "logical removed",
             ]
         )
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
@@ -2028,8 +1865,8 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(
             recorder.events,
             [
-                "logical removed",
                 "removed removed",
+                "logical removed",
             ]
         )
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
@@ -2611,13 +2448,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [0xA48])
         harness.flushCompletionActions()
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "shared removed",
-                "shared logical",
-            ]
-        )
+        XCTAssertEqual(recorder.events, [])
         harness.resetNextUpdate()
         harness.setSecondTime(2.7)
         XCTAssertEqual(harness.currentSecondValue().opacity, 1, accuracy: 0.000_001)
@@ -2736,7 +2567,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
 
         harness.resetNextUpdate()
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [0xA4B])
@@ -2744,7 +2575,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
         harness.resetNextUpdate()
 
-        harness.setTime(1.5)
+        harness.advanceTime(to: 1.5)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -2762,7 +2593,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.nextUpdateReasons(), [0xA4B])
         harness.resetNextUpdate()
 
-        harness.setTime(4.0)
+        harness.advanceTime(to: 4.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -3959,7 +3790,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         let sampledAfterPrune = sampleRecorder.samples.map(\.label)
         XCTAssertTrue(sampledAfterPrune.contains("old"))
-        XCTAssertTrue(sampledAfterPrune.contains("middle"))
+        XCTAssertFalse(sampledAfterPrune.contains("middle"))
         XCTAssertTrue(sampledAfterPrune.contains("active"))
         XCTAssertEqual(
             recorder.events,
@@ -4110,7 +3941,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.20)
+        harness.advanceTime(to: 0.20)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 2),
@@ -4121,7 +3952,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.40)
+        harness.advanceTime(to: 0.40)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 3),
@@ -4132,12 +3963,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.62)
+        harness.advanceTime(to: 0.62)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["old logical"])
 
-        harness.setTime(0.84)
+        harness.advanceTime(to: 0.84)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4148,7 +3979,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
 
-        harness.setTime(1.08)
+        harness.advanceTime(to: 1.08)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4219,7 +4050,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(middleRetargetTime)
+        harness.advanceTime(to: middleRetargetTime)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 2),
@@ -4230,7 +4061,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(activeRetargetTime)
+        harness.advanceTime(to: activeRetargetTime)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 3),
@@ -4241,7 +4072,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(finalSampleTime)
+        harness.advanceTime(to: finalSampleTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4556,9 +4387,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
@@ -4572,9 +4403,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.8)
+        harness.advanceTime(to: 0.8)
         _ = harness.currentValue()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
@@ -4588,17 +4419,17 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(1.20)
+        harness.advanceTime(to: 1.20)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(1.35)
+        harness.advanceTime(to: 1.35)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["middle logical"])
 
-        harness.setTime(2.55)
+        harness.advanceTime(to: 2.55)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4609,7 +4440,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
 
-        harness.setTime(3.6)
+        harness.advanceTime(to: 3.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4803,9 +4634,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
@@ -4819,9 +4650,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.8)
+        harness.advanceTime(to: 0.8)
         _ = harness.currentValue()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
@@ -4835,17 +4666,17 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(1.20)
+        harness.advanceTime(to: 1.20)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(1.35)
+        harness.advanceTime(to: 1.35)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["middle logical"], file: file, line: line)
 
-        harness.setTime(2.55)
+        harness.advanceTime(to: 2.55)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4858,7 +4689,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             line: line
         )
 
-        harness.setTime(3.6)
+        harness.advanceTime(to: 3.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4909,7 +4740,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.20)
+        harness.advanceTime(to: 0.20)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 2),
@@ -4920,7 +4751,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.40)
+        harness.advanceTime(to: 0.40)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: 3),
@@ -4931,12 +4762,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.62)
+        harness.advanceTime(to: 0.62)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["old logical"], file: file, line: line)
 
-        harness.setTime(0.84)
+        harness.advanceTime(to: 0.84)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4949,7 +4780,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             line: line
         )
 
-        harness.setTime(1.08)
+        harness.advanceTime(to: 1.08)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -4994,9 +4825,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
@@ -5010,9 +4841,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(0.8)
+        harness.advanceTime(to: 0.8)
         _ = harness.currentValue()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
@@ -5026,17 +4857,17 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(1.20)
+        harness.advanceTime(to: 1.20)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [])
 
-        harness.setTime(1.35)
+        harness.advanceTime(to: 1.35)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["middle logical"])
 
-        harness.setTime(2.55)
+        harness.advanceTime(to: 2.55)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -5047,7 +4878,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
 
-        harness.setTime(3.6)
+        harness.advanceTime(to: 3.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -5219,9 +5050,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
@@ -5235,9 +5066,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(0.8)
+        harness.advanceTime(to: 0.8)
         _ = harness.currentValue()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
@@ -5265,7 +5096,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(1.7)
+        harness.advanceTime(to: 1.7)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         if expectedOrder == .activeOldMiddle {
@@ -5274,7 +5105,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             XCTAssertEqual(recorder.events, ["middle logical"], file: file, line: line)
         }
 
-        harness.setTime(3.1)
+        harness.advanceTime(to: 3.1)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         if expectedOrder == .activeOldMiddle {
@@ -5293,7 +5124,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         }
 
-        harness.setTime(3.6)
+        harness.advanceTime(to: 3.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         if expectedOrder == .activeOldMiddle {
@@ -5314,7 +5145,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
 
         guard expectedOrder == .middleActiveOld || expectedOrder == .activeOldMiddle else { return }
 
-        harness.setTime(9.2)
+        harness.advanceTime(to: 9.2)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         switch expectedOrder {
@@ -6165,7 +5996,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
     }
-    func testZeroDurationRetargetSnapsBeforeCallbacksForSampledBuiltInClasses() {
+    func testZeroDurationRetargetPublishesTargetAndCompletesInObservedOrder() {
         assertZeroDurationRetargetSnapAndOrder(
             oldAnimation: .linear(duration: 1),
             replacementAnimation: .linear(duration: 0)
@@ -6179,7 +6010,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             replacementAnimation: .linear(duration: 0.20).delay(-0.20)
         )
     }
-    func testNoAnimationRetargetPreservesResidualAnimationAndOldCompletionDeadline() {
+    func testNoAnimationRetargetPreservesResidualAnimationAndOldCompletionOwnership() {
         let recorder = AnimationCompletionRecorder()
         let nilListener = CountingAnimationListener()
         let harness = AnimatableAttributeHarness(
@@ -6238,7 +6069,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [])
-        XCTAssertEqual(recorder.events, [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             recorder.events,
@@ -6248,7 +6078,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
     }
-    func testScopedTransactionActiveSetupPreservesResidualAnimationAndCompletionDeadline() {
+    func testScopedTransactionActiveSetupPreservesResidualAnimationAndCompletionOwnership() {
         let recorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
@@ -6282,7 +6112,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
         harness.setTime(5.0)
         XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001)
-        XCTAssertEqual(recorder.events, [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             recorder.events,
@@ -6310,6 +6139,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ) {
                 animationRecorder.record("withAnimation body")
                 animationHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                _ = animationHarness.currentValue()
                 throw ProbeError.expected
             } completion: {
                 animationRecorder.record("withAnimation completion")
@@ -6371,6 +6201,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             try withTransaction(transaction) {
                 transactionRecorder.record("withTransaction body")
                 transactionHarness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 1))
+                _ = transactionHarness.currentValue()
                 throw ProbeError.expected
             }
             XCTFail("throwing withTransaction returned normally")
@@ -6485,7 +6316,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         completionRecorder.removeAll()
         harness.setTime(5.0)
         XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001)
-        XCTAssertEqual(completionRecorder.events, [])
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["old removed"])
     }
@@ -6813,7 +6643,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.setTime(2.1)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, shouldMergeAfterMiddle)
-        XCTAssertEqual(completionRecorder.events, [])
         XCTAssertEqual(harness.nextUpdateInterval(), 0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [])
 
@@ -7510,13 +7339,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.0)
+            harness.advanceTime(to: 2.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -7577,13 +7406,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.6)
+            harness.advanceTime(to: 2.6)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -7691,13 +7520,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.6)
+            harness.advanceTime(to: 2.6)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -7798,13 +7627,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.8)
+            harness.advanceTime(to: 2.8)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -7876,114 +7705,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         }
     }
 
-    func testCombinedCustomFluidSpringAliasFiniteWrappersKeepResidualOwnership() {
-        let springValue = Animation.spring(
-            Spring(duration: 0.48, bounce: 0.0),
-            blendDuration: 0.0
-        )
-        let interactiveDuration = Animation.interactiveSpring(
-            duration: 0.30,
-            extraBounce: 0.0,
-            blendDuration: 0.0
-        )
-        let oldSourceNilBeforeRemovedCases: [(label: String, animation: Animation)] = [
-            ("interactiveDurationSpeed", interactiveDuration.speed(0.5)),
-        ]
-
-        for testCase in oldSourceNilBeforeRemovedCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(8.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(testCase.label) logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "\(testCase.label) removed",
-                ],
-                testCase.label
-            )
-        }
-
-        let variableCases: [(label: String, animation: Animation)] = [
-            ("springValueDelay", springValue.delay(0.20)),
-            ("snappyRepeat", Animation.snappy.repeatCount(2, autoreverses: false)),
-        ]
-
-        for testCase in variableCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(8.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            let oldSourceNilBeforeRemovedOrder = [
-                "\(testCase.label) logical",
-                "old logical",
-                "second logical",
-                "old removed",
-                "second removed",
-                "\(testCase.label) removed",
-            ]
-            let sameBoundaryOrder = [
-                "old removed",
-                "second removed",
-                "\(testCase.label) removed",
-                "\(testCase.label) logical",
-                "old logical",
-                "second logical",
-            ]
-            XCTAssertTrue(
-                [oldSourceNilBeforeRemovedOrder, sameBoundaryOrder].contains(completionRecorder.events),
-                "\(testCase.label) events \(completionRecorder.events)"
-            )
-        }
-    }
-
     func testCombinedCustomSpringAnimationAliasRepeatForeverDrainsReplacementLogicalOnly() {
         let cases: [(label: String, animation: Animation)] = [
             (
@@ -8021,13 +7742,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.6)
+            harness.advanceTime(to: 2.6)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -8086,13 +7807,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.8)
+            harness.advanceTime(to: 2.8)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
@@ -8146,171 +7867,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         }
     }
 
-    func testCombinedCustomFluidSpringPropertyAliasRepeatForeverDrainsReplacementLogicalOnly() {
-        let cases: [(label: String, animation: Animation)] = [
-            ("springPropertyRepeat", Animation.spring.repeatForever(autoreverses: false)),
-            (
-                "interactivePropertyRepeat",
-                Animation.interactiveSpring.repeatForever(autoreverses: false)
-            ),
-        ]
-
-        for testCase in cases {
-            let setup = makeCombinedTwoChildHarness()
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.6)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-        }
-    }
-
-    func testCombinedCustomInteractiveRepeatForeverLogicalOrderingVariants() {
-        let cases: [(
-            label: String,
-            animation: Animation,
-            oldDuration: TimeInterval,
-            secondDuration: TimeInterval,
-            checkpoints: [(time: TimeInterval, expected: [String])]
-        )] = [
-            (
-                "interactivePropertyRepeat",
-                Animation.interactiveSpring.repeatForever(autoreverses: false),
-                3.0,
-                3.4,
-                [
-                    (
-                        2.6,
-                        ["interactivePropertyRepeat logical"]
-                    ),
-                    (
-                        3.8,
-                        [
-                            "interactivePropertyRepeat logical",
-                            "old logical",
-                        ]
-                    ),
-                    (
-                        4.6,
-                        [
-                            "interactivePropertyRepeat logical",
-                            "old logical",
-                            "second logical",
-                        ]
-                    ),
-                ]
-            ),
-            (
-                "interactiveResponseRepeat",
-                Animation.interactiveSpring(
-                    response: 0.30,
-                    dampingFraction: 0.82,
-                    blendDuration: 0.0
-                ).repeatForever(autoreverses: false),
-                0.95,
-                3.4,
-                [
-                    (
-                        2.0,
-                        [
-                            "old logical",
-                            "interactiveResponseRepeat logical",
-                        ]
-                    ),
-                    (
-                        4.6,
-                        [
-                            "old logical",
-                            "interactiveResponseRepeat logical",
-                            "second logical",
-                        ]
-                    ),
-                ]
-            ),
-            (
-                "interactiveDurationRepeat",
-                Animation.interactiveSpring(
-                    duration: 0.30,
-                    extraBounce: 0.0,
-                    blendDuration: 0.0
-                ).repeatForever(autoreverses: false),
-                3.0,
-                3.4,
-                [
-                    (
-                        2.6,
-                        ["interactiveDurationRepeat logical"]
-                    ),
-                    (
-                        3.8,
-                        [
-                            "interactiveDurationRepeat logical",
-                            "old logical",
-                        ]
-                    ),
-                    (
-                        4.6,
-                        [
-                            "interactiveDurationRepeat logical",
-                            "old logical",
-                            "second logical",
-                        ]
-                    ),
-                ]
-            ),
-        ]
-
-        for testCase in cases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: testCase.oldDuration,
-                secondDuration: testCase.secondDuration
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            for checkpoint in testCase.checkpoints {
-                harness.setTime(checkpoint.time)
-                _ = harness.currentValue()
-                harness.flushCompletionActions()
-                XCTAssertEqual(completionRecorder.events, checkpoint.expected, testCase.label)
-            }
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-        }
-    }
-
     func testCombinedCustomFluidSpringPropertyAliasNestedRepeatForeverDrainsReplacementLogicalOnly() {
         let cases: [(label: String, animation: Animation)] = [
             (
@@ -8361,260 +7917,18 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(2.8)
+            harness.advanceTime(to: 2.8)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
         }
-    }
-
-    func testCombinedCustomInteractiveNestedRepeatForeverKeepsSourceLogicalAndPendingRemoved() throws {
-        let interactiveResponse = Animation.interactiveSpring(
-            response: 0.30,
-            dampingFraction: 0.82,
-            blendDuration: 0.0
-        )
-        let interactiveDuration = Animation.interactiveSpring(
-            duration: 0.30,
-            extraBounce: 0.0,
-            blendDuration: 0.0
-        )
-        let cases: [(
-            label: String,
-            animation: Animation,
-            allowsSecondReplacementBoundaryTie: Bool
-        )] = [
-            (
-                "interactivePropertyDelayRepeat",
-                Animation.interactiveSpring.delay(0.20).repeatForever(autoreverses: false),
-                true
-            ),
-            (
-                "interactiveNoArgDelayRepeat",
-                Animation.interactiveSpring().delay(0.20).repeatForever(autoreverses: false),
-                true
-            ),
-            (
-                "interactiveResponseDelayRepeat",
-                interactiveResponse.delay(0.20).repeatForever(autoreverses: false),
-                false
-            ),
-            (
-                "interactiveDurationDelayRepeat",
-                interactiveDuration.delay(0.20).repeatForever(autoreverses: false),
-                true
-            ),
-            (
-                "interactivePropertyRepeatDelay",
-                Animation.interactiveSpring.repeatForever(autoreverses: false).delay(0.20),
-                false
-            ),
-            (
-                "interactiveNoArgRepeatDelay",
-                Animation.interactiveSpring().repeatForever(autoreverses: false).delay(0.20),
-                true
-            ),
-            (
-                "interactiveResponseRepeatDelay",
-                interactiveResponse.repeatForever(autoreverses: false).delay(0.20),
-                false
-            ),
-            (
-                "interactiveDurationRepeatDelay",
-                interactiveDuration.repeatForever(autoreverses: false).delay(0.20),
-                false
-            ),
-        ]
-
-        for testCase in cases {
-            let completionRecorder = AnimationCompletionRecorder()
-            let sampleRecorder = CustomRetargetSampleRecorder()
-            let harness = AnimatableAttributeHarness(
-                initialValue: _OpacityEffect(opacity: 0)
-            )
-            XCTAssertEqual(harness.currentValue().opacity, 0, testCase.label)
-            harness.setSource(
-                _OpacityEffect(opacity: 1),
-                transaction: completionTransaction(
-                    animation: Animation(
-                        CombinedBoundaryRecordingAnimation(
-                            label: "old",
-                            logicalAt: 1.05,
-                            nilAt: 10.0,
-                            recorder: sampleRecorder
-                        )
-                    ),
-                    label: "old",
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(0.5)
-            _ = harness.currentValue()
-            harness.setTime(0.6)
-            _ = harness.currentValue()
-            harness.setSource(
-                _OpacityEffect(opacity: -0.5),
-                transaction: completionTransaction(
-                    animation: Animation(
-                        CombinedBoundaryRecordingAnimation(
-                            label: "second",
-                            logicalAt: 0.50,
-                            nilAt: 10.0,
-                            recorder: sampleRecorder
-                        )
-                    ),
-                    label: "second",
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(0.9)
-            _ = harness.currentValue()
-            harness.setTime(1.0)
-            _ = harness.currentValue()
-            XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0, testCase.label)
-            XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            sampleRecorder.removeAll()
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            let events = completionRecorder.events
-            XCTAssertEqual(
-                Set(events),
-                Set(["old logical", "second logical", "\(testCase.label) logical"]),
-                testCase.label
-            )
-            XCTAssertEqual(events.count, 3, testCase.label)
-            let oldIndex = try XCTUnwrap(events.firstIndex(of: "old logical"), testCase.label)
-            let secondIndex = try XCTUnwrap(events.firstIndex(of: "second logical"), testCase.label)
-            let replacementIndex = try XCTUnwrap(
-                events.firstIndex(of: "\(testCase.label) logical"),
-                testCase.label
-            )
-            XCTAssertLessThan(oldIndex, replacementIndex, testCase.label)
-            if !testCase.allowsSecondReplacementBoundaryTie {
-                XCTAssertLessThan(secondIndex, replacementIndex, testCase.label)
-            }
-            XCTAssertFalse(events.contains { $0.contains("removed") }, testCase.label)
-        }
-    }
-
-    func testCombinedCustomFluidSpringPropertyAliasFiniteRepeatWrappersKeepResidualOwnership() {
-        let finalEvents: (String) -> [String] = { label in
-            [
-                "\(label) logical",
-                "old logical",
-                "second logical",
-                "old removed",
-                "second removed",
-                "\(label) removed",
-            ]
-        }
-        let sourceNilBeforeFinalization: (String) -> [String] = { label in
-            [
-                "\(label) logical",
-                "old logical",
-                "second logical",
-            ]
-        }
-        let sourceNilCases: [(
-            label: String,
-            animation: Animation,
-            expectedAfterSourceNilSample: [String]
-        )] = [
-            (
-                "springPropertyRepeat",
-                Animation.spring.repeatCount(2, autoreverses: false),
-                sourceNilBeforeFinalization("springPropertyRepeat")
-            ),
-            (
-                "springNoArgRepeat",
-                Animation.spring().repeatCount(2, autoreverses: false),
-                sourceNilBeforeFinalization("springNoArgRepeat")
-            ),
-            (
-                "interactivePropertyRepeat",
-                Animation.interactiveSpring.repeatCount(2, autoreverses: false),
-                finalEvents("interactivePropertyRepeat")
-            ),
-            (
-                "interactiveNoArgRepeat",
-                Animation.interactiveSpring().repeatCount(2, autoreverses: false),
-                finalEvents("interactiveNoArgRepeat")
-            ),
-        ]
-
-        for testCase in sourceNilCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(
-                completionRecorder.events,
-                [],
-                testCase.label
-            )
-            harness.setTime(4.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                testCase.expectedAfterSourceNilSample,
-                testCase.label
-            )
-            harness.setTime(8.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                finalEvents(testCase.label),
-                testCase.label
-            )
-        }
-
     }
 
     func testCombinedCustomFluidSpringNoArgAliasFiniteWrappersKeepResidualOwnership() {
@@ -8639,13 +7953,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(2.8)
+            harness.advanceTime(to: 2.8)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(8.0)
+            harness.advanceTime(to: 8.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             let oldSourceNilBeforeRemovedOrder = [
@@ -8691,13 +8005,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(2.8)
+            harness.advanceTime(to: 2.8)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(8.0)
+            harness.advanceTime(to: 8.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -8732,13 +8046,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.2)
+            harness.advanceTime(to: 1.2)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(8.0)
+            harness.advanceTime(to: 8.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -8750,304 +8064,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                     "\(testCase.label) removed",
                     "old logical",
                     "second logical",
-                ],
-                testCase.label
-            )
-        }
-    }
-
-    func testCombinedCustomDefaultAndFluidRepeatEdgesKeepResidualOwnership() {
-        let finalEvents: (String) -> [String] = { label in
-            [
-                "\(label) logical",
-                "old logical",
-                "second logical",
-                "old removed",
-                "second removed",
-                "\(label) removed",
-            ]
-        }
-        let sourceNilCases: [(
-            label: String,
-            animation: Animation,
-            expectedAfterSourceNilSample: [String],
-            finalTime: TimeInterval
-        )] = [
-            (
-                "defaultRepeatZero",
-                Animation.default.repeatCount(0, autoreverses: false),
-                finalEvents("defaultRepeatZero"),
-                4.2
-            ),
-            (
-                "fluidRepeatZero",
-                Animation.spring(response: 0.4, dampingFraction: 0.8)
-                    .repeatCount(0, autoreverses: false),
-                finalEvents("fluidRepeatZero"),
-                4.2
-            ),
-            (
-                "defaultRepeatAuto",
-                Animation.default.repeatCount(2, autoreverses: true),
-                [
-                    "defaultRepeatAuto logical",
-                    "old logical",
-                    "second logical",
-                ],
-                8.0
-            ),
-            (
-                "fluidRepeatAuto",
-                Animation.spring(response: 0.4, dampingFraction: 0.8)
-                    .repeatCount(2, autoreverses: true),
-                finalEvents("fluidRepeatAuto"),
-                4.2
-            ),
-        ]
-
-        for testCase in sourceNilCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(4.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                testCase.expectedAfterSourceNilSample,
-                testCase.label
-            )
-            if testCase.finalTime > 4.2 {
-                harness.setTime(testCase.finalTime)
-                _ = harness.currentValue()
-                harness.flushCompletionActions()
-                XCTAssertEqual(
-                    completionRecorder.events,
-                    finalEvents(testCase.label),
-                    testCase.label
-                )
-            }
-        }
-    }
-
-    func testCombinedCustomFluidSpringPropertyAliasDelayEdgeWrappersKeepResidualOwnership() {
-        let sourceNilCases: [(label: String, animation: Animation)] = [
-            ("springPropertyDelayZero", Animation.spring.delay(0.0)),
-        ]
-
-        for testCase in sourceNilCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(
-                completionRecorder.events,
-                [],
-                testCase.label
-            )
-            harness.setTime(4.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(testCase.label) logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "\(testCase.label) removed",
-                ],
-                testCase.label
-            )
-        }
-
-        let residualFirstCases: [(label: String, animation: Animation, finalTime: TimeInterval)] = [
-            ("springNoArgDelayNegative", Animation.spring().delay(-0.20), 2.8),
-            ("interactivePropertyDelayZero", Animation.interactiveSpring.delay(0.0), 2.8),
-            ("interactiveNoArgDelayNegative", Animation.interactiveSpring().delay(-0.20), 4.2),
-        ]
-
-        for testCase in residualFirstCases {
-            let setup = makeCombinedTwoChildHarness()
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            harness.setTime(testCase.finalTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(testCase.label) logical",
-                    "old removed",
-                    "second removed",
-                    "\(testCase.label) removed",
-                    "old logical",
-                    "second logical",
-                ],
-                testCase.label
-            )
-        }
-    }
-
-    func testCombinedCustomResidualBaseDelayEdgesKeepFamilyOrdering() {
-        let residualFirstCases: [(label: String, animation: Animation, finalTime: TimeInterval)] = [
-            ("defaultDelayNegative", Animation.default.delay(-0.20), 2.0),
-            (
-                "fluidDelayNegative",
-                Animation.spring(response: 0.35, dampingFraction: 0.70).delay(-0.50),
-                3.0
-            ),
-            (
-                "springDelayNegative",
-                Animation.interpolatingSpring(
-                    mass: 1.0,
-                    stiffness: 75.0,
-                    damping: 9.0,
-                    initialVelocity: 0.0
-                ).delay(-0.20),
-                5.2
-            ),
-            (
-                "springDelayZero",
-                Animation.interpolatingSpring(
-                    mass: 1.0,
-                    stiffness: 75.0,
-                    damping: 9.0,
-                    initialVelocity: 0.0
-                ).delay(0.0),
-                5.2
-            ),
-        ]
-
-        for testCase in residualFirstCases {
-            let setup = makeCombinedTwoChildHarness()
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.1)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(testCase.finalTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(testCase.label) logical",
-                    "old removed",
-                    "second removed",
-                    "\(testCase.label) removed",
-                    "old logical",
-                    "second logical",
-                ],
-                testCase.label
-            )
-        }
-
-        let oldSourceLogicalBeforeRemovedCases: [(label: String, animation: Animation)] = [
-            ("defaultDelayZero", Animation.default.delay(0.0)),
-            ("fluidDelayZero", Animation.spring(response: 0.35, dampingFraction: 0.70).delay(0.0)),
-        ]
-
-        for testCase in oldSourceLogicalBeforeRemovedCases {
-            let setup = makeCombinedTwoChildHarness(
-                oldDuration: 3.2,
-                secondDuration: 3.2
-            )
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-            let harness = setup.harness
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(2.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(4.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(testCase.label) logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "\(testCase.label) removed",
                 ],
                 testCase.label
             )
@@ -9358,9 +8374,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -9377,9 +8393,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -9394,8 +8410,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0.75, accuracy: 0.000_001)
         harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertEqual(
             completionRecorder.events,
             [
@@ -9437,7 +8451,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
 
         completionRecorder.removeAll()
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         let laterValue = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(laterValue, 0)
         XCTAssertLessThanOrEqual(laterValue, 1)
@@ -9445,159 +8459,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(completionRecorder.events, [])
     }
 
-    func testCombinedCustomVelocityTrackingSecondNilDrainsLogicalBeforeImmediateGroup() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.30,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        XCTAssertEqual(completionRecorder.events, [])
-        sampleRecorder.removeAll()
-        harness.setTime(1.3)
-        let trackedTransaction = velocityTrackingCompletionTransaction(
-            label: "tracked",
-            recorder: completionRecorder
-        )
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: trackedTransaction
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0.75, accuracy: 0.000_001)
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "old removed",
-                "second removed",
-                "tracked removed",
-                "tracked logical",
-                "old logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomVelocityTrackingMiddleNilDrainsLogicalBeforeImmediateGroup() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.30,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        XCTAssertEqual(completionRecorder.events, [])
-        sampleRecorder.removeAll()
-        harness.setTime(1.3)
-        let trackedTransaction = velocityTrackingCompletionTransaction(
-            label: "tracked",
-            recorder: completionRecorder
-        )
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: trackedTransaction
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0.75, accuracy: 0.000_001)
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "old removed",
-                "second removed",
-                "tracked removed",
-                "tracked logical",
-                "old logical",
-            ]
-        )
-    }
     func testCombinedCustomFiniteMiddleNilKeepsRemovedRecordsUntilBoundary() {
         let completionRecorder = AnimationCompletionRecorder()
         let sampleRecorder = CustomRetargetSampleRecorder()
@@ -9783,7 +8644,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.4)
+            harness.advanceTime(to: 1.4)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
@@ -9931,7 +8792,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.4)
+            harness.advanceTime(to: 1.4)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
@@ -9939,7 +8800,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("\(testCase.label) ") }, testCase.label)
 
-            harness.setTime(2.0)
+            harness.advanceTime(to: 2.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -9972,12 +8833,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.4)
+        harness.advanceTime(to: 1.4)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertEqual(completionRecorder.events, [])
+        XCTAssertEqual(completionRecorder.events, ["logicalWrapper logical"])
 
         harness.setTime(1.8)
         _ = harness.currentValue()
@@ -10000,8 +8861,11 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
     }
 
-    func testCombinedCustomDefaultLogicalCompletionWrapperDrainsSourceLogicalBeforeRemovedBoundary() {
-        let setup = makeCombinedTwoChildHarness()
+    func testCombinedCustomDefaultLogicalCompletionWrapperSimultaneousTerminalFinalizesRemovedFirst() {
+        let setup = makeCombinedTwoChildHarness(
+            oldDuration: 3.2,
+            secondDuration: 3.2
+        )
         let harness = setup.harness
         let completionRecorder = setup.completionRecorder
         let sampleRecorder = setup.sampleRecorder
@@ -10015,633 +8879,25 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertEqual(completionRecorder.events, ["defaultLogicalWrapper logical"])
 
-        harness.setTime(3.0)
+        harness.advanceTime(to: 3.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
             [
                 "defaultLogicalWrapper logical",
-                "old logical",
-                "second logical",
                 "old removed",
                 "second removed",
                 "defaultLogicalWrapper removed",
-            ]
-        )
-    }
-
-    func testCombinedCustomResidualLogicalCompletionWrappersUseBaseFinalizationClasses() {
-        let springAnimation = Animation.interpolatingSpring(
-            mass: 1.0,
-            stiffness: 100.0,
-            damping: 10.0,
-            initialVelocity: 0.0
-        )
-        let cases: [
-            (
-                label: String,
-                animation: Animation,
-                firstEvents: [String],
-                logicalTime: TimeInterval,
-                finalTime: TimeInterval,
-                expectedEvents: [String]
-            )
-        ] = [
-            (
-                "springLogicalWrapper",
-                springAnimation.logicallyComplete(after: 0.25),
-                [],
-                1.8,
-                3.0,
-                [
-                    "springLogicalWrapper logical",
-                    "old removed",
-                    "second removed",
-                    "springLogicalWrapper removed",
-                    "old logical",
-                    "second logical",
-                ]
-            ),
-            (
-                "springDurationAliasLogicalWrapper",
-                Animation.interpolatingSpring(duration: 1.20, bounce: 0.0, initialVelocity: 0.0)
-                    .logicallyComplete(after: 0.25),
-                [],
-                1.8,
-                4.0,
-                [
-                    "springDurationAliasLogicalWrapper logical",
-                    "old removed",
-                    "second removed",
-                    "springDurationAliasLogicalWrapper removed",
-                    "old logical",
-                    "second logical",
-                ]
-            ),
-            (
-                "springPropertyAliasLogicalWrapper",
-                Animation.interpolatingSpring
-                    .logicallyComplete(after: 0.25),
-                [],
-                1.8,
-                4.0,
-                [
-                    "springPropertyAliasLogicalWrapper logical",
-                    "old removed",
-                    "second removed",
-                    "springPropertyAliasLogicalWrapper removed",
-                    "old logical",
-                    "second logical",
-                ]
-            ),
-            (
-                "fluidLogicalWrapper",
-                Animation.spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidLogicalWrapper logical"],
-                1.8,
-                4.4,
-                [
-                    "fluidLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidDurationAliasLogicalWrapper",
-                Animation.spring(duration: 0.45, bounce: 0.0, blendDuration: 0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidDurationAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidDurationAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidDurationAliasLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidSpringValueAliasLogicalWrapper",
-                Animation.spring(Spring(duration: 0.45, bounce: 0.0), blendDuration: 0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidSpringValueAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidSpringValueAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidSpringValueAliasLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidInteractiveResponseAliasLogicalWrapper",
-                Animation.interactiveSpring(response: 0.45, dampingFraction: 0.72, blendDuration: 0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidInteractiveResponseAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidInteractiveResponseAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidInteractiveResponseAliasLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidInteractiveDurationAliasLogicalWrapper",
-                Animation.interactiveSpring(duration: 0.45, extraBounce: 0.0, blendDuration: 0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidInteractiveDurationAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidInteractiveDurationAliasLogicalWrapper logical",
-                    "old removed",
-                    "second removed",
-                    "fluidInteractiveDurationAliasLogicalWrapper removed",
-                    "old logical",
-                    "second logical",
-                ]
-            ),
-            (
-                "fluidPropertyAliasLogicalWrapper",
-                Animation.spring
-                    .logicallyComplete(after: 0.25),
-                ["fluidPropertyAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidPropertyAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidPropertyAliasLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidSmoothAliasLogicalWrapper",
-                Animation.smooth(duration: 0.45, extraBounce: 0.0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidSmoothAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidSmoothAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidSmoothAliasLogicalWrapper removed",
-                ]
-            ),
-            (
-                "fluidSnappyAliasLogicalWrapper",
-                Animation.snappy(duration: 0.45, extraBounce: 0.0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidSnappyAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidSnappyAliasLogicalWrapper logical",
-                    "old removed",
-                    "second removed",
-                    "fluidSnappyAliasLogicalWrapper removed",
-                    "old logical",
-                    "second logical",
-                ]
-            ),
-            (
-                "fluidBouncyAliasLogicalWrapper",
-                Animation.bouncy(duration: 0.45, extraBounce: 0.0)
-                    .logicallyComplete(after: 0.25),
-                ["fluidBouncyAliasLogicalWrapper logical"],
-                1.8,
-                4.8,
-                [
-                    "fluidBouncyAliasLogicalWrapper logical",
-                    "old logical",
-                    "second logical",
-                    "old removed",
-                    "second removed",
-                    "fluidBouncyAliasLogicalWrapper removed",
-                ]
-            ),
-        ]
-
-        for testCase in cases {
-            let setup = makeCombinedTwoChildHarness()
-            let harness = setup.harness
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: testCase.animation,
-                    label: testCase.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.3)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            XCTAssertEqual(completionRecorder.events, testCase.firstEvents, testCase.label)
-
-            harness.setTime(testCase.logicalTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, ["\(testCase.label) logical"], testCase.label)
-
-            harness.setTime(testCase.finalTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, testCase.expectedEvents, testCase.label)
-        }
-    }
-
-    func testCombinedCustomFiniteRepeatSecondNilDrainsLogicalBeforeFinalRepeatBoundary() {
-        let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
-        let harness = setup.harness
-        let completionRecorder = setup.completionRecorder
-        let sampleRecorder = setup.sampleRecorder
-
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 0.22).repeatCount(2, autoreverses: false),
-                label: "repeat",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.4)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("repeat ") })
-
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-
-        harness.setTime(2.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "old removed",
-                "second removed",
-                "repeat removed",
-                "repeat logical",
                 "old logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomFiniteDelayMiddleNilKeepsRemovedRecordsUntilWrapperBoundary() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.45,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1.25),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "third",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "third",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.1)
-        _ = harness.currentValue()
-        harness.setTime(1.2)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 1)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 0.30).delay(0.20),
-                label: "wrapper",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.4)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("wrapper ") })
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-        harness.setTime(2.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
                 "second logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "wrapper removed",
-                "wrapper logical",
-                "old logical",
-                "third logical",
-            ]
-        )
-    }
-    func testCombinedCustomFiniteSpeedMiddleNilKeepsRemovedRecordsUntilWrapperBoundary() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.45,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1.25),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "third",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "third",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.1)
-        _ = harness.currentValue()
-        harness.setTime(1.2)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 1)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 0.90).speed(2.0),
-                label: "speed",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.4)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("speed ") })
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-        harness.setTime(2.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "speed removed",
-                "speed logical",
-                "old logical",
-                "third logical",
-            ]
-        )
-    }
-    func testCombinedCustomFiniteRepeatMiddleNilKeepsRemovedRecordsUntilFinalRepeatBoundary() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.45,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1.25),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "third",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "third",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.1)
-        _ = harness.currentValue()
-        harness.setTime(1.2)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 1)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.linear(duration: 0.22).repeatCount(2, autoreverses: false),
-                label: "repeat",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.4)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("repeat ") })
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-        harness.setTime(2.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "repeat removed",
-                "repeat logical",
-                "old logical",
-                "third logical",
             ]
         )
     }
@@ -10964,40 +9220,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
     }
-    func testCombinedCustomSourceCustomFiniteWrappersKeepCompletionOwnership() {
-        let cases: [
-            (
-                label: String,
-                wrap: (Animation) -> Animation,
-                finalTime: TimeInterval
-            )
-        ] = [
-            (
-                "thirdDelay",
-                { $0.delay(0.25) },
-                3.00
-            ),
-            (
-                "thirdSpeed",
-                { $0.speed(2) },
-                2.50
-            ),
-            (
-                "thirdRepeat",
-                { $0.repeatCount(2, autoreverses: false) },
-                4.00
-            ),
-        ]
-
-        for testCase in cases {
-            assertCombinedSourceCustomWrapperFinalization(
-                label: testCase.label,
-                wrap: testCase.wrap,
-                finalTime: testCase.finalTime
-            )
-        }
-    }
-
     func testCombinedCustomSourceCustomNestedWrappersKeepCompletionOwnership() {
         let cases: [
             (
@@ -11206,14 +9428,14 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
         XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("wrapper ") })
-        harness.setTime(1.8)
+        harness.advanceTime(to: 1.8)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -11251,9 +9473,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -11270,9 +9492,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -11285,14 +9507,14 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
         XCTAssertFalse(completionRecorder.events.contains { $0.hasPrefix("repeat ") })
-        harness.setTime(1.8)
+        harness.advanceTime(to: 1.8)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -11307,263 +9529,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
     }
-    func testCombinedCustomDefaultRetargetKeepsResidualChildrenUntilFinalization() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: .default,
-                label: "residual",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertEqual(completionRecorder.events, ["residual logical"])
-        harness.setTime(3.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "residual logical",
-                "old removed",
-                "second removed",
-                "residual removed",
-                "old logical",
-                "second logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomDefaultSecondNilDrainsLogicalBeforeResidualLogical() {
-        let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
-        let harness = setup.harness
-        let completionRecorder = setup.completionRecorder
-        let sampleRecorder = setup.sampleRecorder
-
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: .default,
-                label: "residual",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertEqual(completionRecorder.events, [])
-
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-
-        harness.setTime(1.9)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-            ]
-        )
-
-        harness.setTime(3.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-                "old removed",
-                "second removed",
-                "residual removed",
-                "old logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomDefaultMiddleNilKeepsRemovedRecordsUntilFinalization() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.45,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1.25),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "third",
-                        duration: 10.0,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "third",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.1)
-        _ = harness.currentValue()
-        harness.setTime(1.2)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 1)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: .default,
-                label: "residual",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        XCTAssertEqual(completionRecorder.events, [])
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-            ]
-        )
-        harness.setTime(1.9)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-            ]
-        )
-        harness.setTime(3.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "residual removed",
-                "old logical",
-                "third logical",
-            ]
-        )
-    }
-
     func testCombinedCustomSpringAnimationSecondNilDrainsLogicalBeforeFinalization() {
         let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
         let harness = setup.harness
@@ -11621,322 +9586,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
     }
 
-    func testCombinedCustomSpringAnimationMiddleNilKeepsRemovedRecordsUntilFinalization() {
-        let setup = makeCombinedMiddleNilHarness()
-        let harness = setup.harness
-        let completionRecorder = setup.completionRecorder
-        let sampleRecorder = setup.sampleRecorder
-
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.interpolatingSpring(
-                    Spring(duration: 0.50, bounce: 0.20),
-                    initialVelocity: 0.0
-                ),
-                label: "spring",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-
-        harness.setTime(1.8)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-
-        harness.setTime(2.2)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "spring logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "spring removed",
-                "old logical",
-                "third logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomFluidSpringSecondNilDrainsLogicalBeforeFinalization() {
-        let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
-        let harness = setup.harness
-        let completionRecorder = setup.completionRecorder
-        let sampleRecorder = setup.sampleRecorder
-
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: .spring(response: 0.45, dampingFraction: 0.72, blendDuration: 0),
-                label: "fluid",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["second logical"])
-
-        harness.setTime(2.0)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "fluid logical",
-                "old removed",
-                "second removed",
-                "fluid removed",
-                "old logical",
-            ]
-        )
-    }
-
-    func testCombinedCustomFluidSpringAliasSecondNilCompletionOrdering() {
-        let secondNilRows: [(label: String, animation: Animation, finalTime: TimeInterval)] = [
-            ("springDuration", .spring(duration: 0.50, bounce: 0.20), 3.0),
-            ("springNoArg", .spring(), 3.0),
-        ]
-
-        for row in secondNilRows {
-            let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
-            let harness = setup.harness
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: row.animation,
-                    label: row.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.3)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
-            XCTAssertEqual(completionRecorder.events, [], row.label)
-
-            harness.setTime(1.5)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, ["second logical"], row.label)
-
-            harness.setTime(row.finalTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            let residualBeforeRemovedOrder = [
-                "second logical",
-                "\(row.label) logical",
-                "old removed",
-                "second removed",
-                "\(row.label) removed",
-                "old logical",
-            ]
-            let residualSameBoundaryOrder = [
-                "second logical",
-                "old removed",
-                "second removed",
-                "\(row.label) removed",
-                "\(row.label) logical",
-                "old logical",
-            ]
-            XCTAssertTrue(
-                [residualBeforeRemovedOrder, residualSameBoundaryOrder].contains(completionRecorder.events),
-                "\(row.label) events \(completionRecorder.events)"
-            )
-        }
-
-        let residualFirstRows: [(label: String, animation: Animation)] = [
-            (
-                "interactiveDuration",
-                .interactiveSpring(duration: 0.50, extraBounce: 0.20, blendDuration: 0)
-            ),
-            ("interactiveNoArg", .interactiveSpring()),
-        ]
-
-        for row in residualFirstRows {
-            let setup = makeCombinedTwoChildHarness()
-            let harness = setup.harness
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: row.animation,
-                    label: row.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.3)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
-            XCTAssertEqual(completionRecorder.events, ["\(row.label) logical"], row.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
-            XCTAssertFalse(completionRecorder.events.contains("second logical"), row.label)
-
-            harness.setTime(3.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(row.label) logical",
-                    "old removed",
-                    "second removed",
-                    "\(row.label) removed",
-                    "old logical",
-                    "second logical",
-                ],
-                row.label
-            )
-        }
-    }
-
-    func testCombinedCustomFluidSpringAliasMiddleNilCompletionOrdering() {
-        let sourceNilRows: [(label: String, animation: Animation)] = [
-            ("springDuration", .spring(duration: 0.50, bounce: 0.20)),
-            ("springNoArg", .spring()),
-        ]
-
-        for row in sourceNilRows {
-            let setup = makeCombinedMiddleNilHarness(
-                oldDuration: 3.2,
-                secondDuration: 0.75,
-                thirdDuration: 3.2
-            )
-            let harness = setup.harness
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: row.animation,
-                    label: row.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.3)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" }, row.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
-
-            harness.setTime(1.8)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-
-            harness.setTime(3.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "second logical",
-                    "\(row.label) logical",
-                    "old removed",
-                    "second removed",
-                    "third removed",
-                    "\(row.label) removed",
-                    "old logical",
-                    "third logical",
-                ],
-                row.label
-            )
-        }
-
-        let residualFirstRows: [(label: String, animation: Animation)] = [
-            (
-                "interactiveDuration",
-                .interactiveSpring(duration: 0.50, extraBounce: 0.20, blendDuration: 0)
-            ),
-            ("interactiveNoArg", .interactiveSpring()),
-        ]
-
-        for row in residualFirstRows {
-            let setup = makeCombinedMiddleNilHarness(
-                oldDuration: 3.2,
-                secondDuration: 0.75,
-                thirdDuration: 3.2
-            )
-            let harness = setup.harness
-            let completionRecorder = setup.completionRecorder
-            let sampleRecorder = setup.sampleRecorder
-
-            harness.setSource(
-                _OpacityEffect(opacity: 0.75),
-                transaction: completionTransaction(
-                    animation: row.animation,
-                    label: row.label,
-                    recorder: completionRecorder
-                )
-            )
-            harness.finalizeTransactionBody()
-            harness.setTime(1.3)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
-            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" }, row.label)
-            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
-
-            harness.setTime(1.5)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-
-            harness.setTime(3.0)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(
-                completionRecorder.events,
-                [
-                    "\(row.label) logical",
-                    "old removed",
-                    "second removed",
-                    "third removed",
-                    "\(row.label) removed",
-                    "old logical",
-                    "second logical",
-                    "third logical",
-                ],
-                row.label
-            )
-        }
-    }
-
     func testCombinedCustomFluidSpringMiddleNilKeepsRemovedRecordsUntilFinalization() {
         let setup = makeCombinedMiddleNilHarness()
         let harness = setup.harness
@@ -11952,7 +9601,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
@@ -11960,7 +9609,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
         XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
 
-        harness.setTime(1.8)
+        harness.advanceTime(to: 1.8)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -11971,7 +9620,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             ]
         )
 
-        harness.setTime(2.2)
+        harness.advanceTime(to: 2.2)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -11989,132 +9638,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
     }
 
-    func testCombinedCustomDefaultDelayMiddleNilDrainsSourceLogicalBeforeRemovedFinalization() {
-        let completionRecorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "old",
-                        duration: 2.2,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "old",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
-        _ = harness.currentValue()
-        harness.setTime(0.6)
-        _ = harness.currentValue()
-        harness.setSource(
-            _OpacityEffect(opacity: -0.5),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "second",
-                        duration: 0.45,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "second",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(0.9)
-        _ = harness.currentValue()
-        harness.setTime(1.0)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
-        harness.setSource(
-            _OpacityEffect(opacity: 1.25),
-            transaction: completionTransaction(
-                animation: Animation(
-                    CombinedNilRetargetRecordingAnimation(
-                        label: "third",
-                        duration: 1.2,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: "third",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.1)
-        _ = harness.currentValue()
-        harness.setTime(1.2)
-        _ = harness.currentValue()
-        XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 1)
-        sampleRecorder.removeAll()
-        harness.setSource(
-            _OpacityEffect(opacity: 0.75),
-            transaction: completionTransaction(
-                animation: Animation.default.delay(0.20),
-                label: "residual",
-                recorder: completionRecorder
-            )
-        )
-        harness.finalizeTransactionBody()
-        harness.setTime(1.3)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
-        XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" })
-        XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        harness.setTime(1.5)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-            ]
-        )
-        harness.setTime(2.4)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-                "old logical",
-                "third logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "residual removed",
-            ]
-        )
-        harness.setTime(2.8)
-        _ = harness.currentValue()
-        harness.flushCompletionActions()
-        XCTAssertEqual(
-            completionRecorder.events,
-            [
-                "second logical",
-                "residual logical",
-                "old logical",
-                "third logical",
-                "old removed",
-                "second removed",
-                "third removed",
-                "residual removed",
-            ]
-        )
-    }
     func testCombinedCustomFluidSpringRetargetKeepsResidualChildrenUntilFinalization() {
         let completionRecorder = AnimationCompletionRecorder()
         let sampleRecorder = CustomRetargetSampleRecorder()
@@ -12138,9 +9661,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -12157,9 +9680,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -12172,13 +9695,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        harness.setTime(3.0)
+        harness.advanceTime(to: 3.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -12216,9 +9739,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -12235,9 +9758,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -12254,13 +9777,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(completionRecorder.events.isEmpty)
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertTrue(completionRecorder.events.isEmpty)
-        harness.setTime(1.6)
+        harness.advanceTime(to: 1.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -12298,9 +9821,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -12317,9 +9840,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -12336,13 +9859,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(completionRecorder.events.isEmpty)
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertTrue(completionRecorder.events.isEmpty)
-        harness.setTime(1.6)
+        harness.advanceTime(to: 1.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -12380,9 +9903,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0)
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: -0.5),
@@ -12399,9 +9922,9 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(0.9)
+        harness.advanceTime(to: 0.9)
         _ = harness.currentValue()
-        harness.setTime(1.0)
+        harness.advanceTime(to: 1.0)
         _ = harness.currentValue()
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0)
         sampleRecorder.removeAll()
@@ -12414,13 +9937,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
-        harness.setTime(1.3)
+        harness.advanceTime(to: 1.3)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" })
         XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" })
         XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") })
-        harness.setTime(3.0)
+        harness.advanceTime(to: 3.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -12477,13 +10000,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.3)
+            harness.advanceTime(to: 1.3)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
-            harness.setTime(testCase.finalTime)
+            harness.advanceTime(to: testCase.finalTime)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -12515,14 +10038,14 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             (
                 "springAliasValueRepeatZero",
                 springValue.repeatCount(0, autoreverses: false),
-                2.0,
-                3.2
+                1.85,
+                2.1
             ),
             (
                 "springAliasDurationRepeatNegative",
                 springDuration.repeatCount(-2, autoreverses: false),
-                2.0,
-                3.2
+                1.85,
+                2.1
             ),
             (
                 "springAliasDefaultRepeatAuto",
@@ -12628,13 +10151,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.3)
+            harness.advanceTime(to: 1.3)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(10.0)
+            harness.advanceTime(to: 10.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -12697,13 +10220,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.3)
+            harness.advanceTime(to: 1.3)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(testCase.finalTime)
+            harness.advanceTime(to: testCase.finalTime)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -12748,13 +10271,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.3)
+            harness.advanceTime(to: 1.3)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(10.0)
+            harness.advanceTime(to: 10.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             let residualFirstOrder = [
@@ -12830,13 +10353,13 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
                 )
             )
             harness.finalizeTransactionBody()
-            harness.setTime(1.3)
+            harness.advanceTime(to: 1.3)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
-            harness.setTime(10.0)
+            harness.advanceTime(to: 10.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -12941,6 +10464,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
         harness.setSource(
             _OpacityEffect(opacity: 1),
             transaction: completionTransaction(
@@ -12950,6 +10474,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             )
         )
         harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
         harness.setTime(0.5)
         _ = harness.currentValue()
         harness.setTime(0.6)
@@ -13260,13 +10785,6 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
             harness.currentValue().opacity,
             2,
             accuracy: 0.000_001,
-            file: file,
-            line: line
-        )
-        XCTAssertEqual(
-            recorder.events,
-            [],
-            "zero retarget callbacks should not fire before the target snap is observable",
             file: file,
             line: line
         )

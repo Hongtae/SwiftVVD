@@ -905,18 +905,26 @@ extension _AGGraph {
 
     // MARK: Node Lifecycle
 
-    /// Completely removes a node and cleans up its dependencies.
-    func removeNode(_ id: AGAttribute) {
+    struct PreparedNodeRemoval {
+        var id: AGAttribute
+        var outputs: Set<UInt32>
+    }
+
+    /// Disconnects a node while retaining its body and value for the later
+    /// destruction pass.
+    func prepareNodeRemoval(_ id: AGAttribute) -> PreparedNodeRemoval {
         assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard let removingNode = slots[index].node else {
             fatalError("removeNode called on @\(id.rawValue) which does not exist; double-remove is a usage error.")
         }
+        guard !removingNode.isBeingRemoved else {
+            fatalError("removeNode called on @\(id.rawValue) while removal is already in progress.")
+        }
+        removingNode.isBeingRemoved = true
 #if DEBUG
         recordRemovedNodeTombstone(id: id, node: removingNode)
 #endif
-
-        attributeInfos[id.rawValue]?.body?.callDestroy()
 
         // 1. Break input connections (removes one reverse output record for
         // each input record).
@@ -956,26 +964,46 @@ extension _AGGraph {
         indirectDefaultSources.removeValue(forKey: id.rawValue)
         indirectDependencies.removeValue(forKey: id.rawValue)
         nodeSubgraphs.removeValue(forKey: id.rawValue)
-        attributeInfos.removeValue(forKey: id.rawValue)
-        cachedRuleEntries = cachedRuleEntries.filter {
-            $0.value.attribute.identifier != id.rawValue
-        }
         // Remove any cross-graph observers that were watching this node (it was a source).
         crossGraphObservers.removeValue(forKey: id.rawValue)
 
-        // 4. Invalidate: increment seed (all AGWeakAttributes pointing here are now stale),
-        //    free the slot, and push index to freeList for reuse
-        slots[index].seed &+= 1
-        slots[index].node = nil
-        freeList.append(id.rawValue)
-
-        // 5. Mark former dependents as needing re-evaluation.
+        // 4. Mark former dependents as needing re-evaluation.
         // evaluateSideEffects:false because the node is gone. Side-effect rules that depended
         // on it must NOT fire now (they would crash reading a freed attribute).
         // They are simply marked dirty and will be removed or re-evaluated later.
         for outputIndex in outputs {
             markNeedsEvaluation(AGAttribute(rawValue: outputIndex), evaluateSideEffects: false)
         }
+
+        return PreparedNodeRemoval(id: id, outputs: outputs)
+    }
+
+    /// Destroys the body and value retained by `prepareNodeRemoval(_:)`, then
+    /// releases the slot.
+    func finishNodeRemoval(_ removal: PreparedNodeRemoval) {
+        assert(_AGGraph.current === self)
+        let id = removal.id
+        let index = Int(id.rawValue)
+        guard slots[index].node?.isBeingRemoved == true else {
+            fatalError("finishNodeRemoval called for @\(id.rawValue) without a prepared removal.")
+        }
+
+        attributeInfos[id.rawValue]?.body?.callDestroy()
+        attributeInfos.removeValue(forKey: id.rawValue)
+        cachedRuleEntries = cachedRuleEntries.filter {
+            $0.value.attribute.identifier != id.rawValue
+        }
+
+        // Invalidate all weak handles before making the slot available again.
+        slots[index].seed &+= 1
+        slots[index].node = nil
+        freeList.append(id.rawValue)
+    }
+
+    /// Completely removes one node using the graph's disconnect-then-destroy
+    /// lifecycle.
+    func removeNode(_ id: AGAttribute) {
+        finishNodeRemoval(prepareNodeRemoval(id))
     }
 
     // MARK: Value Access
@@ -1163,7 +1191,6 @@ extension _AGGraph {
         }
         slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
-        Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
@@ -1205,7 +1232,6 @@ extension _AGGraph {
         }
         slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
-        Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
@@ -1532,6 +1558,30 @@ extension _AGGraph {
             drainActionOutbox()
         }
         return result
+    }
+
+    func withRuleUpdate(
+        _ attribute: AGAttribute,
+        body: () -> Void
+    ) {
+        assert(_AGGraph.current === self)
+        let index = Int(attribute.rawValue)
+        guard slots.indices.contains(index), slots[index].node != nil else {
+            fatalError(
+                "Rule context update requires a live attribute @\(attribute.rawValue)."
+            )
+        }
+
+        var activeGraphs = _AGGraph.currentlyUpdatingGraphs ?? []
+        activeGraphs.insert(ObjectIdentifier(self))
+        _AGGraph.withCurrentlyUpdatingGraphs(activeGraphs) {
+            let context = _AGUpdateContext(
+                predecessor: _AGGraph.currentUpdateContext
+            )
+            _AGGraph.withCurrentUpdateContext(context) {
+                _AGGraph.withRuleContext(attribute, body: body)
+            }
+        }
     }
 
     var isUpdatingOnCurrentThread: Bool {

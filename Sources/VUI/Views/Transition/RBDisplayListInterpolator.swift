@@ -804,17 +804,6 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         options[.transition] as? RBTransition
     }
 
-    var requiresIntermediateTextAlignment: Bool {
-        guard let transition,
-              transition.method == ContentTransition.Method.none.method,
-              !transition.effects.isEmpty,
-              Self.usesWholeListOpacityEventRouting(transition) else {
-            return false
-        }
-        return Self.containsOnlyTypedTextPresentationItems(from.renderItems) &&
-            Self.containsOnlyTypedTextPresentationItems(to.renderItems)
-    }
-
     var animation: RBAnimation? {
         options[.animation] as? RBAnimation
     }
@@ -3882,27 +3871,6 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 let branches = [crossFade.source, crossFade.target].compactMap { $0 }
                 return !branches.isEmpty && branches.allSatisfy {
                     containsOnlyTextPresentationItems($0.contents.items)
-                }
-            default:
-                return false
-            }
-        }
-    }
-
-    private static func containsOnlyTypedTextPresentationItems(
-        _ items: [DisplayList.Item]
-    ) -> Bool {
-        !items.isEmpty && items.allSatisfy { item in
-            guard case let .content(content) = item.value else {
-                return false
-            }
-            switch content.value {
-            case .text:
-                return true
-            case let .crossFade(crossFade):
-                let branches = [crossFade.source, crossFade.target].compactMap { $0 }
-                return !branches.isEmpty && branches.allSatisfy {
-                    containsOnlyTypedTextPresentationItems($0.contents.items)
                 }
             default:
                 return false

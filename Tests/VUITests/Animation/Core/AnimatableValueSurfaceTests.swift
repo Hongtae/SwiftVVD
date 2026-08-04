@@ -26,6 +26,22 @@ final class AnimatableValueSurfaceTests: XCTestCase {
         XCTAssertEqual(pair.second, 6)
     }
 
+    func testVectorMathHelperDefaultsForwardThroughAnimatableData() {
+        let value = ProbeMath(x: 3, y: 4)
+        XCTAssertEqual(value.magnitude, 5)
+        XCTAssertEqual(-value, ProbeMath(x: -3, y: -4))
+        XCTAssertEqual(
+            value + ProbeMath(x: 2, y: -1),
+            ProbeMath(x: 5, y: 3)
+        )
+        XCTAssertEqual(
+            value - ProbeMath(x: 2, y: -1),
+            ProbeMath(x: 1, y: 5)
+        )
+        XCTAssertEqual(value * 2, ProbeMath(x: 6, y: 8))
+        XCTAssertEqual(value / 2, ProbeMath(x: 1.5, y: 2))
+    }
+
     func testAnimatablePairTypeInitializerUsesVectorZeros() {
         let scalarPair = AnimatablePair(Double.self, Float.self)
         XCTAssertEqual(scalarPair.first, 0)
@@ -41,6 +57,16 @@ final class AnimatableValueSurfaceTests: XCTestCase {
         )
         XCTAssertEqual(nestedPair.first, AnimatablePair.zero)
         XCTAssertEqual(nestedPair.second, ProbeVector.zero)
+    }
+
+    func testAnimatablePairPackageSubscriptGetsAndSetsBothValues() {
+        var pair = AnimatablePair(1.0, 2.0)
+        XCTAssertEqual(pair[].0, 1.0)
+        XCTAssertEqual(pair[].1, 2.0)
+
+        pair[] = (3.0, 4.0)
+        XCTAssertEqual(pair.first, 3.0)
+        XCTAssertEqual(pair.second, 4.0)
     }
 
     func testVectorArithmeticAnimatableDefaultReturnsAndAssignsSelf() {
@@ -397,6 +423,19 @@ private struct ProbeVector: VectorArithmetic, Animatable, Equatable {
 
     var magnitudeSquared: Double {
         value * value
+    }
+}
+
+private struct ProbeMath: _VectorMath, Equatable {
+    var x: Double
+    var y: Double
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(x, y) }
+        set {
+            x = newValue.first
+            y = newValue.second
+        }
     }
 }
 

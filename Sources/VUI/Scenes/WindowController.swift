@@ -46,7 +46,11 @@ class WindowController: WindowDelegate,
     private var _titleString: String = ""
     private var _style: PlatformWindowStyle
 
-    var environment: EnvironmentValues
+    let environmentWrapper: ViewGraphHostEnvironmentWrapper
+    var environment: EnvironmentValues {
+        get { environmentWrapper.environment }
+        set { environmentWrapper.environment = newValue }
+    }
     let sceneResources: SceneResources
 
     // Window-level gesture coordinator owned by the platform host.
@@ -485,6 +489,39 @@ class WindowController: WindowDelegate,
             ?? _baseConfiguration.applying(_inheritedValues.configurationOverride)
     }
 
+    var contentScaleFactorOverride: CGFloat? {
+        get { configuration.contentScaleFactorOverride }
+        set {
+            if let newValue {
+                precondition(
+                    newValue.isFinite && newValue > 0,
+                    "The content scale factor must be positive and finite."
+                )
+            }
+            var override = configurationOverride
+            override.contentScaleFactor = newValue
+            configurationOverride = override
+        }
+    }
+
+    var contentScaleFactor: CGFloat {
+        get {
+            if let contentScaleFactorOverride {
+                return contentScaleFactorOverride
+            }
+            if let windowContext {
+                return windowContext.state.contentScaleFactor
+            }
+            if let parentWindow {
+                return parentWindow.contentScaleFactor
+            }
+            return sceneResources.contentScaleFactor
+        }
+        set {
+            contentScaleFactorOverride = newValue
+        }
+    }
+
     // MARK: - Input Queue
 
     enum InputEvent: @unchecked Sendable {
@@ -576,7 +613,9 @@ class WindowController: WindowDelegate,
                         scene: WindowKey) {
         self._titleGraph = title
         self._style = style
-        self.environment = EnvironmentValues.tracking()
+        let environmentWrapper = ViewGraphHostEnvironmentWrapper()
+        environmentWrapper.environment = EnvironmentValues.tracking()
+        self.environmentWrapper = environmentWrapper
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -617,6 +656,7 @@ class WindowController: WindowDelegate,
         self.viewGraph.graphDelegate = self
         // updateDelegate: WindowController provides root value updates (size, env, etc.).
         self.viewGraph.updateDelegate = self
+        installContentScaleFactorOverrideAction()
         // delegate (ViewGraphHostDelegate): not wired yet. Root input attributes
         // are updated directly through ViewGraphRootValueUpdater for now.
         // self.viewGraph.delegate = self
@@ -624,10 +664,14 @@ class WindowController: WindowDelegate,
 
     init<Content: View>(content: Content,
                         environment: EnvironmentValues = .tracking(),
+                        viewPhase: ViewGraphHost.Phase = ViewGraphHost.Phase(),
                         scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = environment.trackingCopy()
+        let environmentWrapper = ViewGraphHostEnvironmentWrapper()
+        environmentWrapper.environment = environment.trackingCopy()
+        environmentWrapper.phase = viewPhase
+        self.environmentWrapper = environmentWrapper
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -647,6 +691,7 @@ class WindowController: WindowDelegate,
         self.viewGraph.viewDelegate = self
         self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
+        installContentScaleFactorOverrideAction()
     }
 
     deinit {
@@ -660,10 +705,14 @@ class WindowController: WindowDelegate,
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
          environment: EnvironmentValues = .tracking(),
+         viewPhase: ViewGraphHost.Phase = ViewGraphHost.Phase(),
          scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = environment.trackingCopy()
+        let environmentWrapper = ViewGraphHostEnvironmentWrapper()
+        environmentWrapper.environment = environment.trackingCopy()
+        environmentWrapper.phase = viewPhase
+        self.environmentWrapper = environmentWrapper
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -684,6 +733,18 @@ class WindowController: WindowDelegate,
         self.viewGraph.viewDelegate = self
         self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
+        installContentScaleFactorOverrideAction()
+    }
+
+    private func installContentScaleFactorOverrideAction() {
+        environment._contentScaleFactorOverride =
+            _ContentScaleFactorOverrideAction { [weak self] value in
+                guard let self else { return }
+                self.contentScaleFactorOverride = value
+                self.viewGraph.valuesNeedingUpdate.insert(.environment)
+                self.viewChangedWhileDrawing = true
+            }
+        viewGraph.valuesNeedingUpdate.insert(.environment)
     }
 
     // MARK: - Platform Window Lifecycle
@@ -772,7 +833,14 @@ class WindowController: WindowDelegate,
         // Refresh render context once per frame before updateOutputs/render.
         var renderCtx = ViewGraphRenderContext(contentsScale: 1.0, opaqueBackground: false)
         viewGraph.renderDelegate?.updateRenderContext(&renderCtx)
-        // Pending parity: propagate renderCtx.contentsScale to draw calls.
+        precondition(
+            renderCtx.contentsScale.isFinite && renderCtx.contentsScale > 0,
+            "The rendering host must provide a positive finite contents scale."
+        )
+        if environment.displayScale != renderCtx.contentsScale ||
+            environment._contentScaleFactor != renderCtx.contentsScale {
+            viewGraph.valuesNeedingUpdate.insert(.environment)
+        }
 
         var redraw = false
         self._updateView(
@@ -848,6 +916,10 @@ class WindowController: WindowDelegate,
     func updateView(tick: UInt64, delta: Double, date: Date,
                     contentSize: CGSize, redraw: inout Bool,
                     _ withGC: WindowContext.WithGraphicsContext) {
+        let contentScaleFactor = self.contentScaleFactor
+        if sceneResources.contentScaleFactor != contentScaleFactor {
+            sceneResources.contentScaleFactor = contentScaleFactor
+        }
         currentTimestamp = Time(
             seconds: date.timeIntervalSince(Self.eventTimestampOrigin)
         )
@@ -927,6 +999,7 @@ class WindowController: WindowDelegate,
         var drainedGestureOutbox = false
         var drainedViewOutbox = false
         var loadedResources = false
+        var resourcesUpdatedGraph = false
 
         func runRootLayoutPass(
             notifiesLayoutUpdate: Bool,
@@ -977,16 +1050,22 @@ class WindowController: WindowDelegate,
             return !layoutChangeSet.isEmpty
         }
 
-        func loadRootResourcesIfNeeded() -> Bool {
+        func loadRootResourcesIfNeeded() -> (
+            didLoad: Bool,
+            updatedGraph: Bool
+        ) {
             var didLoadResources = false
+            var didUpdateGraph = false
             viewGraph.data.withCurrent {
                 guard let resourceList = viewGraph.rootResourceList?.value,
                       !resourceList.items.isEmpty else {
                     return
                 }
-                didLoadResources = true
                 withGC(false) { context in
                     for task in resourceList.items {
+                        guard task.isPending() else { continue }
+                        didLoadResources = true
+                        didUpdateGraph = didUpdateGraph || task.updatesGraph
                         if task.transaction.isEmpty {
                             task(context)
                         } else {
@@ -994,16 +1073,18 @@ class WindowController: WindowDelegate,
                             // presentation output, so sample both under its owning transaction.
                             viewGraph.runTransaction(task.transaction, do: {
                                 task(context)
-                                _ = runRootLayoutPass(
-                                    notifiesLayoutUpdate: false,
-                                    samplesDisplayList: true
-                                )
+                                if task.updatesGraph {
+                                    _ = runRootLayoutPass(
+                                        notifiesLayoutUpdate: false,
+                                        samplesDisplayList: true
+                                    )
+                                }
                             }, id: nil)
                         }
                     }
                 }
             }
-            return didLoadResources
+            return (didLoadResources, didUpdateGraph)
         }
 
         let updateChangeSet = _AGChangeSet()
@@ -1073,8 +1154,12 @@ class WindowController: WindowDelegate,
                         notifiesLayoutUpdate: false,
                         samplesDisplayList: true
                     )
-                    if loadRootResourcesIfNeeded() {
+                    let resourceLoad = loadRootResourcesIfNeeded()
+                    if resourceLoad.didLoad {
                         loadedResources = true
+                    }
+                    if resourceLoad.updatedGraph {
+                        resourcesUpdatedGraph = true
                         _ = runRootLayoutPass(
                             notifiesLayoutUpdate: false,
                             samplesDisplayList: true
@@ -1083,8 +1168,12 @@ class WindowController: WindowDelegate,
                 }
             }
             viewGraph.flushTransactions {
-                if loadRootResourcesIfNeeded() {
+                let resourceLoad = loadRootResourcesIfNeeded()
+                if resourceLoad.didLoad {
                     loadedResources = true
+                }
+                if resourceLoad.updatedGraph {
+                    resourcesUpdatedGraph = true
                     _ = runRootLayoutPass(
                         notifiesLayoutUpdate: false,
                         samplesDisplayList: true
@@ -1097,8 +1186,12 @@ class WindowController: WindowDelegate,
             drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
-            if loadRootResourcesIfNeeded() {
+            let resourceLoad = loadRootResourcesIfNeeded()
+            if resourceLoad.didLoad {
                 loadedResources = true
+            }
+            if resourceLoad.updatedGraph {
+                resourcesUpdatedGraph = true
                 viewGraph.data.withCurrent {
                     var lastResourceTransaction: Transaction?
                     while viewGraph.data.graph.inbox.hasPendingWork {
@@ -1133,7 +1226,7 @@ class WindowController: WindowDelegate,
             flushedCrossGraphSource ||
             drainedGestureOutbox ||
             drainedViewOutbox ||
-            loadedResources ||
+            resourcesUpdatedGraph ||
             meaningfulUpdateChange
 
         var layoutChanged = false
@@ -2154,7 +2247,9 @@ class WindowController: WindowDelegate,
     // contentsScale: from sceneResources (updated by WindowContext on window events).
     // opaqueBackground: true if the resolved background has no transparency.
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
-        context.contentsScale = sceneResources.contentScaleFactor
+        let contentScaleFactor = self.contentScaleFactor
+        sceneResources.contentScaleFactor = contentScaleFactor
+        context.contentsScale = contentScaleFactor
         // backgroundColor.opacity is 0.0-1.0. Treat >= 1.0 as fully opaque.
         // The backend color alpha is stored as a normalized Scalar.
         context.opaqueBackground = (configuration.backgroundColor.a >= 1.0)
@@ -2196,6 +2291,9 @@ class WindowController: WindowDelegate,
     // MARK: - GraphDelegate
 
     func beginTransaction() {
+        // This graph is owned by the WindowContext update lane. Wake that lane
+        // so updateView drains the pending transaction without entering the
+        // graph concurrently from a second thread.
         setNeedsUpdate()
     }
 
@@ -2206,16 +2304,13 @@ class WindowController: WindowDelegate,
     }
 
     func updateEnvironment() {
-        if let parentGraph = parentWindow?.viewGraph {
-            let parentPhase = parentGraph.data.withCurrent {
-                parentGraph.data._phase.value
-            }
-            viewGraph.updateGraphPhase(
-                oldParentPhase: viewGraph.parentPhase,
-                newParentPhase: parentPhase
-            )
-        }
-        viewGraph.envAttr?.setValue(self.environment)
+        let contentScaleFactor = self.contentScaleFactor
+        environment.displayScale = contentScaleFactor
+        environment._contentScaleFactor = contentScaleFactor
+        viewGraph.setEnvironment(
+            environment,
+            wrapper: environmentWrapper
+        )
     }
 
     // Presentation roots own a distinct ViewGraph, but begin with the
@@ -2223,16 +2318,38 @@ class WindowController: WindowDelegate,
     // graphs run on their own render thread, so route later updates through
     // the child graph's inbox instead of entering that graph from the source
     // graph's thread.
-    func setPresentationEnvironment(_ environment: EnvironmentValues) {
-        let snapshot = UnsafeBox(environment.untrackedCopy())
+    func setPresentationEnvironment(
+        _ environment: EnvironmentValues,
+        viewPhase: ViewGraphHost.Phase
+    ) {
+        let wrapper = ViewGraphHostEnvironmentWrapper()
+        wrapper.environment = environment.untrackedCopy()
+        wrapper.phase = viewPhase
+        let snapshot = UnsafeBox(wrapper)
         viewGraph.data.graph.inbox.enqueue { [weak self, snapshot] in
             guard let self else { return }
-            let environment = snapshot.value.trackingCopy()
+            var environment = snapshot.value.environment.trackingCopy()
+            let contentScaleFactor = self.contentScaleFactor
+            environment.displayScale = contentScaleFactor
+            environment._contentScaleFactor = contentScaleFactor
             self.environment = environment
-            self.viewGraph.envAttr?.setValue(environment)
-        }
-        forEachPresentationChild {
-            $0.setPresentationEnvironment(environment)
+            self.environmentWrapper.phase = snapshot.value.phase
+            self.viewGraph.setEnvironment(
+                environment,
+                wrapper: self.environmentWrapper
+            )
+
+            guard let phase = self.viewGraph.phaseAttr else {
+                fatalError("Presentation environment propagation requires an instantiated ViewGraph.")
+            }
+            let childPhase = ViewGraphHost.Phase(base: phase.value)
+            let childEnvironment = environment.untrackedCopy()
+            self.forEachPresentationChild {
+                $0.setPresentationEnvironment(
+                    childEnvironment,
+                    viewPhase: childPhase
+                )
+            }
         }
     }
 
@@ -2638,7 +2755,8 @@ class WindowController: WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
     func updateSheetPresentation(_ value: SheetPreference.Value,
-                                 transaction: Transaction = Transaction()) {
+                                 transaction: Transaction = Transaction(),
+                                 viewPhase: ViewGraphHost.Phase) {
         guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
@@ -2699,7 +2817,10 @@ class WindowController: WindowDelegate,
                 return (contentAttr, entries[index].controller)
             }
             if let (existingContentAttr, controller) = existingPresentation {
-                controller.setPresentationEnvironment(pref.presentationEnvironment)
+                controller.setPresentationEnvironment(
+                    pref.presentationEnvironment,
+                    viewPhase: viewPhase
+                )
                 existingContentAttr.setValue(rootContent(for: pref), transaction: transaction)
                 continue
             }
@@ -2716,6 +2837,7 @@ class WindowController: WindowDelegate,
             let ctrl = ModalWindowController(crossGraphContent: contentAttr,
                                              sourceGraph: graph,
                                              environment: pref.presentationEnvironment,
+                                             viewPhase: viewPhase,
                                              scene: sheetKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
@@ -2732,7 +2854,10 @@ class WindowController: WindowDelegate,
     }
 
     /// Called from ViewGraph side-effect rule when ConfirmationDialogStorage.PreferenceKey changes.
-    func updateConfirmationDialogPresentation(_ dialogs: [ConfirmationDialogPreference]) {
+    func updateConfirmationDialogPresentation(
+        _ dialogs: [ConfirmationDialogPreference],
+        viewPhase: ViewGraphHost.Phase
+    ) {
         guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
@@ -2758,6 +2883,7 @@ class WindowController: WindowDelegate,
             let key = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             let ctrl = ModalWindowController(crossGraphContent: attr,
                                              sourceGraph: graph,
+                                             viewPhase: viewPhase,
                                              scene: key,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
@@ -2768,7 +2894,10 @@ class WindowController: WindowDelegate,
     }
 
     /// Called from ViewGraph side-effect rule when AlertStorage.PreferenceKey changes.
-    func updateAlertPresentation(_ alerts: [AlertPreference]) {
+    func updateAlertPresentation(
+        _ alerts: [AlertPreference],
+        viewPhase: ViewGraphHost.Phase
+    ) {
         guard let graph = _AGGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
@@ -2800,6 +2929,7 @@ class WindowController: WindowDelegate,
             let alertKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             let ctrl = ModalWindowController(crossGraphContent: alertAttr,
                                              sourceGraph: graph,
+                                             viewPhase: viewPhase,
                                              scene: alertKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)

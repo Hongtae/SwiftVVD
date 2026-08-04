@@ -2,7 +2,15 @@ import XCTest
 @testable import VUI
 
 final class BindingCustomSetterTransactionTests: XCTestCase {
-    func testCustomNoopSetterDoesNotMarkScopedTransactionMutated() {
+    func testBindingStorageMatchesObservedThreeFieldShape() {
+        let binding = Binding<Int>(get: { 0 }, set: { _ in })
+        XCTAssertEqual(
+            Mirror(reflecting: binding).children.compactMap(\.label),
+            ["transaction", "location", "_value"]
+        )
+    }
+
+    func testCustomNoopSetterUsesStandaloneListenerFinalization() {
         var events: [String] = []
         let binding = Binding<Double>(
             get: { 0 },
@@ -26,7 +34,7 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["setter", "body", "returned", "completion"])
     }
 
-    func testTransactionAwareNoopSetterDoesNotMarkScopedTransactionMutated() {
+    func testTransactionAwareNoopSetterUsesStandaloneListenerFinalization() {
         var events: [String] = []
         let binding = Binding<Double>(
             get: { 0 },
@@ -50,7 +58,7 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["setter nil", "body", "returned", "completion"])
     }
 
-    func testCustomSetterSameStoredLocationWriteDoesNotMarkScopedTransactionMutated() {
+    func testCustomSetterSameStoredLocationWriteUsesStandaloneListenerFinalization() {
         let location = TestStoredLocation<Int>(initialValue: 1)
         var events: [String] = []
         let binding = Binding<Int>(
@@ -76,7 +84,7 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["setter", "body", "returned", "completion"])
     }
 
-    func testCustomSetterChangedStoredLocationWriteMarksScopedTransactionMutated() {
+    func testCustomSetterChangedStoredLocationWriteUsesStandaloneListenerFinalization() {
         let location = TestStoredLocation<String>(initialValue: "A")
         var events: [String] = []
         let binding = Binding<String>(
@@ -99,9 +107,6 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         events.append("returned")
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-        XCTAssertEqual(events, ["setter", "body", "returned"])
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(events, ["setter", "body", "returned", "completion"])
     }
 
@@ -148,7 +153,6 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
             get: { 0 },
             set: { _ in
                 events.append(Transaction.current.isEmpty ? "setter current empty" : "setter current active")
-                Transaction.ThreadStorage.markMutation(for: Transaction.current)
             }
         )
 
@@ -172,13 +176,12 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         )
     }
 
-    func testAmbientTransactionOwnsNestedCustomSetterMutation() {
+    func testAmbientTransactionWithoutRegisteredAnimatorUsesListenerFinalization() {
         var events: [String] = []
         let binding = Binding<Double>(
             get: { 0 },
             set: { _ in
                 events.append("setter")
-                Transaction.ThreadStorage.markMutation(for: Transaction.current)
             }
         )
 
@@ -194,9 +197,6 @@ final class BindingCustomSetterTransactionTests: XCTestCase {
         events.append("returned")
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-        XCTAssertEqual(events, ["setter", "body", "returned"])
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(events, ["setter", "body", "returned", "ambient completion"])
     }
 

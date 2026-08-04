@@ -43,6 +43,7 @@ final class SpringSurfaceTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS springDurationBounceBranchDisassemblyObserved
     func testSpringEdgeInputsPreserveSampledDerivedSurface() {
         assertSpring(
             Spring(duration: -0.20, bounce: 0.0),
@@ -74,6 +75,20 @@ final class SpringSurfaceTests: XCTestCase {
             stiffness: 157.91367041742973,
             damping: 0.0
         )
+        assertSpring(
+            Spring(duration: 0.50, bounce: -1.0),
+            duration: .nan,
+            bounce: .nan,
+            response: .nan,
+            dampingRatio: .nan,
+            mass: 1.0,
+            stiffness: .infinity,
+            damping: .infinity
+        )
+        let extremeOverdamped = Spring(duration: 0.50, bounce: -1.0)
+        let fields = Array(Mirror(reflecting: extremeOverdamped).children)
+        XCTAssertEqual(fields[0].value as? Double, -.infinity)
+        XCTAssertEqual(fields[1].value as? Double, .infinity)
         assertSpring(
             Spring(mass: -1.0, stiffness: 90.0, damping: 12.0),
             duration: 0.493653659795374,
@@ -109,6 +124,299 @@ final class SpringSurfaceTests: XCTestCase {
         XCTAssertDoubleEqual(spring.stiffness, 75.0)
         XCTAssertDoubleEqual(spring.damping, 10.0)
         XCTAssertDoubleEqual(spring.initialVelocity, 0.30)
+    }
+
+    // ASSERTIONS springModelDurationDisassemblyObserved
+    // ASSERTIONS springModelStorageDisassemblyObserved
+    func testSpringModelOwnsScalarAnimationLifetime() throws {
+        let underdamped = SpringModel(
+            mass: 1,
+            stiffness: 100,
+            damping: 10,
+            initialVelocity: 0
+        )
+        XCTAssertEqual(
+            underdamped.duration(epsilon: 0.001),
+            1.4727003346780925,
+            accuracy: 1.0e-12
+        )
+
+        let duration = 1.2
+        let naturalFrequency = 2 * Double.pi / duration
+        let critical = SpringModel(
+            mass: 1,
+            stiffness: naturalFrequency * naturalFrequency,
+            damping: 2 * naturalFrequency,
+            initialVelocity: 0
+        )
+        XCTAssertEqual(
+            critical.duration(epsilon: 0.001),
+            1.8,
+            accuracy: 1.0e-12
+        )
+
+        let animation = Animation.interpolatingSpring(
+            duration: duration,
+            bounce: 0,
+            initialVelocity: 0
+        )
+        let box = try XCTUnwrap(animation.box as? SpringAnimationBox)
+        XCTAssertEqual(box.duration, duration, accuracy: 1.0e-12)
+        XCTAssertEqual(box.terminalSamplingHorizon, 1.8, accuracy: 1.0e-12)
+        XCTAssertEqual(
+            box.terminalSamplingHorizon(for: Double(0.001)),
+            1.8,
+            accuracy: 1.0e-12
+        )
+        XCTAssertEqual(
+            box.terminalSamplingHorizon(for: Double(1_000)),
+            1.8,
+            accuracy: 1.0e-12
+        )
+    }
+
+    // ASSERTIONS fluidSpringExtremeControlledObserved
+    // ASSERTIONS fluidSpringNonfiniteSettlingBranchObserved
+    func testExtremeFluidSpringPreservesDivergenceAndTerminatesNonfiniteState() {
+        var overflowContext = AnimationContext<Double>()
+        let overflow = Animation.spring(duration: 0.5, bounce: -0.99)
+        XCTAssertEqual(
+            overflow.animate(value: 1, time: 0, context: &overflowContext),
+            0
+        )
+        let overflowHalf = overflow.animate(
+            value: 1,
+            time: 0.5,
+            context: &overflowContext
+        )
+        XCTAssertGreaterThan(abs(overflowHalf ?? 0), 1.0e100)
+        let overflowOne = overflow.animate(
+            value: 1,
+            time: 1,
+            context: &overflowContext
+        )
+        XCTAssertGreaterThan(abs(overflowOne ?? 0), 1.0e200)
+        XCTAssertNil(
+            overflow.animate(value: 1, time: 2, context: &overflowContext)
+        )
+
+        var boundaryContext = AnimationContext<Double>()
+        let boundary = Animation.spring(duration: 0.5, bounce: -1)
+        XCTAssertEqual(
+            boundary.animate(value: 1, time: 0, context: &boundaryContext),
+            0
+        )
+        XCTAssertNil(
+            boundary.animate(value: 1, time: 0.1, context: &boundaryContext)
+        )
+
+        var divergentContext = AnimationContext<Double>()
+        let divergent = Animation.spring(duration: 0.5, bounce: -0.97)
+        _ = divergent.animate(value: 1, time: 0, context: &divergentContext)
+        let divergentHalf = divergent.animate(
+            value: 1,
+            time: 0.5,
+            context: &divergentContext
+        )
+        XCTAssertGreaterThan(abs(divergentHalf ?? 0), 1.0e20)
+        XCTAssertNotNil(
+            divergent.animate(value: 1, time: 2, context: &divergentContext)
+        )
+    }
+
+    // ASSERTIONS fluidSpringCatchUpClampObserved
+    func testFluidSpringGapContinuesFromOneFrameBeforeCurrentTime() {
+        let stiffness = fluidSpringStiffness(response: 1.2)
+
+        var catchUpState = SpringState<Double>()
+        _ = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 0,
+            state: &catchUpState
+        )
+        _ = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 0.25,
+            state: &catchUpState
+        )
+        let catchUp = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 1.5,
+            state: &catchUpState
+        )
+
+        var oneFrameState = SpringState<Double>()
+        _ = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 0,
+            state: &oneFrameState
+        )
+        _ = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 0.25,
+            state: &oneFrameState
+        )
+        let oneFrame = integratedFluidSpringValue(
+            target: 1,
+            dampingFraction: 0.7,
+            stiffness: stiffness,
+            time: 0.25 + 1.0 / 60.0,
+            state: &oneFrameState
+        )
+
+        XCTAssertEqual(catchUp, oneFrame, accuracy: 1.0e-12)
+        XCTAssertEqual(catchUpState.time, 1.5, accuracy: 1.0e-12)
+    }
+
+    // ASSERTIONS springSettlingDurationDisassemblyObserved
+    // ASSERTIONS springSettlingEdgeObserved
+    func testSpringSettlingDurationMatchesAnalyticAndFallbackBranches() {
+        let ordinary = Spring(response: 0.5, dampingRatio: 0.8)
+        XCTAssertEqual(
+            ordinary.settlingDuration,
+            0.9261291683659721,
+            accuracy: 1.0e-12
+        )
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                target: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            1.1533551689258155,
+            accuracy: 1.0e-12
+        )
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                fromValue: 3.0,
+                toValue: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            1.1170873407650654,
+            accuracy: 1.0e-12
+        )
+
+        XCTAssertEqual(
+            Spring(response: 0.5, dampingRatio: 1.0).settlingDuration,
+            0.8,
+            accuracy: 1.0e-12
+        )
+        XCTAssertEqual(
+            Spring(response: 0.5, dampingRatio: 2.0).settlingDuration,
+            2.1,
+            accuracy: 1.0e-12
+        )
+
+        let zeroResponse = Spring(response: 0, dampingRatio: 0.8)
+        XCTAssertEqual(zeroResponse.settlingDuration, 0)
+        XCTAssertEqual(
+            zeroResponse.settlingDuration(
+                target: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            0
+        )
+        XCTAssertEqual(
+            zeroResponse.settlingDuration(
+                fromValue: 3.0,
+                toValue: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            0
+        )
+
+        let infiniteResponse = Spring(response: .infinity, dampingRatio: 0.8)
+        XCTAssertEqual(infiniteResponse.settlingDuration, .infinity)
+        XCTAssertEqual(
+            infiniteResponse.settlingDuration(
+                target: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            .infinity
+        )
+        XCTAssertEqual(
+            infiniteResponse.settlingDuration(
+                fromValue: 3.0,
+                toValue: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            .infinity
+        )
+
+        let nanResponse = Spring(response: .nan, dampingRatio: 0.8)
+        XCTAssertEqual(nanResponse.settlingDuration, 0)
+        XCTAssertEqual(
+            nanResponse.settlingDuration(
+                target: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            0
+        )
+        XCTAssertEqual(
+            nanResponse.settlingDuration(
+                fromValue: 3.0,
+                toValue: 10.0,
+                initialVelocity: 2.0,
+                epsilon: 0.001
+            ),
+            0
+        )
+
+        let zeroStiffness = Spring(
+            mass: 1,
+            stiffness: 0,
+            damping: 0
+        )
+        XCTAssertEqual(zeroStiffness.settlingDuration, .infinity)
+
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                target: 1.0,
+                initialVelocity: 0.0,
+                epsilon: 0
+            ),
+            .infinity
+        )
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                target: 1.0,
+                initialVelocity: 0.0,
+                epsilon: -0.001
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                target: 1.0,
+                initialVelocity: 0.0,
+                epsilon: .nan
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ordinary.settlingDuration(
+                target: 1.0,
+                initialVelocity: 0.0,
+                epsilon: .infinity
+            ),
+            0
+        )
     }
 }
 

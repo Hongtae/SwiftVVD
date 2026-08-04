@@ -65,6 +65,7 @@ extension ContextMenuModifier {
             itemList: itemListAttr,
             isPresented: modifier[\.isPresented]._attribute.value,
             environment: inputs.base.cachedEnvironment.value.environment,
+            phase: inputs.base.phase,
             transform: inputs.transform,
             size: inputs.size
         )
@@ -107,6 +108,7 @@ final class ContextMenuResponder: ViewResponder {
     private var isPresented: Binding<Bool>?
     private var activeSession: ContextMenuPresentationSession?
     let environment: Attribute<EnvironmentValues>
+    let phase: Attribute<Phase>
     let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
@@ -116,6 +118,7 @@ final class ContextMenuResponder: ViewResponder {
     init(itemList: Attribute<PlatformItemList>,
          isPresented: Binding<Bool>?,
          environment: Attribute<EnvironmentValues>,
+         phase: Attribute<Phase>,
          transform: Attribute<ViewTransform>,
          size: Attribute<ViewSize>) {
         self.hitTestKey = _contextMenuResponderNextKey.withLock { key in
@@ -125,6 +128,7 @@ final class ContextMenuResponder: ViewResponder {
         self.itemList = itemList
         self.isPresented = isPresented
         self.environment = environment
+        self.phase = phase
         self.transform = transform
         self.size = size
         super.init()
@@ -161,6 +165,7 @@ final class ContextMenuResponder: ViewResponder {
         guard let graph = _AGGraph.current else {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
+        let viewPhase = ViewGraphHost.Phase(base: phase.value)
         // Flush pending item-list mutations before taking the initial popup
         // snapshot. The open menu should start from the same source state that
         // future live refreshes will observe.
@@ -178,8 +183,12 @@ final class ContextMenuResponder: ViewResponder {
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
                 let environment = self.environment.value.untrackedCopy()
+                let viewPhase = ViewGraphHost.Phase(base: self.phase.value)
                 session?.root?.replaceMenuItems(items)
-                session?.root?.setPresentationEnvironment(environment)
+                session?.root?.setPresentationEnvironment(
+                    environment,
+                    viewPhase: viewPhase
+                )
             }
         }
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
@@ -194,6 +203,7 @@ final class ContextMenuResponder: ViewResponder {
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
                                                environment: environment.value.untrackedCopy(),
+                                               viewPhase: viewPhase,
                                                scene: parent.scene,
                                                anchor: location,
                                                items: initialItems,
@@ -319,6 +329,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
 
     init<Content: View>(content: Content,
          environment: EnvironmentValues,
+         viewPhase: ViewGraphHost.Phase,
          scene: WindowKey,
          anchor: CGPoint,
          items: [PlatformItemList.Item],
@@ -333,6 +344,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let frame = CGRect(origin: anchor, size: .zero)
         super.init(content: content,
                    environment: environment,
+                   viewPhase: viewPhase,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
                    frameInParent: frame)
@@ -342,6 +354,13 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     func openSubmenu(_ item: PlatformItemList.Item, at origin: CGPoint) {
         guard item.isEnabled, !item.children.isEmpty else { return }
         guard openedSubmenuID != item.id else { return }
+        guard _AGGraph.current != nil else {
+            fatalError("ContextMenuWindowController.openSubmenu called outside AG context")
+        }
+        guard let phase = viewGraph.phaseAttr else {
+            fatalError("ContextMenuWindowController.openSubmenu requires an instantiated ViewGraph")
+        }
+        let viewPhase = ViewGraphHost.Phase(base: phase.value)
         openedSubmenuID = item.id
         openedSubmenu = nil
         dismissAllPresentationChildren()
@@ -350,6 +369,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let child = ContextMenuWindowController(content: ContextMenuPopupView(items: item.children,
                                                                               actions: actions),
                                                 environment: environment.untrackedCopy(),
+                                                viewPhase: viewPhase,
                                                 scene: scene,
                                                 anchor: origin,
                                                 items: item.children,

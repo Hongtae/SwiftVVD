@@ -1700,14 +1700,12 @@ final class SymbolEffectsTests: XCTestCase {
             var completions: [String] = []
             var removal = Transaction(animation: .linear(duration: 0.01))
             removal.addAnimationCompletion(
-                criteria: .removed,
-                tracksStandalonePending: false
+                criteria: .removed
             ) {
                 completions.append("removed")
             }
             removal.addAnimationCompletion(
-                criteria: .logicallyComplete,
-                tracksStandalonePending: false
+                criteria: .logicallyComplete
             ) {
                 completions.append("logical")
             }

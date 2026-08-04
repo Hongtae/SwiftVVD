@@ -7,36 +7,24 @@ final class AnimationLogicalCompletionSurfaceTests: XCTestCase {
         let split = base.logicallyComplete(after: 0.25)
 
         XCTAssertEqual(split.box.duration, base.box.duration)
-        XCTAssertEqual(split.box.presentationDuration, base.box.presentationDuration)
-        XCTAssertEqual(split.box.noRegisteredCompletionDelay(), base.box.noRegisteredCompletionDelay())
-        XCTAssertEqual(
-            split.box.noRegisteredCompletionDelay(for: .removed),
-            base.box.noRegisteredCompletionDelay(for: .removed)
-        )
-        XCTAssertEqual(
-            split.box.registeredCompletionDelay(for: .removed),
-            base.box.registeredCompletionDelay(for: .removed)
-        )
+        XCTAssertEqual(split.box.terminalSamplingHorizon, base.box.terminalSamplingHorizon)
         XCTAssertAnimationFunctionEquivalent(split.function, base.function)
     }
 
-    func testLogicalCompletionWrapperOwnsOnlyLogicalDeadline() {
+    func testLogicalCompletionWrapperUpdatesContextAtItsOwnBoundary() throws {
         let base = Animation.linear(duration: 1.0)
         let split = base.logicallyComplete(after: 0.25)
-        let immediateLogical = base.logicallyComplete(after: -0.25)
+        var context = AnimationContext<Double>()
 
-        XCTAssertEqual(split.box.noRegisteredCompletionDelay(for: .logicallyComplete), 0.25)
-        XCTAssertEqual(split.box.registeredCompletionDelay(for: .logicallyComplete), 0.25)
-        XCTAssertEqual(immediateLogical.box.noRegisteredCompletionDelay(for: .logicallyComplete), 0)
-        XCTAssertEqual(immediateLogical.box.registeredCompletionDelay(for: .logicallyComplete), 0)
-        XCTAssertEqual(
-            split.box.noRegisteredCompletionDelay(for: .removed),
-            base.box.noRegisteredCompletionDelay(for: .removed)
+        _ = try XCTUnwrap(
+            split.animate(value: 1, time: 0.20, context: &context)
         )
-        XCTAssertEqual(
-            split.box.registeredCompletionDelay(for: .removed),
-            base.box.registeredCompletionDelay(for: .removed)
+        XCTAssertFalse(context.isLogicallyComplete)
+
+        _ = try XCTUnwrap(
+            split.animate(value: 1, time: 0.30, context: &context)
         )
+        XCTAssertTrue(context.isLogicallyComplete)
     }
 
     func testLongLogicalCompletionDrainsAtBaseTerminalBoundary() {

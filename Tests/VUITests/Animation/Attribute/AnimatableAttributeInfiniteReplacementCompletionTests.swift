@@ -129,7 +129,7 @@ final class AnimatableAttributeInfiniteReplacementCompletionTests: XCTestCase {
         )
     }
 
-    func testFiniteRepeatOldRecordsStayPendingWithSpeedZeroReplacement() {
+    func testFiniteRepeatOldLogicalDrainsWithSpeedZeroReplacement() {
         assertOldAnimationToInfiniteReplacement(
             oldAnimation: Animation.linear(duration: 0.20)
                 .repeatCount(2, autoreverses: false),
@@ -138,7 +138,7 @@ final class AnimatableAttributeInfiniteReplacementCompletionTests: XCTestCase {
             replacementLabel: "speedZero",
             logicalSampleTime: 0.55,
             pendingSampleTime: 1.20,
-            expectedEventsAfterLogicalSample: []
+            expectedEventsAfterLogicalSample: ["old repeat logical"]
         )
     }
 
@@ -269,9 +269,9 @@ final class AnimatableAttributeInfiniteReplacementCompletionTests: XCTestCase {
         XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         harness.finalizeTransactionBody()
 
-        harness.setTime(max(0, retargetTime - 0.10))
+        harness.advanceTime(to: max(0, retargetTime - 0.10))
         _ = harness.currentValue()
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
@@ -289,12 +289,12 @@ final class AnimatableAttributeInfiniteReplacementCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(logicalSampleTime)
+        harness.advanceTime(to: logicalSampleTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, expectedEventsAfterLogicalSample, file: file, line: line)
 
-        harness.setTime(pendingSampleTime)
+        harness.advanceTime(to: pendingSampleTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, expectedEventsAfterLogicalSample, file: file, line: line)

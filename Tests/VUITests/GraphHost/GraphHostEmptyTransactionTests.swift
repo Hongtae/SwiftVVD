@@ -36,9 +36,7 @@ final class GraphHostEmptyTransactionTests: XCTestCase {
     }
 
     func testEmptyTransactionDoesNotFinalizeCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let host = GraphHost()
         var events: [String] = []
@@ -54,9 +52,7 @@ final class GraphHostEmptyTransactionTests: XCTestCase {
         XCTAssertFalse(host.hasPendingTransactions)
         XCTAssertEqual(host.data.transactionSeed, 1)
 
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
         XCTAssertEqual(events, ["completion"])
 
         withExtendedLifetime(transaction) {}

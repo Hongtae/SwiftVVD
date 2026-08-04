@@ -116,10 +116,10 @@ final class AnimatableAttributeNegativeSpeedRetargetCompletionTests: XCTestCase 
         let harness = makeHarness()
         let replacementStart = 0.25
         let logicalDuration = replacementAnimation.box.duration
-        let presentationDuration = replacementAnimation.box.presentationDuration(
+        let terminalSamplingHorizon = replacementAnimation.box.terminalSamplingHorizon(
             for: Double(1.5)
         )
-        XCTAssertGreaterThan(presentationDuration, logicalDuration, file: file, line: line)
+        XCTAssertGreaterThan(terminalSamplingHorizon, logicalDuration, file: file, line: line)
 
         startAnimation(
             harness,
@@ -143,7 +143,7 @@ final class AnimatableAttributeNegativeSpeedRetargetCompletionTests: XCTestCase 
 
         var sampleTime = replacementStart + logicalDuration +
             replacementAnimation.box.defaultDisplayFrameInterval * 2
-        let finalSampleTime = replacementStart + presentationDuration + 1.0
+        let finalSampleTime = replacementStart + terminalSamplingHorizon + 1.0
         while sampleTime <= finalSampleTime,
               recorder.events.count < 4 {
             sample(harness, at: sampleTime)
@@ -191,8 +191,8 @@ final class AnimatableAttributeNegativeSpeedRetargetCompletionTests: XCTestCase 
 
         var sampleTime = replacementStart + replacementAnimation.box.defaultDisplayFrameInterval
         let finalSampleTime = replacementStart + max(
-            replacementAnimation.box.presentationDuration(for: Double(1.5)),
-            replacementAnimation.box.presentationDuration
+            replacementAnimation.box.terminalSamplingHorizon(for: Double(1.5)),
+            replacementAnimation.box.terminalSamplingHorizon
         ) + 1.0
         while sampleTime <= finalSampleTime,
               recorder.events.count < 4 {
@@ -312,7 +312,7 @@ final class AnimatableAttributeNegativeSpeedRetargetCompletionTests: XCTestCase 
         _ harness: AnimatableAttributeHarness,
         at time: Double
     ) {
-        harness.setTime(time)
+        harness.advanceTime(to: time)
         _ = harness.currentValue()
     }
 }

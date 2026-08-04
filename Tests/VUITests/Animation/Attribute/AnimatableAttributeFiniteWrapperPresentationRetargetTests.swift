@@ -24,15 +24,15 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.05)
+        harness.advanceTime(to: retargetTime + 0.05)
         let earlyReplacement = harness.currentValue().opacity
         XCTAssertLessThan(earlyReplacement, retargetStart - 0.10)
         XCTAssertLessThan(earlyReplacement, 0.05)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertLessThan(harness.currentValue().opacity, -0.45)
 
-        harness.setTime(retargetTime + 0.60)
+        harness.advanceTime(to: retargetTime + 0.60)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -58,15 +58,15 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.05)
+        harness.advanceTime(to: retargetTime + 0.05)
         let earlyReplacement = harness.currentValue().opacity
         XCTAssertLessThan(earlyReplacement, retargetStart - 0.30)
         XCTAssertLessThan(earlyReplacement, 0.70)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertLessThan(harness.currentValue().opacity, -0.45)
 
-        harness.setTime(retargetTime + 0.60)
+        harness.advanceTime(to: retargetTime + 0.60)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -92,12 +92,12 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.05)
+        harness.advanceTime(to: retargetTime + 0.05)
         let earlyReplacement = harness.currentValue().opacity
         XCTAssertLessThan(earlyReplacement, retargetStart)
         XCTAssertGreaterThan(earlyReplacement, 0.05)
 
-        harness.setTime(retargetTime + 0.20)
+        harness.advanceTime(to: retargetTime + 0.20)
         let descendingFrame = harness.currentValue().opacity
         XCTAssertLessThan(descendingFrame, -0.25)
     }
@@ -124,12 +124,12 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.06)
+        harness.advanceTime(to: retargetTime + 0.06)
         let earlyRise = harness.currentValue().opacity
         XCTAssertLessThan(earlyRise, 0.20)
         XCTAssertGreaterThan(earlyRise, 0.05)
 
-        harness.setTime(retargetTime + 0.20)
+        harness.advanceTime(to: retargetTime + 0.20)
         let descendingFrame = harness.currentValue().opacity
         XCTAssertLessThan(descendingFrame, -0.25)
     }
@@ -156,12 +156,12 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         let midReplacement = harness.currentValue().opacity
         XCTAssertLessThan(midReplacement, 0.25)
         XCTAssertGreaterThan(midReplacement, 0.05)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -187,14 +187,14 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.19)
+        harness.advanceTime(to: retargetTime + 0.19)
         XCTAssertLessThan(harness.currentValue().opacity, -0.40)
 
-        harness.setTime(retargetTime + 0.24)
+        harness.advanceTime(to: retargetTime + 0.24)
         let restartedCycle = harness.currentValue().opacity
         XCTAssertGreaterThan(restartedCycle, 0.25)
 
-        harness.setTime(retargetTime + 0.39)
+        harness.advanceTime(to: retargetTime + 0.39)
         XCTAssertLessThan(harness.currentValue().opacity, -0.30)
     }
 
@@ -232,7 +232,7 @@ final class AnimatableAttributeFiniteWrapperPresentationRetargetTests: XCTestCas
     ) {
         var time = 1.0 / 60.0
         while time <= endTime {
-            harness.setTime(time)
+            harness.advanceTime(to: time)
             _ = harness.currentValue()
             time += 1.0 / 60.0
         }

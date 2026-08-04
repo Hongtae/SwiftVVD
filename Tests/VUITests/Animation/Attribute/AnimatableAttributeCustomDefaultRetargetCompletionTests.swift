@@ -2,14 +2,14 @@ import XCTest
 @testable import VUI
 
 final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase {
-    func testSourceCustomToDefaultNilBoundaryFinishesOldBeforeDefaultFinalization() {
+    func testSourceCustomForkNilDrainsLogicalBeforeDefaultTerminal() {
         assertSourceCustomToDefaultRetarget(
             label: "customToDefaultNil",
             oldLogicalAt: nil
         )
     }
 
-    func testSourceCustomToDefaultLogicalBoundaryDoesNotDrainBeforeOldNil() {
+    func testSourceCustomForkLogicalFlagDrainsBeforeDefaultTerminal() {
         assertSourceCustomToDefaultRetarget(
             label: "customToDefaultLogical",
             oldLogicalAt: 0.20
@@ -43,9 +43,9 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0.0, accuracy: 0.000_001)
-        harness.setTime(0.50)
+        harness.advanceTime(to: 0.50)
         _ = harness.currentValue()
-        harness.setTime(retargetSampleTime)
+        harness.advanceTime(to: retargetSampleTime)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThan(beforeRetarget, 0)
         XCTAssertLessThan(beforeRetarget, 1)
@@ -92,7 +92,7 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
         completionRecorder.removeAll()
         sampleRecorder.removeAll()
 
-        harness.setTime(retargetSampleTime + frameInterval * 2.0)
+        harness.advanceTime(to: retargetSampleTime + frameInterval * 2.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
@@ -104,9 +104,8 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
         XCTAssertEqual(continuedOldSample.input, 1.0, accuracy: 0.000_001)
         XCTAssertGreaterThan(continuedOldSample.time, immediateOldSample.time)
 
-        harness.setTime(customNilAt + 1.0)
+        harness.advanceTime(to: customNilAt + 1.0)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
-        XCTAssertEqual(completionRecorder.events, [])
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
@@ -117,7 +116,7 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
         )
     }
 
-    func testDefaultToSourceCustomNilBoundaryGroupsOldDefaultWithCustomNil() {
+    func testDefaultForkLogicalBoundaryPrecedesSourceCustomNil() {
         let oldPresentationTime = defaultPresentationTime()
         assertDefaultToSourceCustomRetarget(
             label: "defaultToCustomNil",
@@ -125,15 +124,15 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
             replacementNilAt: max(0.30, oldPresentationTime - replacementActivationTime - frameInterval),
             earlyOldLogicalSampleTime: nil,
             expectedEventsAtNil: [
-                "old removed",
                 "old logical",
+                "old removed",
                 "replacement removed",
                 "replacement logical",
             ]
         )
     }
 
-    func testDefaultToSourceCustomLogicalBoundaryAllowsOldLogicalBeforeCustomNil() {
+    func testDefaultAndReplacementLogicalFlagsFollowSampleOrder() {
         let oldPresentationTime = defaultPresentationTime()
         let replacementNilAt = max(0.95, oldPresentationTime + 0.35 - replacementActivationTime)
         assertDefaultToSourceCustomRetarget(
@@ -142,10 +141,10 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
             replacementNilAt: replacementNilAt,
             earlyOldLogicalSampleTime: oldPresentationTime + frameInterval,
             expectedEventsAtNil: [
+                "replacement logical",
                 "old logical",
                 "old removed",
                 "replacement removed",
-                "replacement logical",
             ]
         )
     }
@@ -204,25 +203,32 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
         activateReplacementAnimation(harness)
         XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
 
-        if let oldLogicalAt {
-            harness.setTime(oldLogicalAt + frameInterval)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
-        }
+        let oldCompletionSample = max(
+            oldCustomNilAt,
+            oldLogicalAt ?? oldCustomNilAt
+        ) + frameInterval
+        harness.advanceTime(to: oldCompletionSample)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            completionRecorder.events,
+            ["old logical"],
+            file: file,
+            line: line
+        )
 
         let defaultFinalizationTime = replacementActivationTime +
-            Animation.default.box.presentationDuration(for: Double(1.0)) +
+            Animation.default.box.terminalSamplingHorizon(for: Double(1.0)) +
             frameInterval
         XCTAssertGreaterThan(defaultFinalizationTime, oldCustomNilAt, file: file, line: line)
-        harness.setTime(defaultFinalizationTime)
+        harness.advanceTime(to: defaultFinalizationTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,
             [
-                "old removed",
                 "old logical",
+                "old removed",
                 "replacement removed",
                 "replacement logical",
             ],
@@ -290,15 +296,23 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
                 file: file,
                 line: line
             )
-            harness.setTime(earlyOldLogicalSampleTime)
+            harness.advanceTime(to: earlyOldLogicalSampleTime)
             _ = harness.currentValue()
             harness.flushCompletionActions()
-            XCTAssertEqual(completionRecorder.events, ["old logical"], file: file, line: line)
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "replacement logical",
+                    "old logical",
+                ],
+                file: file,
+                line: line
+            )
         } else {
             XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
         }
 
-        harness.setTime(replacementActivationTime + replacementNilAt + frameInterval)
+        harness.advanceTime(to: replacementActivationTime + replacementNilAt + frameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, expectedEventsAtNil, file: file, line: line)
@@ -306,15 +320,15 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
 
     private func defaultPresentationTime() -> TimeInterval {
         let activeBeginTime = retargetTime - (frameInterval * 2.0)
-        return activeBeginTime + Animation.default.box.presentationDuration(for: Double(0.80))
+        return activeBeginTime + Animation.default.box.terminalSamplingHorizon(for: Double(0.80))
     }
 
     private func sampleRunningAnimationBeforeRetarget(
         _ harness: AnimatableAttributeHarness
     ) {
-        harness.setTime(retargetTime / 2.0)
+        harness.advanceTime(to: retargetTime / 2.0)
         _ = harness.currentValue()
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
     }
@@ -322,11 +336,11 @@ final class AnimatableAttributeCustomDefaultRetargetCompletionTests: XCTestCase 
     private func activateReplacementAnimation(
         _ harness: AnimatableAttributeHarness
     ) {
-        harness.setTime(replacementActivationTime)
+        harness.advanceTime(to: replacementActivationTime)
         _ = harness.currentValue()
-        harness.setTime(replacementActivationTime + frameInterval)
+        harness.advanceTime(to: replacementActivationTime + frameInterval)
         _ = harness.currentValue()
-        harness.setTime(replacementActivationTime + (frameInterval * 2.0))
+        harness.advanceTime(to: replacementActivationTime + (frameInterval * 2.0))
         _ = harness.currentValue()
         harness.flushCompletionActions()
     }

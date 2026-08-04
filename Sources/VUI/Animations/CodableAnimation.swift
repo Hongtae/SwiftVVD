@@ -1,4 +1,29 @@
+//
+//  File: CodableAnimation.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
+
+protocol EncodableAnimation: ProtobufEncodableMessage {
+    static var leafProtobufTag: CodableAnimation.Tag? { get }
+}
+
+extension EncodableAnimation {
+    static var leafProtobufTag: CodableAnimation.Tag? {
+        nil
+    }
+
+    func encodeAnimation(to encoder: inout ProtobufEncoder) throws {
+        if let tag = Self.leafProtobufTag {
+            try encoder.encodeMessageField(tag.rawValue, self)
+        } else {
+            try encode(to: &encoder)
+        }
+    }
+}
 
 extension UnitCurve.CubicSolver: ProtobufEncodableMessage, ProtobufDecodableMessage {
     func encode(to encoder: inout ProtobufEncoder) throws {
@@ -33,7 +58,11 @@ extension UnitCurve.CubicSolver: ProtobufEncodableMessage, ProtobufDecodableMess
     }
 }
 
-extension DefaultAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
+extension DefaultAnimation: EncodableAnimation, ProtobufDecodableMessage {
+    static var leafProtobufTag: CodableAnimation.Tag? {
+        .init(rawValue: 7)
+    }
+
     func encode(to encoder: inout ProtobufEncoder) throws {
     }
 
@@ -42,7 +71,11 @@ extension DefaultAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     }
 }
 
-extension BezierAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
+extension BezierAnimation: EncodableAnimation, ProtobufDecodableMessage {
+    static var leafProtobufTag: CodableAnimation.Tag? {
+        .init(rawValue: 1)
+    }
+
     private static var defaultCurve: UnitCurve.CubicSolver {
         UnitCurve.CubicSolver(
             startControlPoint: .zero,
@@ -81,7 +114,11 @@ extension BezierAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     }
 }
 
-extension SpringAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
+extension SpringAnimation: EncodableAnimation, ProtobufDecodableMessage {
+    static var leafProtobufTag: CodableAnimation.Tag? {
+        .init(rawValue: 2)
+    }
+
     func encode(to encoder: inout ProtobufEncoder) throws {
         if mass != 1 {
             encoder.encodeDoubleFieldAlways(1, mass)
@@ -128,7 +165,11 @@ extension SpringAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     }
 }
 
-extension FluidSpringAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
+extension FluidSpringAnimation: EncodableAnimation, ProtobufDecodableMessage {
+    static var leafProtobufTag: CodableAnimation.Tag? {
+        .init(rawValue: 3)
+    }
+
     func encode(to encoder: inout ProtobufEncoder) throws {
         if response != 0 {
             encoder.encodeDoubleFieldAlways(1, response)
@@ -222,6 +263,24 @@ extension RepeatAnimation: ProtobufEncodableMessage {
     }
 }
 
+extension CustomAnimationModifiedContent: EncodableAnimation {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        let encodableBase =
+            (base as? any EncodableAnimation) ?? DefaultAnimation()
+        try encodableBase.encodeAnimation(to: &encoder)
+
+        if let encodableModifier = modifier as? any ProtobufEncodableMessage {
+            try encodableModifier.encode(to: &encoder)
+        }
+    }
+}
+
+extension InternalCustomAnimationModifiedContent: EncodableAnimation {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        try _base.encode(to: &encoder)
+    }
+}
+
 struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     struct Tag: RawRepresentable, Equatable, Hashable {
         var rawValue: UInt
@@ -238,7 +297,9 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     }
 
     func encode(to encoder: inout ProtobufEncoder) throws {
-        try Self.encode(box: base.box, to: &encoder)
+        let encodableBase =
+            (base.base as? any EncodableAnimation) ?? DefaultAnimation()
+        try encodableBase.encodeAnimation(to: &encoder)
     }
 
     init(from decoder: inout ProtobufDecoder) throws {
@@ -292,54 +353,6 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
             throw ProtobufDecoder.DecodingError.failed
         }
         self.base = animation
-    }
-
-    private static func encode(
-        box: AnimationBoxBase,
-        to encoder: inout ProtobufEncoder
-    ) throws {
-        switch box {
-        case is DefaultAnimationBox:
-            try encoder.encodeMessageField(7, DefaultAnimation())
-        case let box as BezierAnimationBox:
-            try encoder.encodeMessageField(
-                1,
-                BezierAnimation(duration: box.storedDuration, curve: box.curve)
-            )
-        case let box as SpringAnimationBox:
-            try encoder.encodeMessageField(
-                2,
-                SpringAnimation(
-                    mass: box.mass,
-                    stiffness: box.stiffness,
-                    damping: box.damping,
-                    initialVelocity: _Velocity(valuePerSecond: box.initialVelocity)
-                )
-            )
-        case let box as FluidSpringAnimationBox:
-            try encoder.encodeMessageField(
-                3,
-                FluidSpringAnimation(
-                    response: box.response,
-                    dampingFraction: box.dampingFraction,
-                    blendDuration: box.blendDuration
-                )
-            )
-        case let box as DelayAnimationBox:
-            try encode(box: box.base, to: &encoder)
-            try DelayAnimation(delay: box.delay).encode(to: &encoder)
-        case let box as SpeedAnimationBox:
-            try encode(box: box.base, to: &encoder)
-            try SpeedAnimation(speed: box.speed).encode(to: &encoder)
-        case let box as RepeatAnimationBox:
-            try encode(box: box.base, to: &encoder)
-            try RepeatAnimation(
-                repeatCount: box.repeatCount,
-                autoreverses: box.autoreverses
-            ).encode(to: &encoder)
-        default:
-            try encoder.encodeMessageField(7, DefaultAnimation())
-        }
     }
 
     private static func decodeModifierEnvelope(

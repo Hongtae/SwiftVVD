@@ -29,7 +29,6 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
     }
 
     func testDeferredAsyncTransactionFlushInstallsScopedCurrentTransactionAndRestoresAmbient() {
-        Transaction.ThreadStorage.currentBox = nil
         let host = GraphHost()
         var child = Transaction()
         child.isContinuous = true
@@ -59,9 +58,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
     }
 
     func testDeferredAsyncTransactionFlushDoesNotFinalizeCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let host = GraphHost()
         var events: [String] = []
@@ -75,7 +72,6 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
             id: Transaction.ID(value: 111),
             mutation: RecordingGraphMutation {
                 events.append("mutation")
-                Transaction.ThreadStorage.markMutation(for: Transaction.current)
             }
         )
 
@@ -83,9 +79,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
 
         XCTAssertEqual(events, ["mutation"])
 
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
         XCTAssertEqual(events, ["mutation", "completion"])
 
         withExtendedLifetime(transaction) {}

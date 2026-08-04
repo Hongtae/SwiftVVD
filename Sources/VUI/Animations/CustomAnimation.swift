@@ -87,8 +87,8 @@ struct AnimationFinishingDefinitionKey<AnimatableValue: VectorArithmetic>: Anima
 struct RepeatState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
     typealias Value = RepeatState<AnimatableValue>
 
-    var iteration: Int = 0
-    var startTime: TimeInterval = 0
+    var index: Int = 0
+    var timeOffset: TimeInterval = 0
 
     static var defaultValue: RepeatState<AnimatableValue> {
         RepeatState()
@@ -122,20 +122,14 @@ struct VelocityTrackingAnimation: CustomAnimation {
         if velocityState.sampler.isEmpty {
             velocityState.sampler.addSample(value, time: time)
             context.velocityState = velocityState
-            return .zero
-        }
-        guard time > 0 else {
-            return .zero
         }
 
         let activeUntil = (velocityState.sampler.lastTime ?? 0) + Self.activityWindow
         let projectedVelocity = velocity(value: value, time: time, context: context)
-        if (projectedVelocity?.magnitudeSquared ?? 0) > 0 || activeUntil > time {
-            return value
+        if let projectedVelocity, projectedVelocity == .zero {
+            return nil
         }
-
-        context.isLogicallyComplete = true
-        return nil
+        return activeUntil > time ? value : nil
     }
 
     nonisolated func velocity<Value>(
@@ -223,12 +217,10 @@ struct DefaultCombiningAnimation: CustomAnimation {
         var combinedState = context.state.combinedState
         guard entries.count == combinedState.entries.count,
               !entries.isEmpty else {
-            context.isLogicallyComplete = true
             return nil
         }
 
         var output = Value.zero
-        var hasActiveOutput = false
         var lastChildIsLogicallyComplete = false
         var nextEntries = combinedState.entries
 
@@ -237,7 +229,6 @@ struct DefaultCombiningAnimation: CustomAnimation {
                 if index == entries.indices.last {
                     combinedState.entries = nextEntries
                     context.state.combinedState = combinedState
-                    context.isLogicallyComplete = true
                     return nil
                 }
                 output = nextEntries[index].value
@@ -254,18 +245,17 @@ struct DefaultCombiningAnimation: CustomAnimation {
                 context: &childContext
             ) else {
                 nextEntries[index].state = nil
-                output = nextEntries[index].value
                 if index == entries.indices.last {
                     combinedState.entries = nextEntries
                     context.state.combinedState = combinedState
-                    context.isLogicallyComplete = true
+                    context.isLogicallyComplete =
+                        childContext.isLogicallyComplete
                     return nil
                 }
                 continue
             }
 
             output += childOutput
-            hasActiveOutput = true
             childState = childContext.state
             nextEntries[index].state = childState
             if index == entries.indices.last {
@@ -276,7 +266,7 @@ struct DefaultCombiningAnimation: CustomAnimation {
         combinedState.entries = nextEntries
         context.state.combinedState = combinedState
         context.isLogicallyComplete = lastChildIsLogicallyComplete
-        return hasActiveOutput ? output : nil
+        return output
     }
 }
 
@@ -343,6 +333,7 @@ public struct AnimationContext<Value> where Value: VectorArithmetic {
     public var state: AnimationState<Value>
     private var environmentBox: AnimationContextEnvironmentBox
     public var isLogicallyComplete: Bool
+    // Reserved storage byte retained as part of this value's observed layout.
     private var storageTag: UInt8
 
     public var environment: EnvironmentValues {

@@ -183,17 +183,24 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     init<Content: View>(content: Content,
                         environment: EnvironmentValues = .tracking(),
+                        viewPhase: ViewGraphHost.Phase = ViewGraphHost.Phase(),
                         scene: WindowKey,
                         usesPlatformWindow: Bool,
                         frameInParent: CGRect = .zero) {
         self.usesPlatformWindow = usesPlatformWindow
         self.frameInParent = frameInParent
-        super.init(content: content, environment: environment, scene: scene)
+        super.init(
+            content: content,
+            environment: environment,
+            viewPhase: viewPhase,
+            scene: scene
+        )
     }
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
          environment: EnvironmentValues = .tracking(),
+         viewPhase: ViewGraphHost.Phase = ViewGraphHost.Phase(),
          scene: WindowKey,
          usesPlatformWindow: Bool,
          frameInParent: CGRect = .zero) {
@@ -202,6 +209,7 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
                    environment: environment,
+                   viewPhase: viewPhase,
                    scene: scene)
     }
 

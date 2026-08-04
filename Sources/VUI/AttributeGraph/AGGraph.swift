@@ -145,6 +145,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         var updateTraversalState: UInt8 = 0
         var inputsChanged: Bool = true
         var isEvaluating: Bool = false  // for cycle detection
+        var isBeingRemoved: Bool = false
 
         // Input records remain sorted by raw slot index. Their flag byte owns
         // permanent, changed, and current-evaluation read state. Reverse

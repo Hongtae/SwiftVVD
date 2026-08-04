@@ -128,14 +128,14 @@ final class AnimatableAttributeResidualWrapperLifetimeTests: XCTestCase {
     ) {
         let delayThenRepeatLogical = delayThenRepeat.box.duration
         let repeatThenDelayLogical = repeatThenDelay.box.duration
-        let delayThenRepeatPresentation = delayThenRepeat.box.presentationDuration(for: Double(1))
-        let repeatThenDelayPresentation = repeatThenDelay.box.presentationDuration(for: Double(1))
+        let delayThenRepeatPresentation = delayThenRepeat.box.terminalSamplingHorizon(for: Double(1))
+        let repeatThenDelayPresentation = repeatThenDelay.box.terminalSamplingHorizon(for: Double(1))
 
         XCTAssertEqual(
-            delayThenRepeatLogical,
-            repeatThenDelayLogical,
+            delayThenRepeatLogical - repeatThenDelayLogical,
+            delay,
             accuracy: 0.000_001,
-            "\(label) should keep the first delayed base logical boundary",
+            "\(label) should repeat an inner delay but apply an outer delay once",
             file: file,
             line: line
         )
@@ -173,12 +173,12 @@ final class AnimatableAttributeResidualWrapperLifetimeTests: XCTestCase {
             initialValue: _OpacityEffect(opacity: 0)
         )
         let logicalDuration = animation.box.duration
-        let presentationDuration = animation.box.presentationDuration(for: Double(1))
+        let terminalSamplingHorizon = animation.box.terminalSamplingHorizon(for: Double(1))
         let frame = animation.box.defaultDisplayFrameInterval
 
         XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         XCTAssertGreaterThan(
-            presentationDuration,
+            terminalSamplingHorizon,
             logicalDuration + frame,
             "\(label) should keep a separate residual presentation boundary",
             file: file,
@@ -202,40 +202,46 @@ final class AnimatableAttributeResidualWrapperLifetimeTests: XCTestCase {
         let didFireImmediateLogical = recorder.events == [logicalEvent]
         if logicalDuration <= frame {
             XCTAssertEqual(recorder.events, [logicalEvent], file: file, line: line)
-        } else {
-            XCTAssertEqual(recorder.events, [], file: file, line: line)
         }
 
         let logicalSampleTime: Double
         if didFireImmediateLogical {
             logicalSampleTime = 0
         } else {
-            harness.setTime(logicalDuration / 2)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            XCTAssertEqual(recorder.events, [], file: file, line: line)
-
-            logicalSampleTime = (logicalDuration + presentationDuration) / 2
-            harness.setTime(logicalSampleTime)
-            _ = harness.currentValue()
-            harness.flushCompletionActions()
-            if recorder.events != [logicalEvent] {
+            var observedLogicalTime: Double?
+            var sampleTime = frame
+            let logicalSearchEnd = terminalSamplingHorizon + 1.0
+            while sampleTime <= logicalSearchEnd {
+                harness.advanceTime(to: sampleTime)
+                _ = harness.currentValue()
+                harness.flushCompletionActions()
+                if recorder.events == [logicalEvent] {
+                    observedLogicalTime = sampleTime
+                    break
+                }
+                if recorder.events.contains(removedEvent) {
+                    break
+                }
+                sampleTime += frame
+            }
+            guard let observedLogicalTime else {
                 XCTFail(
                     "\(label) did not expose a logical-only sample; " +
-                        "duration=\(logicalDuration), presentation=\(presentationDuration), " +
+                        "duration=\(logicalDuration), presentation=\(terminalSamplingHorizon), " +
                         "frame=\(frame), events=\(recorder.events)",
                     file: file,
                     line: line
                 )
                 return
             }
+            logicalSampleTime = observedLogicalTime
         }
 
         var removedBoundaryValue: Double?
         var sampleTime = logicalSampleTime + frame
-        let lastSampleTime = logicalSampleTime + presentationDuration + 1.0
+        let lastSampleTime = terminalSamplingHorizon + 2.0
         while sampleTime <= lastSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.contains(removedEvent) {

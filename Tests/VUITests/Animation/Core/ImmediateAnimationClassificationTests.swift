@@ -2,17 +2,6 @@ import XCTest
 @testable import VUI
 
 final class ImmediateAnimationClassificationTests: XCTestCase {
-    private struct TrapOnAnimateCustomAnimation: CustomAnimation {
-        func animate<Value>(
-            value: Value,
-            time: TimeInterval,
-            context: inout AnimationContext<Value>
-        ) -> Value? where Value: VectorArithmetic {
-            XCTFail("source-defined retarget activation classification must not sample CustomAnimation.animate")
-            return nil
-        }
-    }
-
     func testZeroAndNegativeDurationReplacementsCompleteImmediately() {
         let replacements: [Animation] = [
             .linear(duration: 0),
@@ -24,8 +13,6 @@ final class ImmediateAnimationClassificationTests: XCTestCase {
 
         for replacement in replacements {
             XCTAssertTrue(replacement.box.isImmediatelyComplete)
-            XCTAssertEqual(replacement.box.noRegisteredCompletionDelay(), 0)
-            XCTAssertTrue(replacement.box.finishesRetargetCompletionAtActivation)
 
             var context = AnimationContext<Double>()
             XCTAssertNil(
@@ -40,8 +27,6 @@ final class ImmediateAnimationClassificationTests: XCTestCase {
 
         XCTAssertFalse(replacement.box.isImmediatelyComplete)
         XCTAssertFalse(replacement.box.duration.isFinite)
-        XCTAssertNil(replacement.box.noRegisteredCompletionDelay())
-        XCTAssertFalse(replacement.box.finishesRetargetCompletionAtActivation)
 
         var context = AnimationContext<Double>()
         let sample = try XCTUnwrap(
@@ -51,10 +36,4 @@ final class ImmediateAnimationClassificationTests: XCTestCase {
         XCTAssertFalse(context.isLogicallyComplete)
     }
 
-    func testSourceDefinedCustomDoesNotUseRetargetActivationFastPath() {
-        let replacement = Animation(TrapOnAnimateCustomAnimation())
-
-        XCTAssertTrue(replacement.box.preservesRetargetedCompletionDeadlines)
-        XCTAssertFalse(replacement.box.finishesRetargetCompletionAtActivation)
-    }
 }

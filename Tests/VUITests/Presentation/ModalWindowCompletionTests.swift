@@ -26,9 +26,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(events, [])
         waitForMainQueue(until: { !events.isEmpty })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(context, delta: 0.49))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["removed", "logical"])
     }
 
@@ -61,9 +61,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(events, [])
         waitForMainQueue(until: { !events.isEmpty })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(context, delta: 0.49))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["cleanup", "removed", "logical"])
     }
 
@@ -88,7 +88,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             animation: presentTransaction.effectiveAnimation
         )
 
-        XCTAssertTrue(context.updateAnimation(delta: 0.20))
+        XCTAssertTrue(updateAnimation(context, delta: 0.20))
         XCTAssertEqual(events, [])
 
         var dismissTransaction = Transaction(animation: .linear(duration: 0.20))
@@ -115,13 +115,13 @@ final class ModalWindowCompletionTests: XCTestCase {
 
         waitForMainQueue(until: { events.count > 0 })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(context, delta: 0.29))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["present removed", "present logical"])
-        XCTAssertTrue(context.updateAnimation(delta: 0.18))
+        XCTAssertTrue(updateAnimation(context, delta: 0.18))
         XCTAssertEqual(events, ["present removed", "present logical"])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(
             events,
             [
@@ -132,6 +132,95 @@ final class ModalWindowCompletionTests: XCTestCase {
                 "dismiss logical",
             ]
         )
+    }
+
+    func testNonFiniteDismissRequestedDuringPresentationKeepsRemovedCompletionsPending() {
+        let cases: [(name: String, animation: Animation)] = [
+            (
+                "repeatForever",
+                .linear(duration: 0.20).repeatForever(autoreverses: false)
+            ),
+            ("speed0", .linear(duration: 0.20).speed(0)),
+            ("speedNegative", .linear(duration: 0.20).speed(-1)),
+        ]
+
+        for testCase in cases {
+            let parent = makeParentController()
+            let context = ModalPresentationContext(parentController: parent)
+            var presentRemoved = false
+            var presentLogical = false
+            var dismissRemoved = false
+            var dismissLogical = false
+            var cleanupCount = 0
+
+            var presentTransaction = Transaction(
+                animation: .linear(duration: 0.20)
+            )
+            presentTransaction.addAnimationCompletion(criteria: .removed) {
+                presentRemoved = true
+            }
+            presentTransaction.addAnimationCompletion(
+                criteria: .logicallyComplete
+            ) {
+                presentLogical = true
+            }
+            context.beginPresentAnimation(
+                controller: parent,
+                transaction: presentTransaction
+            )
+            finalizeAnimationCompletions(
+                in: presentTransaction,
+                animation: presentTransaction.effectiveAnimation
+            )
+
+            XCTAssertTrue(updateAnimation(context, delta: 0.20), testCase.name)
+
+            var dismissTransaction = Transaction(animation: testCase.animation)
+            dismissTransaction.addAnimationCompletion(criteria: .removed) {
+                dismissRemoved = true
+            }
+            dismissTransaction.addAnimationCompletion(
+                criteria: .logicallyComplete
+            ) {
+                dismissLogical = true
+            }
+            XCTAssertTrue(
+                context.requestDismissal(
+                    controller: parent,
+                    reason: .dismissed,
+                    transaction: dismissTransaction
+                ) {
+                    cleanupCount += 1
+                },
+                testCase.name
+            )
+            finalizeAnimationCompletions(
+                in: dismissTransaction,
+                animation: dismissTransaction.effectiveAnimation
+            )
+
+            waitForMainQueue(timeout: 0.05, until: {
+                presentRemoved || presentLogical || dismissRemoved ||
+                    dismissLogical
+            })
+            XCTAssertFalse(presentRemoved, testCase.name)
+            XCTAssertFalse(presentLogical, testCase.name)
+            XCTAssertFalse(dismissRemoved, testCase.name)
+            XCTAssertFalse(dismissLogical, testCase.name)
+            XCTAssertEqual(cleanupCount, 0, testCase.name)
+
+            XCTAssertTrue(updateAnimation(context, delta: 0.29), testCase.name)
+            XCTAssertFalse(presentLogical, testCase.name)
+            XCTAssertTrue(updateAnimation(context, delta: 0.02), testCase.name)
+            XCTAssertTrue(presentLogical, testCase.name)
+            XCTAssertFalse(presentRemoved, testCase.name)
+            XCTAssertFalse(dismissRemoved, testCase.name)
+            XCTAssertFalse(dismissLogical, testCase.name)
+            XCTAssertEqual(cleanupCount, 1, testCase.name)
+            XCTAssertFalse(updateAnimation(context, delta: 1.0), testCase.name)
+
+            withExtendedLifetime((presentTransaction, dismissTransaction)) {}
+        }
     }
 
     func testNoExplicitPresentRegistersDefaultModalCompletionBoundary() {
@@ -158,9 +247,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(events, [])
         waitForMainQueue(until: { !events.isEmpty })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(context, delta: 0.29))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["removed", "logical"])
     }
 
@@ -190,9 +279,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(events, [])
         waitForMainQueue(until: { !events.isEmpty })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(context, delta: 0.29))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["cleanup", "removed"])
     }
 
@@ -225,9 +314,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(events, [])
         waitForMainQueue(until: { !events.isEmpty })
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(context, delta: 0.29))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
         XCTAssertEqual(events, ["cleanup", "removed", "logical"])
     }
 
@@ -253,9 +342,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(presentEvents, [])
         waitForMainQueue(until: { !presentEvents.isEmpty })
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.29))
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.02))
         XCTAssertEqual(presentEvents, ["present logical"])
 
         let dismissContext = ModalPresentationContext(parentController: parent)
@@ -283,9 +372,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(dismissEvents, [])
         waitForMainQueue(until: { !dismissEvents.isEmpty })
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.29))
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.02))
         XCTAssertEqual(dismissEvents, ["dismiss cleanup", "dismiss removed"])
     }
 
@@ -314,9 +403,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(presentEvents, [])
         waitForMainQueue(until: { !presentEvents.isEmpty })
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.29))
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.02))
         XCTAssertEqual(presentEvents, ["present removed", "present logical"])
 
         let dismissContext = ModalPresentationContext(parentController: parent)
@@ -347,9 +436,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(dismissEvents, [])
         waitForMainQueue(until: { !dismissEvents.isEmpty })
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.29))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.29))
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.02))
         XCTAssertEqual(
             dismissEvents,
             ["dismiss cleanup", "dismiss removed", "dismiss logical"]
@@ -378,9 +467,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(presentEvents, [])
         waitForMainQueue(until: { !presentEvents.isEmpty })
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.49))
         XCTAssertEqual(presentEvents, [])
-        XCTAssertTrue(presentContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(presentContext, delta: 0.02))
         XCTAssertEqual(presentEvents, ["present removed"])
 
         let dismissContext = ModalPresentationContext(parentController: parent)
@@ -408,9 +497,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         XCTAssertEqual(dismissEvents, [])
         waitForMainQueue(until: { !dismissEvents.isEmpty })
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.49))
         XCTAssertEqual(dismissEvents, [])
-        XCTAssertTrue(dismissContext.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(dismissContext, delta: 0.02))
         XCTAssertEqual(dismissEvents, ["dismiss cleanup", "dismiss removed"])
     }
 
@@ -442,11 +531,11 @@ final class ModalWindowCompletionTests: XCTestCase {
             waitForMainQueue(timeout: 0.05, until: { !events.isEmpty })
             XCTAssertEqual(events, [], "duration \(duration)")
             XCTAssertTrue(
-                context.updateAnimation(delta: duration + 0.29),
+                updateAnimation(context, delta: duration + 0.29),
                 "duration \(duration)"
             )
             XCTAssertEqual(events, [], "duration \(duration)")
-            XCTAssertTrue(context.updateAnimation(delta: 0.02), "duration \(duration)")
+            XCTAssertTrue(updateAnimation(context, delta: 0.02), "duration \(duration)")
             XCTAssertEqual(
                 events,
                 [
@@ -492,11 +581,11 @@ final class ModalWindowCompletionTests: XCTestCase {
             waitForMainQueue(timeout: 0.05, until: { !events.isEmpty })
             XCTAssertEqual(events, [], "duration \(duration)")
             XCTAssertTrue(
-                context.updateAnimation(delta: duration + 0.29),
+                updateAnimation(context, delta: duration + 0.29),
                 "duration \(duration)"
             )
             XCTAssertEqual(events, [], "duration \(duration)")
-            XCTAssertTrue(context.updateAnimation(delta: 0.02), "duration \(duration)")
+            XCTAssertTrue(updateAnimation(context, delta: 0.02), "duration \(duration)")
             XCTAssertEqual(
                 events,
                 [
@@ -534,7 +623,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             presentEvents == ["present logical", "present removed"]
         })
         XCTAssertEqual(presentEvents, ["present logical", "present removed"])
-        XCTAssertFalse(presentContext.updateAnimation(delta: 1.0))
+        XCTAssertFalse(updateAnimation(presentContext, delta: 1.0))
 
         let dismissContext = ModalPresentationContext(parentController: parent)
         var dismissEvents: [String] = []
@@ -567,7 +656,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             dismissEvents,
             ["cleanup", "dismiss logical", "dismiss removed"]
         )
-        XCTAssertFalse(dismissContext.updateAnimation(delta: 1.0))
+        XCTAssertFalse(updateAnimation(dismissContext, delta: 1.0))
     }
 
     func testExplicitZeroPresentationUsesImmediateFallbackForBothCriteria() {
@@ -593,7 +682,7 @@ final class ModalWindowCompletionTests: XCTestCase {
 
         waitForMainQueue(until: { events == ["removed", "logical"] })
         XCTAssertEqual(events, ["removed", "logical"])
-        XCTAssertFalse(context.updateAnimation(delta: 1.0))
+        XCTAssertFalse(updateAnimation(context, delta: 1.0))
     }
 
     func testExplicitZeroDismissalDefersCleanupUntilImmediateFallbackDrains() {
@@ -624,7 +713,7 @@ final class ModalWindowCompletionTests: XCTestCase {
 
         waitForMainQueue(until: { events == ["removed", "logical", "cleanup"] })
         XCTAssertEqual(events, ["removed", "logical", "cleanup"])
-        XCTAssertFalse(context.updateAnimation(delta: 1.0))
+        XCTAssertFalse(updateAnimation(context, delta: 1.0))
     }
 
     func testNonFinitePresentationUsesSampledModalCompletionFallbacks() {
@@ -657,7 +746,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             withExtendedLifetime(transaction) {
                 waitForMainQueue(timeout: 0.05, until: { !events.isEmpty })
                 XCTAssertEqual(events, [], testCase.name)
-                XCTAssertFalse(context.updateAnimation(delta: 1.0), testCase.name)
+                XCTAssertFalse(updateAnimation(context, delta: 1.0), testCase.name)
             }
         }
 
@@ -684,7 +773,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             events == ["negative removed", "negative logical"]
         })
         XCTAssertEqual(events, ["negative removed", "negative logical"])
-        XCTAssertFalse(context.updateAnimation(delta: 1.0))
+        XCTAssertFalse(updateAnimation(context, delta: 1.0))
     }
 
     func testNonFiniteDismissalCleansUpAndLeavesModalCompletionsPending() {
@@ -723,15 +812,13 @@ final class ModalWindowCompletionTests: XCTestCase {
             withExtendedLifetime(transaction) {
                 waitForMainQueue(timeout: 0.05, until: { events.count > 1 })
                 XCTAssertEqual(events, ["\(testCase.name) cleanup"], testCase.name)
-                XCTAssertFalse(context.updateAnimation(delta: 1.0), testCase.name)
+                XCTAssertFalse(updateAnimation(context, delta: 1.0), testCase.name)
             }
         }
     }
 
     func testSheetUpdateDismissDeliversOnDismissBeforeDismissCompletionBoundary() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let parent = makeParentController()
         let namespaceID = Namespace.ID(id: 90_001)
@@ -752,7 +839,8 @@ final class ModalWindowCompletionTests: XCTestCase {
         parent.viewGraph.data.withCurrent {
             parent.updateSheetPresentation(
                 .single(preference),
-                transaction: Transaction(animation: nil)
+                transaction: Transaction(animation: nil),
+                viewPhase: ViewGraphHost.Phase()
             )
         }
         XCTAssertEqual(events, [])
@@ -768,7 +856,8 @@ final class ModalWindowCompletionTests: XCTestCase {
         parent.viewGraph.data.withCurrent {
             parent.updateSheetPresentation(
                 .keyed([namespaceID: dismissTransaction]),
-                transaction: dismissTransaction
+                transaction: dismissTransaction,
+                viewPhase: ViewGraphHost.Phase()
             )
         }
 
@@ -793,8 +882,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             events.append("content logical")
         }
         let contentLogicalToken = AnimationCompletionToken(
-            listener: try XCTUnwrap(contentTransaction.animationLogicalListener),
-            criteria: .logicallyComplete
+            listener: try XCTUnwrap(contentTransaction.animationLogicalListener)
         )
         contentLogicalToken.start()
         finalizeAnimationCompletions(
@@ -814,7 +902,7 @@ final class ModalWindowCompletionTests: XCTestCase {
                 transaction: dismissTransaction
             ) {
                 events.append("onDismiss cleanup")
-                enqueueAnimationCompletionActions(contentLogicalToken.finish())
+                contentLogicalToken.finish()
             }
         )
         finalizeAnimationCompletions(
@@ -823,9 +911,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         )
 
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(context, delta: 0.49))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
 
         waitForMainQueue(until: { events.count == 3 })
         XCTAssertEqual(
@@ -848,8 +936,7 @@ final class ModalWindowCompletionTests: XCTestCase {
             events.append("content removed")
         }
         let contentRemovedToken = AnimationCompletionToken(
-            listener: try XCTUnwrap(contentTransaction.animationListener),
-            criteria: .removed
+            listener: try XCTUnwrap(contentTransaction.animationListener)
         )
         contentRemovedToken.start()
         finalizeAnimationCompletions(
@@ -869,7 +956,7 @@ final class ModalWindowCompletionTests: XCTestCase {
                 transaction: dismissTransaction
             ) {
                 events.append("onDismiss cleanup")
-                enqueueAnimationCompletionActions(contentRemovedToken.finish())
+                contentRemovedToken.finish()
             }
         )
         finalizeAnimationCompletions(
@@ -878,9 +965,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         )
 
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(context, delta: 0.49))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
 
         waitForMainQueue(until: { events.count == 3 })
         XCTAssertEqual(
@@ -906,12 +993,10 @@ final class ModalWindowCompletionTests: XCTestCase {
             events.append("content removed")
         }
         let contentRemovedToken = AnimationCompletionToken(
-            listener: try XCTUnwrap(contentTransaction.animationListener),
-            criteria: .removed
+            listener: try XCTUnwrap(contentTransaction.animationListener)
         )
         let contentLogicalToken = AnimationCompletionToken(
-            listener: try XCTUnwrap(contentTransaction.animationLogicalListener),
-            criteria: .logicallyComplete
+            listener: try XCTUnwrap(contentTransaction.animationLogicalListener)
         )
         contentRemovedToken.start()
         contentLogicalToken.start()
@@ -935,9 +1020,8 @@ final class ModalWindowCompletionTests: XCTestCase {
                 transaction: dismissTransaction
             ) {
                 events.append("onDismiss cleanup")
-                enqueueAnimationCompletionActions(
-                    contentRemovedToken.finish() + contentLogicalToken.finish()
-                )
+                contentRemovedToken.finish()
+                contentLogicalToken.finish()
             }
         )
         finalizeAnimationCompletions(
@@ -946,9 +1030,9 @@ final class ModalWindowCompletionTests: XCTestCase {
         )
 
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.49))
+        XCTAssertTrue(updateAnimation(context, delta: 0.49))
         XCTAssertEqual(events, [])
-        XCTAssertTrue(context.updateAnimation(delta: 0.02))
+        XCTAssertTrue(updateAnimation(context, delta: 0.02))
 
         waitForMainQueue(until: { events.count == 5 })
         XCTAssertEqual(
@@ -968,6 +1052,17 @@ final class ModalWindowCompletionTests: XCTestCase {
             content: EmptyView(),
             scene: WindowKey(namespace: .app, sceneID: SceneID(EmptyView.self))
         )
+    }
+
+    private func updateAnimation(
+        _ context: ModalPresentationContext,
+        delta: Double
+    ) -> Bool {
+        var result = false
+        Update.ensure {
+            result = context.updateAnimation(delta: delta)
+        }
+        return result
     }
 
     private func waitForMainQueue(

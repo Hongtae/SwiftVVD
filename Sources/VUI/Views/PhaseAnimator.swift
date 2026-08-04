@@ -215,10 +215,10 @@ extension PhaseAnimator {
                 didAnimate = true
             }
 
-            override func animationWasRemoved() -> [() -> Void] {
+            override func animationWasRemoved() {
                 count -= 1
-                guard count == 0 else { return [] }
-                return fireActions(didAnimate: didAnimate)
+                guard count == 0 else { return }
+                fireActions(didAnimate: didAnimate)
             }
 
             func fireNoAnimationFallback() {
@@ -229,11 +229,10 @@ extension PhaseAnimator {
                 didFireAction = true
             }
 
-            private func fireActions(didAnimate: Bool) -> [() -> Void] {
-                guard !didFireAction else { return [] }
+            private func fireActions(didAnimate: Bool) {
+                guard !didFireAction else { return }
                 action(didAnimate)
                 didFireAction = true
-                return []
             }
         }
     }

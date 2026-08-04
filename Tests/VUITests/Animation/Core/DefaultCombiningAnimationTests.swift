@@ -78,7 +78,8 @@ final class DefaultCombiningAnimationTests: XCTestCase {
         XCTAssertEqual(sample, 11.4375, accuracy: 0.000_001)
     }
 
-    func testCompletedChildKeepsAccumulatedContribution() throws {
+    // ASSERTIONS combinedStateExecutionObserved
+    func testNewlyCompletedChildUsesTerminalFrameBranchBeforeStoredNilBranch() throws {
         var animation = Animation(UnitLinearAnimation(duration: 0.2))
         var state = AnimationState<Double>()
 
@@ -96,7 +97,12 @@ final class DefaultCombiningAnimationTests: XCTestCase {
             animation.animate(value: 15.0, time: 0.5, context: &context)
         )
 
-        XCTAssertEqual(sample, 11.25, accuracy: 0.000_001)
+        XCTAssertEqual(sample, 3.75, accuracy: 0.000_001)
+
+        let nextSample = try XCTUnwrap(
+            animation.animate(value: 15.0, time: 0.6, context: &context)
+        )
+        XCTAssertEqual(nextSample, 11.75, accuracy: 0.000_001)
     }
 
     func testLastChildNilTerminatesCombinedAnimation() {
@@ -116,6 +122,28 @@ final class DefaultCombiningAnimationTests: XCTestCase {
 
         XCTAssertNil(animation.animate(value: 15.0, time: 1.25, context: &context))
         XCTAssertTrue(context.isLogicallyComplete)
+    }
+
+    // ASSERTIONS combinedStateExecutionObserved
+    func testLastChildNilDoesNotForceLogicalCompletion() {
+        var animation = Animation(UnitLinearAnimation(duration: 0.2))
+        var state = AnimationState<Double>()
+
+        combineAnimation(
+            into: &animation,
+            state: &state,
+            value: 10.0,
+            elapsed: 0.25,
+            newAnimation: Animation(
+                LogicalFlagAnimation(duration: 1.0, logicalAt: nil)
+            ),
+            newValue: 5.0
+        )
+
+        var context = AnimationContext(state: state)
+
+        XCTAssertNil(animation.animate(value: 15.0, time: 1.25, context: &context))
+        XCTAssertFalse(context.isLogicallyComplete)
     }
 
     func testReplacementChildLogicalFlagPropagatesBeforeNil() throws {

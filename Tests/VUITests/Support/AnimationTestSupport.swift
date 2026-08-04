@@ -1,6 +1,112 @@
 import Foundation
 @testable import VUI
 
+private func fluidSpringSettlingDuration<Value: VectorArithmetic>(
+    response: TimeInterval,
+    dampingFraction: Double,
+    target: Value
+) -> TimeInterval {
+    let duration = max(0, response)
+    guard duration > 0 else { return 0 }
+
+    let step = 1.0 / 300.0
+    let limit = max(duration * 12, 10)
+    let stiffness = fluidSpringStiffness(response: response)
+    var state = SpringState<Value>()
+    var time: TimeInterval = 0
+    while time <= limit {
+        _ = integratedFluidSpringValue(
+            target: target,
+            dampingFraction: dampingFraction,
+            stiffness: stiffness,
+            time: time,
+            state: &state
+        )
+        if isFluidSpringSettled(target: target, state: state) {
+            return max(duration, time)
+        }
+        time += step
+    }
+    return limit
+}
+
+func finalizeAnimationCompletions(
+    in transaction: Transaction,
+    animation: Animation? = nil
+) {
+    _ = transaction
+    _ = animation
+    Transaction.dispatchPendingListeners()
+}
+
+extension AnimationBoxBase {
+    var defaultDisplayFrameInterval: TimeInterval {
+        1.0 / 60.0
+    }
+
+    // Test-only terminal sampling horizon. Runtime completion is owned by
+    // CustomAnimation.animate returning nil, not by a parallel box property.
+    var terminalSamplingHorizon: TimeInterval {
+        terminalSamplingHorizon(for: Double(1))
+    }
+
+    func terminalSamplingHorizon<Value>(
+        for value: Value
+    ) -> TimeInterval where Value: VectorArithmetic {
+        switch self {
+        case is DefaultAnimationBox:
+            return max(
+                duration,
+                fluidSpringSettlingDuration(
+                    response: 0.5,
+                    dampingFraction: 1,
+                    target: value
+                )
+            )
+        case let delay as DelayAnimationBox:
+            return max(
+                0,
+                delay.base.terminalSamplingHorizon(for: value) + delay.delay
+            )
+        case let speed as SpeedAnimationBox:
+            guard speed.speed > 0 else {
+                return .infinity
+            }
+            return speed.base.terminalSamplingHorizon(for: value) / speed.speed
+        case let repeatAnimation as RepeatAnimationBox:
+            guard let repeatCount = repeatAnimation.repeatCount else {
+                return .infinity
+            }
+            return repeatAnimation.base.terminalSamplingHorizon(for: value) *
+                TimeInterval(max(repeatCount, 1))
+        case let logical as LogicalCompletionAnimationBox:
+            return logical.base.terminalSamplingHorizon(for: value)
+        case let fluid as FluidSpringAnimationBox:
+            let terminal = max(
+                fluid.duration,
+                fluidSpringSettlingDuration(
+                    response: fluid.response,
+                    dampingFraction: fluid.dampingFraction,
+                    target: value
+                )
+            )
+            return terminal
+        case let spring as SpringAnimationBox:
+            guard !spring.isImmediatelyComplete else {
+                return 0
+            }
+            return SpringModel(
+                mass: spring.mass,
+                stiffness: spring.stiffness,
+                damping: spring.damping,
+                initialVelocity: spring.initialVelocity
+            ).duration(epsilon: 0.001)
+        default:
+            return duration
+        }
+    }
+}
+
 struct UnitLinearAnimation: CustomAnimation {
     var duration: TimeInterval
 
@@ -85,11 +191,10 @@ final class CountingAnimationListener: AnimationListener, @unchecked Sendable {
         lock.unlock()
     }
 
-    override func animationWasRemoved() -> [() -> Void] {
+    override func animationWasRemoved() {
         lock.lock()
         removedStorage += 1
         lock.unlock()
-        return []
     }
 }
 
@@ -106,9 +211,8 @@ final class RecordingAnimationListener: AnimationListener, @unchecked Sendable {
         recorder.record("\(label) added")
     }
 
-    override func animationWasRemoved() -> [() -> Void] {
+    override func animationWasRemoved() {
         recorder.record("\(label) removed")
-        return []
     }
 }
 

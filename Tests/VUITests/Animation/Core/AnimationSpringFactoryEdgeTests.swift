@@ -215,7 +215,6 @@ final class AnimationSpringFactoryEdgeTests: XCTestCase {
 
         for animation in animations {
             XCTAssertTrue(animation.box.isImmediatelyComplete)
-            XCTAssertEqual(animation.box.noRegisteredCompletionDelay(), 0)
 
             var context = AnimationContext<Double>()
             XCTAssertNil(animation.animate(value: 1.0, time: 0, context: &context))

@@ -9,12 +9,14 @@ final class WindowConfigurationTests: XCTestCase {
         base.displaySyncEnabled = true
         base.drawEveryFrames = true
         base.drawDebugInfo = [.frameInfo]
+        base.contentScaleFactorOverride = 1.5
 
         let override = WindowConfiguration.Override(
             activeFrameInterval: 0.01,
             displaySyncEnabled: false,
             drawEveryFrames: false,
-            drawDebugInfo: [.thread]
+            drawDebugInfo: [.thread],
+            contentScaleFactor: 2
         )
         let resolved = base.applying(override)
 
@@ -24,6 +26,7 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertFalse(resolved.drawEveryFrames)
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, [.thread])
+        XCTAssertEqual(resolved.contentScaleFactorOverride, 2)
     }
 
     func testEmptyOverridePreservesBaseConfiguration() {
@@ -33,6 +36,7 @@ final class WindowConfigurationTests: XCTestCase {
         base.displaySyncEnabled = false
         base.drawEveryFrames = false
         base.drawDebugInfo = [.queue, .windowState]
+        base.contentScaleFactorOverride = 1.5
 
         let resolved = base.applying(.init())
 
@@ -42,6 +46,10 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(resolved.drawEveryFrames, base.drawEveryFrames)
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, base.drawDebugInfo)
+        XCTAssertEqual(
+            resolved.contentScaleFactorOverride,
+            base.contentScaleFactorOverride
+        )
     }
 
     func testExplicitEmptyDebugOverrideClearsBaseDebugInfo() {
@@ -57,7 +65,8 @@ final class WindowConfigurationTests: XCTestCase {
         var value = WindowConfiguration.Override(
             activeFrameInterval: 0.1,
             displaySyncEnabled: true,
-            drawDebugInfo: [.frameInfo]
+            drawDebugInfo: [.frameInfo],
+            contentScaleFactor: 1
         )
 
         WindowConfiguration.Override.Key.reduce(value: &value) {
@@ -66,7 +75,8 @@ final class WindowConfigurationTests: XCTestCase {
                 inactiveFrameInterval: 0.2,
                 displaySyncEnabled: false,
                 drawEveryFrames: false,
-                drawDebugInfo: [.thread]
+                drawDebugInfo: [.thread],
+                contentScaleFactor: 3
             )
         }
 
@@ -75,6 +85,7 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(value.displaySyncEnabled, false)
         XCTAssertEqual(value.drawEveryFrames, false)
         XCTAssertEqual(value.drawDebugInfo, [.frameInfo, .thread])
+        XCTAssertEqual(value.contentScaleFactor, 3)
     }
 
     func testFrameRateModifierMapsRenderingModesAndInactiveDefault() {
@@ -138,7 +149,8 @@ final class WindowConfigurationTests: XCTestCase {
         root.configurationOverride = .init(
             activeFrameInterval: 0.01,
             displaySyncEnabled: false,
-            drawDebugInfo: [.frameInfo]
+            drawDebugInfo: [.frameInfo],
+            contentScaleFactor: 2
         )
 
         let child = PopupWindowController(
@@ -150,6 +162,7 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(child.configurationOverride.activeFrameInterval, 0.01)
         XCTAssertEqual(child.configurationOverride.displaySyncEnabled, false)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.frameInfo])
+        XCTAssertEqual(child.configurationOverride.contentScaleFactor, 2)
 
         let nestedChild = PopupWindowController(
             content: EmptyView(),
@@ -161,7 +174,8 @@ final class WindowConfigurationTests: XCTestCase {
         root.configurationOverride = .init(
             inactiveFrameInterval: 0.2,
             displaySyncEnabled: true,
-            drawDebugInfo: [.thread, .queue]
+            drawDebugInfo: [.thread, .queue],
+            contentScaleFactor: 3
         )
 
         for controller in [child, nestedChild] {
@@ -169,6 +183,7 @@ final class WindowConfigurationTests: XCTestCase {
             XCTAssertEqual(controller.configurationOverride.inactiveFrameInterval, 0.2)
             XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, true)
             XCTAssertEqual(controller.configurationOverride.drawDebugInfo, [.thread, .queue])
+            XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 3)
         }
     }
 

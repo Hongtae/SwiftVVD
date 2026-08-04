@@ -1,18 +1,9 @@
 import XCTest
 @testable import VUI
 
-private final class PresentationDurationCountingAnimationBox: AnimationBoxBase, @unchecked Sendable {
-    var presentationDurationCallCount = 0
-
+private final class TerminalOwnedAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override var duration: TimeInterval {
         1
-    }
-
-    override func presentationDuration<Value>(
-        for value: Value
-    ) -> TimeInterval where Value: VectorArithmetic {
-        presentationDurationCallCount += 1
-        return 2
     }
 
     override func animate<Value>(
@@ -33,8 +24,8 @@ private final class PresentationDurationCountingAnimationBox: AnimationBoxBase, 
 }
 
 final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
-    func testFreshLogicalActivationDoesNotResolvePresentationDuration() {
-        let box = PresentationDurationCountingAnimationBox()
+    func testFreshLogicalActivationUsesAnimateTerminal() {
+        let box = TerminalOwnedAnimationBox()
         let completionRecorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
@@ -52,12 +43,11 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         _ = harness.currentValue()
         harness.finalizeTransactionBody()
 
-        XCTAssertEqual(box.presentationDurationCallCount, 0)
         XCTAssertEqual(completionRecorder.events, [])
     }
 
-    func testRetargetAfterLogicalDrainDoesNotResolvePresentationDuration() {
-        let box = PresentationDurationCountingAnimationBox()
+    func testRetargetAfterLogicalDrainUsesAnimateTerminal() {
+        let box = TerminalOwnedAnimationBox()
         let completionRecorder = AnimationCompletionRecorder()
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
@@ -74,11 +64,10 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         )
         _ = harness.currentValue()
         harness.finalizeTransactionBody()
-        harness.setTime(1.1)
+        harness.advanceTime(to: 1.1)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["first logical"])
-        XCTAssertEqual(box.presentationDurationCallCount, 0)
 
         var replacementTransaction = Transaction(animation: Animation(box: box))
         replacementTransaction.addAnimationCompletion(criteria: .logicallyComplete) {
@@ -91,7 +80,6 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         _ = harness.currentValue()
         harness.finalizeTransactionBody()
 
-        XCTAssertEqual(box.presentationDurationCallCount, 0)
         XCTAssertEqual(completionRecorder.events, ["first logical"])
     }
 
@@ -113,14 +101,14 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(1.6)
+        harness.advanceTime(to: 1.6)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -131,7 +119,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
             ]
         )
 
-        harness.setTime(2.0)
+        harness.advanceTime(to: 2.0)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -156,9 +144,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         let completionRecorder = AnimationCompletionRecorder()
         let harness = makeStartedLogicalSplitHarness(recorder: completionRecorder)
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         let sampledOpacity = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(sampledOpacity, 0)
         XCTAssertLessThan(sampledOpacity, 1)
@@ -166,9 +154,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         XCTAssertEqual(completionRecorder.events, ["active logical"])
 
         completionRecorder.removeAll()
-        harness.setTime(5.0)
+        harness.advanceTime(to: 5.0)
         _ = harness.currentValue()
-        harness.setTime(5.1)
+        harness.advanceTime(to: 5.1)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active removed"])
@@ -186,9 +174,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
             reason: reason
         )
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [reason])
@@ -230,7 +218,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.2)
+        harness.advanceTime(to: 0.2)
         _ = harness.currentValue()
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [reason])
@@ -270,9 +258,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
             reason: reason
         )
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         _ = harness.currentValue()
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [reason])
@@ -313,7 +301,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.2)
+        harness.advanceTime(to: 0.2)
         _ = harness.currentValue()
         XCTAssertEqual(harness.nextUpdateInterval(), 1.0 / 30.0, accuracy: 0.000_001)
         XCTAssertEqual(harness.nextUpdateReasons(), [reason])
@@ -347,9 +335,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         let completionRecorder = AnimationCompletionRecorder()
         let harness = makeStartedLogicalSplitHarness(recorder: completionRecorder)
 
-        harness.setTime(0.5)
+        harness.advanceTime(to: 0.5)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(beforeRetarget, 0)
         XCTAssertLessThan(beforeRetarget, 1)
@@ -368,7 +356,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(5.0)
+        harness.advanceTime(to: 5.0)
         XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001)
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, ["active removed"])
@@ -395,9 +383,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.4)
+        harness.advanceTime(to: 0.4)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(beforeRetarget, 0)
         XCTAssertLessThan(beforeRetarget, 1)
@@ -415,19 +403,25 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(1.25)
+        harness.advanceTime(to: 1.25)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active logical"])
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "active logical",
+                "active removed",
+            ]
+        )
 
         completionRecorder.removeAll()
-        harness.setTime(2.05)
+        harness.advanceTime(to: 2.05)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active removed"])
+        XCTAssertEqual(completionRecorder.events, [])
 
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active removed"])
+        XCTAssertEqual(completionRecorder.events, [])
     }
 
     func testNoAnimationRetargetOwnCompletionFallsBackWhileOldRecordsStayPending() {
@@ -448,9 +442,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [])
 
-        harness.setTime(0.4)
+        harness.advanceTime(to: 0.4)
         _ = harness.currentValue()
-        harness.setTime(0.6)
+        harness.advanceTime(to: 0.6)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(beforeRetarget, 0)
         XCTAssertLessThan(beforeRetarget, 1)
@@ -480,19 +474,25 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         )
 
         completionRecorder.removeAll()
-        harness.setTime(1.25)
+        harness.advanceTime(to: 1.25)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active logical"])
+        XCTAssertEqual(
+            completionRecorder.events,
+            [
+                "active logical",
+                "active removed",
+            ]
+        )
 
         completionRecorder.removeAll()
-        harness.setTime(2.05)
+        harness.advanceTime(to: 2.05)
         _ = harness.currentValue()
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active removed"])
+        XCTAssertEqual(completionRecorder.events, [])
 
         harness.flushCompletionActions()
-        XCTAssertEqual(completionRecorder.events, ["active removed"])
+        XCTAssertEqual(completionRecorder.events, [])
     }
 
     func testNoAnimationRetargetPreservesSampledResidualFamilyUntilTerminalOutput() {
@@ -574,9 +574,9 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
 
-        harness.setTime(0.05)
+        harness.advanceTime(to: 0.05)
         _ = harness.currentValue()
-        harness.setTime(0.12)
+        harness.advanceTime(to: 0.12)
         let beforeRetarget = harness.currentValue().opacity
         XCTAssertGreaterThanOrEqual(beforeRetarget, 0, file: file, line: line)
         XCTAssertLessThanOrEqual(beforeRetarget, 1, file: file, line: line)
@@ -594,9 +594,8 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
 
-        harness.setTime(5.0)
+        harness.advanceTime(to: 5.0)
         XCTAssertEqual(harness.currentValue().opacity, 2, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(completionRecorder.events, [], file: file, line: line)
         harness.flushCompletionActions()
         XCTAssertEqual(
             Set(completionRecorder.events),

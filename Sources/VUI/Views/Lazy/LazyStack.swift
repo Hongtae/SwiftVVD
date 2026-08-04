@@ -1979,17 +1979,16 @@ final class LazyLayoutCacheItem: AnimationListener, LazyLayoutNamespace, @unchec
         animationCount &+= 1
     }
 
-    override func animationWasRemoved() -> [() -> Void] {
-        guard animationCount > 0 else { return [] }
+    override func animationWasRemoved() {
+        guard animationCount > 0 else { return }
         animationCount &-= 1
         guard animationCount == 0,
               let cache else {
-            return []
+            return
         }
         cache.viewGraph?.continueTransaction(
             SingleItemPhaseMutation(cache: cache, item: self)
         )
-        return []
     }
 
     func beginPrefetching(at proposal: ProposedViewSize) {

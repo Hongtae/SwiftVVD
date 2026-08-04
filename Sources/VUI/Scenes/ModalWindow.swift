@@ -57,11 +57,20 @@ final class ModalPresentationContext: @unchecked Sendable {
         case dismissing
     }
 
+    private struct CompletionTokens: @unchecked Sendable {
+        var regular: [AnimationCompletionToken] = []
+        var logical: [AnimationCompletionToken] = []
+
+        var isEmpty: Bool {
+            regular.isEmpty && logical.isEmpty
+        }
+    }
+
     private struct TransitionAnimation: @unchecked Sendable {
         let phase: TransitionPhase
         let duration: Double
         let configuration: AnimationConfiguration
-        var completionTokens: [AnimationCompletionToken]
+        var completionTokens: CompletionTokens
         var elapsed: Double = 0
         var completion: (() -> Void)?
 
@@ -73,23 +82,19 @@ final class ModalPresentationContext: @unchecked Sendable {
     }
 
     private struct PendingDismissal: @unchecked Sendable {
+        enum CompletionBoundary: @unchecked Sendable {
+            case unresolved
+            case timed(
+                duration: Double,
+                completionTokens: CompletionTokens
+            )
+            case nonfinishing(completionTokens: CompletionTokens)
+        }
+
         var transaction: Transaction
         var completion: () -> Void
-        var duration: Double? = nil
-        var completionTokens: [AnimationCompletionToken]? = nil
+        var completionBoundary: CompletionBoundary = .unresolved
         var elapsed: Double = 0
-    }
-
-    private final class DeferredDismissCompletion: @unchecked Sendable {
-        let completion: () -> Void
-
-        init(_ completion: @escaping () -> Void) {
-            self.completion = completion
-        }
-
-        func callAsFunction() {
-            completion()
-        }
     }
 
     private let padding: CGFloat = 4
@@ -151,9 +156,9 @@ final class ModalPresentationContext: @unchecked Sendable {
     }
 
     private func resolvedPresentDuration(for transaction: Transaction) -> Double {
-        // An explicit nil animation keeps modal completion on the immediate
-        // fallback path. A disabled transaction can still carry an explicit
-        // animation that owns the modal timing boundary.
+        // An explicit nil animation keeps modal completion immediate. A
+        // disabled transaction can still carry an explicit animation that
+        // owns the modal timing boundary.
         if transaction.hasExplicitAnimationValue && transaction.animation == nil {
             return 0
         }
@@ -191,36 +196,48 @@ final class ModalPresentationContext: @unchecked Sendable {
         for transaction: Transaction,
         duration: Double,
         registersDefaultCompletion: Bool
-    ) -> [AnimationCompletionToken] {
+    ) -> CompletionTokens {
         // Platform modal children may not draw through this overlay path, but
         // they still register tokens so transaction completions wait for the
         // same modal timing boundary.
         guard duration > 0 else {
-            return []
+            return CompletionTokens()
         }
         if let animation = transaction.effectiveAnimation {
             guard animation.box.duration > 0 else {
-                return []
+                return CompletionTokens()
             }
         } else if !registersDefaultCompletion {
-            return []
+            return CompletionTokens()
         }
-        return completionTokens(for: transaction.animationListener, criteria: .removed) +
-            completionTokens(for: transaction.animationLogicalListener, criteria: .logicallyComplete)
+        return completionTokens(for: transaction)
     }
 
-    private func completionTokens(
-        for listener: AnimationListener?,
-        criteria: AnimationCompletionCriteria
-    ) -> [AnimationCompletionToken] {
-        guard let listener else {
-            return []
-        }
-        return [AnimationCompletionToken(listener: listener, criteria: criteria)]
+    private func completionTokens(for transaction: Transaction) -> CompletionTokens {
+        CompletionTokens(
+            regular: transaction.animationListener.map {
+                [AnimationCompletionToken(listener: $0)]
+            } ?? [],
+            logical: transaction.animationLogicalListener.map {
+                [AnimationCompletionToken(listener: $0)]
+            } ?? []
+        )
     }
 
-    private func startCompletionTokens(_ tokens: [AnimationCompletionToken]) {
-        tokens.forEach { $0.start() }
+    private func startCompletionTokens(_ tokens: CompletionTokens) {
+        (tokens.regular + tokens.logical).forEach { $0.start() }
+    }
+
+    private func startNonfinishingCompletionTokens(
+        for transaction: Transaction
+    ) -> CompletionTokens? {
+        guard let animation = transaction.effectiveAnimation,
+              !animation.box.duration.isFinite else {
+            return nil
+        }
+        let tokens = completionTokens(for: transaction)
+        startCompletionTokens(tokens)
+        return tokens
     }
 
     private func isDirectNegativeSpeedAnimation(_ animation: Animation) -> Bool {
@@ -230,52 +247,41 @@ final class ModalPresentationContext: @unchecked Sendable {
         return speed.speed < 0
     }
 
-    private func finishImmediatePresentCompletionIfNeeded(
+    private func handleImmediatePresentCompletion(
         transaction: Transaction,
         duration: Double
     ) {
         guard duration <= 0,
               transaction.hasExplicitAnimationValue,
-              let animation = transaction.animation,
-              isDirectNegativeSpeedAnimation(animation) else {
+              let animation = transaction.animation else {
             return
         }
-        let tokens = completionTokens(for: transaction.animationListener, criteria: .removed) +
-            completionTokens(for: transaction.animationLogicalListener, criteria: .logicallyComplete)
+        let tokens = completionTokens(for: transaction)
         startCompletionTokens(tokens)
-        enqueueAnimationCompletionActions(finishCompletionTokens(tokens))
-    }
-
-    private func shouldDeferImmediateDismissCompletion(
-        transaction: Transaction,
-        duration: Double
-    ) -> Bool {
-        guard duration <= 0,
-              transaction.hasExplicitAnimationValue,
-              let animation = transaction.animation,
-              animation.box.duration <= 0 else {
-            return false
+        if animation.box.duration.isFinite ||
+            isDirectNegativeSpeedAnimation(animation) {
+            finishCompletionTokens(tokens)
         }
-        return transaction.animationCompletionObserver != nil
     }
 
-    private func finishImmediateDismissal(
+    private func handleImmediateDismissal(
         transaction: Transaction,
         duration: Double,
         completion: @escaping () -> Void
     ) {
-        guard shouldDeferImmediateDismissCompletion(transaction: transaction, duration: duration) else {
-            completion()
+        guard duration <= 0,
+              transaction.hasExplicitAnimationValue,
+              let animation = transaction.animation else {
+              completion()
             return
         }
-        // Give the zero-duration no-registered completion fallback a run-loop
-        // turn before sheet cleanup becomes visible.
-        let deferredCompletion = DeferredDismissCompletion(completion)
-        DispatchQueue.main.async {
-            DispatchQueue.main.async {
-                deferredCompletion()
-            }
+        let tokens = completionTokens(for: transaction)
+        startCompletionTokens(tokens)
+        if animation.box.duration.isFinite,
+           !isDirectNegativeSpeedAnimation(animation) {
+            finishCompletionTokens(tokens)
         }
+        completion()
     }
 
     func onViewLoaded() {
@@ -429,7 +435,7 @@ final class ModalPresentationContext: @unchecked Sendable {
         )
         guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
-            finishImmediatePresentCompletionIfNeeded(
+            handleImmediatePresentCompletion(
                 transaction: transaction,
                 duration: duration
             )
@@ -454,7 +460,7 @@ final class ModalPresentationContext: @unchecked Sendable {
         )
         guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
-            finishImmediateDismissal(
+            handleImmediateDismissal(
                 transaction: transaction,
                 duration: duration,
                 completion: completion
@@ -474,6 +480,18 @@ final class ModalPresentationContext: @unchecked Sendable {
     private func makePendingDismissal(transaction: Transaction,
                                       completion: @escaping () -> Void) -> PendingDismissal {
         let duration = resolvedDismissDuration(for: transaction)
+        if duration <= 0,
+           let completionTokens = startNonfinishingCompletionTokens(
+               for: transaction
+           ) {
+            return PendingDismissal(
+                transaction: transaction,
+                completion: completion,
+                completionBoundary: .nonfinishing(
+                    completionTokens: completionTokens
+                )
+            )
+        }
         let completionTokens = completionTokens(
             for: transaction,
             duration: duration,
@@ -484,8 +502,10 @@ final class ModalPresentationContext: @unchecked Sendable {
             return PendingDismissal(
                 transaction: transaction,
                 completion: completion,
-                duration: duration,
-                completionTokens: completionTokens,
+                completionBoundary: .timed(
+                    duration: duration,
+                    completionTokens: completionTokens
+                ),
                 elapsed: 0
             )
         }
@@ -493,31 +513,25 @@ final class ModalPresentationContext: @unchecked Sendable {
     }
 
     private func beginDismissAnimation(_ dismissal: PendingDismissal) {
-        guard let duration = dismissal.duration,
-              let completionTokens = dismissal.completionTokens else {
+        switch dismissal.completionBoundary {
+        case .unresolved:
             beginDismissAnimation(
                 transaction: dismissal.transaction,
                 completion: dismissal.completion
             )
-            return
-        }
-        guard duration > 0 || !completionTokens.isEmpty else {
+        case .nonfinishing:
             transition = nil
-            finishImmediateDismissal(
-                transaction: dismissal.transaction,
+            dismissal.completion()
+        case let .timed(duration, completionTokens):
+            transition = TransitionAnimation(
+                phase: .dismissing,
                 duration: duration,
+                configuration: transitionDismissAnimation,
+                completionTokens: completionTokens,
+                elapsed: min(dismissal.elapsed, duration),
                 completion: dismissal.completion
             )
-            return
         }
-        transition = TransitionAnimation(
-            phase: .dismissing,
-            duration: duration,
-            configuration: transitionDismissAnimation,
-            completionTokens: completionTokens,
-            elapsed: min(dismissal.elapsed, duration),
-            completion: dismissal.completion
-        )
     }
 
     func requestDismissal(controller: WindowController,
@@ -553,23 +567,25 @@ final class ModalPresentationContext: @unchecked Sendable {
             pendingDismissal?.elapsed += delta
         }
         if transition.isComplete {
-            let completions = finishCompletionTokens(transition.completionTokens)
             switch transition.phase {
             case .presenting:
+                if case .nonfinishing = pendingDismissal?.completionBoundary {
+                    finishLogicalCompletionTokens(transition.completionTokens)
+                } else {
+                    finishCompletionTokens(transition.completionTokens)
+                }
                 if let dismissal = pendingDismissal {
                     pendingDismissal = nil
                     // Present completion drains before the deferred dismissal
                     // begins, preserving one transaction boundary at a time.
-                    enqueueAnimationCompletionActions(completions)
                     beginDismissAnimation(dismissal)
                 } else {
                     self.transition = nil
-                    enqueueAnimationCompletionActions(completions)
                 }
             case .dismissing:
                 self.transition = nil
                 transition.completion?()
-                enqueueAnimationCompletionActions(completions)
+                finishCompletionTokens(transition.completionTokens)
             }
         } else {
             self.transition = transition
@@ -577,10 +593,13 @@ final class ModalPresentationContext: @unchecked Sendable {
         return true
     }
 
-    private func finishCompletionTokens(_ tokens: [AnimationCompletionToken]) -> [() -> Void] {
-        let removedTokens = tokens.filter { $0.criteria == .removed }
-        let otherTokens = tokens.filter { $0.criteria != .removed }
-        return (removedTokens + otherTokens).flatMap { $0.finish() }
+    private func finishCompletionTokens(_ tokens: CompletionTokens) {
+        tokens.regular.forEach { $0.finish() }
+        finishLogicalCompletionTokens(tokens)
+    }
+
+    private func finishLogicalCompletionTokens(_ tokens: CompletionTokens) {
+        tokens.logical.forEach { $0.finish() }
     }
 
     func onModalSessionDismissedByUser() {
@@ -612,6 +631,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: _AGGraph,
          environment: EnvironmentValues = .tracking(),
+         viewPhase: ViewGraphHost.Phase = ViewGraphHost.Phase(),
          scene: WindowKey,
          parentController: WindowController,
          usesPlatformWindow: Bool) {
@@ -620,6 +640,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
                    environment: environment,
+                   viewPhase: viewPhase,
                    scene: scene)
     }
 

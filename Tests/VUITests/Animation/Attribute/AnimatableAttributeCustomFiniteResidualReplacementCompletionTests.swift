@@ -178,7 +178,7 @@ final class AnimatableAttributeCustomFiniteResidualReplacementCompletionTests: X
         )
 
         let replacementFinalTime = replacementActivationTime +
-            max(replacement.box.duration, replacement.box.presentationDuration(for: 1.5)) +
+            max(replacement.box.duration, replacement.box.terminalSamplingHorizon(for: 1.5)) +
             frameInterval
         let oldNilTime = retargetTime + oldNilAt + frameInterval
         harness.setTime(max(replacementFinalTime, oldNilTime))

@@ -5,7 +5,7 @@ import XCTest
 
 final class TransactionThreadStorageTests: XCTestCase {
     override func tearDown() {
-        Transaction.ThreadStorage.currentBox = nil
+        XCTAssertNil(Transaction.ThreadStorage.currentBox)
         Transaction.ThreadStorage.resetCurrentIDForTesting()
         super.tearDown()
     }
@@ -177,7 +177,6 @@ final class TransactionThreadStorageTests: XCTestCase {
             try withTransaction(Transaction()) {
                 let innerBox = try XCTUnwrap(Transaction.ThreadStorage.currentBox)
                 XCTAssertFalse(innerBox === outerBox)
-                XCTAssertNil(Transaction.current.animationCompletionObserver)
                 XCTAssertNil(Transaction.current.animationListener)
                 XCTAssertNil(Transaction.current.animationLogicalListener)
             }

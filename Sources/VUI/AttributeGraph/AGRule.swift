@@ -407,7 +407,10 @@ struct AnyRuleContext: Equatable {
     }
 
     func update(body: () -> Void) {
-        _AGGraph.withRuleContext(attribute, body: body)
+        guard let graph = _AGGraph.current else {
+            fatalError("AnyRuleContext.update called outside an active graph.")
+        }
+        graph.withRuleUpdate(attribute, body: body)
     }
 
     func valueAndFlags<Value>(

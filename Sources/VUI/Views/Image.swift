@@ -848,7 +848,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         }
         phase.activeDraw = active
         guard !tokens.isEmpty else { return }
-        enqueueAnimationCompletionActions(finishDrawCompletionTokens(tokens))
+        finishDrawCompletionTokens(tokens)
     }
 
     private mutating func pulsePresentation(
@@ -1153,9 +1153,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
            !active.primary.completionTokens.isEmpty {
             let tokens = active.primary.completionTokens
             active.primary.completionTokens.removeAll()
-            enqueueAnimationCompletionActions(
-                finishDrawCompletionTokens(tokens)
-            )
+            finishDrawCompletionTokens(tokens)
         }
 
         for index in active.continuations.indices {
@@ -1173,9 +1171,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                !continuation.leg.completionTokens.isEmpty {
                 let tokens = continuation.leg.completionTokens
                 continuation.leg.completionTokens.removeAll()
-                enqueueAnimationCompletionActions(
-                    finishDrawCompletionTokens(tokens)
-                )
+                finishDrawCompletionTokens(tokens)
             }
             active.continuations[index] = continuation
             legPresentations.append(resolved)
@@ -1724,22 +1720,18 @@ private func drawCompletionTokens(
 ) -> [AnimationCompletionToken] {
     var tokens: [AnimationCompletionToken] = []
     if let listener = transaction.animationListener {
-        tokens.append(AnimationCompletionToken(listener: listener, criteria: .removed))
+        tokens.append(AnimationCompletionToken(listener: listener))
     }
     if let listener = transaction.animationLogicalListener {
-        tokens.append(
-            AnimationCompletionToken(listener: listener, criteria: .logicallyComplete)
-        )
+        tokens.append(AnimationCompletionToken(listener: listener))
     }
     return tokens
 }
 
 private func finishDrawCompletionTokens(
     _ tokens: [AnimationCompletionToken]
-) -> [() -> Void] {
-    let removed = tokens.filter { $0.criteria == .removed }
-    let remaining = tokens.filter { $0.criteria != .removed }
-    return (removed + remaining).flatMap { $0.finish() }
+) {
+    tokens.forEach { $0.finish() }
 }
 
 private func drawEase(_ value: Double) -> Double {
@@ -2399,17 +2391,33 @@ extension Image: View {
             lcAttr = OptionalAttribute()
         }
 
+        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
+
         // 4. Drawing pass (DisplayList Rule)
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let _ = view._attribute.value // Dependency: image changes
             let presentation = imagePresentationAttr.value
-            let position = presentation.displayPosition ?? positionAttr.value
+            let animatedPosition = positionAttr.value
+            let displayPosition =
+                presentation.displayPosition ?? animatedPosition
+            let localPosition = CGPoint(
+                x: displayPosition.x - animatedPosition.x,
+                y: displayPosition.y - animatedPosition.y
+            )
             let viewSize = (presentation.displaySize ?? sizeAttr.value).value
             let environment = envAttr.value.untrackedCopy()
+            let updateVersion = DisplayList.Version(forUpdate: ())
 
             var list = DisplayList()
+            let layerSerial = interpolatorGroup.addLayer(
+                id: .unstyled,
+                style: nil
+            )
+            defer {
+                interpolatorGroup.finishLayers()
+            }
             if var resolved = presentation.image {
-                let frame = CGRect(origin: position, size: viewSize)
+                let frame = CGRect(origin: localPosition, size: viewSize)
                 var imageList = DisplayList()
                 resolved.symbolLayerOpacities = presentation.symbolLayerOpacities
                 resolved.symbolVariableColorOpacities =
@@ -2425,6 +2433,7 @@ extension Image: View {
                 imageList.appendImageItem(
                     resolved,
                     bounds: frame,
+                    version: updateVersion,
                     environment: environment
                 )
                 if presentation.isSymbolEffectActive,
@@ -2438,7 +2447,10 @@ extension Image: View {
                     list = imageList
                 }
             }
-            return list
+            return DisplayList.effect(
+                .interpolatorLayer(interpolatorGroup, layerSerial),
+                contents: list
+            )
         }
 
         var outputs = _ViewOutputs()
@@ -2450,7 +2462,7 @@ extension Image: View {
         var interpolatorInputs = inputs
         interpolatorInputs.base.transaction = imageTransactionAttr
         outputs.applyInterpolatorGroup(
-            DisplayList.UnaryInterpolatorGroup(),
+            interpolatorGroup,
             content: transitionContentAttr,
             inputs: interpolatorInputs,
             animatesSize: false,

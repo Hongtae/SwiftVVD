@@ -11,6 +11,7 @@ import VVD
 final class _TextResourceResolutionState {
     private(set) var pendingVersion: Int?
     private var pendingTransaction = Transaction()
+    private var preparedVersion: Int?
 
     func transaction(for version: Int, candidate: Transaction) -> Transaction {
         guard pendingVersion != version else {
@@ -26,6 +27,14 @@ final class _TextResourceResolutionState {
         pendingVersion = nil
         pendingTransaction = Transaction()
     }
+
+    func requiresPreparation(version: Int) -> Bool {
+        preparedVersion != version
+    }
+
+    func didPrepare(version: Int) {
+        preparedVersion = version
+    }
 }
 
 final class _TextDisplayListContentState {
@@ -36,6 +45,7 @@ final class _TextDisplayListContentState {
     private var seed = DisplayList.Seed()
 
     func contentSeed(
+        updateVersion: DisplayList.Version,
         resolvedVersion: Int,
         size: CGSize,
         needsDrawingGroup: Bool,
@@ -47,32 +57,13 @@ final class _TextDisplayListContentState {
             self.size != size ||
             self.needsDrawingGroup != needsDrawingGroup ||
             self.rendererID != rendererID {
-            seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+            seed = DisplayList.Seed(updateVersion)
             self.resolvedVersion = resolvedVersion
             self.size = size
             self.needsDrawingGroup = needsDrawingGroup
             self.rendererID = rendererID
         }
         return seed
-    }
-}
-
-private extension DisplayList {
-    func translatedTextPresentation(x: CGFloat, y: CGFloat) -> DisplayList {
-        guard x != 0 || y != 0 else {
-            return self
-        }
-
-        let transform = CGAffineTransform(translationX: x, y: y)
-        var result = DisplayList()
-        for item in items {
-            result.appendTransformedItem(item, affineTransform: transform)
-        }
-        for item in debugItems {
-            result.appendTransformedDebugItem(item, affineTransform: transform)
-        }
-        result.numericValue = numericValue
-        return result
     }
 }
 
@@ -100,6 +91,49 @@ extension View {
     }
 }
 
+protocol TextResolutionContext {
+    var environment: EnvironmentValues { get set }
+    var sceneResources: SceneResources { get }
+    var contentScaleFactor: CGFloat { get }
+
+    func resolveTextAttachment(_ image: Image) -> GraphicsContext.ResolvedImage?
+}
+
+extension TextResolutionContext {
+    var displayScale: CGFloat {
+        environment.displayScale
+    }
+
+    var contentScaleFactor: CGFloat {
+        environment._contentScaleFactor
+    }
+}
+
+extension GraphicsContext: TextResolutionContext {
+    func resolveTextAttachment(_ image: Image) -> ResolvedImage? {
+        resolve(image)
+    }
+}
+
+struct GraphTextResolutionContext: TextResolutionContext {
+    var environment: EnvironmentValues
+    let sceneResources: SceneResources
+
+    func resolveTextAttachment(_ image: Image) -> GraphicsContext.ResolvedImage? {
+        var resolved: GraphicsContext.ResolvedImage
+        if let symbol = image.provider.makeVectorSymbol() {
+            resolved = GraphicsContext.ResolvedImage(
+                symbol: symbol.applyingEffectiveFontMetrics(in: environment)
+            )
+        } else if let svg = image.provider.makeSVG() {
+            resolved = GraphicsContext.ResolvedImage(svg: svg)
+        } else {
+            return nil
+        }
+        resolved.applyResizingProvider(image.provider)
+        return resolved
+    }
+}
 
 class AnyTextStorage: CustomDebugStringConvertible {
     var debugDescription: String {
@@ -109,7 +143,10 @@ class AnyTextStorage: CustomDebugStringConvertible {
         return "<\(typeName): \(pointer)>: \(String(reflecting: text))"
     }
 
-    func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    func resolve(
+        typefaces: [Typeface],
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         fatalError("This method should be overridden by subclasses.")
     }
     func resolveText(in environment: EnvironmentValues) -> String {
@@ -123,9 +160,9 @@ class AnyTextStorage: CustomDebugStringConvertible {
     }
     func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext,
+        context: any TextResolutionContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText {
+    ) -> GraphicsContext.ResolvedText? {
         resolve(typefaces: typefaces, context: context)
     }
     func resolveTransitionText(in environment: EnvironmentValues) -> String? {
@@ -147,6 +184,9 @@ class AnyTextStorage: CustomDebugStringConvertible {
         nil
     }
     func needsDynamicRenderingInArchive(in environment: EnvironmentValues) -> Bool {
+        false
+    }
+    func requiresBackendResolution(in environment: EnvironmentValues) -> Bool {
         false
     }
     func contentHash(
@@ -208,8 +248,8 @@ private class AnyFormatStyleBox {
     func resolve(
         locale: Locale,
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         fatalError("This method should be overridden by subclasses.")
     }
 
@@ -235,13 +275,14 @@ where Style: FormatStyle, Style.FormatInput: Equatable {
     override func resolve(
         locale: Locale,
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         let output = format.locale(locale).format(input)
         if let string = output as? String {
             return .init(
                 runs: [.text(typefaces, string)],
-                scaleFactor: context.contentScaleFactor
+                scaleFactor: context.contentScaleFactor,
+                displayScale: context.displayScale
             )
         }
         if let attributed = output as? AttributedString {
@@ -251,7 +292,11 @@ where Style: FormatStyle, Style.FormatInput: Equatable {
                 context: context
             )
         }
-        return .init(runs: [], scaleFactor: context.contentScaleFactor)
+        return .init(
+            runs: [],
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
+        )
     }
 
     override func resolveText(locale: Locale) -> String {
@@ -281,8 +326,8 @@ private final class FormatStyleStorage: AnyTextStorage {
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         storage.resolve(
             locale: context.environment.locale,
             typefaces: typefaces,
@@ -309,8 +354,8 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         _resolvedAttributedText(
             AttributedString(localized: resource),
             defaultTypefaces: typefaces,
@@ -343,11 +388,12 @@ private final class DateTextStorage: AnyTextStorage {
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         .init(
             runs: [.text(typefaces, resolveText(in: context.environment))],
-            scaleFactor: context.contentScaleFactor
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
         )
     }
 
@@ -486,8 +532,8 @@ private protocol _TimeDataFormat: Equatable {
     func resolvedText(
         _ output: Output,
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText?
     func plainText(_ output: Output) -> String
     func nextUpdateDelay(
         for input: Input,
@@ -501,11 +547,12 @@ private extension _TimeDataFormat where Output == String {
     func resolvedText(
         _ output: String,
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         .init(
             runs: [.text(typefaces, output)],
-            scaleFactor: context.contentScaleFactor
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
         )
     }
 
@@ -708,8 +755,8 @@ where Format: DiscreteFormatStyle, Format.FormatOutput == AttributedString {
     func resolvedText(
         _ output: AttributedString,
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         _resolvedAttributedText(
             output,
             defaultTypefaces: typefaces,
@@ -751,16 +798,16 @@ where Source: _TimeDataFormattingSource,
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         resolve(typefaces: typefaces, context: context, referenceDate: Date())
     }
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext,
+        context: any TextResolutionContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText {
+    ) -> GraphicsContext.ResolvedText? {
         let value = source.value(referenceDate: referenceDate)
         let output = format.format(
             value,
@@ -868,23 +915,37 @@ class LocalizedTextStorage: AnyTextStorage {
         self.bundle = bundle
     }
 
-    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    override func resolve(
+        typefaces: [Typeface],
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         let segments = resolve(locale: context.environment.locale)
-        let runs = segments.flatMap { segment -> [GraphicsContext.ResolvedText.Run] in
+        var runs: [GraphicsContext.ResolvedText.Run] = []
+        for segment in segments {
             switch segment {
             case let .attributedString(value):
-                return _resolvedAttributedText(
+                runs.append(contentsOf: _resolvedAttributedText(
                     value,
                     defaultTypefaces: typefaces,
                     context: context
-                ).runs
+                ).runs)
             case let .text(text):
-                return text._resolve(context: context).runs.map {
-                    $0.applying(foregroundColor: text.foregroundColor)
+                guard let resolved = text._resolve(
+                    context: context,
+                    referenceDate: Date()
+                ) else {
+                    return nil
                 }
+                runs.append(contentsOf: resolved.runs.map {
+                    $0.applying(foregroundColor: text.foregroundColor)
+                })
             }
         }
-        return .init(runs: runs, scaleFactor: context.contentScaleFactor)
+        return .init(
+            runs: runs,
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
+        )
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -895,6 +956,15 @@ class LocalizedTextStorage: AnyTextStorage {
             case let .text(text):
                 result.append(text._resolveText(in: environment))
             }
+        }
+    }
+
+    override func requiresBackendResolution(
+        in environment: EnvironmentValues
+    ) -> Bool {
+        resolve(locale: environment.locale).contains { segment in
+            guard case let .text(text) = segment else { return false }
+            return text._requiresBackendResolution(in: environment)
         }
     }
 
@@ -969,10 +1039,19 @@ class ConcatenatedTextStorage: AnyTextStorage {
         self.second = second
     }
 
-    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        let first = first._resolve(context: context)
-        let second = second._resolve(context: context)
-        return .init(runs: first.runs + second.runs, scaleFactor: context.contentScaleFactor)
+    override func resolve(
+        typefaces: [Typeface],
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
+        guard let first = first._resolve(context: context, referenceDate: Date()),
+              let second = second._resolve(context: context, referenceDate: Date()) else {
+            return nil
+        }
+        return .init(
+            runs: first.runs + second.runs,
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
+        )
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -985,6 +1064,13 @@ class ConcatenatedTextStorage: AnyTextStorage {
             return nil
         }
         return first + second
+    }
+
+    override func requiresBackendResolution(
+        in environment: EnvironmentValues
+    ) -> Bool {
+        first._requiresBackendResolution(in: environment) ||
+            second._requiresBackendResolution(in: environment)
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
@@ -1001,9 +1087,18 @@ class AttachmentTextStorage: AnyTextStorage {
         self.image = image
     }
 
-    override func resolve(typefaces: [Typeface], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        let image = context.resolve(self.image)
-        return .init(runs: [.attachment(typefaces, image)], scaleFactor: context.contentScaleFactor)
+    override func resolve(
+        typefaces: [Typeface],
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
+        guard let image = context.resolveTextAttachment(self.image) else {
+            return nil
+        }
+        return .init(
+            runs: [.attachment(typefaces, image)],
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
+        )
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -1012,6 +1107,12 @@ class AttachmentTextStorage: AnyTextStorage {
 
     override func resolveTransitionText(in environment: EnvironmentValues) -> String? {
         nil
+    }
+
+    override func requiresBackendResolution(
+        in environment: EnvironmentValues
+    ) -> Bool {
+        image.provider.requiresBackendResolution
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
@@ -1353,7 +1454,19 @@ public struct Text: Equatable {
         context: GraphicsContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText {
-        let displayScale = context.sceneResources.contentScaleFactor
+        guard let resolved = _resolve(
+            context: context as any TextResolutionContext,
+            referenceDate: referenceDate
+        ) else {
+            fatalError("A graphics text context must resolve every attachment.")
+        }
+        return resolved
+    }
+
+    func _resolve(
+        context: any TextResolutionContext,
+        referenceDate: Date
+    ) -> GraphicsContext.ResolvedText? {
         var font = self.font ?? context.environment.font
         if font == nil {
             font = .system(.body)
@@ -1369,8 +1482,10 @@ public struct Text: Equatable {
         var resolutionContext = context
         resolutionContext.environment.font = font
         font = font?.resolved(in: context.environment)
-        font = font?.displayScale(displayScale)
-        let defaultFace = font?.typeface(forContext: context.sceneResources)
+        let defaultFace = font?.typeface(
+            forContext: context.sceneResources,
+            contentScaleFactor: context.contentScaleFactor
+        )
         let fallbackFaces = font?.fallbackTypefaces ?? []
         let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
 
@@ -1380,23 +1495,31 @@ public struct Text: Equatable {
                 runs = [.text(faces, text)]
                 return GraphicsContext.ResolvedText(
                     runs: runs.map { $0.applying(customAttributes) },
-                    scaleFactor: context.contentScaleFactor
+                    scaleFactor: context.contentScaleFactor,
+                    displayScale: context.displayScale
                 )
             }
             else if case let .anyTextStorage(text) = self.storage {
-                let resolved = text.resolve(
+                guard let resolved = text.resolve(
                     typefaces: faces,
                     context: resolutionContext,
                     referenceDate: referenceDate
-                )
+                ) else {
+                    return nil
+                }
                 guard !customAttributes.isEmpty else { return resolved }
                 return GraphicsContext.ResolvedText(
                     runs: resolved.runs.map { $0.applying(customAttributes) },
-                    scaleFactor: context.contentScaleFactor
+                    scaleFactor: context.contentScaleFactor,
+                    displayScale: context.displayScale
                 )
             }
         }
-        return .init(runs: [], scaleFactor: context.contentScaleFactor)
+        return .init(
+            runs: [],
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
+        )
     }
 
     func _sizeVariantTexts(in environment: EnvironmentValues) -> [(TextSizeVariant, String)]? {
@@ -1424,6 +1547,11 @@ public struct Text: Equatable {
         return storage.needsDynamicRenderingInArchive(in: environment)
     }
 
+    func _requiresBackendResolution(in environment: EnvironmentValues) -> Bool {
+        guard case let .anyTextStorage(storage) = storage else { return false }
+        return storage.requiresBackendResolution(in: environment)
+    }
+
     func _contentHash(
         into hasher: inout Hasher,
         environment: EnvironmentValues,
@@ -1441,8 +1569,89 @@ public struct Text: Equatable {
         }
     }
 
+    func _resolutionVersion(
+        in environment: EnvironmentValues,
+        referenceDate: Date
+    ) -> Int {
+        var hasher = Hasher()
+        _contentHash(
+            into: &hasher,
+            environment: environment,
+            referenceDate: referenceDate
+        )
+        hasher.combine(environment.font?.hashValue ?? 0)
+        hasher.combine(environment.defaultFontRenderingMode)
+        hasher.combine(environment.displayScale)
+        customAttributes.hash(into: &hasher)
+        return hasher.finalize()
+    }
+
+    func _resolveStyledText(
+        context: any TextResolutionContext,
+        referenceDate: Date,
+        archiveOptions: ArchivedViewInput.Value,
+        features: ResolvedProperties.Features,
+        sizeFitting: Bool
+    ) -> ResolvedStyledText? {
+        guard let resolved = _resolve(
+            context: context,
+            referenceDate: referenceDate
+        ) else {
+            return nil
+        }
+
+        let environment = context.environment
+        let layoutProperties = TextLayoutProperties(environment)
+        let transitionText = _resolveTransitionText(in: environment)
+        let needsDynamicArchive = _needsDynamicRenderingInArchive(in: environment)
+        let version = _resolutionVersion(
+            in: environment,
+            referenceDate: referenceDate
+        )
+
+        func makeStyledText(
+            _ resolved: GraphicsContext.ResolvedText,
+            additionalFeatures: ResolvedProperties.Features = []
+        ) -> ResolvedStyledText {
+            ResolvedStyledText(
+                storage: _dynamicArchiveStorage(
+                    for: resolved,
+                    enabled: needsDynamicArchive
+                ),
+                layoutProperties: layoutProperties,
+                archiveOptions: archiveOptions,
+                features: features
+                    .union(resolved.resolvedFeatures)
+                    .union(additionalFeatures),
+                resolvedText: resolved,
+                version: version,
+                transitionText: transitionText
+            )
+        }
+
+        guard sizeFitting,
+              let variants = _resolveSizeVariants(
+                context: context,
+                referenceDate: referenceDate
+              ) else {
+            return makeStyledText(resolved)
+        }
+
+        var styledVariants = variants.map { _, variant in
+            makeStyledText(variant, additionalFeatures: .isUniqueSizeVariant)
+        }
+        if let terminal = variants.last?.1 {
+            styledVariants.append(makeStyledText(terminal))
+        }
+        guard let first = styledVariants.first else {
+            return makeStyledText(resolved)
+        }
+        first.setSizeVariantCandidates(styledVariants)
+        return first
+    }
+
     func _resolveSizeVariants(
-        context: GraphicsContext,
+        context: any TextResolutionContext,
         referenceDate: Date = Date()
     ) -> [(TextSizeVariant, GraphicsContext.ResolvedText)]? {
         guard let variants = _sizeVariantTexts(
@@ -1453,7 +1662,6 @@ public struct Text: Equatable {
             return nil
         }
 
-        let displayScale = context.sceneResources.contentScaleFactor
         var font = self.font ?? context.environment.font ?? .system(.body)
         if let fontWeight {
             font = font.weight(fontWeight)
@@ -1463,8 +1671,11 @@ public struct Text: Equatable {
         if italicValue == true {
             font = font.italic()
         }
-        font = font.resolved(in: context.environment).displayScale(displayScale)
-        let faces = ([font.typeface(forContext: context.sceneResources)] + font.fallbackTypefaces)
+        font = font.resolved(in: context.environment)
+        let faces = ([font.typeface(
+            forContext: context.sceneResources,
+            contentScaleFactor: context.contentScaleFactor
+        )] + font.fallbackTypefaces)
             .compactMap { $0 }
         guard !faces.isEmpty else { return nil }
 
@@ -1472,7 +1683,8 @@ public struct Text: Equatable {
             let runs: [GraphicsContext.ResolvedText.Run] = [.text(faces, string)]
             let resolved = GraphicsContext.ResolvedText(
                 runs: runs.map { $0.applying(customAttributes) },
-                scaleFactor: context.contentScaleFactor
+                scaleFactor: context.contentScaleFactor,
+                displayScale: context.displayScale
             )
             return (variant, resolved)
         }
@@ -1631,33 +1843,23 @@ extension Text: View {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
 
-        // 1. Internal state nodes for communication between the resource and layout passes.
-        // Caches the fully resolved styled text object (including glyphs/metrics).
+        // 1. Internal state nodes for the graph-side resolver and backend resource pass.
         let initialResolvedStyledText = ResolvedStyledText()
-        let resolvedStyledTextAttr = graph.makeInput(value: initialResolvedStyledText)
-        let resolvedStyledTextTransactionAttr = graph.makeInput(value: Transaction())
+        let backendResolvedStyledTextAttr = graph.makeInput(value: initialResolvedStyledText)
+        let backendResolvedTextTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _TextResourceResolutionState()
         let inheritedTransactionAttr = inputs.base.transaction
         let displayListContentState = _TextDisplayListContentState()
-        // Resource resolution runs after graph construction. This indirection lets the
-        // resource pass initialize the unresolved interpolation surface before publishing
-        // the first drawable text payload.
-        let interpolatorPrimeAttr = graph.makeIndirectAttribute(
-            defaultValue: DisplayList()
-        )
 
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
         let environmentAttr = cachedEnvironmentAttr.value.environment
         let timeAttr = inputs.base.time
         let inbox = graph.inbox
-        let targetPositionAttr = inputs.position
-        let animatedPositionAttr: Attribute<CGPoint>
         let animatedSizeAttr: Attribute<ViewSize>
         let targetSizeAttr: Attribute<ViewSize>
         if inputs.needsGeometry {
             var cachedEnvironment = cachedEnvironmentAttr.value
-            animatedPositionAttr = cachedEnvironment.animatedPosition(for: inputs)
             animatedSizeAttr = cachedEnvironment.animatedSize(for: inputs)
             guard let animatedFrame = cachedEnvironment.animatedFrame else {
                 fatalError("Text geometry animation requires an animated frame.")
@@ -1665,13 +1867,38 @@ extension Text: View {
             targetSizeAttr = animatedFrame.size
             cachedEnvironmentAttr.value = cachedEnvironment
         } else {
-            animatedPositionAttr = inputs.position
             animatedSizeAttr = inputs.size
             targetSizeAttr = inputs.size
         }
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
         let usesSizeFittingText = inputs.base[VariantThatFitsFlag.self]
+        let resolvedTextHelper = ResolvedTextHelper(
+            _time: timeAttr,
+            _referenceDate: inputs[ReferenceDateInput.self],
+            archiveOptions: archiveOptions
+        )
+        let graphResolvedStyledTextAttr = graph.makeStatefulRule(
+            ResolvedTextFilter(
+                _text: view._attribute,
+                _environment: environmentAttr,
+                helper: resolvedTextHelper
+            )
+        )
+        let resolvedStyledTextAttr: Attribute<ResolvedStyledText> = graph.makeRule {
+            let graphResolved = graphResolvedStyledTextAttr.value
+            guard graphResolved.resolvedText == nil else {
+                return graphResolved
+            }
+            return backendResolvedStyledTextAttr.value
+        }
+        let resolvedStyledTextTransactionAttr: Attribute<Transaction> = graph.makeRule {
+            let graphResolved = graphResolvedStyledTextAttr.value
+            if graphResolved.resolvedText != nil {
+                return inheritedTransactionAttr.value
+            }
+            return backendResolvedTextTransactionAttr.value
+        }
 
         let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
             cachedEnvironmentAttr.value.environment.value._debugLayout
@@ -1684,35 +1911,37 @@ extension Text: View {
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
             let referenceDate = Date()
             let renderEnvironment = environment.untrackedCopy()
-            let transitionText = text._resolveTransitionText(in: environment)
-            let needsDynamicArchive = text._needsDynamicRenderingInArchive(in: environment)
-            let layoutProperties = TextLayoutProperties(environment)
-
-            // Generate a unique hash (version) combining text content and environment factors.
-            var hasher = Hasher()
-            text._contentHash(
-                into: &hasher,
-                environment: environment,
-                referenceDate: referenceDate
-            )
-            hasher.combine(environment.font?.hashValue ?? 0)
-            hasher.combine(environment.defaultFontRenderingMode)
-            hasher.combine(environment.displayScale)
-            text.customAttributes.hash(into: &hasher)
-            let currentVersion = hasher.finalize()
-
-            if let delay = text._nextUpdateDelay(
+            let currentVersion = text._resolutionVersion(
                 in: environment,
                 referenceDate: referenceDate
-            ), delay.isFinite, delay > 0,
-               let viewGraph = _AGGraphContext.current?.context as? ViewGraph {
-                let currentTime = timeAttr.value
-                viewGraph.nextUpdate.views.at(currentTime + delay)
+            )
+
+            let graphResolvedStyledText = graphResolvedStyledTextAttr.value
+            if let resolved = graphResolvedStyledText.resolvedText {
+                guard resourceResolutionState.requiresPreparation(
+                    version: currentVersion
+                ) else {
+                    return ResourceList()
+                }
+                var list = ResourceList()
+                list.items.append(ResourceList.Task(
+                    transaction: Transaction(),
+                    updatesGraph: false,
+                    isPending: {
+                        resourceResolutionState.requiresPreparation(
+                            version: currentVersion
+                        )
+                    }
+                ) { _ in
+                    resolved.prepareResources()
+                    resourceResolutionState.didPrepare(version: currentVersion)
+                })
+                return list
             }
 
-            // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
-            let resolvedStyledText = resolvedStyledTextAttr.value
-            if resolvedStyledText.version == currentVersion, resolvedStyledText.resolvedText != nil {
+            let backendResolvedStyledText = backendResolvedStyledTextAttr.value
+            if backendResolvedStyledText.version == currentVersion,
+               backendResolvedStyledText.resolvedText != nil {
                 resourceResolutionState.didResolve(version: currentVersion)
                 return ResourceList()
             }
@@ -1731,78 +1960,25 @@ extension Text: View {
             var list = ResourceList()
 
             list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
-                _ = interpolatorPrimeAttr.value
                 var context = context
                 context.environment = renderEnvironment
-                // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
-                let resolved = text._resolve(
+                guard let resolved = text._resolveStyledText(
                     context: context,
-                    referenceDate: referenceDate
-                )
+                    referenceDate: referenceDate,
+                    archiveOptions: archiveOptions,
+                    features: [],
+                    sizeFitting: usesSizeFittingText
+                ) else {
+                    fatalError("A graphics text context must resolve backend attachments.")
+                }
+                resolved.resolvedText?.prepareResources()
                 let boxedResolved = UnsafeBox(resolved)
-                let boxedVariants = UnsafeBox(
-                    usesSizeFittingText ? text._resolveSizeVariants(
-                        context: context,
-                        referenceDate: referenceDate
-                    ) : nil
-                )
                 let boxedTransaction = UnsafeBox(resourceTransaction)
-                let boxedLayoutProperties = UnsafeBox(layoutProperties)
 
-                // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                 let publish: @Sendable () -> Void = {
-                    let variantValues = boxedVariants.value
-                    var styledVariants: [ResolvedStyledText] = []
-                    if let variantValues {
-                        styledVariants = variantValues.map { _, resolved in
-                            ResolvedStyledText(
-                                storage: _dynamicArchiveStorage(
-                                    for: resolved,
-                                    enabled: needsDynamicArchive
-                                ),
-                                layoutProperties: boxedLayoutProperties.value,
-                                archiveOptions: archiveOptions,
-                                features: resolved.resolvedFeatures.union(.isUniqueSizeVariant),
-                                resolvedText: resolved,
-                                version: currentVersion,
-                                transitionText: transitionText
-                            )
-                        }
-                        if let terminalResolved = variantValues.last?.1 {
-                            styledVariants.append(
-                                ResolvedStyledText(
-                                    storage: _dynamicArchiveStorage(
-                                        for: terminalResolved,
-                                        enabled: needsDynamicArchive
-                                    ),
-                                    layoutProperties: boxedLayoutProperties.value,
-                                    archiveOptions: archiveOptions,
-                                    features: terminalResolved.resolvedFeatures,
-                                    resolvedText: terminalResolved,
-                                    version: currentVersion,
-                                    transitionText: transitionText
-                                )
-                            )
-                        }
-                        if let first = styledVariants.first {
-                            first.setSizeVariantCandidates(styledVariants)
-                        }
-                    }
-
-                    resolvedStyledTextTransactionAttr.setValue(boxedTransaction.value)
-                    resolvedStyledTextAttr.setValue(
-                        styledVariants.first ?? ResolvedStyledText(
-                            storage: _dynamicArchiveStorage(
-                                for: boxedResolved.value,
-                                enabled: needsDynamicArchive
-                            ),
-                            layoutProperties: boxedLayoutProperties.value,
-                            archiveOptions: archiveOptions,
-                            features: boxedResolved.value.resolvedFeatures,
-                            resolvedText: boxedResolved.value,
-                            version: currentVersion,
-                            transitionText: transitionText
-                        ),
+                    backendResolvedTextTransactionAttr.setValue(boxedTransaction.value)
+                    backendResolvedStyledTextAttr.setValue(
+                        boxedResolved.value,
                         transaction: boxedTransaction.value
                     )
                 }
@@ -1821,7 +1997,7 @@ extension Text: View {
         let lcAttr: Attribute<LayoutComputer>
         if usesSizeFittingText {
             let cache = SizeFittingTextCache(
-                resolver: ResolvedTextHelper(),
+                resolver: resolvedTextHelper,
                 logic: StickyTextSizeFittingLogic(),
                 input: ResolvedTextHelper.Input(
                     text: initialResolvedStyledText,
@@ -1866,17 +2042,24 @@ extension Text: View {
             let text = view._attribute.value // Dependency: text modifiers/colors
             let environment = cachedEnvironmentAttr.value.environment.value
             let targetSize = targetSizeAttr.value.value
-            let targetPosition = targetPositionAttr.value
             let styledText = displayedStyledTextAttr.value
             let resolved = styledText.resolvedText
             let debugLayout = debugLayoutAttr.value
             let foreground = text.foregroundShading(in: environment)
             let renderer = textRendererAttr?.value
+            let updateVersion = DisplayList.Version(forUpdate: ())
 
             var list = DisplayList()
+            let layerSerial = interpolatorGroup.addLayer(
+                id: .unstyled,
+                style: nil
+            )
+            defer {
+                interpolatorGroup.finishLayers()
+            }
 
             if let resolved = resolved {
-                var frame = CGRect(origin: targetPosition, size: targetSize)
+                var frame = CGRect(origin: .zero, size: targetSize)
                 let measuredSize = renderer?.sizeThatFits(
                     proposal: ProposedViewSize(frame.size),
                     text: TextProxy(resolved)
@@ -1893,6 +2076,7 @@ extension Text: View {
                     needsDrawingGroup: styledText.needsDrawingGroup
                 )
                 let contentSeed = displayListContentState.contentSeed(
+                    updateVersion: updateVersion,
                     resolvedVersion: styledText.version,
                     size: frame.size,
                     needsDrawingGroup: styledText.needsDrawingGroup,
@@ -1912,33 +2096,25 @@ extension Text: View {
                     bounds: frame,
                     displayBounds: displayBounds,
                     seed: contentSeed,
+                    version: updateVersion,
                     environment: environment.untrackedCopy()
                 )
             } else {
                 // Keep an interpolation endpoint without emitting a render command.
                 list.appendDebugItem(
-                    bounds: CGRect(origin: targetPosition, size: targetSize)
+                    bounds: CGRect(origin: .zero, size: targetSize)
                 ) { _ in }
             }
             if debugLayout {
                 appendDebugOverlay(
                     to: &list,
-                    frame: CGRect(origin: targetPosition, size: targetSize),
+                    frame: CGRect(origin: .zero, size: targetSize),
                     category: .primitiveView
                 )
             }
-            return list
-        }
-        let presentationDlAttr: Attribute<DisplayList> = graph.makeRule {
-            let displayedStyledText = displayedStyledTextAttr.value
-            guard displayedStyledText.resolvedText != nil else {
-                return dlAttr.value
-            }
-            let targetPosition = targetPositionAttr.value
-            let presentationPosition = animatedPositionAttr.value
-            return dlAttr.value.translatedTextPresentation(
-                x: presentationPosition.x - targetPosition.x,
-                y: presentationPosition.y - targetPosition.y
+            return DisplayList.effect(
+                .interpolatorLayer(interpolatorGroup, layerSerial),
+                contents: list
             )
         }
 
@@ -1955,18 +2131,9 @@ extension Text: View {
             interpolatorGroup,
             content: displayedStyledTextAttr,
             inputs: interpolatorInputs,
-            animatedPosition: animatedPositionAttr,
-            animatedSize: animatedSizeAttr,
-            presentationDisplayList: presentationDlAttr,
             animatesSize: false,
             defersRender: false
         )
-        if let interpolated = outputs.preferences.reducedValue(
-            for: DisplayList.Key.self,
-            in: graph
-        ) {
-            graph.setIndirectTarget(interpolatorPrimeAttr, to: interpolated)
-        }
         if platformItemListShouldCollectStaticItemContributors(inputs) {
             // Plain Text under MenuStyleContext contributes a disabled platform item.
             let textAttr = view._attribute

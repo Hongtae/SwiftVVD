@@ -4170,7 +4170,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 )
                 place(height: 80)
                 _ = animatedValue.value
-                Transaction.dispatchPendingListeners().forEach { $0() }
+                Transaction.dispatchPendingListeners()
                 graphInputs.time.setValue(Time(seconds: firstSample))
                 place(height: 80)
                 _ = animatedValue.value
@@ -4201,7 +4201,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             removal.animationFrameInterval = 1.0 / 120.0
             source.setValue(view(count: 1, target: 3), transaction: removal)
             place(height: 40)
-            Transaction.dispatchPendingListeners().forEach { $0() }
+            Transaction.dispatchPendingListeners()
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
         }
 

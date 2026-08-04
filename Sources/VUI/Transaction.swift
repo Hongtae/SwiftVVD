@@ -115,22 +115,7 @@ extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
 }
 
 public func withTransaction<Result>(_ transaction: Transaction, _ body: () throws -> Result) rethrows -> Result {
-    try withTransaction(
-        transaction,
-        immediateNoMutationCompletion: false,
-        body
-    )
-}
-
-func withTransaction<Result>(
-    _ transaction: Transaction,
-    immediateNoMutationCompletion: Bool,
-    _ body: () throws -> Result
-) rethrows -> Result {
     let previous = Transaction.ThreadStorage.currentBox
-    // Empty transactions normally do not need a scoped thread-local box. Keep
-    // the scope when completion state is active so no-mutation completion rules
-    // can still observe whether the body wrote through the transaction.
     if transaction.isEmpty,
        previous?.transaction.hasLocalAnimationCompletionState != true {
         return try body()
@@ -139,32 +124,9 @@ func withTransaction<Result>(
     let parentTransaction = previous?.transaction ?? Transaction()
     let scopedTransaction = transaction.scopedTransaction(inheritingFrom: parentTransaction)
     let scopedBox = Transaction.ThreadStorageBox(transaction: scopedTransaction)
-    Transaction.ThreadStorage.currentBox = scopedBox
-    let result: Result
-    do {
-        result = try body()
-    } catch {
-        // Restore the parent scope before completion callbacks run so callbacks
-        // observe the transaction environment outside the failed body.
-        Transaction.ThreadStorage.currentBox = previous
-        finalizeAnimationCompletions(
-            in: scopedTransaction,
-            animation: scopedTransaction.effectiveAnimation,
-            bodyDidMutate: scopedBox.bodyDidMutate,
-            immediateNoMutationCompletion: immediateNoMutationCompletion
-        )
-        throw error
+    return try Transaction.ThreadStorage.withValue(scopedBox) {
+        try body()
     }
-    // Completion callbacks are deliberately outside the scoped body but still
-    // receive the transaction that scheduled them.
-    Transaction.ThreadStorage.currentBox = previous
-    finalizeAnimationCompletions(
-        in: scopedTransaction,
-        animation: scopedTransaction.effectiveAnimation,
-        bodyDidMutate: scopedBox.bodyDidMutate,
-        immediateNoMutationCompletion: immediateNoMutationCompletion
-    )
-    return result
 }
 
 public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ value: V, _ body: () throws -> R) rethrows -> R {
@@ -176,10 +138,6 @@ public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ 
 extension Transaction {
     final class ThreadStorageBox {
         let transaction: Transaction
-        // Tracks mutation through the active scoped transaction. Completion
-        // finalization uses this to distinguish real writes from a transaction
-        // scope that merely installed completion listeners.
-        var bodyDidMutate = false
 
         init(transaction: Transaction) {
             self.transaction = transaction
@@ -187,32 +145,22 @@ extension Transaction {
     }
 
     enum ThreadStorage {
-        private static let key = "VUI.Transaction.current"
+        private static let transaction = _AGThreadLocal<ThreadStorageBox?>(nil)
         private static let idKey = "VUI.Transaction.currentID"
+
         static var currentBox: ThreadStorageBox? {
-            get {
-                Thread.current.threadDictionary[key] as? ThreadStorageBox
-            }
-            set {
-                if let newValue {
-                    Thread.current.threadDictionary[key] = newValue
-                } else {
-                    Thread.current.threadDictionary.removeObject(forKey: key)
-                }
-            }
+            transaction.value
         }
 
         static var current: Transaction? {
-            get {
-                currentBox?.transaction
-            }
-            set {
-                if let newValue {
-                    currentBox = ThreadStorageBox(transaction: newValue)
-                } else {
-                    currentBox = nil
-                }
-            }
+            currentBox?.transaction
+        }
+
+        static func withValue<Result>(
+            _ box: ThreadStorageBox?,
+            _ body: () throws -> Result
+        ) rethrows -> Result {
+            try transaction.withValue(box, operation: body)
         }
 
         static var currentID: ID {
@@ -238,18 +186,6 @@ extension Transaction {
         }
         #endif
 
-        static func markMutation(for transaction: Transaction) {
-            transaction.markAnimationCompletionMutation()
-            // Only the active box with the same completion observer owns the
-            // scoped mutation flag; inherited or copied transactions still keep
-            // their observer state, but must not mark this body as mutating.
-            guard let currentBox,
-                  currentBox.transaction.animationCompletionObserver === transaction.animationCompletionObserver else {
-                return
-            }
-            currentBox.bodyDidMutate = true
-        }
-
         private enum ThreadIDState {
             private static let nextID = Atomic<UInt32>(1)
 
@@ -265,46 +201,34 @@ extension Transaction {
         ThreadStorage.current ?? Transaction()
     }
 
+    var current: Transaction {
+        let threadTransaction = Self.current
+        guard !threadTransaction.isEmpty else {
+            return self
+        }
+        guard !isEmpty else {
+            return threadTransaction
+        }
+
+        var transaction = threadTransaction
+        transaction.plist.merge(plist)
+        return transaction
+    }
+
     static func withScopedThreadTransaction<Result>(
         _ transaction: Transaction,
-        finalizesCompletions: Bool = false,
-        immediateNoMutationCompletion: Bool = false,
         _ body: () throws -> Result
     ) rethrows -> Result {
         let previous = ThreadStorage.currentBox
         let parentTransaction = previous?.transaction ?? Transaction()
         let scopedTransaction = transaction.scopedTransaction(inheritingFrom: parentTransaction)
         let scopedBox = ThreadStorageBox(transaction: scopedTransaction)
-        ThreadStorage.currentBox = scopedBox
-        let result: Result
-        do {
-            result = try body()
-        } catch {
-            ThreadStorage.currentBox = previous
-            if finalizesCompletions {
-                finalizeAnimationCompletions(
-                    in: scopedTransaction,
-                    animation: scopedTransaction.effectiveAnimation,
-                    bodyDidMutate: scopedBox.bodyDidMutate,
-                    immediateNoMutationCompletion: immediateNoMutationCompletion
-                )
-            }
-            throw error
+        return try ThreadStorage.withValue(scopedBox) {
+            try body()
         }
-        ThreadStorage.currentBox = previous
-        if finalizesCompletions {
-            finalizeAnimationCompletions(
-                in: scopedTransaction,
-                animation: scopedTransaction.effectiveAnimation,
-                bodyDidMutate: scopedBox.bodyDidMutate,
-                immediateNoMutationCompletion: immediateNoMutationCompletion
-            )
-        }
-        return result
     }
 
     var hasLocalAnimationCompletionState: Bool {
-        animationCompletionObserver != nil ||
         animationListener != nil ||
         animationLogicalListener != nil
     }
@@ -317,17 +241,13 @@ extension Transaction {
             return self
         }
 
-        let localCompletionObserver = animationCompletionObserver
         let localAnimationListener = animationListener
         let localAnimationLogicalListener = animationLogicalListener
         var transaction = self
         // Merge parent values for ordinary transaction keys, then restore local
-        // completion/listener identity. Completion ownership is scoped to the
-        // transaction that installed it, not to the inherited parent box.
+        // listener identity. Completion ownership is scoped to the transaction
+        // that installed it, not to the inherited parent box.
         transaction.plist.merge(parent.plist)
-        if transaction.animationCompletionObserver !== localCompletionObserver {
-            transaction.animationCompletionObserver = localCompletionObserver
-        }
         if transaction.animationListener !== localAnimationListener {
             transaction.animationListener = localAnimationListener
         }

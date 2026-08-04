@@ -39,12 +39,21 @@ public struct _AppearanceActionModifier: ViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        guard _AGGraph.current != nil else {
+        guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
+        let mergedModifier = graph.makeStatefulRule(
+            MergedCallbacks(
+                modifier: modifier._attribute,
+                phase: inputs.base.phase
+            )
+        )
         var outputs = body(_Graph(), inputs)
-        outputs.multiModifier(modifier, inputs: inputs)
+        outputs.multiModifier(
+            _GraphValue(_attribute: mergedModifier),
+            inputs: inputs
+        )
         return outputs
     }
 
@@ -53,6 +62,105 @@ public struct _AppearanceActionModifier: ViewModifier {
 
 @available(*, unavailable)
 extension _AppearanceActionModifier: Sendable {}
+
+private extension _AppearanceActionModifier {
+    final class MergedBox {
+        let resetSeed: UInt32
+        var count: Int32 = 0
+        var lastCount: Int32 = 0
+        var appear: (() -> Void)?
+        var disappear: (() -> Void)?
+        var updateScheduled = false
+
+        init(resetSeed: UInt32) {
+            self.resetSeed = resetSeed
+        }
+
+        deinit {
+            guard lastCount >= 1, let disappear else { return }
+            Update.enqueueAction(disappear)
+        }
+
+        func appeared() {
+            if count == 0, !updateScheduled {
+                scheduleUpdate()
+            }
+            count += 1
+        }
+
+        func disappeared() {
+            count -= 1
+            if count == 0, !updateScheduled {
+                scheduleUpdate()
+            }
+        }
+
+        private func scheduleUpdate() {
+            updateScheduled = true
+            Update.enqueueAction { [self] in
+                update()
+            }
+        }
+
+        private func update() {
+            updateScheduled = false
+            let previousCount = lastCount
+            lastCount = count
+
+            if previousCount > 0 {
+                if count <= 0 {
+                    disappear?()
+                }
+            } else if count >= 1 {
+                appear?()
+            }
+        }
+    }
+
+    struct MergedCallbacks: StatefulRule {
+        typealias Value = _AppearanceActionModifier
+
+        var modifier: Attribute<_AppearanceActionModifier>
+        var phase: Attribute<Phase>
+        var box: MergedBox?
+
+        init(
+            modifier: Attribute<_AppearanceActionModifier>,
+            phase: Attribute<Phase>,
+            box: MergedBox? = nil
+        ) {
+            self.modifier = modifier
+            self.phase = phase
+            self.box = box
+        }
+
+        mutating func updateValue() {
+            let resetSeed = phase.value.resetSeed
+            if let box, box.resetSeed != resetSeed {
+                self.box = nil
+            }
+
+            let box: MergedBox
+            if let current = self.box {
+                box = current
+            } else {
+                box = MergedBox(resetSeed: resetSeed)
+                self.box = box
+            }
+
+            let modifier = modifier.value
+            box.appear = modifier.appear
+            box.disappear = modifier.disappear
+
+            _AGGraph.setStatefulOutput(
+                _AppearanceActionModifier(
+                    appear: { box.appeared() },
+                    disappear: { box.disappeared() }
+                )
+            )
+        }
+    }
+}
 
 struct AppearanceEffect: StatefulRule, RemovableAttribute {
     typealias Value = Void

@@ -221,6 +221,7 @@ extension MenuDropdownModifier {
         let responder = MenuDropdownResponder(
             itemList: itemListAttr,
             environment: environmentAttr,
+            phase: inputs.base.phase,
             transform: inputs.transform,
             size: inputs.size,
             onHoverChanged: nil,
@@ -269,6 +270,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
 
     let itemList: Attribute<PlatformItemList>
     let environment: Attribute<EnvironmentValues>
+    let phase: Attribute<Phase>
     let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
@@ -289,6 +291,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
 
     init(itemList: Attribute<PlatformItemList>,
          environment: Attribute<EnvironmentValues>,
+         phase: Attribute<Phase>,
          transform: Attribute<ViewTransform>,
          size: Attribute<ViewSize>,
          onHoverChanged: ((Bool) -> Void)?,
@@ -302,6 +305,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
         }
         self.itemList = itemList
         self.environment = environment
+        self.phase = phase
         self.transform = transform
         self.size = size
         self.onHoverChanged = onHoverChanged
@@ -360,6 +364,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
         guard let graph = _AGGraph.current else {
             fatalError("MenuDropdownResponder.present called outside AG context")
         }
+        let viewPhase = ViewGraphHost.Phase(base: phase.value)
 
         graph.inbox.drain()
         graph.drainActions()
@@ -373,8 +378,12 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
                 let environment = self.environment.value.untrackedCopy()
+                let viewPhase = ViewGraphHost.Phase(base: self.phase.value)
                 session?.root?.replaceMenuItems(items)
-                session?.root?.setPresentationEnvironment(environment)
+                session?.root?.setPresentationEnvironment(
+                    environment,
+                    viewPhase: viewPhase
+                )
             }
         }
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
@@ -389,6 +398,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
                                                environment: environment.value.untrackedCopy(),
+                                               viewPhase: viewPhase,
                                                scene: parent.scene,
                                                anchor: presentationAnchor(),
                                                items: initialItems,

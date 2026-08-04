@@ -119,12 +119,12 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         let secondEvent = secondBoundary == .old ? "old logical" : "replacement logical"
 
         XCTAssertLessThan(firstTime, secondTime, label, file: file, line: line)
-        harness.setTime(firstTime + frame)
+        harness.advanceTime(to: firstTime + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [firstEvent], label, file: file, line: line)
 
-        harness.setTime(secondTime + frame)
+        harness.advanceTime(to: secondTime + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [firstEvent, secondEvent], label, file: file, line: line)
@@ -150,12 +150,12 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         let frame = replacementAnimation.box.defaultDisplayFrameInterval
         let replacementBoundary = retargetTime + replacementAnimation.box.duration
 
-        harness.setTime(replacementBoundary - frame)
+        harness.advanceTime(to: replacementBoundary - frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementBoundary + frame)
+        harness.advanceTime(to: replacementBoundary + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -198,7 +198,7 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         harness.finalizeTransactionBody()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.setSource(
             _OpacityEffect(opacity: replacementTarget),
@@ -214,12 +214,12 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         let replacementBoundary = retargetTime + replacementAnimation.box.duration
-        harness.setTime(replacementBoundary - frame)
+        harness.advanceTime(to: replacementBoundary - frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementBoundary + frame)
+        harness.advanceTime(to: replacementBoundary + frame)
         let snappedValue = harness.currentValue().opacity
         harness.flushCompletionActions()
         XCTAssertEqual(snappedValue, replacementTarget, accuracy: 0.000_001, file: file, line: line)
@@ -261,7 +261,7 @@ final class AnimatableAttributeBuiltInFamilyRetargetCompletionTests: XCTestCase 
         harness.finalizeTransactionBody()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)

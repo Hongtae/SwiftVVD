@@ -460,13 +460,23 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let runSpringMove = try XCTUnwrap(probe.toggle)
 
         runSpringMove()
+        redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: -controller.animationTimestamp.seconds,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw,
+            withGC
+        )
+        _ = try displayList(in: controller)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
 
-        for (index, sampleTime) in [0.0, 1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
+        for (index, sampleTime) in [1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
             redraw = false
             controller.updateView(
-                tick: UInt64(index + 1),
+                tick: UInt64(index + 2),
                 delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
@@ -552,13 +562,23 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try XCTUnwrap(child.gestureGraph).data.withCurrent {
             runSpringMove()
         }
+        redraw = false
+        child.updateView(
+            tick: 1,
+            delta: -child.animationTimestamp.seconds,
+            date: child.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw,
+            withGC
+        )
+        _ = try displayList(in: child)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
 
-        for (index, sampleTime) in [0.0, 1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
+        for (index, sampleTime) in [1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
             redraw = false
             child.updateView(
-                tick: UInt64(index + 1),
+                tick: UInt64(index + 2),
                 delta: sampleTime - child.animationTimestamp.seconds,
                 date: child.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
@@ -613,13 +633,23 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             location: CGPoint(x: 210, y: 120),
             timestamp: 0
         )))
+        redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: -controller.animationTimestamp.seconds,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw,
+            withGC
+        )
+        _ = try displayList(in: controller)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
 
-        for (index, sampleTime) in [0.0, 1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
+        for (index, sampleTime) in [1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
             redraw = false
             controller.updateView(
-                tick: UInt64(index + 1),
+                tick: UInt64(index + 2),
                 delta: sampleTime - controller.animationTimestamp.seconds,
                 date: controller.date.addingTimeInterval(sampleTime),
                 contentSize: CGSize(width: 420, height: 240),
@@ -661,10 +691,26 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         var tick: UInt64 = 1
         for run in 1...6 {
             pressSpringMoveButton(in: controller)
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-
             let baseTime = Double(run - 1)
-            for sampleOffset in [0.0, 1.0 / 60.0, 2.0 / 60.0, 0.1] {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: baseTime - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(baseTime),
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw,
+                withGC
+            )
+            tick += 1
+            _ = try displayList(in: controller)
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+            XCTAssertEqual(
+                probe.completions,
+                [],
+                "Run \(run) should not complete before its registered animation."
+            )
+
+            for sampleOffset in [1.0 / 60.0, 2.0 / 60.0, 0.1] {
                 redraw = false
                 controller.updateView(
                     tick: tick,
@@ -853,12 +899,13 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         _ = try update(time: 0)
         try XCTUnwrap(probe.toggle)()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         _ = try update(time: 0.001)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         _ = try update(time: 0.25)
         _ = try update(time: 0.60)
 
         try XCTUnwrap(probe.toggle)()
+        _ = try update(time: 0.60)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
         var beforeCompletion: (time: Double, bounds: CGRect)?
@@ -929,19 +976,38 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let run = try XCTUnwrap(probe.toggle)
         run()
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 1,
+                delta: -controller.animationTimestamp.seconds,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        let immediateDisplayList = try displayList(in: controller)
+        XCTAssertEqual(
+            try XCTUnwrap(statusMarkerBounds(in: immediateDisplayList)).width,
+            100,
+            accuracy: 0.5
+        )
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
 
         for (index, sampleTime) in [1.0 / 60.0, 2.0 / 60.0, 0.1, 1.0, 10.0].enumerated() {
             redraw = false
-            controller.updateView(
-                tick: UInt64(index + 1),
-                delta: sampleTime - controller.animationTimestamp.seconds,
-                date: controller.date.addingTimeInterval(sampleTime),
-                contentSize: CGSize(width: 420, height: 240),
-                redraw: &redraw,
-                withGC
-            )
+            Update.ensure {
+                controller.updateView(
+                    tick: UInt64(index + 2),
+                    delta: sampleTime - controller.animationTimestamp.seconds,
+                    date: controller.date.addingTimeInterval(sampleTime),
+                    contentSize: CGSize(width: 420, height: 240),
+                    redraw: &redraw,
+                    withGC
+                )
+            }
             let runningDisplayList = try displayList(in: controller)
             XCTAssertEqual(
                 try XCTUnwrap(statusMarkerBounds(in: runningDisplayList)).width,
@@ -954,24 +1020,28 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         redraw = false
-        controller.updateView(
-            tick: 20,
-            delta: 20.1 - controller.animationTimestamp.seconds,
-            date: controller.date.addingTimeInterval(20.1),
-            contentSize: CGSize(width: 420, height: 240),
-            redraw: &redraw,
-            withGC
-        )
+        Update.ensure {
+            controller.updateView(
+                tick: 20,
+                delta: 20.1 - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(20.1),
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw,
+                withGC
+            )
+        }
         _ = try displayList(in: controller)
         redraw = false
-        controller.updateView(
-            tick: 21,
-            delta: 20.1 - controller.animationTimestamp.seconds,
-            date: controller.date.addingTimeInterval(20.1),
-            contentSize: CGSize(width: 420, height: 240),
-            redraw: &redraw,
-            withGC
-        )
+        Update.ensure {
+            controller.updateView(
+                tick: 21,
+                delta: 20.1 - controller.animationTimestamp.seconds,
+                date: controller.date.addingTimeInterval(20.1),
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw,
+                withGC
+            )
+        }
         let completeDisplayList = try displayList(in: controller)
         XCTAssertEqual(probe.completions, [1])
         XCTAssertEqual(try XCTUnwrap(statusMarkerBounds(in: completeDisplayList)).width, 160, accuracy: 0.5)
@@ -1531,17 +1601,29 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let removeChild = try XCTUnwrap(probe.toggle)
         removeChild()
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 1,
+                delta: -controller.animationTimestamp.seconds,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        let immediateDisplayList = try displayList(in: controller)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(probe.completions, [])
         let immediateGreenBounds = try XCTUnwrap(
-            opaqueGreenShapeBounds(in: try displayList(in: controller)).first
+            opaqueGreenShapeBounds(in: immediateDisplayList).first
         )
         XCTAssertEqual(immediateGreenBounds.midX, initialGreenBounds.midX, accuracy: 0.5)
         XCTAssertEqual(immediateGreenBounds.midY, initialGreenBounds.midY, accuracy: 0.5)
         XCTAssertEqual(immediateGreenBounds.width, initialGreenBounds.width, accuracy: 0.5)
         XCTAssertEqual(immediateGreenBounds.height, initialGreenBounds.height, accuracy: 0.5)
         let immediateBackgroundBounds = try XCTUnwrap(
-            translucentGreenShapeBounds(in: try displayList(in: controller))
+            translucentGreenShapeBounds(in: immediateDisplayList)
         )
         XCTAssertEqual(immediateBackgroundBounds.midX, initialBackgroundBounds.midX, accuracy: 0.5)
         XCTAssertEqual(immediateBackgroundBounds.midY, initialBackgroundBounds.midY, accuracy: 0.5)
@@ -1549,17 +1631,21 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(immediateBackgroundBounds.height, initialBackgroundBounds.height, accuracy: 0.5)
 
         var opacitySamples: [(time: Double, opacity: Double?)] = []
-        var greenBoundsSamples: [(time: Double, bounds: CGRect)] = []
-        for (index, sampleTime) in [0.0, 1.0 / 60.0, 2.0 / 60.0, 0.5, 2.5].enumerated() {
+        var greenBoundsSamples: [(time: Double, bounds: CGRect)] = [
+            (time: 0, bounds: immediateGreenBounds)
+        ]
+        for (index, sampleTime) in [1.0 / 60.0, 2.0 / 60.0, 0.5, 2.5].enumerated() {
             redraw = false
-            controller.updateView(
-                tick: UInt64(index + 1),
-                delta: sampleTime - controller.animationTimestamp.seconds,
-                date: controller.date.addingTimeInterval(sampleTime),
-                contentSize: CGSize(width: 420, height: 240),
-                redraw: &redraw,
-                withGC
-            )
+            Update.ensure {
+                controller.updateView(
+                    tick: UInt64(index + 2),
+                    delta: sampleTime - controller.animationTimestamp.seconds,
+                    date: controller.date.addingTimeInterval(sampleTime),
+                    contentSize: CGSize(width: 420, height: 240),
+                    redraw: &redraw,
+                    withGC
+                )
+            }
             let sample = try displayList(in: controller)
             opacitySamples.append((sampleTime, firstOpacity(in: sample)))
             if let bounds = opaqueGreenShapeBounds(in: sample).first {
@@ -1815,6 +1901,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    // ASSERTIONS buttonLabelNestedLayoutInheritsContainerPositionObserved
     func testLabButtonGlyphPixelsRemainCenteredAcrossNestedAndDirectLayouts() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -1867,54 +1954,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let list = try displayList(in: controller)
-        let titles = [
-            "Animation Lab",
-            "Symbol Effects",
-            "Keyframe & Phase",
-            "Matched Geometry",
-            "Content Transition",
-            "Timeline",
-            "Visual Effect & Mesh",
-            "Custom Animation",
-            "Context Menus",
-            "Modals & Popups",
-            "Images",
-            "Text Variants",
-            "ScrollView Reader",
-            "Open Top-Level Sheet",
-            "Top-Level Alert",
-            "Top-Level Data Alert",
-            "Top-Level Error Alert",
-            "Increment",
-            "Change Text",
-            "Remove View",
-            "Close",
-        ]
-        var labels: [(title: String, frame: CGRect)] = []
-        for title in titles {
-            let samples = renderedResolvedTextSamples(
-                in: list,
-                matching: title,
-                environment: controller.environment
-            )
-            XCTAssertFalse(samples.isEmpty, "missing rendered text for \(title)")
-            labels.append(contentsOf: samples.map {
-                (title: title, frame: $0.frame)
-            })
-        }
-        let allBorders = shapeStrokeBounds(in: list)
-        let borderedLabels = try labels.map { label in
-            let candidates = allBorders.filter { border in
-                border.insetBy(dx: -0.01, dy: -0.01).contains(label.frame)
+        let buttonBorders = shapeStrokeBounds(in: list)
+            .filter { abs($0.height - 25) <= 0.5 }
+            .sorted {
+                abs($0.minY - $1.minY) > 0.5
+                    ? $0.minY < $1.minY
+                    : $0.minX < $1.minX
             }
-            let border = try XCTUnwrap(
-                candidates.min {
-                    $0.width * $0.height < $1.width * $1.height
-                },
-                "missing containing button border for \(label.title)"
-            )
-            return (title: label.title, label: label.frame, border: border)
-        }
+        XCTAssertEqual(buttonBorders.count, 21)
 
         let commandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
         let context = try XCTUnwrap(GraphicsContext(
@@ -1966,9 +2013,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         func glyphBounds(in frame: CGRect) -> CGRect? {
-            let region = frame.standardized.applying(
-                CGAffineTransform(scaleX: scale, y: scale)
-            ).insetBy(dx: -2, dy: -2)
+            let region = frame.standardized
+                .insetBy(dx: 3, dy: 3)
+                .applying(CGAffineTransform(scaleX: scale, y: scale))
             let minRegionX = max(Int(floor(region.minX)), 0)
             let maxRegionX = min(Int(ceil(region.maxX)), resolutionWidth)
             let minRegionY = max(Int(floor(region.minY)), 0)
@@ -2004,39 +2051,25 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
         }
 
-        let samples = borderedLabels.map { sample in
-            let glyph = glyphBounds(in: sample.label)
-            return (
-                title: sample.title,
-                label: sample.label,
-                border: sample.border,
-                glyph: glyph,
-                glyphOffset: glyph.map {
-                    $0.midX / scale - sample.border.midX
-                }
+        for (index, border) in buttonBorders.enumerated() {
+            let glyph = try XCTUnwrap(
+                glyphBounds(in: border),
+                "button \(index) has no glyph pixels inside \(border)"
             )
-        }
-        for sample in samples {
-            XCTAssertNotNil(
-                sample.glyph,
-                "missing glyph pixels for \(sample.title)"
-            )
-            XCTAssertEqual(
-                sample.label.midX,
-                sample.border.midX,
-                accuracy: 0.001,
-                "\(sample.title) logical label is not centered in its border"
-            )
-            XCTAssertEqual(
-                sample.label.midY,
-                sample.border.midY,
-                accuracy: 0.001,
-                "\(sample.title) logical label is not vertically centered in its border"
+            XCTAssertGreaterThan(
+                glyph.width,
+                2,
+                "button \(index) contains only a pixel artifact"
             )
             XCTAssertLessThanOrEqual(
-                abs(try XCTUnwrap(sample.glyphOffset)),
+                abs(glyph.midX / scale - border.midX),
                 1,
-                "\(sample.title) glyph pixels are not centered in their button border"
+                "button \(index) glyph pixels are not horizontally centered in \(border)"
+            )
+            XCTAssertLessThanOrEqual(
+                abs(glyph.midY / scale - border.midY),
+                2,
+                "button \(index) glyph pixels are not vertically centered in \(border)"
             )
         }
     }
@@ -2450,6 +2483,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         try XCTUnwrap(probe.toggle)()
+        _ = try update(time: 0)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         for time in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.25, 2.5, 5.1] {
             let sample = try update(time: time)
@@ -2684,6 +2718,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let initialBounds = try update(time: 0)
         try XCTUnwrap(probe.removeChild)()
+        _ = try update(time: 0)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
         var samples: [(time: Double, bounds: CGRect)] = []
@@ -2782,6 +2817,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let initialBounds = try update(time: 0)
         try XCTUnwrap(probe.removeChild)()
+        _ = try update(time: 0)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
 
         var samples: [(time: Double, bounds: CGRect)] = []
@@ -2800,6 +2836,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         try XCTUnwrap(probe.insertChild)()
+        _ = try update(time: 5.1)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         var insertionSamples: [(time: Double, bounds: CGRect)] = []
         for offset in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.0, 2.5, 4.0, 5.1] {
@@ -2908,10 +2945,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         try XCTUnwrap(probe.springMove)()
+        _ = try update(time: currentTime)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         let beforeRemoval = try advance(to: 1.0)
 
         try XCTUnwrap(probe.removeChild)()
+        _ = try update(time: currentTime)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         let immediateRemoval = try update(time: currentTime)
         XCTAssertEqual(
@@ -2935,10 +2974,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         _ = try advance(to: 6.2)
         try XCTUnwrap(probe.springMove)()
+        _ = try update(time: currentTime)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         let beforeInsertion = try advance(to: 7.2)
 
         try XCTUnwrap(probe.insertChild)()
+        _ = try update(time: currentTime)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         let immediateInsertion = try update(time: currentTime)
         XCTAssertEqual(

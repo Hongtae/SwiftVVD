@@ -22,7 +22,6 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
     }
 
     func testRunTransactionDoesNotInstallPassedTransactionAsCurrent() {
-        Transaction.ThreadStorage.currentBox = nil
         let host = GraphHost()
         var transaction = Transaction()
         transaction.isContinuous = true

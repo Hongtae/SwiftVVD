@@ -20,8 +20,8 @@ import Synchronization
 /// Call `invalidate()` to batch-remove all registered nodes at once.
 ///
 /// Subgraphs form a parent/child tree: an AGSubgraph created while another is active
-/// automatically becomes its child. `invalidate()` cascades depth-first,
-/// so invalidating a parent also destroys all descendant subgraphs.
+/// automatically becomes its child. `invalidate()` visits the parent before its
+/// newest child and destroys each subgraph's newest node first.
 ///
 /// Typical use: ForEach item lifecycle:
 /// ```swift
@@ -168,21 +168,44 @@ final class AGSubgraphRef: @unchecked Sendable {
     func _finishInvalidation() {
         guard invalidationPending else { return }
 
-        children.forEach {
-            $0._finishInvalidation()
-            if $0.parent === self {
-                $0.parent = nil
+        var work: [AGSubgraphRef] = [self]
+        var ordered: [AGSubgraphRef] = []
+        var visited: Set<ObjectIdentifier> = []
+        while let subgraph = work.popLast() {
+            guard subgraph.invalidationPending,
+                  visited.insert(ObjectIdentifier(subgraph)).inserted else {
+                continue
             }
-            $0.removeSecondaryAncestor(self)
+            ordered.append(subgraph)
+            for child in subgraph.children where child.invalidationPending {
+                work.append(child)
+            }
         }
-        children.removeAll()
 
-        nodes.forEach {
-            graph?.removeNode($0)
+        if let graph {
+            var removals: [_AGGraph.PreparedNodeRemoval] = []
+            for subgraph in ordered {
+                for node in subgraph.nodes.reversed() {
+                    removals.append(graph.prepareNodeRemoval(node))
+                }
+            }
+            for removal in removals {
+                graph.finishNodeRemoval(removal)
+            }
         }
-        nodes.removeAll()
-        isValid = false
-        invalidationPending = false
+
+        for subgraph in ordered {
+            for child in subgraph.children {
+                if child.parent === subgraph {
+                    child.parent = nil
+                }
+                child.removeSecondaryAncestor(subgraph)
+            }
+            subgraph.children.removeAll()
+            subgraph.nodes.removeAll()
+            subgraph.isValid = false
+            subgraph.invalidationPending = false
+        }
     }
 
     func removeFromParent() {

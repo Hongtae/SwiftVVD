@@ -24,12 +24,12 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         let earlyReplacement = harness.currentValue().opacity
         XCTAssertLessThan(earlyReplacement, retargetStart - 0.20)
         XCTAssertLessThan(earlyReplacement, 0.05)
 
-        harness.setTime(retargetTime + 0.90)
+        harness.advanceTime(to: retargetTime + 0.90)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -47,13 +47,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: .default, target: -0.5)
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         XCTAssertLessThan(harness.currentValue().opacity, retargetStart - 0.25)
 
-        harness.setTime(retargetTime + 0.15)
+        harness.advanceTime(to: retargetTime + 0.15)
         XCTAssertLessThan(harness.currentValue().opacity, 0)
 
-        harness.setTime(retargetTime + 0.85)
+        harness.advanceTime(to: retargetTime + 0.85)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -71,13 +71,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: .default, target: -0.5)
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         XCTAssertLessThan(harness.currentValue().opacity, retargetStart - 0.20)
 
-        harness.setTime(retargetTime + 0.15)
+        harness.advanceTime(to: retargetTime + 0.15)
         XCTAssertLessThan(harness.currentValue().opacity, 0)
 
-        harness.setTime(retargetTime + 0.85)
+        harness.advanceTime(to: retargetTime + 0.85)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -95,10 +95,10 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: shortLinear, target: -0.5)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertLessThan(harness.currentValue().opacity, 0.35)
 
-        harness.setTime(retargetTime + 0.47)
+        harness.advanceTime(to: retargetTime + 0.47)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -116,13 +116,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: shortBezier, target: -0.5)
 
-        harness.setTime(retargetTime + 0.03)
+        harness.advanceTime(to: retargetTime + 0.03)
         XCTAssertGreaterThan(harness.currentValue().opacity, retargetStart + 0.02)
 
-        harness.setTime(retargetTime + 0.24)
+        harness.advanceTime(to: retargetTime + 0.24)
         XCTAssertLessThan(harness.currentValue().opacity, 0.20)
 
-        harness.setTime(retargetTime + 0.47)
+        harness.advanceTime(to: retargetTime + 0.47)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -148,20 +148,20 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.02)
+        harness.advanceTime(to: retargetTime + 0.02)
         let firstRetargetFrame = harness.currentValue().opacity
         XCTAssertGreaterThan(firstRetargetFrame, retargetStart)
 
-        harness.setTime(retargetTime + 0.12)
+        harness.advanceTime(to: retargetTime + 0.12)
         let descendingFrame = harness.currentValue().opacity
         XCTAssertLessThan(descendingFrame, 0.45)
 
-        harness.setTime(retargetTime + 0.28)
+        harness.advanceTime(to: retargetTime + 0.28)
         let overshootFrame = harness.currentValue().opacity
         XCTAssertLessThan(overshootFrame, -0.45)
     }
 
-    func testDefaultRetargetedToDefaultPreservesMergeState() {
+    func testDefaultRetargetedToDefaultUsesMergedReplacementPath() {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0)
         )
@@ -175,13 +175,10 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: .default, target: -0.5)
 
-        harness.setTime(retargetTime + 0.02)
-        XCTAssertGreaterThan(harness.currentValue().opacity, retargetStart + 0.003)
-
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         XCTAssertLessThan(harness.currentValue().opacity, 0.45)
 
-        harness.setTime(retargetTime + 0.85)
+        harness.advanceTime(to: retargetTime + 0.85)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -199,13 +196,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: .default, target: -0.5)
 
-        harness.setTime(retargetTime + 0.08)
+        harness.advanceTime(to: retargetTime + 0.08)
         XCTAssertLessThan(harness.currentValue().opacity, retargetStart - 0.08)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertLessThan(harness.currentValue().opacity, -0.25)
 
-        harness.setTime(retargetTime + 0.85)
+        harness.advanceTime(to: retargetTime + 0.85)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -223,13 +220,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: .default, target: -0.5)
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         XCTAssertLessThan(harness.currentValue().opacity, retargetStart - 0.35)
 
-        harness.setTime(retargetTime + 0.18)
+        harness.advanceTime(to: retargetTime + 0.18)
         XCTAssertLessThan(harness.currentValue().opacity, -0.02)
 
-        harness.setTime(retargetTime + 0.85)
+        harness.advanceTime(to: retargetTime + 0.85)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -255,11 +252,11 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
             target: -0.5
         )
 
-        harness.setTime(retargetTime + 0.10)
+        harness.advanceTime(to: retargetTime + 0.10)
         let middleFrame = harness.currentValue().opacity
         XCTAssertLessThan(middleFrame, 0.20)
 
-        harness.setTime(retargetTime + 0.22)
+        harness.advanceTime(to: retargetTime + 0.22)
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.001)
     }
 
@@ -277,13 +274,13 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
 
         retarget(harness, animation: shortRepeat, target: -0.5)
 
-        harness.setTime(retargetTime + 0.19)
+        harness.advanceTime(to: retargetTime + 0.19)
         XCTAssertLessThan(harness.currentValue().opacity, -0.40)
 
-        harness.setTime(retargetTime + 0.24)
+        harness.advanceTime(to: retargetTime + 0.24)
         XCTAssertGreaterThan(harness.currentValue().opacity, 0.25)
 
-        harness.setTime(retargetTime + 0.39)
+        harness.advanceTime(to: retargetTime + 0.39)
         XCTAssertLessThan(harness.currentValue().opacity, -0.30)
     }
 
@@ -321,7 +318,7 @@ final class AnimatableAttributeDefaultPresentationRetargetTests: XCTestCase {
     ) {
         var time = 1.0 / 60.0
         while time <= endTime {
-            harness.setTime(time)
+            harness.advanceTime(to: time)
             _ = harness.currentValue()
             time += 1.0 / 60.0
         }

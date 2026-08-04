@@ -418,9 +418,7 @@ final class PreferenceBridgeTests: XCTestCase {
     }
 
     func testPreferenceTransformQueuedTargetUpdateDoesNotFinalizeCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let host = GraphHost()
         var transformed: AGAttribute!

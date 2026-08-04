@@ -40,23 +40,21 @@ final class TransactionCustomKeyInheritanceTests: XCTestCase {
         XCTAssertEqual(observed, 7)
     }
 
-    func testScopedTransactionDoesNotInheritParentCompletionObserver() throws {
+    func testScopedTransactionDoesNotInheritParentCompletionListener() throws {
         var parent = Transaction(animation: .linear(duration: 1))
         parent.addAnimationCompletion {}
 
         let scoped = Transaction().scopedTransaction(inheritingFrom: parent)
 
         XCTAssertNotNil(scoped.animation)
-        XCTAssertNil(scoped.animationCompletionObserver)
         XCTAssertNil(scoped.animationListener)
         XCTAssertNil(scoped.animationLogicalListener)
     }
 
-    func testNestedWithTransactionCurrentDoesNotInheritParentCompletionObserver() {
+    func testNestedWithTransactionCurrentDoesNotInheritParentCompletionListener() {
         var parent = Transaction(animation: .linear(duration: 1))
         parent.addAnimationCompletion {}
         var observedAnimation: Animation?
-        var observedObserver: AnimationCompletionObserver?
         var observedListener: AnimationListener?
         var observedLogicalListener: AnimationListener?
 
@@ -64,19 +62,17 @@ final class TransactionCustomKeyInheritanceTests: XCTestCase {
             withTransaction(Transaction()) {
                 let current = Transaction.current
                 observedAnimation = current.animation
-                observedObserver = current.animationCompletionObserver
                 observedListener = current.animationListener
                 observedLogicalListener = current.animationLogicalListener
             }
         }
 
         XCTAssertNotNil(observedAnimation)
-        XCTAssertNil(observedObserver)
         XCTAssertNil(observedListener)
         XCTAssertNil(observedLogicalListener)
     }
 
-    func testScopedTransactionKeepsInnerCompletionObserver() throws {
+    func testScopedTransactionKeepsInnerCompletionListener() throws {
         var parent = Transaction(animation: .linear(duration: 1))
         parent.addAnimationCompletion {}
         var child = Transaction()
@@ -86,12 +82,12 @@ final class TransactionCustomKeyInheritanceTests: XCTestCase {
 
         XCTAssertNotNil(scoped.animation)
         XCTAssertTrue(
-            try XCTUnwrap(scoped.animationCompletionObserver) ===
-                XCTUnwrap(child.animationCompletionObserver)
+            try XCTUnwrap(scoped.animationLogicalListener) ===
+                XCTUnwrap(child.animationLogicalListener)
         )
         XCTAssertFalse(
-            try XCTUnwrap(scoped.animationCompletionObserver) ===
-                XCTUnwrap(parent.animationCompletionObserver)
+            try XCTUnwrap(scoped.animationLogicalListener) ===
+                XCTUnwrap(parent.animationLogicalListener)
         )
     }
 }

@@ -418,6 +418,49 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testSubgraphInvalidationDestroysParentNewestNodesBeforeNewestChild() {
+        // ASSERTIONS attributeGraphSubgraphDestructionOrderObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = ObservedDestroyOrderRecorder()
+
+        ref.withCurrent {
+            let parent = AGSubgraph()
+            AGSubgraph.withCurrent(parent) {
+                _ = graph.makeStatefulRule(
+                    ObservedDestroyOrderRule(label: "parent first", recorder: recorder)
+                )
+                _ = graph.makeStatefulRule(
+                    ObservedDestroyOrderRule(label: "parent second", recorder: recorder)
+                )
+            }
+            let olderChild = AGSubgraph(parent: parent)
+            AGSubgraph.withCurrent(olderChild) {
+                _ = graph.makeStatefulRule(
+                    ObservedDestroyOrderRule(label: "older child", recorder: recorder)
+                )
+            }
+            let newerChild = AGSubgraph(parent: parent)
+            AGSubgraph.withCurrent(newerChild) {
+                _ = graph.makeStatefulRule(
+                    ObservedDestroyOrderRule(label: "newer child", recorder: recorder)
+                )
+            }
+
+            parent.invalidate()
+
+            XCTAssertEqual(
+                recorder.labels,
+                [
+                    "parent second",
+                    "parent first",
+                    "newer child",
+                    "older child",
+                ]
+            )
+        }
+    }
+
     func testGraphCounterStartsAtZeroAndUnknownLanesReturnZero() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -949,6 +992,37 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testRuleContextUpdateDefersInvalidatedSideEffectsToNextGraphUpdate() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let owner = graph.makeRule { 0 }
+            let source = graph.makeInput(value: 0)
+            var events: [String] = []
+
+            graph.makeSideEffectRule {
+                events.append("sideEffect.\(source.value)")
+            }
+            events.removeAll()
+
+            // ASSERTIONS ruleContextNativeUpdateScopeObserved
+            AnyRuleContext(attribute: owner.identifier).update {
+                events.append("update.begin")
+                source.setValue(1)
+                events.append("update.end")
+                XCTAssertEqual(events, ["update.begin", "update.end"])
+            }
+
+            XCTAssertEqual(events, ["update.begin", "update.end"])
+            XCTAssertEqual(owner.value, 0)
+            XCTAssertEqual(
+                events,
+                ["update.begin", "update.end", "sideEffect.1"]
+            )
+        }
+    }
+
     func testNestedDifferentGraphEvaluationAdvancesEachGraphCounter() {
         let outerGraph = _AGGraph()
         let outerRef = _AGGraphContext(graph: outerGraph)
@@ -1432,6 +1506,10 @@ private final class ObservedDestroyRecorder {
     var destroyCount = 0
 }
 
+private final class ObservedDestroyOrderRecorder {
+    var labels: [String] = []
+}
+
 private struct ObservedStatefulRule: StatefulRule, ObservedAttribute, AsyncAttribute {
     typealias Value = Int
 
@@ -1443,6 +1521,21 @@ private struct ObservedStatefulRule: StatefulRule, ObservedAttribute, AsyncAttri
 
     mutating func destroy() {
         recorder.destroyCount += 1
+    }
+}
+
+private struct ObservedDestroyOrderRule: StatefulRule, ObservedAttribute {
+    typealias Value = Int
+
+    var label: String
+    var recorder: ObservedDestroyOrderRecorder
+
+    mutating func updateValue() {
+        value = 1
+    }
+
+    mutating func destroy() {
+        recorder.labels.append(label)
     }
 }
 

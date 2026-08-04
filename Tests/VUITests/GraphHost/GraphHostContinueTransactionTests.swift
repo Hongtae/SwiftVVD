@@ -355,9 +355,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
     }
 
     func testContinueTransactionInvalidatingFallbackDoesNotFinalizeCapturedCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let host = GraphHost()
         var input: Attribute<Int>!
@@ -390,13 +388,10 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             }
         }
 
-        let previousBox = Transaction.ThreadStorage.currentBox
-        Transaction.ThreadStorage.currentBox = Transaction.ThreadStorageBox(transaction: transaction)
-        do {
+        Transaction.withScopedThreadTransaction(transaction) {
             host.continueTransaction(invalidating: weakInput)
             XCTAssertFalse(host.hasPendingTransactions)
         }
-        Transaction.ThreadStorage.currentBox = previousBox
 
         XCTAssertEqual(Update.queuedActionReasons, [nil])
 
@@ -414,9 +409,7 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         XCTAssertTrue(events.isEmpty)
         XCTAssertFalse(host.hasPendingTransactions)
 
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
         XCTAssertEqual(events, ["completion"])
 
         withExtendedLifetime(transaction) {}

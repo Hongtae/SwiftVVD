@@ -47,6 +47,7 @@ final class ViewGraphRootValuesTests: XCTestCase {
 
 private final class TestRootValueUpdaterHost: ViewRendererHost, ViewGraphRootValueUpdater {
     var storage: ViewGraph!
+    let sceneResources = SceneResources()
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()

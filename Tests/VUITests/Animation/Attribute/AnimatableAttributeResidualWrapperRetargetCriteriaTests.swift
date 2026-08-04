@@ -175,7 +175,7 @@ final class AnimatableAttributeResidualWrapperRetargetCriteriaTests: XCTestCase 
         XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         let retargetStartValue = harness.currentValue().opacity
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
@@ -194,17 +194,17 @@ final class AnimatableAttributeResidualWrapperRetargetCriteriaTests: XCTestCase 
 
         let oldEnd = max(
             oldAnimation.box.duration,
-            oldAnimation.box.presentationDuration(for: 1.0)
+            oldAnimation.box.terminalSamplingHorizon(for: 1.0)
         )
         let replacementEnd = retargetTime + max(
             replacementAnimation.box.duration,
-            replacementAnimation.box.presentationDuration(for: target - retargetStartValue)
+            replacementAnimation.box.terminalSamplingHorizon(for: target - retargetStartValue)
         )
         let lastSampleTime = max(oldEnd, replacementEnd) + 2.0
 
         var sampleTime = retargetTime + frame
         while sampleTime <= lastSampleTime && recorder.events.count < expectedEvents.count {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             sampleTime += frame

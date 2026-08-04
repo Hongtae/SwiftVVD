@@ -7,12 +7,17 @@
 
 import Foundation
 
-// SceneResources — per-scene (per-WindowController) render resource cache.
+// SceneResources — per-renderer-host (per-WindowController) resource cache.
 // Owned by WindowController; passed down through WindowContext → GraphicsContext.
-// Aux/modal windows under the same WindowController share the same instance.
+// Presentation controllers own their corresponding host cache.
 final class SceneResources: AppLifetimeResource, @unchecked Sendable {
+    struct TypefaceKey: Hashable {
+        let font: Font
+        let dpi: UInt32
+    }
+
     var contentScaleFactor: CGFloat = 1.0
-    var cachedTypefaces: [Font: Typeface] = [:]
+    var cachedTypefaces: [TypefaceKey: Typeface] = [:]
     var cachedTextures: [String: AnyObject] = [:]
     
     override func purgeResources(reason: ResourcePurgeReason) {
@@ -21,10 +26,7 @@ final class SceneResources: AppLifetimeResource, @unchecked Sendable {
         }
 
         switch reason {
-        case .lowMemory:
-            cachedTextures.removeAll()
-            
-        case .appTermination:
+        case .lowMemory, .appTermination:
             cachedTypefaces.removeAll()
             cachedTextures.removeAll()
         }

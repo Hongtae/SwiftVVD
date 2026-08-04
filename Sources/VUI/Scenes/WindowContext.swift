@@ -211,7 +211,8 @@ class WindowContext: @unchecked Sendable {
             var frameTimestamp = timestamp(0)
 
             var contentSize: CGSize = .zero
-            var contentScaleFactor: CGFloat = 1
+            var nativeScaleFactor: CGFloat = 1
+            var effectiveScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
 
             var surfaceRevision: Int = 0
@@ -238,13 +239,24 @@ class WindowContext: @unchecked Sendable {
                     ($0.state, $0.configuration)
                 }
 
-                if contentSize != state.bounds.size {
-                    contentSize = state.bounds.size
+                if nativeScaleFactor != state.contentScaleFactor {
+                    nativeScaleFactor = state.contentScaleFactor
                     shouldDrawFrame = true
                 }
-                if contentScaleFactor != state.contentScaleFactor {
-                    contentScaleFactor = state.contentScaleFactor
-                    sceneResources.contentScaleFactor = contentScaleFactor
+                precondition(
+                    nativeScaleFactor.isFinite && nativeScaleFactor > 0,
+                    "The native scale factor must be positive and finite."
+                )
+                let resolvedScaleFactor =
+                    config.contentScaleFactorOverride
+                    ?? nativeScaleFactor
+                precondition(
+                    resolvedScaleFactor.isFinite && resolvedScaleFactor > 0,
+                    "The content scale factor must be positive and finite."
+                )
+                if effectiveScaleFactor != resolvedScaleFactor {
+                    effectiveScaleFactor = resolvedScaleFactor
+                    sceneResources.contentScaleFactor = effectiveScaleFactor
                     shouldDrawFrame = true
                 }
                 if surfaceRevision != state.surfaceRevision {
@@ -278,16 +290,41 @@ class WindowContext: @unchecked Sendable {
                 if let swapChain {
                     var renderPass = swapChain.currentRenderPassDescriptor()
                     let device = swapChain.commandQueue.device
-                    let backBuffer = renderPass.colorAttachments[0].renderTarget!
+                    let backBuffer =
+                        renderPass.colorAttachments[0].renderTarget!
 
                     let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
+                    let deviceResolution = CGSize(
+                        width: backBuffer.width,
+                        height: backBuffer.height
+                    )
+                    // The drawable is the native-pixel authority. The
+                    // override changes only the offscreen rendering density.
+                    let resolvedContentSize =
+                        deviceResolution / nativeScaleFactor
+                    if contentSize != resolvedContentSize {
+                        contentSize = resolvedContentSize
+                        shouldDrawFrame = true
+                    }
+                    let renderTargetResolution =
+                        resolvedContentSize * effectiveScaleFactor
+                    let renderWidth = max(
+                        1,
+                        Int(ceil(renderTargetResolution.width))
+                    )
+                    let renderHeight = max(
+                        1,
+                        Int(ceil(renderTargetResolution.height))
+                    )
 
-                    if let renderTargets, dim(renderTargets.backdrop) == dim(backBuffer) {
+                    if let renderTargets,
+                       dim(renderTargets.backdrop) ==
+                        (renderWidth, renderHeight, 1) {
                     } else {
                         renderTargets = GraphicsContext.RenderTargets(
                             device: device,
-                            width: backBuffer.width,
-                            height: backBuffer.height)
+                            width: renderWidth,
+                            height: renderHeight)
                     }
 
                     renderPass.colorAttachments[0].clearColor = .clear
@@ -330,10 +367,10 @@ class WindowContext: @unchecked Sendable {
                                         sceneResources: sceneResources,
                                         environment: EnvironmentValues(),
                                         viewport: CGRect(x: 0, y: 0,
-                                                         width: backBuffer.width,
-                                                         height: backBuffer.height),
+                                                         width: renderWidth,
+                                                         height: renderHeight),
                                         contentOffset: .zero,
-                                        contentScaleFactor: contentScaleFactor,
+                                        contentScaleFactor: effectiveScaleFactor,
                                         renderTargets: renderTargets,
                                         commandBuffer: commandBuffer)
 
@@ -467,7 +504,8 @@ class WindowContext: @unchecked Sendable {
                         if present {
                             if let context = graphicsContext {
                                 if let rp = context.beginRenderPass(descriptor: renderPass,
-                                                                    viewport: context.viewport) {
+                                                                    viewport: CGRect(origin: .zero,
+                                                                                     size: deviceResolution)) {
                                     context.encodeDrawTextureCommand(
                                         renderPass: rp,
                                         texture: context.backdrop,

@@ -38,11 +38,11 @@ final class AnimatableAttributeSpringCompletionCriteriaTests: XCTestCase {
         )
         XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
         let logicalDuration = animation.box.duration
-        let presentationDuration = animation.box.presentationDuration(
+        let terminalSamplingHorizon = animation.box.terminalSamplingHorizon(
             for: Double(1)
         )
         XCTAssertGreaterThan(
-            presentationDuration,
+            terminalSamplingHorizon,
             logicalDuration,
             "\(label) should have a separate final presentation boundary",
             file: file,
@@ -62,13 +62,13 @@ final class AnimatableAttributeSpringCompletionCriteriaTests: XCTestCase {
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(logicalDuration / 2)
+        harness.advanceTime(to: logicalDuration / 2)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        let splitSampleTime = (logicalDuration + presentationDuration) / 2
-        harness.setTime(splitSampleTime)
+        let splitSampleTime = (logicalDuration + terminalSamplingHorizon) / 2
+        harness.advanceTime(to: splitSampleTime)
         let logicalBoundaryValue = harness.currentValue().opacity
         harness.flushCompletionActions()
         XCTAssertGreaterThan(logicalBoundaryValue, 0, file: file, line: line)
@@ -77,9 +77,9 @@ final class AnimatableAttributeSpringCompletionCriteriaTests: XCTestCase {
 
         var removedBoundaryValue: Double?
         var sampleTime = splitSampleTime + animation.box.defaultDisplayFrameInterval
-        let finalSampleTime = splitSampleTime + presentationDuration + 1.0
+        let finalSampleTime = splitSampleTime + terminalSamplingHorizon + 1.0
         while sampleTime <= finalSampleTime {
-            harness.setTime(sampleTime)
+            harness.advanceTime(to: sampleTime)
             let value = harness.currentValue().opacity
             harness.flushCompletionActions()
             if recorder.events.contains("\(label) removed") {

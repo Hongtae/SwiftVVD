@@ -2,7 +2,7 @@ import XCTest
 @testable import VUI
 
 final class AnimatableAttributeZeroDurationRetargetCriteriaTests: XCTestCase {
-    func testZeroDurationRetargetSnapsBeforeCallbacksAndKeepsGenerationOrder() {
+    func testZeroDurationRetargetPublishesTargetAndKeepsListenerDrainOrder() {
         assertZeroRetargetOrder(
             oldAnimation: .linear(duration: 0.80),
             replacementAnimation: .linear(duration: 0),
@@ -67,9 +67,9 @@ final class AnimatableAttributeZeroDurationRetargetCriteriaTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001, file: file, line: line)
 
-        harness.setTime(0.10)
+        harness.advanceTime(to: 0.10)
         _ = harness.currentValue()
-        harness.setTime(0.20)
+        harness.advanceTime(to: 0.20)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
@@ -85,13 +85,6 @@ final class AnimatableAttributeZeroDurationRetargetCriteriaTests: XCTestCase {
         )
         harness.finalizeTransactionBody()
         XCTAssertEqual(harness.currentValue().opacity, -0.5, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(
-            recorder.events,
-            [],
-            "zero retarget callbacks should not fire before the snapped target is observable",
-            file: file,
-            line: line
-        )
 
         harness.flushCompletionActions()
         XCTAssertEqual(

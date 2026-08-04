@@ -208,9 +208,7 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
     }
 
     func testProviderHostGlobalTransactionDoesNotFinalizeQueuedCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let host = GraphHost()
         let provider = GlobalTransactionHostProvider(host: host)
@@ -225,7 +223,6 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
             id: Transaction.ID(value: 113),
             mutation: GlobalRecordingGraphMutation {
                 events.append("mutation")
-                Transaction.ThreadStorage.markMutation(for: Transaction.current)
             },
             hostProvider: provider
         )
@@ -235,9 +232,7 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
         XCTAssertEqual(events, ["mutation"])
         XCTAssertEqual(host.data.transactionSeed, 1)
 
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
         XCTAssertEqual(events, ["mutation", "completion"])
 
         withExtendedLifetime(transaction) {}
@@ -274,9 +269,7 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
     }
 
     func testNilHostGlobalTransactionFallbackDoesNotFinalizeCompletionListeners() {
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
 
         let provider = GlobalTransactionHostProvider(host: nil)
         var events: [String] = []
@@ -290,7 +283,6 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
             id: Transaction.ID(value: 111),
             mutation: GlobalRecordingGraphMutation {
                 events.append("mutation")
-                Transaction.ThreadStorage.markMutation(for: Transaction.current)
             },
             hostProvider: provider
         )
@@ -299,9 +291,7 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
 
         XCTAssertEqual(events, ["mutation"])
 
-        Transaction.dispatchPendingListeners(
-            finalizingStandalonePending: true
-        ).forEach { $0() }
+        Transaction.dispatchPendingListeners()
         XCTAssertEqual(events, ["mutation", "completion"])
 
         withExtendedLifetime(transaction) {}

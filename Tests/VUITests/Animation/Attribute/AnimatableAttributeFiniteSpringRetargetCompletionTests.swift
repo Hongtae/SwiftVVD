@@ -145,7 +145,7 @@ final class AnimatableAttributeFiniteSpringRetargetCompletionTests: XCTestCase {
 
         let replacementLogical = retargetTime + replacementAnimation.box.duration
         let oldLogical = oldAnimation.box.duration
-        let replacementFinal = retargetTime + replacementAnimation.box.presentationDuration(
+        let replacementFinal = retargetTime + replacementAnimation.box.terminalSamplingHorizon(
             for: target - retargetStartValue
         )
         XCTAssertLessThan(replacementLogical, oldLogical, label, file: file, line: line)

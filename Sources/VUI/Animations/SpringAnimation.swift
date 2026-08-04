@@ -7,6 +7,92 @@
 
 import Foundation
 
+struct SpringModel {
+    var naturalFrequency: Double
+    var dampingRatio: Double
+    var dampedFrequency: Double
+    var amplitude: Double
+    var velocityCoefficient: Double
+
+    init(
+        mass: Double,
+        stiffness: Double,
+        damping: Double,
+        initialVelocity: Double
+    ) {
+        let naturalFrequency = sqrt(stiffness / mass)
+        let dampingRatio = damping / (2 * sqrt(mass * stiffness))
+
+        self.naturalFrequency = naturalFrequency
+        self.dampingRatio = dampingRatio
+        self.amplitude = 1
+        if dampingRatio < 1 {
+            let dampedFrequency =
+                naturalFrequency * sqrt(1 - dampingRatio * dampingRatio)
+            self.dampedFrequency = dampedFrequency
+            self.velocityCoefficient =
+                (naturalFrequency * dampingRatio - initialVelocity) /
+                dampedFrequency
+        } else {
+            self.dampedFrequency = 0
+            self.velocityCoefficient = naturalFrequency - initialVelocity
+        }
+    }
+
+    func duration(epsilon: Double) -> TimeInterval {
+        guard dampingRatio != 0 else {
+            return .infinity
+        }
+        let threshold = epsilon > 0.000_001 ? epsilon : 0.000_001
+        if dampingRatio < 1 {
+            let envelope = abs(amplitude) + abs(velocityCoefficient)
+            let duration =
+                -log(threshold / envelope) /
+                (dampingRatio * naturalFrequency)
+            return Double.maximum(duration, 0)
+        }
+
+        var time: TimeInterval = 0
+        var minimumError = Double.infinity
+        var minimumErrorTime: TimeInterval = -1
+        for _ in 0..<1024 {
+            let error = abs(1 - sample(at: time))
+            guard error.isFinite else {
+                return 0
+            }
+            if !(minimumError < threshold) {
+                if error < minimumError {
+                    minimumError = error
+                    minimumErrorTime = time
+                }
+            } else if !(error < threshold) {
+                minimumError = .infinity
+            } else if time - minimumErrorTime > 1 {
+                return minimumErrorTime
+            }
+            time += 0.1
+        }
+        return 0
+    }
+
+    func sample(at time: TimeInterval) -> Double {
+        let residual: Double
+        if dampingRatio < 1 {
+            residual =
+                exp(-naturalFrequency * dampingRatio * time) *
+                (
+                    amplitude * cos(dampedFrequency * time) +
+                    velocityCoefficient * sin(dampedFrequency * time)
+                )
+        } else {
+            residual =
+                exp(-naturalFrequency * time) *
+                (amplitude + velocityCoefficient * time)
+        }
+        return 1 - residual
+    }
+}
+
 struct FluidSpringAnimation: InternalCustomAnimation {
     var response: TimeInterval
     var dampingFraction: Double
@@ -15,8 +101,12 @@ struct FluidSpringAnimation: InternalCustomAnimation {
     var function: Animation.Function {
         let stiffness = fluidSpringStiffness(response: response)
         let damping = 2 * dampingFraction * sqrt(stiffness)
-        let duration = Spring(mass: 1, stiffness: stiffness, damping: damping)
-            .settlingDuration(target: Double(1), initialVelocity: Double.zero, epsilon: 0.001)
+        let duration = SpringModel(
+            mass: 1,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: 0
+        ).duration(epsilon: 0.001)
         return .spring(duration, 1, stiffness, damping, 0)
     }
 
@@ -36,12 +126,12 @@ struct SpringAnimation: InternalCustomAnimation {
     var initialVelocity: _Velocity<Double>
 
     var function: Animation.Function {
-        let duration = Spring(mass: mass, stiffness: stiffness, damping: damping)
-            .settlingDuration(
-                target: Double(1),
-                initialVelocity: initialVelocity.valuePerSecond,
-                epsilon: 0.001
-            )
+        let duration = SpringModel(
+            mass: mass,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: initialVelocity.valuePerSecond
+        ).duration(epsilon: 0.001)
         return .spring(duration, mass, stiffness, damping, initialVelocity.valuePerSecond)
     }
 
@@ -60,30 +150,30 @@ struct SpringState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
     @usableFromInline
     typealias Value = SpringState<AnimatableValue>
 
-    var time: TimeInterval
-    var position: AnimatableValue
+    var offset: AnimatableValue
     var velocity: AnimatableValue
-    var acceleration: AnimatableValue
-    var responseBlendStartTime: TimeInterval
-    var responseBlendDelta: TimeInterval
-    var isInitialized: Bool
+    var force: AnimatableValue
+    var time: TimeInterval
+    var startTime: TimeInterval
+    var blendStart: TimeInterval
+    var blendInterval: TimeInterval
 
     init(
-        time: TimeInterval = 0,
-        position: AnimatableValue = .zero,
+        offset: AnimatableValue = .zero,
         velocity: AnimatableValue = .zero,
-        acceleration: AnimatableValue = .zero,
-        responseBlendStartTime: TimeInterval = 0,
-        responseBlendDelta: TimeInterval = 0,
-        isInitialized: Bool = false
+        force: AnimatableValue = .zero,
+        time: TimeInterval = 0,
+        startTime: TimeInterval = 0,
+        blendStart: TimeInterval = 0,
+        blendInterval: TimeInterval = 0
     ) {
-        self.time = time
-        self.position = position
+        self.offset = offset
         self.velocity = velocity
-        self.acceleration = acceleration
-        self.responseBlendStartTime = responseBlendStartTime
-        self.responseBlendDelta = responseBlendDelta
-        self.isInitialized = isInitialized
+        self.force = force
+        self.time = time
+        self.startTime = startTime
+        self.blendStart = blendStart
+        self.blendInterval = blendInterval
     }
 
     @usableFromInline
@@ -131,13 +221,13 @@ func blendedFluidSpringResponse<Value: VectorArithmetic>(
     time: TimeInterval,
     state: SpringState<Value>
 ) -> TimeInterval {
-    guard blendDuration > 0, state.responseBlendDelta != 0 else {
+    guard blendDuration > 0, state.blendInterval != 0 else {
         return response
     }
-    let rawProgress = (time - state.responseBlendStartTime) / blendDuration
+    let rawProgress = (time - state.blendStart) / blendDuration
     let progress = min(max(rawProgress, 0), 1)
     let smoothstep = progress * progress * (3 - 2 * progress)
-    return response + state.responseBlendDelta * (1 - smoothstep)
+    return response + state.blendInterval * (1 - smoothstep)
 }
 
 @usableFromInline
@@ -150,40 +240,37 @@ func integratedFluidSpringValue<Value: VectorArithmetic>(
 ) -> Value {
     let step = 1.0 / 300.0
     let halfStep = 1.0 / 600.0
-    let clampedTime = max(time, 0)
 
-    if !state.isInitialized {
-        state = SpringState(isInitialized: true)
-    } else if clampedTime - state.time > 1 {
-        state.time = max(0, clampedTime - (1.0 / 60.0))
+    if time - state.time > 1 {
+        state.time = time - (1.0 / 60.0)
     }
 
     let dampingCoefficient = -dampingFraction * 2 * sqrt(stiffness)
-    while state.time < clampedTime {
-        var midpointVelocity = state.acceleration
+    while state.time < time {
+        var midpointVelocity = state.force
         midpointVelocity.scale(by: halfStep)
         midpointVelocity += state.velocity
 
-        var positionStep = midpointVelocity
-        positionStep.scale(by: step)
-        state.position += positionStep
+        var offsetStep = midpointVelocity
+        offsetStep.scale(by: step)
+        state.offset += offsetStep
 
-        var springForce = target - state.position
+        var springForce = target - state.offset
         springForce.scale(by: stiffness)
 
         var dampingForce = midpointVelocity
         dampingForce.scale(by: dampingCoefficient)
 
-        state.acceleration = springForce + dampingForce
+        state.force = springForce + dampingForce
 
-        var velocityStep = state.acceleration
+        var velocityStep = state.force
         velocityStep.scale(by: halfStep)
         state.velocity = midpointVelocity + velocityStep
 
         state.time += step
     }
 
-    return state.position
+    return state.offset
 }
 
 @usableFromInline
@@ -192,46 +279,19 @@ func isFluidSpringSettled<Value: VectorArithmetic>(
     state: SpringState<Value>
 ) -> Bool {
     let velocitySquared = state.velocity.magnitudeSquared
-    let accelerationSquared = state.acceleration.magnitudeSquared
-    guard max(velocitySquared, accelerationSquared) <= 0.0036 else {
+    let forceSquared = state.force.magnitudeSquared
+    if max(velocitySquared, forceSquared) > 0.0036 {
         return false
     }
 
     var tolerance = target
     tolerance.scale(by: 0.01)
     var error = target
-    error -= state.position
-    return error.magnitudeSquared <= tolerance.magnitudeSquared
-}
-
-@usableFromInline
-func fluidSpringSettlingDuration<Value: VectorArithmetic>(
-    response: TimeInterval,
-    dampingFraction: Double,
-    target: Value
-) -> TimeInterval {
-    let duration = max(0, response)
-    guard duration > 0 else { return 0 }
-
-    let step = 1.0 / 300.0
-    let limit = max(duration * 12, 10)
-    let stiffness = fluidSpringStiffness(response: response)
-    var state = SpringState<Value>()
-    var time: TimeInterval = 0
-    while time <= limit {
-        _ = integratedFluidSpringValue(
-            target: target,
-            dampingFraction: dampingFraction,
-            stiffness: stiffness,
-            time: time,
-            state: &state
-        )
-        if isFluidSpringSettled(target: target, state: state) {
-            return max(duration, time)
-        }
-        time += step
+    error -= state.offset
+    if error.magnitudeSquared > tolerance.magnitudeSquared {
+        return false
     }
-    return limit
+    return true
 }
 
 public struct Spring: Hashable, Sendable {
@@ -240,8 +300,23 @@ public struct Spring: Hashable, Sendable {
     var _mass: Double
 
     public init(duration: TimeInterval = 0.5, bounce: Double = 0.0) {
-        let dampingRatio = Self.dampingRatio(bounce: bounce)
-        self.init(response: duration, dampingRatio: dampingRatio)
+        let dampingRatio: Double
+        if bounce <= -1 {
+            dampingRatio = .infinity
+        } else if bounce < 0 {
+            dampingRatio = 1 / (1 + bounce)
+        } else if bounce == 0 {
+            dampingRatio = 1
+        } else {
+            dampingRatio = 1 - min(bounce, 1)
+        }
+
+        let frequency = 2 * Double.pi
+        let angularSign = dampingRatio > 1 ? -frequency : frequency
+        angularFrequency =
+            angularSign * sqrt(abs(1 - dampingRatio * dampingRatio)) / duration
+        decayConstant = dampingRatio * frequency / duration
+        _mass = 1
     }
 
     public init(response: Double, dampingRatio: Double) {
@@ -355,12 +430,6 @@ public struct Spring: Hashable, Sendable {
         return naturalFrequency * sqrt(max(1 - dampingRatio * dampingRatio, 0))
     }
 
-    private static func dampingRatio(bounce: Double) -> Double {
-        if bounce >= 0 {
-            return max(1 - bounce, 0)
-        }
-        return 1 / max(1 + bounce, 0.001)
-    }
 }
 
 extension Spring {
@@ -475,22 +544,43 @@ extension Spring {
         initialVelocity: V = .zero,
         epsilon: Double
     ) -> TimeInterval where V: VectorArithmetic {
-        let threshold = epsilon * epsilon
-        var lastOutside: TimeInterval = 0
-        let step = max(response / 120, 1.0 / 120.0)
-        let limit = max(response * 12, 10)
+        if decayConstant == 0 {
+            return .infinity
+        }
+
+        if angularFrequency > 0 {
+            var velocityAdjustedTarget = target.scaled(by: decayConstant)
+            velocityAdjustedTarget -= initialVelocity
+            let envelope =
+                sqrt(target.magnitudeSquared) +
+                sqrt(velocityAdjustedTarget.magnitudeSquared)
+            let duration = -log(epsilon / envelope) / decayConstant
+            return Double.maximum(duration, 0)
+        }
+
+        var belowThresholdStart: TimeInterval = -1
+        var previousErrorMagnitude = Double.infinity
         var time: TimeInterval = 0
-        while time <= limit {
+        for _ in 0..<1024 {
             let value = self.value(target: target, initialVelocity: initialVelocity, time: time)
-            let velocity = self.velocity(target: target, initialVelocity: initialVelocity, time: time)
             var error = target
             error -= value
-            if error.magnitudeSquared > threshold || velocity.magnitudeSquared > threshold {
-                lastOutside = time
+            let errorMagnitude = sqrt(error.magnitudeSquared)
+            guard errorMagnitude.isFinite else {
+                return 0
             }
-            time += step
+
+            if !(previousErrorMagnitude < epsilon) {
+                belowThresholdStart = time
+                previousErrorMagnitude = errorMagnitude
+            } else if !(errorMagnitude < epsilon) {
+                previousErrorMagnitude = .infinity
+            } else if time - belowThresholdStart > 1 {
+                return belowThresholdStart
+            }
+            time += 0.1
         }
-        return lastOutside + step
+        return 0
     }
 
     public func value<V>(

@@ -104,76 +104,31 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
     }
 
     mutating func updateValue() {
-        let target = roundedFrame(
-            position: _position.value,
-            size: _size.value,
-            pixelLength: _pixelLength.value
+        let position = _position.changedValue(options: AGValueOptions(rawValue: 0))
+        let size = _size.changedValue(options: AGValueOptions(rawValue: 0))
+        let pixelLength = _pixelLength.changedValue(options: AGValueOptions(rawValue: 0))
+        var value = (
+            value: roundedFrame(
+                position: position.value,
+                size: size.value,
+                pixelLength: pixelLength.value
+            ),
+            changed: position.changed || size.changed || pixelLength.changed
         )
-        if animationsDisabled {
-            finishValue(target)
-            return
+        if !animationsDisabled {
+            helper.update(
+                value: &value,
+                defaultAnimation: nil,
+                environment: _environment
+            )
         }
-
-        var value = (value: target, changed: false)
-        let update = helper.beginStandaloneUpdate(
-            value: &value,
-            defaultAnimation: nil,
-            transactionForChangedTarget: { nil }
-        )
-
-        let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
-
-        if update.didReset || previousOutput == nil {
-            finishValue(update.target)
-            return
+        if value.changed || _AGGraph.currentStatefulOutput(ViewFrame.self) == nil {
+            _AGGraph.setStatefulOutput(value.value)
         }
-
-        if let targetAnimationBranch = update.targetAnimationBranch {
-            switch targetAnimationBranch {
-            case .animated(let animation, let transaction, let time):
-                // Frame rules do not maintain an outer completion-record list.
-                // Let the helper install state listeners through the direct
-                // state-owned path and only keep the sampled frame output here.
-                helper.retargetStandaloneAnimation(
-                    animation: animation,
-                    start: previousOutput ?? update.target,
-                    target: update.target,
-                    transaction: transaction,
-                    time: time,
-                    environment: _environment
-                )
-                value.value = update.target
-            case .noAnimation:
-                if helper.coalesceStandaloneTargetRefinementWithoutAnimation(
-                    target: update.target,
-                    at: update.time
-                ) {
-                    value.value = update.target
-                } else {
-                    // A plain model refinement does not replace an active
-                    // presentation. Commit its new endpoint, then keep sampling
-                    // the existing residual against that endpoint.
-                    helper.commitTarget(update.target)
-                    value.value = update.target
-                    if !helper.isAnimating {
-                        _AGGraph.setStatefulOutput(update.target)
-                        return
-                    }
-                }
-            }
-        }
-
-        guard helper.isAnimating else { return }
-        helper.update(
-            value: &value,
-            environment: _environment,
-            advancesDelayedSecondSample: true
-        )
-        _AGGraph.setStatefulOutput(value.value)
     }
 
     mutating func destroy() {
-        helper.finishAndClearAnimatorState()
+        helper.removeListeners()
     }
 
     private func roundedFrame(
@@ -188,11 +143,6 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
         return frame
     }
 
-    private mutating func finishValue(_ value: ViewFrame) {
-        helper.finishAndClearAnimatorState()
-        helper.commitTarget(value)
-        _AGGraph.setStatefulOutput(value)
-    }
 }
 
 private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, AsyncAttribute {
@@ -229,85 +179,40 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
     }
 
     mutating func updateValue() {
-        let target = roundedFrame(
-            position: _position.value,
-            size: _size.value,
-            pixelLength: _pixelLength.value
+        let position = _position.changedValue(options: AGValueOptions(rawValue: 0))
+        let size = _size.changedValue(options: AGValueOptions(rawValue: 0))
+        let pixelLength = _pixelLength.changedValue(options: AGValueOptions(rawValue: 0))
+        var value = (
+            value: roundedFrame(
+                position: position.value,
+                size: size.value,
+                pixelLength: pixelLength.value
+            ),
+            changed: position.changed || size.changed || pixelLength.changed
         )
-        if animationsDisabled {
-            finishValue(target)
-            return
-        }
-
-        var value = (value: target, changed: false)
-        let update = helper.beginStandaloneUpdate(
-            value: &value,
-            defaultAnimation: nil,
-            transactionForChangedTarget: { nil }
-        )
-
-        let previousOutput: ViewFrame? = _AGGraph.currentStatefulOutput()
-
-        if update.didReset || previousOutput == nil {
-            finishValue(update.target)
-            return
-        }
-
-        if let targetAnimationBranch = update.targetAnimationBranch {
-            switch targetAnimationBranch {
-            case .animated(let animation, let transaction, let time):
-                // The VFD lane follows the same standalone listener ownership as
-                // the plain frame lane; velocity sampling remains a local add-on
-                // after the helper has updated the frame value.
-                helper.retargetStandaloneAnimation(
-                    animation: animation,
-                    start: previousOutput ?? update.target,
-                    target: update.target,
-                    transaction: transaction,
-                    time: time,
-                    environment: _environment
-                )
-                value.value = update.target
-            case .noAnimation:
-                if helper.coalesceStandaloneTargetRefinementWithoutAnimation(
-                    target: update.target,
-                    at: update.time
-                ) {
-                    value.value = update.target
-                } else {
-                    // Keep the existing presentation residual when a later
-                    // plain layout pass refines only the model endpoint.
-                    helper.commitTarget(update.target)
-                    value.value = update.target
-                    if !helper.isAnimating {
-                        velocityFilter.reset()
-                        _AGGraph.setStatefulOutput(update.target)
-                        return
-                    }
+        if !animationsDisabled {
+            helper.update(
+                value: &value,
+                defaultAnimation: nil,
+                environment: _environment,
+                sampleCollector: { data, time in
+                    velocityFilter.addSample(data, time: time)
                 }
-            }
+            )
         }
-
-        guard helper.isAnimating else { return }
-        helper.update(
-            value: &value,
-            environment: _environment,
-            sampleCollector: { data, time in
-                velocityFilter.addSample(data, time: time)
-            },
-            advancesDelayedSecondSample: true
-        )
-        _AGGraph.setStatefulOutput(value.value)
 
         if helper.isAnimating {
             scheduleMaxVelocity()
         } else {
             velocityFilter.reset()
         }
+        if value.changed || _AGGraph.currentStatefulOutput(ViewFrame.self) == nil {
+            _AGGraph.setStatefulOutput(value.value)
+        }
     }
 
     mutating func destroy() {
-        helper.finishAndClearAnimatorState()
+        helper.removeListeners()
     }
 
     private func roundedFrame(
@@ -320,13 +225,6 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
             frame.round(toMultipleOf: pixelLength)
         }
         return frame
-    }
-
-    private mutating func finishValue(_ value: ViewFrame) {
-        helper.finishAndClearAnimatorState()
-        helper.commitTarget(value)
-        velocityFilter.reset()
-        _AGGraph.setStatefulOutput(value)
     }
 
     private mutating func scheduleMaxVelocity() {
@@ -534,7 +432,3 @@ extension CachedEnvironment {
         return result
     }
 }
-
-// Thin owner for live animation state. Callers keep policy-heavy completion
-// sorting outside this helper, while this type tracks source model changes,
-// phase resets, and the currently active AnimatorState.

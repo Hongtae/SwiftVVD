@@ -120,11 +120,7 @@ private struct ChildTransaction: Rule, AsyncAttribute {
             return transaction
         }
 
-        let animation = animation.value
-        if animation == nil {
-            enqueueNoRegisteredAnimationFallback(transaction.animationCompletionObserver)
-        }
-        transaction.animation = animation
+        transaction.animation = animation.value
         precondition(
             transactionSeed.value == currentSeed,
             "Transaction seed changed while evaluating an animation modifier."

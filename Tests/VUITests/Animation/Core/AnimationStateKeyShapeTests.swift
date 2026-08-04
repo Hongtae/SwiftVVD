@@ -27,8 +27,8 @@ final class AnimationStateKeyShapeTests: XCTestCase {
         XCTAssertNil(state[AnimationFinishingDefinitionKey<Double>.self])
 
         let repeatState = state[RepeatState<Double>.self]
-        XCTAssertEqual(repeatState.iteration, 0)
-        XCTAssertEqual(repeatState.startTime, 0)
+        XCTAssertEqual(repeatState.index, 0)
+        XCTAssertEqual(repeatState.timeOffset, 0)
 
         let velocityState = state[VelocityState<Double>.self]
         XCTAssertTrue(velocityState.sampler.isEmpty)
@@ -38,13 +38,16 @@ final class AnimationStateKeyShapeTests: XCTestCase {
         XCTAssertTrue(state.combinedState.entries.isEmpty)
 
         let springState = state[SpringState<Double>.self]
-        XCTAssertEqual(springState.time, 0)
-        XCTAssertEqual(springState.position, 0, accuracy: 0.000_001)
+        XCTAssertEqual(MemoryLayout<SpringState<Double>>.size, 56)
+        XCTAssertEqual(MemoryLayout<SpringState<Double>>.stride, 56)
+        XCTAssertEqual(MemoryLayout<SpringState<Double>>.alignment, 8)
+        XCTAssertEqual(springState.offset, 0, accuracy: 0.000_001)
         XCTAssertEqual(springState.velocity, 0, accuracy: 0.000_001)
-        XCTAssertEqual(springState.acceleration, 0, accuracy: 0.000_001)
-        XCTAssertEqual(springState.responseBlendStartTime, 0)
-        XCTAssertEqual(springState.responseBlendDelta, 0)
-        XCTAssertFalse(springState.isInitialized)
+        XCTAssertEqual(springState.force, 0, accuracy: 0.000_001)
+        XCTAssertEqual(springState.time, 0)
+        XCTAssertEqual(springState.startTime, 0)
+        XCTAssertEqual(springState.blendStart, 0)
+        XCTAssertEqual(springState.blendInterval, 0)
     }
 
     func testHiddenAnimationStateKeysRoundTripIndependently() {
@@ -55,10 +58,10 @@ final class AnimationStateKeyShapeTests: XCTestCase {
         velocityState.sampler.addSample(3.0, time: 1)
         state[VelocityState<Double>.self] = velocityState
 
-        state[RepeatState<Double>.self] = RepeatState(iteration: 2, startTime: 0.25)
+        state[RepeatState<Double>.self] = RepeatState(index: 2, timeOffset: 0.25)
 
         var childState = AnimationState<Double>()
-        childState[RepeatState<Double>.self] = RepeatState(iteration: 7, startTime: 0.5)
+        childState[RepeatState<Double>.self] = RepeatState(index: 7, timeOffset: 0.5)
         state.combinedState = CombinedAnimationState(
             entries: [
                 CombinedAnimationState.Entry(value: 4.0, state: childState),
@@ -66,13 +69,13 @@ final class AnimationStateKeyShapeTests: XCTestCase {
         )
 
         state[SpringState<Double>.self] = SpringState(
-            time: 0.2,
-            position: 0.3,
+            offset: 0.3,
             velocity: 0.4,
-            acceleration: 0.5,
-            responseBlendStartTime: 0.6,
-            responseBlendDelta: 0.7,
-            isInitialized: true
+            force: 0.5,
+            time: 0.2,
+            startTime: 0.55,
+            blendStart: 0.6,
+            blendInterval: 0.7
         )
 
         XCTAssertEqual(state[VelocityState<Double>.self].sampler.lastTime, 1)
@@ -81,22 +84,22 @@ final class AnimationStateKeyShapeTests: XCTestCase {
             2,
             accuracy: 0.000_001
         )
-        XCTAssertEqual(state[RepeatState<Double>.self].iteration, 2)
-        XCTAssertEqual(state[RepeatState<Double>.self].startTime, 0.25)
+        XCTAssertEqual(state[RepeatState<Double>.self].index, 2)
+        XCTAssertEqual(state[RepeatState<Double>.self].timeOffset, 0.25)
         XCTAssertEqual(state.combinedState.entries.map(\.value), [4.0])
         XCTAssertEqual(
-            state.combinedState.entries.first?.state?[RepeatState<Double>.self].iteration,
+            state.combinedState.entries.first?.state?[RepeatState<Double>.self].index,
             7
         )
 
         let springState = state[SpringState<Double>.self]
-        XCTAssertEqual(springState.time, 0.2)
-        XCTAssertEqual(springState.position, 0.3, accuracy: 0.000_001)
+        XCTAssertEqual(springState.offset, 0.3, accuracy: 0.000_001)
         XCTAssertEqual(springState.velocity, 0.4, accuracy: 0.000_001)
-        XCTAssertEqual(springState.acceleration, 0.5, accuracy: 0.000_001)
-        XCTAssertEqual(springState.responseBlendStartTime, 0.6)
-        XCTAssertEqual(springState.responseBlendDelta, 0.7)
-        XCTAssertTrue(springState.isInitialized)
+        XCTAssertEqual(springState.force, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(springState.time, 0.2)
+        XCTAssertEqual(springState.startTime, 0.55)
+        XCTAssertEqual(springState.blendStart, 0.6)
+        XCTAssertEqual(springState.blendInterval, 0.7)
     }
 
     func testAnimationContextHiddenStateAccessorsRoundTrip() {

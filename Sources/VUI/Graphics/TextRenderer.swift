@@ -434,7 +434,9 @@ extension GraphicsContext.ResolvedText {
     func makeLayout(in size: CGSize, layoutDirection: LayoutDirection) -> Text.Layout {
         let width = max(size.width, 0) * scaleFactor
         let height = max(size.height, 0) * scaleFactor
-        let maxWidth = width > CGFloat(Int.max) ? Int.max : Int(width)
+        let maxWidth = width > CGFloat(Int.max)
+            ? Int.max
+            : Int(ceil(width))
         let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
         let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
         let unbounded = makeGlyphs()

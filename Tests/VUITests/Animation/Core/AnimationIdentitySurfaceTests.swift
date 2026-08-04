@@ -138,6 +138,34 @@ final class AnimationIdentitySurfaceTests: XCTestCase {
             equal: true
         )
     }
+
+    // ASSERTIONS animationFactoryAliasIdentityObserved
+    func testFluidSpringFactoryAliasesHaveNoStoredFactoryIdentity() {
+        assertIdentity(
+            "spring duration vs smooth collision",
+            Animation.spring(duration: 0.5, bounce: 0.2),
+            Animation.smooth(duration: 0.5, extraBounce: 0.2),
+            equal: true
+        )
+        assertIdentity(
+            "spring duration vs snappy collision",
+            Animation.spring(duration: 0.45, bounce: 0.15),
+            Animation.snappy(duration: 0.45),
+            equal: true
+        )
+        assertIdentity(
+            "spring property vs smooth property collision",
+            Animation.spring,
+            Animation.smooth(),
+            equal: true
+        )
+        assertIdentity(
+            "nearby bounce values remain distinct",
+            Animation.spring(duration: 0.5, bounce: 0.2),
+            Animation.spring(duration: 0.5, bounce: 0.2000000001),
+            equal: false
+        )
+    }
 }
 
 private struct SourceIdentityAnimation: CustomAnimation {

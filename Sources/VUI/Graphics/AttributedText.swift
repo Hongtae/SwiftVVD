@@ -149,7 +149,7 @@ struct _ResolvedTextRunAttributes: Equatable {
 private func _resolvedAttributedRuns(
     _ value: AttributedString,
     defaultTypefaces: [Typeface],
-    context: GraphicsContext
+    context: any TextResolutionContext
 ) -> [GraphicsContext.ResolvedText.Run] {
     #if os(Windows)
     // The Windows Foundation dynamic library does not currently expose the
@@ -184,11 +184,12 @@ private func _resolvedAttributedRuns(
             if presentationIntent?.contains(.emphasized) == true {
                 font = font.italic()
             }
-            font = font
-                .resolved(in: context.environment)
-                .displayScale(context.sceneResources.contentScaleFactor)
+            font = font.resolved(in: context.environment)
             attributes.font = font
-            typefaces = ([font.typeface(forContext: context.sceneResources)] +
+            typefaces = ([font.typeface(
+                forContext: context.sceneResources,
+                contentScaleFactor: context.contentScaleFactor
+            )] +
                 font.fallbackTypefaces).compactMap { $0 }
         } else {
             typefaces = defaultTypefaces
@@ -211,15 +212,16 @@ final class AttributedStringTextStorage: AnyTextStorage {
 
     override func resolve(
         typefaces: [Typeface],
-        context: GraphicsContext
-    ) -> GraphicsContext.ResolvedText {
+        context: any TextResolutionContext
+    ) -> GraphicsContext.ResolvedText? {
         GraphicsContext.ResolvedText(
             runs: _resolvedAttributedRuns(
                 str,
                 defaultTypefaces: typefaces,
                 context: context
             ),
-            scaleFactor: context.contentScaleFactor
+            scaleFactor: context.contentScaleFactor,
+            displayScale: context.displayScale
         )
     }
 
@@ -244,7 +246,7 @@ final class AttributedStringTextStorage: AnyTextStorage {
 func _resolvedAttributedText(
     _ value: AttributedString,
     defaultTypefaces: [Typeface],
-    context: GraphicsContext
+    context: any TextResolutionContext
 ) -> GraphicsContext.ResolvedText {
     GraphicsContext.ResolvedText(
         runs: _resolvedAttributedRuns(
@@ -252,6 +254,7 @@ func _resolvedAttributedText(
             defaultTypefaces: defaultTypefaces,
             context: context
         ),
-        scaleFactor: context.contentScaleFactor
+        scaleFactor: context.contentScaleFactor,
+        displayScale: context.displayScale
     )
 }

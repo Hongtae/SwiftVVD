@@ -77,6 +77,7 @@ final class PresentationEnvironmentTests: XCTestCase {
                 itemList: graph.makeInput(value: PlatformItemList()),
                 isPresented: nil,
                 environment: environment,
+                phase: try XCTUnwrap(parent.viewGraph.phaseAttr),
                 transform: graph.makeInput(value: ViewTransform.identity),
                 size: graph.makeInput(value: ViewSize(CGSize(width: 100, height: 40)))
             )
@@ -101,6 +102,7 @@ final class PresentationEnvironmentTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS viewGraphHostEnvironmentWrapperOwnershipObserved
     @MainActor
     func testNestedPopupTracksParentPresentationEnvironment() throws {
         var initial = EnvironmentValues()
@@ -124,12 +126,25 @@ final class PresentationEnvironmentTests: XCTestCase {
 
         var updated = initial
         updated.presentationEnvironmentProbeValue = "nested-updated"
-        root.setPresentationEnvironment(updated)
+        var sourcePhase = Phase()
+        sourcePhase.resetSeed = 4
+        root.setPresentationEnvironment(
+            updated,
+            viewPhase: ViewGraphHost.Phase(base: sourcePhase)
+        )
         drainPresentationEnvironmentUpdates(in: root)
 
         XCTAssertEqual(
             child.environment.presentationEnvironmentProbeValue,
             "nested-updated"
+        )
+        XCTAssertEqual(
+            root.viewGraph.parentPhase?.rawValue,
+            sourcePhase.rawValue
+        )
+        XCTAssertEqual(
+            child.viewGraph.parentPhase?.rawValue,
+            sourcePhase.rawValue
         )
     }
 
@@ -173,7 +188,10 @@ final class PresentationEnvironmentTests: XCTestCase {
 
         var updated = initial
         updated.presentationEnvironmentProbeValue = "concurrent-updated"
-        root.setPresentationEnvironment(updated)
+        root.setPresentationEnvironment(
+            updated,
+            viewPhase: ViewGraphHost.Phase()
+        )
 
         releaseChildGraph.signal()
         XCTAssertEqual(childGraphExited.wait(timeout: .now() + 2), .success)

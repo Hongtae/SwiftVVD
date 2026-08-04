@@ -191,7 +191,7 @@ final class AnimationFinishingDefinitionTests: XCTestCase {
         XCTAssertNil(repeated.animate(value: Self.viewFrameTarget, time: 0.1, context: &context))
         XCTAssertEqual(recorder.observations, [true, false])
         XCTAssertNil(context.finishingDefinition)
-        XCTAssertEqual(context.state[RepeatState<ViewFrame.AnimatableData>.self].iteration, 2)
+        XCTAssertEqual(context.state[RepeatState<ViewFrame.AnimatableData>.self].index, 2)
     }
 
     private static var viewFrameTarget: ViewFrame.AnimatableData {

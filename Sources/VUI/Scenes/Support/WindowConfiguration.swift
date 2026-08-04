@@ -18,6 +18,7 @@ struct WindowConfiguration {
         rgba8: .init(r: 255, g: 255, b: 241, a: 255)
     )
     var drawDebugInfo: _DrawDebug.Info = []
+    var contentScaleFactorOverride: CGFloat? = nil
 
     // Partial values supplied by scene modifiers. nil means that the base
     // configuration remains in effect for that field.
@@ -28,6 +29,7 @@ struct WindowConfiguration {
         var drawEveryFrames: Bool? = nil
         var backgroundColor: BackendColor? = nil
         var drawDebugInfo: _DrawDebug.Info? = nil
+        var contentScaleFactor: CGFloat? = nil
     }
 
     func applying(_ override: Override) -> Self {
@@ -49,6 +51,9 @@ struct WindowConfiguration {
         }
         if let value = override.drawDebugInfo {
             result.drawDebugInfo = value
+        }
+        if let value = override.contentScaleFactor {
+            result.contentScaleFactorOverride = value
         }
         return result
     }
@@ -86,6 +91,9 @@ extension WindowConfiguration.Override {
                 } else {
                     value.drawDebugInfo = nextValue
                 }
+            }
+            if let nextValue = next.contentScaleFactor {
+                value.contentScaleFactor = nextValue
             }
         }
     }

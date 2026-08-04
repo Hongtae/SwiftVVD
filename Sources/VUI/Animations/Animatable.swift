@@ -229,9 +229,9 @@ public struct AnimatablePair<First, Second>: VectorArithmetic where First: Vecto
         self.second = _secondType.zero
     }
 
-    @inlinable subscript() -> (First, Second) {
-      get { return (first, second) }
-      set { (first, second) = newValue }
+    @inlinable package subscript() -> (First, Second) {
+        get { return (first, second) }
+        set { (first, second) = newValue }
     }
 
     public static var zero: AnimatablePair<First, Second> {

@@ -191,6 +191,21 @@ final class KeyframeTimelineTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS keyframeTimelineVelocityInitialValueSeedObserved
+    func testVelocitySeedsUntrackedComponentsFromInitialValue() {
+        let timeline = KeyframeTimeline(
+            initialValue: KeyframeRootValue(x: 10, y: 20)
+        ) {
+            KeyframeTrack(\KeyframeRootValue.x) {
+                LinearKeyframe(100.0, duration: 1)
+            }
+        }
+
+        let velocity = timeline.velocity(time: 0.25)
+        XCTAssertEqual(velocity.x, 90, accuracy: 0.000_001)
+        XCTAssertEqual(velocity.y, 20, accuracy: 0.000_001)
+    }
+
     private func assertSamples(
         _ timeline: KeyframeTimeline<Double>,
         times: [Double],

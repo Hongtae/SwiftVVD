@@ -131,10 +131,13 @@ final class TransactionStateEqualityTests: XCTestCase {
     }
 
     func testAGBackedSameValueWriteUsesNoMutationCompletionTiming() {
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0.4)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0.4, accuracy: 0.000001)
+        let host = GraphHost()
+        var input: Attribute<_OpacityEffect>!
+        host.data.withCurrent {
+            input = host.data.graph.makeInput(
+                value: _OpacityEffect(opacity: 0.4)
+            )
+        }
 
         var events: [String] = []
         var transaction = Transaction(animation: .linear(duration: 0.20))
@@ -144,7 +147,14 @@ final class TransactionStateEqualityTests: XCTestCase {
 
         withTransaction(transaction) {
             events.append("same body")
-            harness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 0.4))
+            host.data.withCurrent {
+                XCTAssertFalse(
+                    input.setValue(
+                        _OpacityEffect(opacity: 0.4),
+                        transaction: Transaction.current
+                    )
+                )
+            }
         }
         events.append("same returned")
 
@@ -160,10 +170,13 @@ final class TransactionStateEqualityTests: XCTestCase {
     }
 
     func testAGBackedSameValueWriteWithAnimationCompletesBeforeReturn() {
-        let harness = AnimatableAttributeHarness(
-            initialValue: _OpacityEffect(opacity: 0.4)
-        )
-        XCTAssertEqual(harness.currentValue().opacity, 0.4, accuracy: 0.000001)
+        let host = GraphHost()
+        var input: Attribute<_OpacityEffect>!
+        host.data.withCurrent {
+            input = host.data.graph.makeInput(
+                value: _OpacityEffect(opacity: 0.4)
+            )
+        }
 
         var events: [String] = []
         withAnimation(
@@ -171,7 +184,14 @@ final class TransactionStateEqualityTests: XCTestCase {
             completionCriteria: .removed
         ) {
             events.append("same animation body")
-            harness.setSourceUsingCurrentTransaction(_OpacityEffect(opacity: 0.4))
+            host.data.withCurrent {
+                XCTAssertFalse(
+                    input.setValue(
+                        _OpacityEffect(opacity: 0.4),
+                        transaction: Transaction.current
+                    )
+                )
+            }
         } completion: {
             events.append("same animation completion")
         }
@@ -187,7 +207,7 @@ final class TransactionStateEqualityTests: XCTestCase {
         )
     }
 
-    func testAGBackedSemanticEqualDifferentStorageWriteUsesMutationFallbackTiming() {
+    func testAGBackedSemanticEqualDifferentStorageWriteRegistersAnimatorListener() {
         let harness = GenericAnimatableAttributeHarness<SemanticAnimatablePayload>(
             initialValue: SemanticAnimatablePayload(value: 1, ignored: 10)
         )
@@ -209,7 +229,8 @@ final class TransactionStateEqualityTests: XCTestCase {
         }
         events.append("semantic ag returned")
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertTrue(harness.valueNeedsEvaluation())
+        _ = harness.currentValue()
         XCTAssertEqual(
             events,
             [
@@ -218,7 +239,8 @@ final class TransactionStateEqualityTests: XCTestCase {
             ]
         )
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        harness.advanceTime(to: 0.25)
+        _ = harness.currentValue()
         XCTAssertEqual(
             events,
             [
@@ -229,46 +251,23 @@ final class TransactionStateEqualityTests: XCTestCase {
         )
     }
 
-    func testAGInputArrayEqualContentsWriteUsesStorageComparisonFallbackTiming() {
+    func testAGInputArrayEqualContentsWriteUsesStorageComparison() {
         let host = GraphHost()
         var input: Attribute<[Int]>!
         host.data.withCurrent {
             input = host.data.graph.makeInput(value: [1, 2, 3])
         }
 
-        var events: [String] = []
-        var transaction = Transaction(animation: .linear(duration: 0.20))
-        transaction.addAnimationCompletion(criteria: .removed) {
-            events.append("array completion")
+        let nextValue = [1, 2, 3].map { $0 }
+        host.data.withCurrent {
+            XCTAssertTrue(
+                input.setValue(
+                    nextValue,
+                    transaction: Transaction(animation: .linear(duration: 0.20))
+                )
+            )
+            XCTAssertEqual(input.value, [1, 2, 3])
         }
-
-        withTransaction(transaction) {
-            events.append("array body")
-            let nextValue = [1, 2, 3].map { $0 }
-            host.data.withCurrent {
-                input.setValue(nextValue, transaction: Transaction.current)
-            }
-        }
-        events.append("array returned")
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
-        XCTAssertEqual(
-            events,
-            [
-                "array body",
-                "array returned",
-            ]
-        )
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
-        XCTAssertEqual(
-            events,
-            [
-                "array body",
-                "array returned",
-                "array completion",
-            ]
-        )
     }
 
     func testStoredLocationRawEqualWriteUsesNoMutationCompletionTiming() {
@@ -302,47 +301,34 @@ final class TransactionStateEqualityTests: XCTestCase {
         )
     }
 
-    func testStoredLocationSemanticEqualDifferentStorageUsesMutationFallbackTiming() {
+    func testStoredLocationSemanticEqualDifferentStorageCommitsMutation() {
         let location = TestStoredLocation<SemanticEquatablePayload>(
             initialValue: SemanticEquatablePayload(value: 1, ignored: 10)
         )
-
-        var events: [String] = []
-        var transaction = Transaction(animation: .linear(duration: 0.20))
-        transaction.addAnimationCompletion(criteria: .removed) {
-            events.append("semantic completion")
+        var committed: [SemanticEquatablePayload] = []
+        var committedWithAnimation = false
+        location.setCommitValueHandler { value, transaction in
+            committed.append(value)
+            committedWithAnimation = transaction.animation != nil
         }
 
+        let transaction = Transaction(animation: .linear(duration: 0.20))
+
         withTransaction(transaction) {
-            events.append("semantic body")
             location.setValue(
                 SemanticEquatablePayload(value: 1, ignored: 11),
                 transaction: Transaction.current
             )
         }
-        events.append("semantic returned")
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         XCTAssertEqual(
-            events,
-            [
-                "semantic body",
-                "semantic returned",
-            ]
+            committed,
+            [SemanticEquatablePayload(value: 1, ignored: 11)]
         )
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
-        XCTAssertEqual(
-            events,
-            [
-                "semantic body",
-                "semantic returned",
-                "semantic completion",
-            ]
-        )
+        XCTAssertTrue(committedWithAnimation)
     }
 
-    func testAGBackedChangedWriteUsesWriteNoTokenFallbackTiming() {
+    func testAGBackedChangedWriteRegistersAnimatorListener() {
         let harness = AnimatableAttributeHarness(
             initialValue: _OpacityEffect(opacity: 0.4)
         )
@@ -360,7 +346,8 @@ final class TransactionStateEqualityTests: XCTestCase {
         }
         events.append("changed returned")
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertTrue(harness.valueNeedsEvaluation())
+        _ = harness.currentValue()
         XCTAssertEqual(
             events,
             [
@@ -369,7 +356,8 @@ final class TransactionStateEqualityTests: XCTestCase {
             ]
         )
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        harness.advanceTime(to: 0.25)
+        _ = harness.currentValue()
         XCTAssertEqual(
             events,
             [

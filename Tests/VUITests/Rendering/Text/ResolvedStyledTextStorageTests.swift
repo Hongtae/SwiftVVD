@@ -214,6 +214,226 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertEqual(styled.metricsCacheEntryCount, 1)
     }
 
+    // ASSERTIONS textFractionalNaturalWidthDoesNotTruncateObserved
+    func testFractionalNaturalWidthUsesPixelCeilingAndDoesNotSelfTruncate() {
+        for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+            let face = FractionalWidthTestTypeface(
+                advance: 7.3 * scale
+            )
+            let resolved = GraphicsContext.ResolvedText(
+                runs: [.text([face], "AAAA")],
+                scaleFactor: scale
+            )
+            let styled = ResolvedStyledText(resolvedText: resolved)
+            let naturalSize = styled.sizeThatFits(.unspecified)
+            let expectedWidth = ceil(29.2 * scale) / scale
+
+            XCTAssertEqual(
+                naturalSize.width,
+                expectedWidth,
+                accuracy: 0.000_001,
+                "scale \(scale)"
+            )
+            XCTAssertFalse(
+                resolved.makeLayout(
+                    in: naturalSize,
+                    layoutDirection: .leftToRight
+                ).isTruncated,
+                "Natural-width text self-truncated at scale \(scale)"
+            )
+            XCTAssertTrue(
+                resolved.makeLayout(
+                    in: CGSize(
+                        width: naturalSize.width - 1 / scale,
+                        height: naturalSize.height
+                    ),
+                    layoutDirection: .leftToRight
+                ).isTruncated,
+                "One-pixel-narrower text did not truncate at scale \(scale)"
+            )
+        }
+    }
+
+    // ASSERTIONS textEnvironmentDisplayScaleControlsPixelAlignmentObserved textEnvironmentDisplayScaleLeavesHostGlyphRasterUnchangedObserved
+    @MainActor
+    func testTextResolutionSeparatesDisplayScaleFromContentScaleTypeface() throws {
+        let previousAppContext = appContext
+        appContext = TextResolutionTestAppContext()
+        defer { appContext = previousAppContext }
+
+        let provider = DPIRecordingTypefaceProvider()
+        let font = VUI.Font(provider: AnyFontBox(provider))
+        let sceneResources = SceneResources()
+        sceneResources.contentScaleFactor = 2
+
+        for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+            var environment = EnvironmentValues()
+            environment.displayScale = scale
+            environment._contentScaleFactor = 2
+            let context = GraphTextResolutionContext(
+                environment: environment,
+                sceneResources: sceneResources
+            )
+            let resolved = try XCTUnwrap(
+                Text(verbatim: "AAAA")
+                    .font(font)
+                    ._resolve(context: context, referenceDate: Date())
+            )
+            let naturalSize = resolved.measure()
+
+            XCTAssertEqual(resolved.scaleFactor, 2)
+            XCTAssertEqual(resolved.displayScale, scale)
+            XCTAssertEqual(
+                naturalSize.width,
+                ceil(29.2 * scale) / scale,
+                accuracy: 0.000_001,
+                "scale \(scale)"
+            )
+        }
+
+        XCTAssertEqual(provider.requestedDPIs, [144])
+        XCTAssertEqual(sceneResources.cachedTypefaces.count, 1)
+    }
+
+    // ASSERTIONS fontProviderOnlyStorageObserved
+    @MainActor
+    func testTypefaceCacheKeyCanonicalizesContentScaleToBackendDPI() throws {
+        let previousAppContext = appContext
+        appContext = TextResolutionTestAppContext()
+        defer { appContext = previousAppContext }
+
+        let provider = DPIRecordingTypefaceProvider()
+        let font = VUI.Font(provider: AnyFontBox(provider))
+        let sceneResources = SceneResources()
+        let scales = [CGFloat(1.49999), CGFloat(1.5)]
+
+        XCTAssertEqual(
+            MemoryLayout<VUI.Font>.size,
+            MemoryLayout<AnyFontBox>.size
+        )
+        for scale in scales {
+            XCTAssertNotNil(
+                font.typeface(
+                    forContext: sceneResources,
+                    contentScaleFactor: scale
+                )
+            )
+        }
+        XCTAssertNotNil(font.typeface(forContext: sceneResources, dpi: 108))
+
+        XCTAssertEqual(provider.requestedDPIs, [108])
+        XCTAssertEqual(sceneResources.cachedTypefaces.count, 1)
+        XCTAssertEqual(
+            Set(sceneResources.cachedTypefaces.keys.map(\.font)),
+            [font]
+        )
+        XCTAssertEqual(
+            Set(sceneResources.cachedTypefaces.keys.map(\.dpi)),
+            [108]
+        )
+
+        sceneResources.purgeResources(reason: .lowMemory)
+        XCTAssertTrue(sceneResources.cachedTypefaces.isEmpty)
+        XCTAssertNotNil(font.typeface(forContext: sceneResources, dpi: 108))
+        XCTAssertEqual(provider.requestedDPIs, [108, 108])
+    }
+
+    // ASSERTIONS textDisplayScaleLayoutMetricsStableObserved
+    @MainActor
+    func testSystemFontKeepsLogicalMetricsAcrossDisplayScales() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        let testAppContext = ResolvedTextScaleTestAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        appContext = testAppContext
+        defer { appContext = previousAppContext }
+
+        let renderingModes: [(String, VUI.Font.RenderingMode)] = [
+            ("bitmap", .bitmap()),
+            ("vector", .vector()),
+        ]
+        for (modeName, renderingMode) in renderingModes {
+            let provider = SystemFontProvider(
+                size: 24,
+                weight: .semibold,
+                design: .default,
+                renderingMode: renderingMode
+            )
+            var referenceLineSize: CGSize?
+            for scale in [CGFloat(1), CGFloat(2), CGFloat(3)] {
+                let dpi = UInt32(CGFloat(defaultDPI) * scale)
+                let typeface = try XCTUnwrap(
+                    provider.makeTypeface(
+                        testAppContext,
+                        dpi: dpi
+                    )
+                )
+                let expectedEmbolden =
+                    SystemFontProvider.embolden(for: .semibold) * scale
+                if let textureTypeface = typeface as? TextureTypeface {
+                    XCTAssertEqual(
+                        textureTypeface.textureFont.boldStrength,
+                        expectedEmbolden,
+                        accuracy: 0.000_001
+                    )
+                } else if let vectorTypeface = typeface as? VectorTypeface {
+                    XCTAssertEqual(
+                        vectorTypeface.embolden,
+                        expectedEmbolden,
+                        accuracy: 0.000_001
+                    )
+                } else {
+                    XCTFail("Unexpected \(modeName) typeface")
+                }
+                let resolved = GraphicsContext.ResolvedText(
+                    runs: [
+                        .text([typeface], "TestApp1 Labs"),
+                    ],
+                    scaleFactor: scale
+                )
+                let styled = ResolvedStyledText(resolvedText: resolved)
+                let line = try XCTUnwrap(resolved.makeGlyphs().first)
+                let logicalLineSize = CGSize(
+                    width: line.width / scale,
+                    height: line.height / scale
+                )
+                if let referenceLineSize {
+                    XCTAssertEqual(
+                        logicalLineSize.width,
+                        referenceLineSize.width,
+                        accuracy: 0.000_001,
+                        "\(modeName) scale \(scale)"
+                    )
+                    XCTAssertEqual(
+                        logicalLineSize.height,
+                        referenceLineSize.height,
+                        accuracy: 0.000_001,
+                        "\(modeName) scale \(scale)"
+                    )
+                } else {
+                    referenceLineSize = logicalLineSize
+                }
+
+                let naturalSize = styled.sizeThatFits(.unspecified)
+                XCTAssertEqual(
+                    naturalSize.width,
+                    ceil(logicalLineSize.width * scale) / scale,
+                    accuracy: 0.000_001,
+                    "\(modeName) scale \(scale)"
+                )
+                XCTAssertEqual(
+                    naturalSize.height,
+                    logicalLineSize.height,
+                    accuracy: 0.000_001,
+                    "\(modeName) scale \(scale)"
+                )
+            }
+        }
+    }
+
     func testResolvedStyledTextPreservesZeroWidthProposalSemantics() {
         let face = ResolvedMetricsCacheTestTypeface()
         let resolved = GraphicsContext.ResolvedText(
@@ -590,5 +810,102 @@ private final class ResolvedMetricsCacheTestTypeface: Typeface {
     }
     func hashIdentity(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(self))
+    }
+}
+
+private final class FractionalWidthTestTypeface: Typeface {
+    let advance: CGFloat
+
+    init(advance: CGFloat) {
+        self.advance = advance
+    }
+
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
+        .texture(TextureFont.GlyphData(
+            texture: nil,
+            offset: CGPoint(x: 0, y: 8),
+            advance: CGSize(width: advance, height: 10),
+            frame: CGRect(x: 0, y: 0, width: advance, height: 10),
+            ascender: 8,
+            descender: -2
+        ))
+    }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        .zero
+    }
+
+    func hasGlyph(for: UnicodeScalar) -> Bool { true }
+    var lineHeight: CGFloat { 10 }
+    var ascender: CGFloat { 8 }
+    var descender: CGFloat { -2 }
+    var identifier: String { "fractional-width-\(advance)" }
+    func isEqual(to other: any Typeface) -> Bool {
+        guard let other = other as? FractionalWidthTestTypeface else {
+            return false
+        }
+        return advance == other.advance
+    }
+    func hashIdentity(into hasher: inout Hasher) {
+        hasher.combine(advance)
+    }
+}
+
+private final class DPIRecordingTypefaceProvider: TypefaceProvider {
+    var requestedDPIs: [UInt32] = []
+
+    func isEqual(to other: any TypefaceProvider) -> Bool {
+        self === (other as AnyObject)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
+
+    func makeTypeface(
+        _ context: AppContext,
+        dpi: UInt32
+    ) -> (any Typeface)? {
+        requestedDPIs.append(dpi)
+        let contentScaleFactor = CGFloat(dpi) / CGFloat(defaultDPI)
+        return FractionalWidthTestTypeface(
+            advance: 7.3 * contentScaleFactor
+        )
+    }
+}
+
+private final class TextResolutionTestAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext? = nil
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var appWindowsController: AppWindowsController? { nil }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? { nil }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+    }
+
+    func checkWindowActivities() {
+    }
+}
+
+private final class ResolvedTextScaleTestAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext?
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var appWindowsController: AppWindowsController? { nil }
+    private var resources: [URL: any DataProtocol] = [:]
+
+    init(graphicsDeviceContext: GraphicsDeviceContext) {
+        self.graphicsDeviceContext = graphicsDeviceContext
+    }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? {
+        resources[url]
+    }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+        resources[url] = data
+    }
+
+    func checkWindowActivities() {
     }
 }

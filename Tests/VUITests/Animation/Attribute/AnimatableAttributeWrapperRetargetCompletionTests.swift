@@ -73,7 +73,7 @@ final class AnimatableAttributeWrapperRetargetCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         let retargetStartValue = harness.currentValue().opacity
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
@@ -92,17 +92,17 @@ final class AnimatableAttributeWrapperRetargetCompletionTests: XCTestCase {
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
         let replacementLogical = retargetTime + replacementAnimation.box.duration
-        let replacementFinal = retargetTime + replacementAnimation.box.presentationDuration(
+        let replacementFinal = retargetTime + replacementAnimation.box.terminalSamplingHorizon(
             for: target - retargetStartValue
         )
         XCTAssertLessThan(replacementLogical, replacementFinal, label, file: file, line: line)
 
-        harness.setTime(replacementLogical + frame)
+        harness.advanceTime(to: replacementLogical + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, ["replacement logical"], label, file: file, line: line)
 
-        harness.setTime(replacementFinal + frame)
+        harness.advanceTime(to: replacementFinal + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -145,12 +145,12 @@ final class AnimatableAttributeWrapperRetargetCompletionTests: XCTestCase {
             line: line
         )
 
-        harness.setTime(replacementBoundary - frame)
+        harness.advanceTime(to: replacementBoundary - frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementBoundary + frame)
+        harness.advanceTime(to: replacementBoundary + frame)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(Set(recorder.events), ["old logical", "replacement logical"], label, file: file, line: line)
@@ -181,7 +181,7 @@ final class AnimatableAttributeWrapperRetargetCompletionTests: XCTestCase {
         harness.finalizeTransactionBody()
         XCTAssertEqual(recorder.events, [], file: file, line: line)
 
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(recorder.events, [], file: file, line: line)

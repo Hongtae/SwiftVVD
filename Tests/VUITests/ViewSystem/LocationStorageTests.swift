@@ -105,8 +105,7 @@ final class LocationStorageTests: XCTestCase {
         var stored = 1
         let location = LocationBox(location: FunctionalLocation<Int>(
             get: { stored },
-            set: { value, _ in stored = value },
-            marksMutation: false
+            set: { value, _ in stored = value }
         ))
 
         var update = location.update()
@@ -147,8 +146,7 @@ final class LocationStorageTests: XCTestCase {
         var stored = 1
         let plain = LocationBox(location: FunctionalLocation<Int>(
             get: { stored },
-            set: { value, _ in stored = value },
-            marksMutation: false
+            set: { value, _ in stored = value }
         ))
         let tracked = LocationBox(location: ObservationAccessLocation<Int>(
             get: { stored },
@@ -272,7 +270,7 @@ final class LocationStorageTests: XCTestCase {
         XCTAssertEqual(updates, [2, 4])
     }
 
-    func testStoredLocationWriteScopesCurrentTransactionAroundCommit() {
+    func testStoredLocationWriteResolvesCommitTransactionWithoutReplacingThreadTransaction() {
         var commits: [LocationCommitSnapshot] = []
         let location = TestStoredLocation<Int>(
             initialValue: 1,
@@ -306,8 +304,8 @@ final class LocationStorageTests: XCTestCase {
                 marker: 66,
                 tracksVelocity: true,
                 ambientMarker: 7,
-                currentMarker: 66,
-                currentTracksVelocity: true,
+                currentMarker: 0,
+                currentTracksVelocity: false,
                 currentAmbientMarker: 7
             )
         ])

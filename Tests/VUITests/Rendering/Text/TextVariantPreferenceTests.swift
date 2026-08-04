@@ -572,9 +572,16 @@ final class TextVariantPreferenceTests: XCTestCase {
     }
 
     func testStaticTextResourceRuleDoesNotDependOnFrameTime() throws {
-        let graph = _AGGraph()
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
 
-        try _AGGraph.withCurrent(graph) {
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
             let text = graph.makeInput(value: Text("static"))
             let inputs = makeViewInputs(graph: graph)
             let outputs = Text._makeView(
@@ -941,8 +948,16 @@ final class TextVariantPreferenceTests: XCTestCase {
     }
 
     func testTextMakeViewUsesDedicatedSizeFittingLayoutEngineOnlyWhenFlagIsEnabled() {
-        let graph = _AGGraph()
-        _AGGraph.withCurrent(graph) {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
             let view = graph.makeInput(value: Text("variant"))
 
             var ordinaryInputs = makeViewInputs(graph: graph)

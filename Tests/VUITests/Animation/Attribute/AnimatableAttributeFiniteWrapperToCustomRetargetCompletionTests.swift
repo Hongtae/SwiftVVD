@@ -121,16 +121,16 @@ final class AnimatableAttributeFiniteWrapperToCustomRetargetCompletionTests: XCT
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0, label, file: file, line: line)
 
         if let replacementLogicalAt {
-            harness.setTime(replacementActivationTime + replacementLogicalAt + frameInterval)
+            harness.advanceTime(to: replacementActivationTime + replacementLogicalAt + frameInterval)
             _ = harness.currentValue()
             harness.flushCompletionActions()
         }
-        harness.setTime(oldLogicalTime + frameInterval)
+        harness.advanceTime(to: oldLogicalTime + frameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, expectedAtOldLogical, label, file: file, line: line)
 
-        harness.setTime(replacementActivationTime + replacementNilAt + frameInterval)
+        harness.advanceTime(to: replacementActivationTime + replacementNilAt + frameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, expectedFinalEvents, label, file: file, line: line)
@@ -159,12 +159,12 @@ final class AnimatableAttributeFiniteWrapperToCustomRetargetCompletionTests: XCT
 
         XCTAssertGreaterThan(sampleRecorder.shouldMergeCount, 0, label, file: file, line: line)
 
-        harness.setTime(oldLogicalTime + frameInterval)
+        harness.advanceTime(to: oldLogicalTime + frameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(completionRecorder.events, [], label, file: file, line: line)
 
-        harness.setTime(replacementActivationTime + replacementNilAt + frameInterval)
+        harness.advanceTime(to: replacementActivationTime + replacementNilAt + frameInterval)
         _ = harness.currentValue()
         harness.flushCompletionActions()
         XCTAssertEqual(
@@ -243,9 +243,9 @@ final class AnimatableAttributeFiniteWrapperToCustomRetargetCompletionTests: XCT
     private func sampleRunningAnimationBeforeRetarget(
         _ harness: AnimatableAttributeHarness
     ) {
-        harness.setTime(retargetTime / 2.0)
+        harness.advanceTime(to: retargetTime / 2.0)
         _ = harness.currentValue()
-        harness.setTime(retargetTime)
+        harness.advanceTime(to: retargetTime)
         _ = harness.currentValue()
         harness.flushCompletionActions()
     }
@@ -253,11 +253,11 @@ final class AnimatableAttributeFiniteWrapperToCustomRetargetCompletionTests: XCT
     private func activateReplacementAnimation(
         _ harness: AnimatableAttributeHarness
     ) {
-        harness.setTime(replacementActivationTime)
+        harness.advanceTime(to: replacementActivationTime)
         _ = harness.currentValue()
-        harness.setTime(replacementActivationTime + frameInterval)
+        harness.advanceTime(to: replacementActivationTime + frameInterval)
         _ = harness.currentValue()
-        harness.setTime(replacementActivationTime + (frameInterval * 2.0))
+        harness.advanceTime(to: replacementActivationTime + (frameInterval * 2.0))
         _ = harness.currentValue()
         harness.flushCompletionActions()
     }

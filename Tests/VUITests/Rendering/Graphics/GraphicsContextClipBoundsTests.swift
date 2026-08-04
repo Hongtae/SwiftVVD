@@ -135,6 +135,154 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         return (count, bytes[centerOffset])
     }
 
+    func testBundledCoreSymbolCatalogResolvesEverySVGAsset() throws {
+        let names = [
+            "add",
+            "arrow.left",
+            "arrow.right",
+            "battery.alert",
+            "battery.charging",
+            "battery.full",
+            "battery.low",
+            "bell",
+            "bell.fill",
+            "check",
+            "chevron.down",
+            "chevron.left",
+            "chevron.right",
+            "chevron.up",
+            "cloud",
+            "cloud.fill",
+            "close",
+            "copy",
+            "download",
+            "draw",
+            "edit",
+            "error",
+            "error.fill",
+            "file",
+            "file.fill",
+            "filter",
+            "folder",
+            "folder.fill",
+            "folder.open",
+            "heart",
+            "heart.fill",
+            "help",
+            "help.fill",
+            "home",
+            "home.fill",
+            "info",
+            "info.fill",
+            "lock",
+            "lock.fill",
+            "lock.open",
+            "lock.open.fill",
+            "menu",
+            "more.horizontal",
+            "more.vertical",
+            "pause",
+            "person",
+            "person.fill",
+            "photo",
+            "photo.fill",
+            "play",
+            "recycle",
+            "refresh",
+            "remove",
+            "save",
+            "search",
+            "settings",
+            "settings.fill",
+            "share",
+            "sort",
+            "star",
+            "star.fill",
+            "stop",
+            "trash",
+            "trash.fill",
+            "upload",
+            "visibility",
+            "visibility.fill",
+            "visibility.off",
+            "visibility.off.fill",
+            "volume",
+            "volume.off",
+            "warning",
+            "warning.fill",
+            "wifi",
+            "wifi.off",
+        ]
+
+        for name in names {
+            let symbol = try XCTUnwrap(
+                SymbolAssetCatalog.resolve(
+                    name: name,
+                    variableValue: nil,
+                    bundle: nil
+                ),
+                "Failed to resolve bundled symbol \(name)"
+            )
+            XCTAssertFalse(symbol.layers.isEmpty, name)
+        }
+    }
+
+    func testBundledCoreSymbolFillPairsUseDistinctGeometry() throws {
+        let pairedNames = [
+            "bell",
+            "cloud",
+            "error",
+            "file",
+            "folder",
+            "heart",
+            "help",
+            "home",
+            "info",
+            "lock",
+            "lock.open",
+            "person",
+            "photo",
+            "settings",
+            "star",
+            "trash",
+            "visibility",
+            "visibility.off",
+            "warning",
+        ]
+
+        for name in pairedNames {
+            let regular = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: name,
+                variableValue: nil,
+                bundle: nil
+            ))
+            let filled = try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: "\(name).fill",
+                variableValue: nil,
+                bundle: nil
+            ))
+            XCTAssertNotEqual(
+                regular.layers.map(\.path),
+                filled.layers.map(\.path),
+                "\(name) and \(name).fill must use distinct geometry"
+            )
+        }
+    }
+
+    func testWarningSymbolOutlineRendersLessInkThanFilledVariantOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let warning = try renderSymbol("warning", deviceContext: deviceContext)
+        let filledWarning = try renderSymbol(
+            "warning.fill",
+            deviceContext: deviceContext
+        )
+
+        XCTAssertGreaterThan(warning.count, 0)
+        XCTAssertGreaterThan(filledWarning.count, warning.count)
+    }
+
     func testPortableVectorSymbolsRenderOutlineAndFilledVariantsOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

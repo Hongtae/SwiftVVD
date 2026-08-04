@@ -44,6 +44,83 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         XCTAssertTrue(recorder.events.isEmpty)
     }
 
+    func testDefaultBeginTransactionFlushesOnMainRunLoopObserver() {
+        let recorder = DefaultBeginTransactionGraphDelegate()
+        let host = DefaultBeginTransactionGraphHost(delegate: recorder)
+        recorder.host = host
+        host.instantiateIfNeeded()
+        recorder.reset()
+
+        host.asyncTransaction(
+            Transaction(),
+            id: Transaction.ID(value: 802),
+            mutation: GraphDelegateRecordingMutation {
+                recorder.record("mutation")
+            }
+        )
+
+        XCTAssertTrue(recorder.events.isEmpty)
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        XCTAssertEqual(recorder.events, ["update", "mutation", "change"])
+    }
+
+    func testDefaultBeginTransactionCalledOffMainUsesMainRunLoopObserver() {
+        let recorder = DefaultBeginTransactionGraphDelegate()
+        let host = DefaultBeginTransactionGraphHost(delegate: recorder)
+        recorder.host = host
+        host.instantiateIfNeeded()
+        recorder.reset()
+        let scheduled = DispatchSemaphore(value: 0)
+
+        DispatchQueue.global().async {
+            recorder.beginTransaction()
+            scheduled.signal()
+        }
+
+        XCTAssertEqual(scheduled.wait(timeout: .now() + 1), .success)
+        XCTAssertTrue(recorder.events.isEmpty)
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        XCTAssertEqual(recorder.events, ["update"])
+    }
+
+    func testWindowControllerBeginTransactionKeepsFlushOnOwningRenderLane() {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(EmptyView.self)
+            )
+        )
+        controller.viewGraph.instantiateIfNeeded()
+        controller.viewGraph.flushTransactions()
+        let mutation = WindowControllerTransactionMutation()
+
+        controller.viewGraph.asyncTransaction(
+            Transaction(),
+            id: Transaction.ID(value: 803),
+            mutation: GraphDelegateRecordingMutation {
+                mutation.didApply = true
+            }
+        )
+
+        XCTAssertTrue(controller.viewGraph.hasPendingTransactions)
+        XCTAssertFalse(mutation.didApply)
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        XCTAssertTrue(controller.viewGraph.hasPendingTransactions)
+        XCTAssertFalse(mutation.didApply)
+
+        controller.viewGraph.flushTransactions()
+
+        XCTAssertFalse(controller.viewGraph.hasPendingTransactions)
+        XCTAssertTrue(mutation.didApply)
+    }
+
     func testGlobalHostFlushNotifiesProviderHostDelegateAfterMutation() {
         let recorder = GraphDelegateEventRecorder()
         let host = DelegateGraphHost(recorder: recorder)
@@ -185,7 +262,8 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         XCTAssertTrue(recorder.events.isEmpty)
     }
 
-    func testWindowControllerUpdateEnvironmentPropagatesParentPhaseToChildViewGraph() {
+    // ASSERTIONS viewGraphHostEnvironmentWrapperOwnershipObserved
+    func testWindowControllerUpdateEnvironmentConsumesWrapperPhaseWithoutEnteringParentGraph() {
         let parent = WindowController(
             content: EmptyView(),
             scene: WindowKey(namespace: .app, sceneID: SceneID(EmptyView.self))
@@ -210,17 +288,88 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         var newParentPhase = Phase()
         newParentPhase.resetSeed = 3
         parent.viewGraph.setPhase(newParentPhase)
+        child.environmentWrapper.phase = ViewGraphHost.Phase(
+            base: newParentPhase
+        )
+
+        let enteredParentGraph = DispatchSemaphore(value: 0)
+        let releaseParentGraph = DispatchSemaphore(value: 0)
+        let parentGraphExited = DispatchSemaphore(value: 0)
+        let parentGraph = GraphDelegateUncheckedSendableValue(
+            parent.viewGraph.data
+        )
+        DispatchQueue.global().async {
+            parentGraph.value.withCurrent {
+                enteredParentGraph.signal()
+                releaseParentGraph.wait()
+            }
+            parentGraphExited.signal()
+        }
+
+        XCTAssertEqual(
+            enteredParentGraph.wait(timeout: .now() + 2),
+            .success
+        )
 
         child.viewGraph.data.withCurrent {
             child.updateEnvironment()
         }
 
+        releaseParentGraph.signal()
+        XCTAssertEqual(
+            parentGraphExited.wait(timeout: .now() + 2),
+            .success
+        )
         XCTAssertEqual(child.viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
         child.viewGraph.data.withCurrent {
             let next = child.viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 8)
             XCTAssertTrue(next.isBeingRemoved)
         }
+    }
+
+    // ASSERTIONS viewGraphHostEnvironmentWrapperOwnershipObserved
+    func testPresentationSideEffectCapturesPhaseAttributeWithoutReenteringHostData() throws {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PresentationPhaseAttributeCaptureProbe.self)
+            )
+        )
+        let graph = controller.viewGraph.data.graph
+        let updateSeed = controller.viewGraph.data._updateSeed
+        let phase = try XCTUnwrap(controller.viewGraph.phaseAttr)
+        let context = _AGGraphContext(graph: graph)
+        var observedPhases: [UInt32] = []
+
+        _ = context.withCurrent {
+            graph.makeSideEffectRule {
+                _ = updateSeed.value
+                let viewPhase = ViewGraphHost.Phase(base: phase.value)
+                controller.updateAlertPresentation(
+                    [],
+                    viewPhase: viewPhase
+                )
+                observedPhases.append(viewPhase.base.rawValue)
+            }
+        }
+
+        XCTAssertEqual(observedPhases, [0])
+
+        controller.viewGraph.data.updateSeed &+= 1
+
+        XCTAssertEqual(observedPhases, [0, 0])
+    }
+}
+
+private enum PresentationPhaseAttributeCaptureProbe {}
+
+private struct GraphDelegateUncheckedSendableValue<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
     }
 }
 
@@ -235,6 +384,19 @@ private final class DelegateGraphHost: GraphHost {
 
     override var graphDelegate: (any GraphDelegate)? {
         delegateRecorder
+    }
+}
+
+private final class DefaultBeginTransactionGraphHost: GraphHost {
+    private let delegateStorage: any GraphDelegate
+
+    init(delegate: any GraphDelegate) {
+        self.delegateStorage = delegate
+        super.init(data: Data())
+    }
+
+    override var graphDelegate: (any GraphDelegate)? {
+        delegateStorage
     }
 }
 
@@ -263,12 +425,41 @@ private final class GraphDelegateEventRecorder: GraphDelegate {
     }
 }
 
+private final class DefaultBeginTransactionGraphDelegate: GraphDelegate, @unchecked Sendable {
+    weak var host: GraphHost?
+    private(set) var events: [String] = []
+
+    func record(_ event: String) {
+        events.append(event)
+    }
+
+    func reset() {
+        events.removeAll()
+    }
+
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        guard let host else {
+            fatalError("DefaultBeginTransactionGraphDelegate used before attaching a host.")
+        }
+        record("update")
+        return body(host)
+    }
+
+    func graphDidChange() {
+        record("change")
+    }
+}
+
 private struct GraphDelegateRecordingMutation: GraphMutation {
     var body: () -> Void
 
     func apply() {
         body()
     }
+}
+
+private final class WindowControllerTransactionMutation {
+    var didApply = false
 }
 
 private final class GraphDelegateTransactionHostProvider: TransactionHostProvider {

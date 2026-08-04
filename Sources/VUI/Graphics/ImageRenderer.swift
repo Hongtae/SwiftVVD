@@ -207,6 +207,7 @@ extension ImageRenderer: Sendable {}
 private final class ImageRendererHost<Content: View>: ViewRendererHost, ViewGraphRootValueUpdater {
     var content: Content
     var storage: ViewGraph!
+    let sceneResources = SceneResources()
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()

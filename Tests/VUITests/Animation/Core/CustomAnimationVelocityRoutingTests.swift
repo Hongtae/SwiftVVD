@@ -2,6 +2,36 @@ import XCTest
 @testable import VUI
 
 final class CustomAnimationVelocityRoutingTests: XCTestCase {
+    // ASSERTIONS velocityTrackingActivityWindowBranchObserved
+    func testVelocityTrackingRequiresNonzeroVelocityWithinActivityWindow() {
+        let tracking = VelocityTrackingAnimation()
+        var context = AnimationContext<Double>()
+
+        XCTAssertNil(
+            tracking.animate(value: 0, time: 0, context: &context)
+        )
+        XCTAssertFalse(context.isLogicallyComplete)
+        XCTAssertTrue(
+            tracking.shouldMerge(
+                previous: .linear(duration: 0.1),
+                value: 1,
+                time: 0.1,
+                context: &context
+            )
+        )
+
+        XCTAssertEqual(
+            tracking.animate(value: 1, time: 1, context: &context),
+            1
+        )
+        XCTAssertFalse(context.isLogicallyComplete)
+
+        XCTAssertNil(
+            tracking.animate(value: 1, time: 3, context: &context)
+        )
+        XCTAssertFalse(context.isLogicallyComplete)
+    }
+
     func testDirectFluidSpringMergeSeedsStateFromOldVelocityAndOutput() {
         let recorder = DetailedVelocityRecorder()
         let previous = Animation(
@@ -28,10 +58,10 @@ final class CustomAnimationVelocityRoutingTests: XCTestCase {
         )
 
         let springState = context.state[SpringState<Double>.self]
-        XCTAssertTrue(springState.isInitialized)
-        XCTAssertEqual(springState.position, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(springState.offset, 0.5, accuracy: 0.000_001)
         XCTAssertEqual(springState.velocity, 6.0, accuracy: 0.000_001)
         XCTAssertEqual(springState.time, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(springState.startTime, 0.25, accuracy: 0.000_001)
     }
 
     func testDirectDefaultAndFluidSpringReplacementsCallOldVelocityBeforeAnimate() {

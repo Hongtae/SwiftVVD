@@ -388,39 +388,34 @@ enum DynamicContainer {
             animationCount += 1
         }
 
-        override func animationWasRemoved() -> [() -> Void] {
+        override func animationWasRemoved() {
             guard animationCount > 0 else {
-                return []
+                return
             }
             animationCount -= 1
             guard animationCount == 0, !completed else {
-                return []
+                return
             }
-            return [{ [weak self] in
-                self?.complete()
-            }]
+            complete()
         }
 
         func beginTrackingAnimations() {
             animationWasAdded()
             Update.enqueueAction { [weak self] in
-                self?.animationWasRemoved().forEach { $0() }
+                self?.animationWasRemoved()
             }
         }
 
-        func installCompletion(into transaction: inout Transaction) -> AnimationCompletionObserver? {
+        func installCompletion(into transaction: inout Transaction) -> AnimationListener? {
             guard !completionInstalled else {
-                return transaction.animationCompletionObserver
+                return transaction.animationListener
             }
             completionInstalled = true
 
-            transaction.addAnimationCompletion(
-                criteria: .removed,
-                tracksStandalonePending: false
-            ) { [weak self] in
+            transaction.addAnimationCompletion(criteria: .removed) { [weak self] in
                 self?.complete()
             }
-            return transaction.animationCompletionObserver
+            return transaction.animationListener
         }
 
         private func complete() {
@@ -465,7 +460,7 @@ enum DynamicContainer {
         // listener lifecycle is probed independently from adaptor ownership.
         var transitionTransactions: _TransitionTransactionResolver?
         var removalLifecycleStarted: Bool
-        var ignoredRetainedUnusedRemovalObserver: ObjectIdentifier?
+        var ignoredRetainedUnusedRemovalListener: ObjectIdentifier?
         var retainAfterRemovalCompletion: Bool
 
         init(
@@ -482,7 +477,7 @@ enum DynamicContainer {
             phase: TransitionPhase? = .identity,
             transitionTransactions: _TransitionTransactionResolver? = nil,
             removalLifecycleStarted: Bool = false,
-            ignoredRetainedUnusedRemovalObserver: ObjectIdentifier? = nil,
+            ignoredRetainedUnusedRemovalListener: ObjectIdentifier? = nil,
             retainAfterRemovalCompletion: Bool = false
         ) {
             self.subgraph = subgraph
@@ -498,7 +493,7 @@ enum DynamicContainer {
             self.phase = phase
             self.transitionTransactions = transitionTransactions
             self.removalLifecycleStarted = removalLifecycleStarted
-            self.ignoredRetainedUnusedRemovalObserver = ignoredRetainedUnusedRemovalObserver
+            self.ignoredRetainedUnusedRemovalListener = ignoredRetainedUnusedRemovalListener
             self.retainAfterRemovalCompletion = retainAfterRemovalCompletion
         }
 
@@ -1385,7 +1380,8 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
                 transform.appendPosition(childPosition.value)
                 return transform
             }
-            childInputs.containerPosition = inputs.position
+            // Layout placement does not redefine the nearest container
+            // channels; descendants keep the inherited position and size.
             childInputs.safeAreaInsets = inputs.safeAreaInsets
             childInputs.stackOrientation = inputs.stackOrientation
 
@@ -1885,35 +1881,31 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             if item.phase == nil {
                 let removalTransaction =
                     positiveRemovalTransaction(for: item)
-                let observerID = removalTransaction?
-                    .animationCompletionObserver
+                let listenerID = removalTransaction?
+                    .animationListener
                     .map(ObjectIdentifier.init)
-                let ignoredObserver = observerID != nil &&
-                    item.ignoredRetainedUnusedRemovalObserver == observerID
+                let ignoredListener = listenerID != nil &&
+                    item.ignoredRetainedUnusedRemovalListener == listenerID
                 if removed.isEmpty,
-                   !ignoredObserver,
-                   let removalTransaction {
+                   !ignoredListener,
+                   removalTransaction != nil {
                     let listener = makeTransitionRemovalListener(
                         graph: graph
                     )
                     item.listener = listener
-                    item.ignoredRetainedUnusedRemovalObserver = nil
+                    item.ignoredRetainedUnusedRemovalListener = nil
                     item.retainAfterRemovalCompletion =
                         retainCompletedUnusedRemovals
                     item.removalLifecycleStarted = true
                     item.removalOrder = nextRemovalOrder()
                     item.phase = .didDisappear
                     listener.beginTrackingAnimations()
-                    finalizeAnimationCompletions(
-                        in: removalTransaction,
-                        animation: removalTransaction.effectiveAnimation
-                    )
                     removed.append(item)
                     changed = true
                 } else if unused.count < maxUnusedItems {
-                    if !removed.isEmpty, let observerID {
-                        item.ignoredRetainedUnusedRemovalObserver =
-                            observerID
+                    if !removed.isEmpty, let listenerID {
+                        item.ignoredRetainedUnusedRemovalListener =
+                            listenerID
                     }
                     unused.append(item)
                 } else {
@@ -1927,8 +1919,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 continue
             }
             guard item.needsTransitions,
-                  let removalTransaction =
-                    positiveRemovalTransaction(for: item) else {
+                  positiveRemovalTransaction(for: item) != nil else {
                 cacheOrErase(
                     item,
                     maxUnusedItems: maxUnusedItems,
@@ -1946,10 +1937,6 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             item.removalOrder = nextRemovalOrder()
             item.phase = .didDisappear
             listener.beginTrackingAnimations()
-            finalizeAnimationCompletions(
-                in: removalTransaction,
-                animation: removalTransaction.effectiveAnimation
-            )
             removed.append(item)
             changed = true
         }
@@ -2469,9 +2456,8 @@ extension Layout {
                 childInputs.position = posAttr
                 childInputs.size = sizeAttr
                 childInputs.transform = childTransformAttr
-                childInputs.containerPosition = inputs.position
                 // Layout placement does not redefine the nearest container
-                // size; viewport-sensitive descendants keep the inherited channel.
+                // channels; descendants keep the inherited position and size.
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
                 childInputs.stackOrientation = layoutInputs.stackOrientation
                 childInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)

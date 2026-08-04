@@ -111,7 +111,7 @@ final class TransactionNestingTests: XCTestCase {
         XCTAssertFalse(scoped.tracksVelocity)
     }
 
-    func testNestedTransactionKeepsSeparateCompletionObserver() throws {
+    func testNestedTransactionKeepsSeparateCompletionListener() throws {
         var outer = Transaction(animation: .linear(duration: 1))
         outer.addAnimationCompletion {}
 
@@ -123,12 +123,12 @@ final class TransactionNestingTests: XCTestCase {
                 let current = Transaction.current
                 XCTAssertNotNil(current.animation)
                 XCTAssertTrue(
-                    try XCTUnwrap(current.animationCompletionObserver) ===
-                        XCTUnwrap(inner.animationCompletionObserver)
+                    try XCTUnwrap(current.animationLogicalListener) ===
+                        XCTUnwrap(inner.animationLogicalListener)
                 )
                 XCTAssertFalse(
-                    try XCTUnwrap(current.animationCompletionObserver) ===
-                        XCTUnwrap(outer.animationCompletionObserver)
+                    try XCTUnwrap(current.animationLogicalListener) ===
+                        XCTUnwrap(outer.animationLogicalListener)
                 )
             }
         }

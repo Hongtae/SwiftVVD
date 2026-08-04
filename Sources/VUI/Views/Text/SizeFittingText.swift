@@ -353,19 +353,118 @@ where Resolver: SizeFittingTextResolver, Logic: TextSizeFittingLogic {
 }
 
 struct ResolvedTextHelper: SizeFittingTextResolver {
+    enum NextUpdate {
+        case time(Time)
+        case recipe(
+            lastTime: Time,
+            lastDate: Date,
+            reduceFrequency: Bool,
+            resolved: ResolvedStyledText
+        )
+        case none
+    }
+
+    var _time: Attribute<Time>
+    var _referenceDate: WeakAttribute<Date?>
+    var includeDefaultAttributes: Bool
+    var allowsKeyColors: Bool
+    var archiveOptions: ArchivedViewInput.Value
+    var features: Text.ResolvedProperties.Features
+    var attachmentsAsAuxiliaryMetadata: Bool
+    var allowsAccessibilityAttributes: Bool
+    var tracker: PropertyList.Tracker
+    var lastText: Text?
+    var nextUpdate: NextUpdate
+    var sizeVariant: TextSizeVariant
+
     struct Input {
         var text: ResolvedStyledText
         var renderer: TextRendererBoxBase?
     }
 
-    var sizeVariant: TextSizeVariant
-
-    init(sizeVariant: TextSizeVariant = .regular) {
+    init(
+        _time: Attribute<Time> = Attribute(identifier: .invalid),
+        _referenceDate: WeakAttribute<Date?> = WeakAttribute(),
+        includeDefaultAttributes: Bool = false,
+        allowsKeyColors: Bool = false,
+        archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),
+        features: Text.ResolvedProperties.Features = [],
+        attachmentsAsAuxiliaryMetadata: Bool = false,
+        allowsAccessibilityAttributes: Bool = false,
+        tracker: PropertyList.Tracker = PropertyList.Tracker(),
+        lastText: Text? = nil,
+        nextUpdate: NextUpdate = .none,
+        sizeVariant: TextSizeVariant = .regular
+    ) {
+        self._time = _time
+        self._referenceDate = _referenceDate
+        self.includeDefaultAttributes = includeDefaultAttributes
+        self.allowsKeyColors = allowsKeyColors
+        self.archiveOptions = archiveOptions
+        self.features = features
+        self.attachmentsAsAuxiliaryMetadata = attachmentsAsAuxiliaryMetadata
+        self.allowsAccessibilityAttributes = allowsAccessibilityAttributes
+        self.tracker = tracker
+        self.lastText = lastText
+        self.nextUpdate = nextUpdate
         self.sizeVariant = sizeVariant
     }
 
     var narrowerVariant: ResolvedTextHelper {
-        ResolvedTextHelper(sizeVariant: sizeVariant.nextDown)
+        var result = self
+        result.sizeVariant = sizeVariant.nextDown
+        result.tracker = PropertyList.Tracker()
+        result.lastText = nil
+        result.nextUpdate = .none
+        return result
+    }
+
+    mutating func resolve(
+        _ text: Text?,
+        with environment: EnvironmentValues,
+        sizeFitting: Bool
+    ) -> ResolvedStyledText? {
+        guard let text else {
+            lastText = nil
+            nextUpdate = .none
+            return nil
+        }
+        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+              let rendererHost = viewGraph.rendererHost else {
+            fatalError("ResolvedTextHelper.resolve requires an active ViewGraph renderer host.")
+        }
+
+        tracker.reset()
+        let trackedEnvironment = EnvironmentValues(
+            environment._plist,
+            tracker: tracker
+        )
+        let referenceDate = _referenceDate.value.flatMap { $0 } ?? Date()
+        let context = GraphTextResolutionContext(
+            environment: trackedEnvironment,
+            sceneResources: rendererHost.sceneResources
+        )
+        let resolved = text._resolveStyledText(
+            context: context,
+            referenceDate: referenceDate,
+            archiveOptions: archiveOptions,
+            features: features,
+            sizeFitting: sizeFitting
+        )
+
+        if let delay = text._nextUpdateDelay(
+            in: trackedEnvironment,
+            referenceDate: referenceDate
+        ), delay.isFinite, delay > 0 {
+            if _time.identifier.isInvalid {
+                fatalError("Dynamic resolved text requires a valid graph time attribute.")
+            }
+            nextUpdate = .time(_time.value + delay)
+        } else {
+            nextUpdate = .none
+        }
+        lastText = text
+        return resolved
     }
 
     func value(for input: Input) -> SizeFittingTextCacheValue<StyledTextLayoutEngine> {
@@ -377,6 +476,60 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
             engine: StyledTextLayoutEngine(text: text, renderer: input.renderer),
             renderer: input.renderer
         )
+    }
+}
+
+struct ResolvedTextFilter: StatefulRule, AsyncAttribute {
+    typealias Value = ResolvedStyledText
+
+    var _text: Attribute<Text>
+    var _environment: Attribute<EnvironmentValues>
+    var helper: ResolvedTextHelper
+
+    mutating func updateValue() {
+        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
+            fatalError("ResolvedTextFilter.updateValue requires an active ViewGraph.")
+        }
+
+        let text = _text.changedValue(options: AGValueOptions(rawValue: 0))
+        let environment = _environment.changedValue(options: AGValueOptions(rawValue: 0))
+        let hasOutput = _AGGraph.currentStatefulOutput(ResolvedStyledText.self) != nil
+
+        var needsResolution = !hasOutput
+        if text.changed, helper.lastText != text.value {
+            needsResolution = true
+        }
+        if environment.changed,
+           helper.tracker.hasDifferentUsedValues(environment.value._plist) {
+            needsResolution = true
+        }
+
+        if !needsResolution, case let .time(deadline) = helper.nextUpdate {
+            let currentTime = helper._time.value
+            if currentTime < deadline {
+                viewGraph.nextUpdate.views.at(deadline)
+                return
+            }
+            needsResolution = true
+        }
+        guard needsResolution else { return }
+
+        if let resolved = helper.resolve(
+            text.value,
+            with: environment.value,
+            sizeFitting: false
+        ) {
+            _AGGraph.setStatefulOutput(resolved)
+        } else if !hasOutput {
+            _AGGraph.setStatefulOutput(ResolvedStyledText())
+        }
+
+        if case let .time(deadline) = helper.nextUpdate {
+            let currentTime = helper._time.value
+            if currentTime < deadline {
+                viewGraph.nextUpdate.views.at(deadline)
+            }
+        }
     }
 }
 
