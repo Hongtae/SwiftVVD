@@ -20,13 +20,19 @@ struct AnimationLabSheet: View {
     @State private var runCount = 0
     @State private var completionStatus = "idle"
     @State private var didStartAutomatedTrace = false
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 12) {
             Text("Animation Lab")
                 .font(.system(size: 22, weight: .semibold))
 
-            Text("Run \(runCount): \(completionStatus)")
+            Text(String(
+                format: "Run %d: %@ · scale %.1fx",
+                runCount,
+                completionStatus,
+                displayScale
+            ))
                 .font(.system(.callout))
                 .foregroundColor(.secondary)
 

@@ -32,15 +32,20 @@ private struct SampleLocalizedError: LocalizedError {
 }
 
 struct ContentView: View {
+    @State private var contentScaleFactorOverride: CGFloat?
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\._contentScaleFactorOverride)
+    private var setContentScaleFactorOverride
+
+    @State private var settingsPresented = false
     @State private var selectedCategory: LabCategory? =
         ProcessInfo.processInfo.environment["VUI_ANIMATION_TRACE_SCENARIO"] != nil
             ? .animation
             : ProcessInfo.processInfo.environment["VUI_SCROLL_READER_SMOKE"] != nil
                 ? .scrollViewReader
                 : nil
-    // This selects the lab sheet host. Each child presentation keeps its own
-    // policy when the lab has a platform window; overlay labs force descendants
-    // through the overlay fallback.
+    // Each child presentation keeps its own policy when the lab has a platform
+    // window; overlay labs force descendants through the overlay fallback.
     @State private var usesPlatformPresentationWindows = true
 
     // Keep these presentations attached to the top-level view. Moving every
@@ -55,19 +60,24 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("TestApp1 Labs")
-                .font(.system(size: 24, weight: .semibold))
+            ZStack {
+                Text("TestApp1 Labs")
+                    .font(.system(size: 24, weight: .semibold))
+
+                HStack {
+                    Spacer()
+                    Button("Settings", systemImage: "settings") {
+                        settingsPresented = true
+                    }
+                }
+            }
+            .frame(width: 632)
 
             Text("Open a focused smoke surface. New parity work can add another category here.")
                 .font(.system(.callout))
                 .foregroundColor(.secondary)
 
             VStack(spacing: 10) {
-                Toggle(
-                    "Open Labs in Platform Windows",
-                    isOn: $usesPlatformPresentationWindows
-                )
-
                 Text("Animation Comparison")
                     .font(.system(.headline))
 
@@ -133,6 +143,10 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 680, height: 650)
+        .sheet(isPresented: $settingsPresented) {
+            settingsContent()
+        }
+        .environment(\.modalSessionUsingPlatformWindow, false)
         .sheet(item: $selectedCategory) { category in
             categoryContent(category)
         }
@@ -191,6 +205,53 @@ struct ContentView: View {
             \.modalSessionUsingPlatformWindow,
             usesPlatformPresentationWindows
         )
+    }
+
+    private func settingsContent() -> some View {
+        VStack(spacing: 14) {
+            Text("Settings")
+                .font(.system(size: 22, weight: .semibold))
+
+            Text(String(format: "Effective content scale: %.1fx", displayScale))
+
+            HStack(spacing: 8) {
+                contentScaleButton("Default", value: nil)
+                contentScaleButton("1x", value: 1)
+                contentScaleButton("2x", value: 2)
+                contentScaleButton("3x", value: 3)
+            }
+
+            Divider()
+
+            Toggle(
+                "Open Test Modals in Platform Windows",
+                isOn: $usesPlatformPresentationWindows
+            )
+
+            Text("Settings always opens as an overlay.")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+
+            Button("Close") {
+                settingsPresented = false
+            }
+        }
+        .padding(24)
+        .frame(width: 440, height: 280)
+    }
+
+    private func contentScaleButton(
+        _ title: String,
+        value: CGFloat?
+    ) -> some View {
+        Button(
+            contentScaleFactorOverride == value
+                ? "[\(title)]"
+                : title
+        ) {
+            contentScaleFactorOverride = value
+            setContentScaleFactorOverride(value)
+        }
     }
 
     @ViewBuilder
