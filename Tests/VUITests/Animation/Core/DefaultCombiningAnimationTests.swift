@@ -79,7 +79,7 @@ final class DefaultCombiningAnimationTests: XCTestCase {
     }
 
     // ASSERTIONS combinedStateExecutionObserved
-    func testNewlyCompletedChildUsesTerminalFrameBranchBeforeStoredNilBranch() throws {
+    func testNewlyCompletedNonLastChildPreservesStoredContributionOnTerminalFrame() throws {
         var animation = Animation(UnitLinearAnimation(duration: 0.2))
         var state = AnimationState<Double>()
 
@@ -97,7 +97,7 @@ final class DefaultCombiningAnimationTests: XCTestCase {
             animation.animate(value: 15.0, time: 0.5, context: &context)
         )
 
-        XCTAssertEqual(sample, 3.75, accuracy: 0.000_001)
+        XCTAssertEqual(sample, 11.25, accuracy: 0.000_001)
 
         let nextSample = try XCTUnwrap(
             animation.animate(value: 15.0, time: 0.6, context: &context)

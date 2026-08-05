@@ -467,6 +467,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
 
     struct Value {
         var image: GraphicsContext.ResolvedImage?
+        var symbolAnimator: SymbolAnimator?
         var symbolEffects: [IdentifiedSymbolEffect]
         var symbolEffectVersion: UInt32
         var symbolOpacity: Double
@@ -490,6 +491,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     var transaction: Attribute<Transaction>
     var time: Attribute<Time>
     var phase = Phase()
+    private var symbolAnimator: SymbolAnimator?
     private var synchronousSource: Image?
     private var synchronousImage: GraphicsContext.ResolvedImage?
     private var synchronousVectorSymbol: ResolvedVectorSymbol?
@@ -531,6 +533,11 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         let image = resolvedImage(in: currentEnvironment)
         let environmentEffects = currentEnvironment.symbolEffects
         let transaction = transaction.value
+        let symbolAnimator = updateSymbolAnimator(
+            image: image,
+            state: currentEnvironment.contentTransitionState,
+            transaction: transaction
+        )
         let pendingDrawTransition = updatePendingDrawTransition(
             effects: environmentEffects,
             hasResolvedImage: image != nil,
@@ -726,6 +733,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
 
         _AGGraph.setStatefulOutput(Value(
             image: image,
+            symbolAnimator: symbolAnimator,
             symbolEffects: phase.effects,
             symbolEffectVersion: phase.version,
             symbolOpacity: pulse.opacity,
@@ -744,6 +752,31 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
             displayPosition: nil,
             displaySize: nil
         ))
+    }
+
+    private mutating func updateSymbolAnimator(
+        image: GraphicsContext.ResolvedImage?,
+        state: ContentTransition.State,
+        transaction: Transaction
+    ) -> SymbolAnimator? {
+        guard let image, image.symbol != nil else {
+            symbolAnimator?.cancel()
+            symbolAnimator = nil
+            return nil
+        }
+
+        if let symbolAnimator {
+            symbolAnimator.update(
+                image: image,
+                state: state,
+                transaction: transaction
+            )
+            return symbolAnimator
+        }
+
+        let animator = SymbolAnimator(image: image)
+        symbolAnimator = animator
+        return animator
     }
 
     private mutating func resolvedImage(
@@ -1305,7 +1338,23 @@ struct ImageViewPresentation: StatefulRule, AsyncAttribute {
 
     mutating func updateValue() {
         var presentation = image.value
-        presentation.drawPresentationStart?.activate(at: time.value)
+        let needsPresentationTime =
+            presentation.drawPresentationStart != nil ||
+            presentation.symbolAnimator?.isAnimating == true
+        let now = needsPresentationTime ? time.value : .zero
+        presentation.drawPresentationStart?.activate(at: now)
+        if let symbolAnimator = presentation.symbolAnimator,
+           symbolAnimator.isAnimating,
+           var image = presentation.image {
+            image.symbolReplacementPresentation =
+                symbolAnimator.presentation(at: now)
+            presentation.image = image
+            if symbolAnimator.isAnimating,
+               let ref = _AGGraphContext.current,
+               let viewGraph = ref.context as? ViewGraph {
+                viewGraph.nextUpdate.views.at(now + 1.0 / 120.0)
+            }
+        }
         let targetPosition = presentation.image == nil ? nil : position.value
         let displaySize = presentation.image == nil ? nil : size.value
         let displayPosition: CGPoint?
@@ -1331,6 +1380,92 @@ struct ImageViewPresentation: StatefulRule, AsyncAttribute {
         presentation.displayPosition = displayPosition
         presentation.displaySize = displaySize
         _AGGraph.setStatefulOutput(presentation)
+    }
+}
+
+private struct ResolvedImageContentView: ShapeStyledLeafView {
+    struct UpdateData {
+        var _time: Attribute<Time>
+        var _position: Attribute<CGPoint>
+        var _size: Attribute<ViewSize>
+        var _pixelLength: Attribute<CGFloat>
+        var needsPrepare: Bool
+    }
+
+    var presentation: ImageViewChild.Value
+    var referencePosition: CGPoint
+    var styleResolverMode: _ShapeStyle_ResolverMode
+
+    static var animatesSize: Bool { false }
+    static var hasBackground: Bool { true }
+
+    func mustUpdate(
+        data: UpdateData,
+        position: Attribute<CGPoint>,
+        environment: Attribute<EnvironmentValues>
+    ) -> Bool {
+        false
+    }
+
+    func shape(
+        in size: CGSize
+    ) -> (shape: _ShapeStyle_RenderedShape.Shape, frame: CGRect) {
+        let frame = CGRect(
+            origin: presentation.displayPosition.map {
+                CGPoint(
+                    x: $0.x - referencePosition.x,
+                    y: $0.y - referencePosition.y
+                )
+            } ?? .zero,
+            size: presentation.displaySize?.value ?? size
+        )
+        guard var image = presentation.image else {
+            return (.empty, frame)
+        }
+        image.symbolLayerOpacities = presentation.symbolLayerOpacities
+        image.symbolVariableColorOpacities =
+            presentation.symbolVariableColorOpacities
+        image.symbolDrawPathIntervals = presentation.symbolDrawPathIntervals
+        image.symbolDrawProgresses = presentation.symbolDrawProgresses
+        image.symbolDrawFallbackProgresses =
+            presentation.symbolDrawFallbackProgresses
+        image.symbolDrawFallbackOpacity =
+            presentation.symbolDrawFallbackOpacity
+        image.symbolDrawsReversed = presentation.symbolDrawsReversed
+        return (
+            .image(
+                image,
+                opacity: presentation.isSymbolEffectActive
+                    ? presentation.symbolOpacity
+                    : 1
+            ),
+            frame
+        )
+    }
+
+    func backgroundShape(
+        in size: CGSize
+    ) -> (shape: _ShapeStyle_RenderedShape.Shape, frame: CGRect) {
+        (.empty, CGRect(origin: .zero, size: size))
+    }
+
+    func isClear(styles: _ShapeStyle_Pack) -> Bool {
+        presentation.image == nil
+    }
+
+    static func resolverMode(
+        for image: GraphicsContext.ResolvedImage?
+    ) -> _ShapeStyle_ResolverMode {
+        guard let symbol = image?.symbol else {
+            return _ShapeStyle_ResolverMode()
+        }
+        let foregroundLevels = UInt16(clamping:
+            (symbol.layers.map(\.semanticLevel).max() ?? 0) + 1
+        )
+        return _ShapeStyle_ResolverMode(
+            foregroundLevels: foregroundLevels,
+            options: foregroundLevels > 1 ? .foregroundPalette : []
+        )
     }
 }
 
@@ -2372,12 +2507,7 @@ extension Image: View {
             if image.provider.requiresBackendResolution {
                 return resolvedImageTransactionAttr.value
             }
-            let sourceTransaction = graph.transaction(
-                for: view._attribute.identifier
-            ) ?? Transaction()
-            return sourceTransaction.isEmpty
-                ? inheritedTransactionAttr.value
-                : sourceTransaction
+            return inheritedTransactionAttr.value
         }
 
         // 3. Layout pass (Layout Rule)
@@ -2391,74 +2521,52 @@ extension Image: View {
             lcAttr = OptionalAttribute()
         }
 
-        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
-
-        // 4. Drawing pass (DisplayList Rule)
-        let dlAttr: Attribute<DisplayList> = graph.makeRule {
-            let _ = view._attribute.value // Dependency: image changes
+        let imageContentAttr: Attribute<ResolvedImageContentView> =
+            graph.makeRule {
             let presentation = imagePresentationAttr.value
-            let animatedPosition = positionAttr.value
-            let displayPosition =
-                presentation.displayPosition ?? animatedPosition
-            let localPosition = CGPoint(
-                x: displayPosition.x - animatedPosition.x,
-                y: displayPosition.y - animatedPosition.y
-            )
-            let viewSize = (presentation.displaySize ?? sizeAttr.value).value
-            let environment = envAttr.value.untrackedCopy()
-            let updateVersion = DisplayList.Version(forUpdate: ())
-
-            var list = DisplayList()
-            let layerSerial = interpolatorGroup.addLayer(
-                id: .unstyled,
-                style: nil
-            )
-            defer {
-                interpolatorGroup.finishLayers()
-            }
-            if var resolved = presentation.image {
-                let frame = CGRect(origin: localPosition, size: viewSize)
-                var imageList = DisplayList()
-                resolved.symbolLayerOpacities = presentation.symbolLayerOpacities
-                resolved.symbolVariableColorOpacities =
-                    presentation.symbolVariableColorOpacities
-                resolved.symbolDrawPathIntervals =
-                    presentation.symbolDrawPathIntervals
-                resolved.symbolDrawProgresses = presentation.symbolDrawProgresses
-                resolved.symbolDrawFallbackProgresses =
-                    presentation.symbolDrawFallbackProgresses
-                resolved.symbolDrawFallbackOpacity =
-                    presentation.symbolDrawFallbackOpacity
-                resolved.symbolDrawsReversed = presentation.symbolDrawsReversed
-                imageList.appendImageItem(
-                    resolved,
-                    bounds: frame,
-                    version: updateVersion,
-                    environment: environment
+            return ResolvedImageContentView(
+                presentation: presentation,
+                referencePosition: positionAttr.value,
+                styleResolverMode: ResolvedImageContentView.resolverMode(
+                    for: presentation.image
                 )
-                if presentation.isSymbolEffectActive,
-                   presentation.symbolOpacity != 1 {
-                    list.appendOpacityItem(
-                        bounds: frame,
-                        opacity: presentation.symbolOpacity,
-                        contents: imageList
-                    )
-                } else {
-                    list = imageList
-                }
-            }
-            return DisplayList.effect(
-                .interpolatorLayer(interpolatorGroup, layerSerial),
-                contents: list
             )
         }
+        let styleResolverModeAttr = graph.subscriptNode(
+            parent: imageContentAttr,
+            keyPath: \ResolvedImageContentView.styleResolverMode
+        )
+        var imageCachedEnvironment = cachedEnvironmentAttribute.value
+        let styles = imageCachedEnvironment.resolvedShapeStyles(
+            for: inputs,
+            role: .fill,
+            mode: styleResolverModeAttr
+        )
+        cachedEnvironmentAttribute.value = imageCachedEnvironment
+        let pixelLengthAttr: Attribute<CGFloat> = graph.makeRule {
+            envAttr.value.animationPixelLength
+        }
+        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
+        var leafInputs = inputs
+        leafInputs.containerPosition = positionAttr
+        var outputs = ResolvedImageContentView.makeLeafView(
+            view: _GraphValue(_attribute: imageContentAttr),
+            inputs: leafInputs,
+            styles: styles,
+            interpolatorGroup: interpolatorGroup,
+            data: ResolvedImageContentView.UpdateData(
+                _time: inputs.base.time,
+                _position: positionAttr,
+                _size: sizeAttr,
+                _pixelLength: pixelLengthAttr,
+                needsPrepare: false
+            )
+        )
 
-        var outputs = _ViewOutputs()
         outputs._layoutComputer = lcAttr
 
-        // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
+        // 4. Propagate backend resource work alongside the common leaf output.
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
-        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
         var interpolatorInputs = inputs
         interpolatorInputs.base.transaction = imageTransactionAttr
         outputs.applyInterpolatorGroup(

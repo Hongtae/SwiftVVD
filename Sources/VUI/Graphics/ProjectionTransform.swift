@@ -46,6 +46,10 @@ public struct ProjectionTransform: Equatable, Sendable {
         m12 * m21 * m33 - m13 * m22 * m31
     }
 
+    var isInvertible: Bool {
+        !determinant.isZero
+    }
+
     public mutating func invert() -> Bool {
         let d = self.determinant
         if d.isZero {
@@ -102,6 +106,18 @@ public struct ProjectionTransform: Equatable, Sendable {
         mat.m32 = dot(row3, col2)
         mat.m33 = dot(row3, col3)
         return mat
+    }
+
+    mutating func flipRTL(width: CGFloat) {
+        let flip = ProjectionTransform(CGAffineTransform(
+            a: -1,
+            b: 0,
+            c: 0,
+            d: 1,
+            tx: width,
+            ty: 0
+        ))
+        self = flip.concatenating(self).concatenating(flip)
     }
 }
 

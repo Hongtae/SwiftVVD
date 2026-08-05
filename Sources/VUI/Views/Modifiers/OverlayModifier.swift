@@ -102,8 +102,6 @@ func makeSecondaryLayerView<Secondary: View>(
     )
     var secondaryInputs = inputs
     secondaryInputs.copyCaches()
-    secondaryInputs.containerPosition = inputs.position
-    secondaryInputs.containerSize = OptionalAttribute(inputs.size)
     secondaryInputs[ImplicitRootLayoutInput.self] = .zStack
 
     let secondaryPosition = graph.subscriptNode(

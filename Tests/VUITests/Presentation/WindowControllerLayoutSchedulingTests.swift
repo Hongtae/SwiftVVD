@@ -891,7 +891,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             tick &+= 1
             return try XCTUnwrap(
-                textBounds(in: try displayList(in: controller)).first {
+                renderedTextBounds(in: try displayList(in: controller)).first {
                     $0.height < 30
                 }
             )
@@ -944,6 +944,64 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             0.5,
             "The completion status must continue moving with the reversed layout."
         )
+    }
+
+    // ASSERTIONS appKitEventActionUpdateBoundaryObserved animationListenerLifecycleObserved
+    @MainActor
+    func testInputQueuedCustomAnimationRegistersBeforePendingListenerFallback() throws {
+        Transaction.dispatchPendingListeners()
+
+        let counter = LayoutSchedulingCounter()
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingCustomCompletionStatusRoot(
+                counter: counter,
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingCustomCompletionStatusRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(time: Double) {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 420, height: 240),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+        }
+
+        update(time: 0)
+        _ = try XCTUnwrap(probe.toggle)
+        controller.enqueueInputAction {
+            Update.enqueueAction {
+                probe.toggle?()
+            }
+        }
+        update(time: 0.001)
+
+        XCTAssertTrue(probe.completions.isEmpty)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertTrue(
+            probe.completions.isEmpty,
+            "The event action must register its animator before the 10 ms "
+                + "pending-listener fallback."
+        )
+
+        update(time: 1.0 / 60.0)
+        update(time: 2.0 / 60.0)
+        update(time: 2.2)
+        XCTAssertEqual(probe.completions, [1])
     }
 
     @MainActor
@@ -1142,7 +1200,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertTrue(initial.completed.isEmpty)
 
         try XCTUnwrap(probe.toggle)()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        GraphHost.flushGlobalTransactions()
 
         for time in [0.001, 1.0 / 60.0, 0.1, 0.5, 1.25] {
             let sample = try update(time: time)
@@ -1756,7 +1814,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let initialDisplayList = try displayList(in: controller)
-        let initialBounds = try XCTUnwrap(textBounds(in: initialDisplayList).first)
+        let initialBounds = try XCTUnwrap(renderedTextBounds(in: initialDisplayList).first)
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -1774,7 +1832,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 withGC
             )
             let sampleDisplayList = try displayList(in: controller)
-            samples.append((sampleTime, try XCTUnwrap(textBounds(in: sampleDisplayList).first)))
+            samples.append((sampleTime, try XCTUnwrap(renderedTextBounds(in: sampleDisplayList).first)))
         }
 
         let finalBounds = try XCTUnwrap(samples.last?.bounds)
@@ -1822,7 +1880,11 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let initialDisplayList = try displayList(in: controller)
-        let initialBounds = try XCTUnwrap(textBounds(in: initialDisplayList).min { $0.minX < $1.minX })
+        let initialBounds = try XCTUnwrap(
+            renderedTextBounds(in: initialDisplayList).min {
+                $0.minX < $1.minX
+            }
+        )
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -1842,7 +1904,11 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             let sampleDisplayList = try displayList(in: controller)
             samples.append((
                 sampleTime,
-                try XCTUnwrap(textBounds(in: sampleDisplayList).min { $0.minX < $1.minX })
+                try XCTUnwrap(
+                    renderedTextBounds(in: sampleDisplayList).min {
+                        $0.minX < $1.minX
+                    }
+                )
             ))
         }
 
@@ -1891,7 +1957,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let list = try displayList(in: controller)
         let borders = shapeStrokeBounds(in: list).sorted { $0.minX < $1.minX }
-        let labels = textBounds(in: list).sorted { $0.minX < $1.minX }
+        let labels = renderedTextBounds(in: list).sorted {
+            $0.minX < $1.minX
+        }
         XCTAssertEqual(borders.count, 3)
         XCTAssertEqual(labels.count, 3)
         for (border, label) in zip(borders, labels) {
@@ -2106,10 +2174,15 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 withGC
             )
             tick += 1
-            let buttons = shapeStrokeBounds(in: try displayList(in: controller))
+            let list = try displayList(in: controller)
+            let buttons = shapeStrokeBounds(in: list)
                 .filter { $0.width > 40 && $0.height > 15 && $0.height < 50 }
                 .sorted { $0.minX < $1.minX }
-            XCTAssertEqual(buttons.count, 4, "unexpected button strokes at \(time): \(buttons)")
+            XCTAssertEqual(
+                buttons.count,
+                4,
+                "unexpected button strokes at \(time): \(buttons)"
+            )
             return try XCTUnwrap(buttons.dropFirst().first)
         }
 
@@ -2710,7 +2783,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             tick += 1
             return try XCTUnwrap(
-                textBounds(in: try displayList(in: controller)).first {
+                renderedTextBounds(
+                    in: try displayList(in: controller)
+                ).first {
                     abs($0.width - 160) <= 0.5 && abs($0.height - 20) <= 0.5
                 }
             )
@@ -3644,13 +3719,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         _ = try update(5.22)
         _ = try update(5.23)
         let incremented = try update(5.24)
-        XCTAssertTrue(
-            incremented.effects.contains {
-                if case .contentTransition = $0.effect {
-                    return true
-                }
-                return false
-            },
+        let numericGlyphOperations = closureBounds(in: incremented)
+        XCTAssertFalse(
+            numericGlyphOperations.isEmpty,
             displayListTreeDescription(incremented)
         )
     }
@@ -3748,12 +3819,15 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try XCTUnwrap(probe.toggle)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         _ = try update(time: 0.001)
-        _ = try update(time: 0.05)
+        _ = try update(time: 0.017)
+        _ = try update(time: 0.034)
         let beforeRetarget = try update(time: 0.12)
 
         try XCTUnwrap(probe.toggle)()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
         let afterRetarget = try update(time: 0.121)
+        _ = try update(time: 0.137)
+        _ = try update(time: 0.154)
         let continued = try update(time: 0.24)
         let later = try update(time: 0.72)
         let settled = try update(time: 1.70)
@@ -3795,6 +3869,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 accuracy: 0.5,
                 "repeated retarget restarted at action \(action + 1)"
             )
+            _ = try update(time: actionTime + 0.017)
+            _ = try update(time: actionTime + 0.034)
         }
 
         for (index, sample) in repeatedBoundaries.enumerated().dropFirst(2) {
@@ -3820,6 +3896,231 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
         XCTAssertEqual(repeatedSettled.compactOpacity, 1, accuracy: 0.01)
         XCTAssertEqual(repeatedSettled.expandedOpacity, 0, accuracy: 0.01)
+    }
+
+    // ASSERTIONS asymmetricTransitionRapidViewRetargetContinuityObserved
+    @MainActor
+    func testRapidAsymmetricViewTransitionRetargetKeepsPresentationBoundaryContinuous() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+        let pipelineStates = try XCTUnwrap(
+            GraphicsPipelineStates.sharedInstance(commandQueue: renderQueue)
+        )
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingRapidAsymmetricViewTransitionRoot(
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingRapidAsymmetricViewTransitionRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            _ = pipelineStates
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 500, height: 220),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 500, height: 220),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail(
+                    "Unable to create asymmetric-transition graphics context."
+                )
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+        var redraw = false
+        var frameTrajectory: [(time: Double, bounds: CGRect)] = []
+
+        func greenCardBounds(
+            in list: DisplayList
+        ) throws -> CGRect {
+            let candidates = renderedShapePresentationSamples(in: list)
+                .compactMap { sample -> CGRect? in
+                guard sample.role == .fill,
+                      !sample.isStroke,
+                      sample.opacity > 0.0001,
+                      let color = sample.color,
+                      color.provider.green > color.provider.red,
+                      color.provider.green > color.provider.blue else {
+                    return nil
+                }
+                return sample.bounds
+            }
+            return try XCTUnwrap(
+                candidates.max {
+                    $0.width * $0.height < $1.width * $1.height
+                },
+                "missing transitioned green card: \(displayListTreeDescription(list))"
+            )
+        }
+
+        func update(
+            time: Double
+        ) throws -> CGRect {
+            redraw = false
+            controller.updateView(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 500, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+            tick &+= 1
+            let bounds = try greenCardBounds(
+                in: try displayList(in: controller)
+            )
+            frameTrajectory.append((time, bounds))
+            return bounds
+        }
+
+        var currentTime = 0.0
+        let initial = try update(time: currentTime)
+        let buttonBounds = try XCTUnwrap(
+            shapeStrokeBounds(in: try displayList(in: controller)).first {
+                $0.width > 70 &&
+                    $0.width < 160 &&
+                    $0.height > 18 &&
+                    $0.height < 40
+            }
+        )
+        let buttonPoint = CGPoint(
+            x: buttonBounds.midX,
+            y: buttonBounds.midY
+        )
+
+        func advance(
+            to targetTime: Double
+        ) throws -> CGRect {
+            let interval = 1.0 / 60.0
+            while currentTime + interval < targetTime {
+                currentTime += interval
+                _ = try update(time: currentTime)
+            }
+            currentTime = targetTime
+            return try update(time: currentTime)
+        }
+
+        let actionTimes = [
+            0.20,
+            0.65,
+            1.05,
+            1.75,
+            2.20,
+            2.95,
+            3.30,
+            4.05,
+            4.50,
+            5.15,
+        ]
+        for (action, actionTime) in actionTimes.enumerated() {
+            let boundary = try advance(to: actionTime)
+            controller.enqueueInputAction {
+                _ = controller.handleMouseEvent(event: MouseEvent(
+                    type: .buttonDown,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: buttonPoint,
+                    timestamp: actionTime
+                ))
+                _ = controller.handleMouseEvent(event: MouseEvent(
+                    type: .buttonUp,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: buttonPoint,
+                    timestamp: actionTime + 0.0001
+                ))
+            }
+            let immediate = try advance(to: actionTime + 0.001)
+
+            XCTAssertEqual(
+                immediate.origin.x,
+                boundary.origin.x,
+                accuracy: 0.75,
+                "asymmetric transition restarted horizontally at action \(action + 1)"
+            )
+            XCTAssertEqual(
+                immediate.origin.y,
+                boundary.origin.y,
+                accuracy: 0.75,
+                "asymmetric transition restarted vertically at action \(action + 1)"
+            )
+            XCTAssertEqual(
+                immediate.size.width,
+                boundary.size.width,
+                accuracy: 0.75,
+                "asymmetric transition restarted its scale at action \(action + 1)"
+            )
+            XCTAssertEqual(
+                immediate.size.height,
+                boundary.size.height,
+                accuracy: 0.75,
+                "asymmetric transition restarted its scale at action \(action + 1)"
+            )
+        }
+
+        _ = try advance(to: currentTime + 2.2)
+        let settled = try advance(to: currentTime + 0.1)
+        XCTAssertEqual(settled, initial)
+
+        for (previous, next) in zip(
+            frameTrajectory,
+            frameTrajectory.dropFirst()
+        ) {
+            XCTAssertLessThanOrEqual(
+                abs(
+                    next.bounds.midX -
+                        previous.bounds.midX
+                ),
+                8,
+                "horizontal presentation jump from \(previous) to \(next)"
+            )
+            XCTAssertLessThanOrEqual(
+                abs(
+                    next.bounds.midY -
+                        previous.bounds.midY
+                ),
+                2,
+                "vertical presentation jump from \(previous) to \(next)"
+            )
+            XCTAssertLessThanOrEqual(
+                abs(
+                    next.bounds.width -
+                        previous.bounds.width
+                ),
+                3,
+                "presentation width jump from \(previous) to \(next)"
+            )
+            XCTAssertLessThanOrEqual(
+                abs(
+                    next.bounds.height -
+                        previous.bounds.height
+                ),
+                3,
+                "presentation height jump from \(previous) to \(next)"
+            )
+        }
     }
 
     @MainActor
@@ -3883,17 +4184,19 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             XCTAssertFalse(
                 renderedTextBounds(in: list).isEmpty
             )
-            let transitionContents = list.effects.first {
-                    if case .contentTransition = $0.effect {
-                        return true
-                    }
-                    return false
-                }?.contents
-            XCTAssertNotNil(transitionContents, displayListTreeDescription(list))
+            let transitionContents = drawingContents(in: list)
             XCTAssertFalse(
-                transitionContents?.itemCommands.compactMap(\.bounds).contains {
+                transitionContents.isEmpty,
+                displayListTreeDescription(list)
+            )
+            let transitionCommandBounds = transitionContents.flatMap(
+                recursiveTextCommandBounds(in:)
+            )
+            XCTAssertFalse(transitionCommandBounds.isEmpty)
+            XCTAssertFalse(
+                transitionCommandBounds.contains {
                     $0.width >= 100
-                } ?? true,
+                },
                 "rapid numeric updates must retain glyph-bounded operations"
             )
         }
@@ -3975,10 +4278,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             $0.compactMap { $0 }
         }
 
-        XCTAssertEqual(
-            insertionProgresses.first,
-            [0, 0],
-            "fresh symbol insertion consumed draw time before its first presentation: \(insertion)"
+        let firstInsertionProgresses = try XCTUnwrap(
+            insertionProgresses.first
+        )
+        XCTAssertTrue(
+            firstInsertionProgresses.allSatisfy {
+                $0 >= 0 && $0 < 0.10
+            },
+            "fresh symbol insertion did not begin at the hidden boundary: \(insertion)"
         )
         XCTAssertTrue(
             insertionProgresses.contains { progresses in
@@ -3995,6 +4302,135 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                     progresses[1] < 0.999
             },
             "fresh symbol insertion skipped pencil opacity group: \(fallbackInsertion)"
+        )
+    }
+
+    // ASSERTIONS symbolEffectLayoutMotionObserved
+    // ASSERTIONS symbolEffectLayoutDrawRestoreObserved
+    @MainActor
+    func testSystemSymbolDrawHideKeepsRenderedPositionDuringButtonRelayout() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingAnimationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSymbolDrawLayoutRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSymbolDrawLayoutRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: controller.sceneResources,
+                    environment: controller.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 500, height: 150),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 500, height: 150),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the symbol layout context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        let startDate = controller.date
+        var tick: UInt64 = 0
+
+        func update(_ time: Double) throws -> DisplayList {
+            controller.updateFrame(
+                tick: tick,
+                delta: time - controller.animationTimestamp.seconds,
+                date: startDate.addingTimeInterval(time),
+                contentSize: CGSize(width: 500, height: 150),
+                shouldDrawFrame: false,
+                withGC
+            )
+            tick &+= 1
+            return try displayList(in: controller)
+        }
+
+        func drawSample(
+            in list: DisplayList
+        ) throws -> LayoutSchedulingSymbolPresentationSample {
+            try XCTUnwrap(
+                symbolPresentationSamples(in: list).first {
+                    $0.name == "draw" && $0.opacity > 0.001
+                },
+                "missing draw symbol: \(displayListTreeDescription(list))"
+            )
+        }
+
+        func labelFrame(in list: DisplayList) throws -> CGRect {
+            try XCTUnwrap(
+                renderedResolvedTextSamples(
+                    in: list,
+                    matching: "by layer",
+                    environment: controller.environment
+                )
+                .filter { $0.opacity > 0.001 }
+                .max { $0.opacity < $1.opacity }?
+                .frame,
+                "missing symbol caption: \(displayListTreeDescription(list))"
+            )
+        }
+
+        let initialList = try update(0)
+        let initialSymbol = try drawSample(in: initialList)
+        let initialLabel = try labelFrame(in: initialList)
+
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        _ = try update(0.001)
+        let hidingList = try update(0.15)
+        let hidingSymbol = try drawSample(in: hidingList)
+        let hidingLabel = try labelFrame(in: hidingList)
+
+        XCTAssertGreaterThan(
+            abs(hidingLabel.midX - initialLabel.midX),
+            5,
+            "the caption must follow the widened-button HStack layout"
+        )
+        XCTAssertEqual(
+            hidingSymbol.bounds.midX,
+            initialSymbol.bounds.midX,
+            accuracy: 0.75,
+            """
+            draw-to-hidden presentation must retain its preceding position
+            initialSymbol=\(initialSymbol)
+            hidingSymbol=\(hidingSymbol)
+            initialLabel=\(initialLabel)
+            hidingLabel=\(hidingLabel)
+            initialList:
+            \(displayListTreeDescription(initialList))
+            hidingList:
+            \(displayListTreeDescription(hidingList))
+            """
+        )
+
+        _ = try update(1.40)
+        try XCTUnwrap(probe.toggle)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        _ = try update(1.401)
+        let restoringList = try update(1.55)
+        let restoringSymbol = try drawSample(in: restoringList)
+        let restoringLabel = try labelFrame(in: restoringList)
+
+        XCTAssertEqual(restoringLabel.midX, initialLabel.midX, accuracy: 0.75)
+        XCTAssertEqual(
+            restoringSymbol.bounds.midX,
+            initialSymbol.bounds.midX,
+            accuracy: 0.75,
+            "restore presentation must follow the current layout position"
         )
     }
 
@@ -4056,9 +4492,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let timeline = try [0.001, 0.01, 0.02, 0.10, 0.20, 0.30, 0.50, 0.80]
             .map { time in
-                (
+                let list = try update(time)
+                return (
                     time,
-                    symbolPresentationSamples(in: try update(time))
+                    symbolPresentationSamples(in: list)
                         .filter { $0.opacity > 0.001 }
                 )
             }
@@ -4141,7 +4578,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let initialDisplayList = try displayList(in: controller)
-        let initialBounds = try XCTUnwrap(textBounds(in: initialDisplayList).first)
+        let initialBounds = try XCTUnwrap(
+            renderedTextBounds(in: initialDisplayList).first
+        )
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -4159,7 +4598,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 withGC
             )
             let sampleDisplayList = try displayList(in: controller)
-            samples.append((sampleTime, try XCTUnwrap(textBounds(in: sampleDisplayList).first)))
+            samples.append((
+                sampleTime,
+                try XCTUnwrap(
+                    renderedTextBounds(in: sampleDisplayList).first
+                )
+            ))
         }
 
         let finalBounds = try XCTUnwrap(samples.last?.bounds)
@@ -4315,7 +4759,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let initialDisplayList = try displayList(in: controller)
-        let initialBounds = try XCTUnwrap(textBounds(in: initialDisplayList).first)
+        let initialBounds = try XCTUnwrap(
+            renderedTextBounds(in: initialDisplayList).first
+        )
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -4333,7 +4779,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 withGC
             )
             let sampleDisplayList = try displayList(in: controller)
-            samples.append((sampleTime, try XCTUnwrap(textBounds(in: sampleDisplayList).first)))
+            samples.append((
+                sampleTime,
+                try XCTUnwrap(
+                    renderedTextBounds(in: sampleDisplayList).first
+                )
+            ))
         }
 
         let finalBounds = try XCTUnwrap(samples.last?.bounds)
@@ -4405,7 +4856,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         let inserted = try displayList(in: controller)
         let insertedText = try XCTUnwrap(
-            textBounds(in: inserted).first {
+            renderedTextBounds(in: inserted).first {
                 $0.width > 80 && $0.width < 140 && $0.height > 14
             }
         )
@@ -4420,10 +4871,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             update(time: sampleTime)
             let list = try displayList(in: controller)
             let text = try XCTUnwrap(
-                textBounds(in: list).first {
+                renderedTextBounds(in: list).first {
                     $0.width > 80 && $0.width < 140 && $0.height > 14
                 },
-                "missing Animation Lab child text at \(sampleTime): \(textBounds(in: list))"
+                "missing Animation Lab child text at \(sampleTime): \(renderedTextBounds(in: list))"
             )
             let background = try XCTUnwrap(
                 translucentShapeFillRecords(in: list).first { record in
@@ -4516,7 +4967,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
             let list = try displayList(in: controller)
             let childTexts = renderedTextBounds(in: list).filter {
-                $0.width >= 50 && $0.width < 150 && $0.height >= 8 && $0.height < 25
+                ($0.width > 60 && $0.width < 150 &&
+                    $0.height > 11 && $0.height < 25) ||
+                    ($0.width > 20 && $0.width < 45 &&
+                        $0.height > 5 && $0.height <= 12)
             }
             let backgrounds: [CGRect] = renderedTranslucentShapeFillRecords(in: list).compactMap { record in
                 guard record.bounds.width >= 60, record.bounds.height >= 25 else {
@@ -4637,12 +5091,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             tick += 1
 
             let list = try displayList(in: controller)
-            let titles = textBounds(in: list).filter {
+            let titles = renderedTextBounds(in: list).filter {
                     abs($0.width - 160) <= 0.5 && abs($0.height - 20) <= 0.5
                 }
             XCTAssertFalse(
                 titles.isEmpty,
-                "missing retained-removal title at \(time): \(textBounds(in: list))"
+                "missing retained-removal title at \(time): \(renderedTextBounds(in: list))"
             )
             let box = try XCTUnwrap(
                 shapeStrokeBounds(in: list).first {
@@ -4654,12 +5108,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(
                     title.minX,
                     box.minX - 0.75,
-                    "retained-removal title escaped the left edge at \(time): titles=\(titles) box=\(box) allText=\(textBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                    "retained-removal title escaped the left edge at \(time): titles=\(titles) box=\(box) allText=\(renderedTextBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
                 )
                 XCTAssertLessThanOrEqual(
                     title.maxX,
                     box.maxX + 0.75,
-                    "retained-removal title escaped the right edge at \(time): titles=\(titles) box=\(box) allText=\(textBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
+                    "retained-removal title escaped the right edge at \(time): titles=\(titles) box=\(box) allText=\(renderedTextBounds(in: list)) allStrokes=\(shapeStrokeBounds(in: list)) tree=\(displayListTreeDescription(list))"
                 )
                 if expectsSettledCenter {
                     XCTAssertEqual(
@@ -4754,7 +5208,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let initialDisplayList = try displayList(in: child)
-        let initialBounds = try XCTUnwrap(textBounds(in: initialDisplayList).first)
+        let initialBounds = try XCTUnwrap(
+            renderedTextBounds(in: initialDisplayList).first
+        )
 
         let run = try XCTUnwrap(probe.toggle)
         try XCTUnwrap(child.gestureGraph).data.withCurrent {
@@ -4774,7 +5230,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 withGC
             )
             let sampleDisplayList = try displayList(in: child)
-            samples.append((sampleTime, try XCTUnwrap(textBounds(in: sampleDisplayList).first)))
+            samples.append((
+                sampleTime,
+                try XCTUnwrap(
+                    renderedTextBounds(in: sampleDisplayList).first
+                )
+            ))
         }
 
         let finalBounds = try XCTUnwrap(samples.last?.bounds)
@@ -4980,30 +5441,477 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             .max { $0.minX < $1.minX }
     }
 
+    private func renderedShapeRecords(
+        in displayList: DisplayList
+    ) -> [(
+        bounds: CGRect,
+        role: ShapeRole,
+        color: VUI.Color?,
+        isStroke: Bool
+    )] {
+        typealias Record = (
+            bounds: CGRect,
+            role: ShapeRole,
+            color: VUI.Color?,
+            isStroke: Bool
+        )
+
+        func applying(
+            _ transform: CGAffineTransform,
+            to records: [Record]
+        ) -> [Record] {
+            guard !transform.isIdentity else { return records }
+            return records.map { record in
+                (
+                    record.bounds.applying(transform).standardized,
+                    record.role,
+                    record.color,
+                    record.isStroke
+                )
+            }
+        }
+
+        func branchTransform(
+            from sourceBounds: CGRect,
+            to outputBounds: CGRect
+        ) -> CGAffineTransform? {
+            guard sourceBounds.width.magnitude > .ulpOfOne,
+                  sourceBounds.height.magnitude > .ulpOfOne else {
+                return nil
+            }
+            let scaleX = outputBounds.width / sourceBounds.width
+            let scaleY = outputBounds.height / sourceBounds.height
+            return CGAffineTransform(
+                a: scaleX,
+                b: 0,
+                c: 0,
+                d: scaleY,
+                tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                ty: outputBounds.minY - sourceBounds.minY * scaleY
+            )
+        }
+
+        func presentationTransform(
+            for item: DisplayList.Item
+        ) -> CGAffineTransform {
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case .effect:
+                return CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds, !recordedBounds.isNull else {
+                return .identity
+            }
+            return CGAffineTransform(
+                translationX: item.frame.minX - recordedBounds.minX,
+                y: item.frame.minY - recordedBounds.minY
+            )
+        }
+
+        return displayList.items.reduce(into: []) { records, item in
+            let itemTransform = presentationTransform(for: item)
+            switch item.value {
+            case let .content(content):
+                if case let .shape(shape) = content.value,
+                   case let .shape(
+                    role,
+                    style,
+                    _,
+                    _,
+                    commandBounds
+                   ) = shape.command,
+                   let commandBounds {
+                    let transformedPath = shape.path.applying(shape.transform)
+                    let center = CGPoint(
+                        x: commandBounds.midX,
+                        y: commandBounds.midY
+                    )
+                    let isStroke: Bool
+                    switch role {
+                    case .stroke:
+                        isStroke = true
+                    case .fill:
+                        isStroke = !transformedPath.contains(
+                            center,
+                            eoFill: shape.fillStyle.isEOFilled
+                        )
+                    case .separator:
+                        isStroke = false
+                    }
+                    let color: VUI.Color?
+                    if case let .color(value)? = style {
+                        color = value
+                    } else {
+                        color = nil
+                    }
+                    records.append((
+                        commandBounds
+                            .applying(itemTransform)
+                            .standardized,
+                        role,
+                        color,
+                        isStroke
+                    ))
+                }
+                switch content.value {
+                case let .style(style):
+                    let nested = renderedShapeRecords(in: style.contents)
+                    records.append(contentsOf: applying(
+                        style.transform.concatenating(itemTransform),
+                        to: nested
+                    ))
+                case let .crossFade(crossFade):
+                    if let source = crossFade.source,
+                       let transform = branchTransform(
+                        from: source.sourceBounds,
+                        to: source.outputBounds
+                       ) {
+                        records.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: renderedShapeRecords(in: source.contents)
+                        ))
+                    }
+                    if let target = crossFade.target,
+                       let transform = branchTransform(
+                        from: target.sourceBounds,
+                        to: target.outputBounds
+                       ) {
+                        records.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: renderedShapeRecords(in: target.contents)
+                        ))
+                    }
+                case let .flattened(contents, origin, _):
+                    records.append(contentsOf: applying(
+                        CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform),
+                        to: renderedShapeRecords(in: contents)
+                    ))
+                case let .drawing(contents, origin, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        records.append(contentsOf: applying(
+                            CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform),
+                            to: renderedShapeRecords(in: local.list)
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let nested = renderedShapeRecords(in: contents)
+                if case let .transform(projection) = effect,
+                   projection.isAffine {
+                    records.append(contentsOf: applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ).concatenating(itemTransform),
+                        to: nested
+                    ))
+                } else {
+                    records.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
+                }
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    records.append(contentsOf: applying(
+                        itemTransform,
+                        to: renderedShapeRecords(in: contents)
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
+    private func renderedShapePresentationSamples(
+        in displayList: DisplayList,
+        inheritedOpacity: Double = 1
+    ) -> [LayoutSchedulingShapePresentationSample] {
+        func applying(
+            _ transform: CGAffineTransform,
+            to samples: [LayoutSchedulingShapePresentationSample]
+        ) -> [LayoutSchedulingShapePresentationSample] {
+            guard !transform.isIdentity else { return samples }
+            return samples.map { sample in
+                var sample = sample
+                sample.bounds = sample.bounds
+                    .applying(transform)
+                    .standardized
+                return sample
+            }
+        }
+
+        func branchTransform(
+            from sourceBounds: CGRect,
+            to outputBounds: CGRect
+        ) -> CGAffineTransform? {
+            guard sourceBounds.width.magnitude > .ulpOfOne,
+                  sourceBounds.height.magnitude > .ulpOfOne else {
+                return nil
+            }
+            let scaleX = outputBounds.width / sourceBounds.width
+            let scaleY = outputBounds.height / sourceBounds.height
+            return CGAffineTransform(
+                a: scaleX,
+                b: 0,
+                c: 0,
+                d: scaleY,
+                tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                ty: outputBounds.minY - sourceBounds.minY * scaleY
+            )
+        }
+
+        func presentationTransform(
+            for item: DisplayList.Item
+        ) -> CGAffineTransform {
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case .effect:
+                return CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds, !recordedBounds.isNull else {
+                return .identity
+            }
+            return CGAffineTransform(
+                translationX: item.frame.minX - recordedBounds.minX,
+                y: item.frame.minY - recordedBounds.minY
+            )
+        }
+
+        return displayList.items.reduce(into: []) { samples, item in
+            let itemOpacity = inheritedOpacity * Double(item.opacity)
+            let itemTransform = presentationTransform(for: item)
+            switch item.value {
+            case let .content(content):
+                if case let .shape(shape) = content.value,
+                   case let .shape(
+                    role,
+                    style,
+                    _,
+                    _,
+                    commandBounds
+                   ) = shape.command,
+                   let commandBounds {
+                    let transformedPath = shape.path.applying(shape.transform)
+                    let center = CGPoint(
+                        x: commandBounds.midX,
+                        y: commandBounds.midY
+                    )
+                    let isStroke: Bool
+                    switch role {
+                    case .stroke:
+                        isStroke = true
+                    case .fill:
+                        isStroke = !transformedPath.contains(
+                            center,
+                            eoFill: shape.fillStyle.isEOFilled
+                        )
+                    case .separator:
+                        isStroke = false
+                    }
+                    let color: VUI.Color?
+                    if case let .color(value)? = style {
+                        color = value
+                    } else {
+                        color = nil
+                    }
+                    samples.append(LayoutSchedulingShapePresentationSample(
+                        bounds: commandBounds
+                            .applying(itemTransform)
+                            .standardized,
+                        role: role,
+                        color: color,
+                        isStroke: isStroke,
+                        opacity: itemOpacity
+                    ))
+                }
+                switch content.value {
+                case let .style(style):
+                    let styleOpacity: Double
+                    if case let .opacity(opacity) = style.style {
+                        styleOpacity = opacity
+                    } else {
+                        styleOpacity = 1
+                    }
+                    let nested = renderedShapePresentationSamples(
+                        in: style.contents,
+                        inheritedOpacity: itemOpacity * styleOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        style.transform.concatenating(itemTransform),
+                        to: nested
+                    ))
+                case let .crossFade(crossFade):
+                    let sourceOpacity: Double
+                    let targetOpacity: Double
+                    if case let .effect(
+                        .crossFade(sourceFraction, targetFraction),
+                        _
+                    ) = crossFade.command {
+                        sourceOpacity = 1 - Double(sourceFraction)
+                        targetOpacity = Double(targetFraction)
+                    } else {
+                        sourceOpacity = 1
+                        targetOpacity = 1
+                    }
+                    if let source = crossFade.source,
+                       let transform = branchTransform(
+                        from: source.sourceBounds,
+                        to: source.outputBounds
+                       ) {
+                        let nested = renderedShapePresentationSamples(
+                            in: source.contents,
+                            inheritedOpacity: itemOpacity * sourceOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: nested
+                        ))
+                    }
+                    if let target = crossFade.target,
+                       let transform = branchTransform(
+                        from: target.sourceBounds,
+                        to: target.outputBounds
+                       ) {
+                        let nested = renderedShapePresentationSamples(
+                            in: target.contents,
+                            inheritedOpacity: itemOpacity * targetOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: nested
+                        ))
+                    }
+                case let .flattened(contents, origin, _):
+                    let nested = renderedShapePresentationSamples(
+                        in: contents,
+                        inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform),
+                        to: nested
+                    ))
+                case let .drawing(contents, origin, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        let nested = renderedShapePresentationSamples(
+                            in: local.list,
+                            inheritedOpacity: itemOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform),
+                            to: nested
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let effectOpacity: Double
+                if case let .opacity(opacity) = effect {
+                    effectOpacity = Double(opacity)
+                } else {
+                    effectOpacity = 1
+                }
+                let nested = renderedShapePresentationSamples(
+                    in: contents,
+                    inheritedOpacity: itemOpacity * effectOpacity
+                )
+                if case let .transform(projection) = effect,
+                   projection.isAffine {
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ).concatenating(itemTransform),
+                        to: nested
+                    ))
+                } else {
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
+                }
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    let nested = renderedShapePresentationSamples(
+                        in: contents,
+                        inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
     private func shapeFillBounds(in displayList: DisplayList) -> [CGRect] {
-        var bounds = displayList.itemRecords.compactMap { record -> CGRect? in
-            guard record.kind == .shapeFill else { return nil }
+        renderedShapeRecords(in: displayList).compactMap { record in
+            guard record.role == .fill else { return nil }
             return record.bounds
         }
-        for effect in displayList.effects {
-            bounds.append(contentsOf: shapeFillBounds(in: effect.contents))
-        }
-        return bounds
     }
 
     private func shapeStrokeBounds(in displayList: DisplayList) -> [CGRect] {
-        var bounds = displayList.itemRecords.compactMap { record -> CGRect? in
-            guard record.kind == .shapeStroke else { return nil }
-            return record.bounds
+        renderedShapeRecords(in: displayList).compactMap { record in
+            record.isStroke ? record.bounds : nil
         }
-        for effect in displayList.effects {
-            bounds.append(contentsOf: shapeStrokeBounds(in: effect.contents))
-        }
-        return bounds
     }
 
     private func opaqueGreenShapeBounds(in displayList: DisplayList) -> [CGRect] {
-        var bounds = shapeFillRecords(in: displayList).compactMap { record -> CGRect? in
+        shapeFillRecords(in: displayList).compactMap { record -> CGRect? in
             guard record.color.provider.alpha >= 0.8,
                   record.color.provider.green > record.color.provider.red,
                   record.color.provider.green > record.color.provider.blue else {
@@ -5011,10 +5919,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             }
             return record.bounds
         }
-        for effect in displayList.effects {
-            bounds.append(contentsOf: opaqueGreenShapeBounds(in: effect.contents))
-        }
-        return bounds
     }
 
     private func textBounds(in displayList: DisplayList) -> [CGRect] {
@@ -5028,92 +5932,390 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         return bounds
     }
 
+    private func closureBounds(in displayList: DisplayList) -> [CGRect] {
+        var bounds = displayList.itemRecords.compactMap { record -> CGRect? in
+            guard record.kind == .closure else { return nil }
+            return record.bounds
+        }
+        for effect in displayList.effects {
+            bounds.append(contentsOf: closureBounds(in: effect.contents))
+        }
+        return bounds
+    }
+
     private func displayListTreeDescription(
         _ displayList: DisplayList,
         depth: Int = 0
     ) -> String {
         let prefix = String(repeating: "  ", count: depth)
-        var lines = displayList.itemRecords.map { record in
-            "\(prefix)item kind=\(record.kind) effect=\(String(describing: record.effectKind)) bounds=\(String(describing: record.bounds))"
-        }
-        for effect in displayList.effects {
-            let label: String
-            switch effect.effect {
-            case .identity:
-                label = "identity"
-            case .archive:
-                label = "archive"
-            case .opacity:
-                label = "opacity"
-            case .transform:
-                label = "transform"
-            case .mask:
-                label = "mask"
-            case .animation:
-                label = "animation"
-            case .state:
-                label = "state"
-            case .contentTransition:
-                label = "contentTransition"
-            case .interpolatorRoot:
-                label = "interpolatorRoot"
-            case .interpolatorLayer:
-                label = "interpolatorLayer"
-            case .interpolatorAnimation:
-                label = "interpolatorAnimation"
-            case .shader:
-                label = "shader"
-            case .geometryGroup:
-                label = "geometryGroup"
+        var lines: [String] = []
+        for item in displayList.items {
+            switch item.value {
+            case let .content(content):
+                let record = item.record
+                let text: String? = if case let .text(text) = content.value {
+                    text.view.text.storage?.string
+                } else {
+                    nil
+                }
+                lines.append(
+                    "\(prefix)item kind=\(record.kind) effect=\(String(describing: record.effectKind)) text=\(String(describing: text)) frame=\(item.frame) bounds=\(String(describing: record.bounds))"
+                )
+            case let .effect(effect, contents):
+                let label: String
+                switch effect {
+                case .identity:
+                    label = "identity"
+                case .archive:
+                    label = "archive"
+                case .opacity:
+                    label = "opacity"
+                case let .transform(transform):
+                    label = "transform \(transform)"
+                case .mask:
+                    label = "mask"
+                case .animation:
+                    label = "animation"
+                case .state:
+                    label = "state"
+                case .contentTransition:
+                    label = "contentTransition"
+                case .interpolatorRoot:
+                    label = "interpolatorRoot"
+                case .interpolatorLayer:
+                    label = "interpolatorLayer"
+                case .interpolatorAnimation:
+                    label = "interpolatorAnimation"
+                case .shader:
+                    label = "shader"
+                case .geometryGroup:
+                    label = "geometryGroup"
+                }
+                lines.append(
+                    "\(prefix)effect \(label) frame=\(item.frame) contentsBounds=\(String(describing: contents.interpolationBounds))"
+                )
+                lines.append(displayListTreeDescription(
+                    contents,
+                    depth: depth + 1
+                ))
+            case let .states(states):
+                lines.append("\(prefix)states frame=\(item.frame)")
+                for (_, contents) in states {
+                    lines.append(displayListTreeDescription(
+                        contents,
+                        depth: depth + 1
+                    ))
+                }
+            case .empty:
+                lines.append("\(prefix)empty frame=\(item.frame)")
             }
-            lines.append("\(prefix)effect \(label)")
-            lines.append(displayListTreeDescription(effect.contents, depth: depth + 1))
+        }
+        for debugItem in displayList.debugItems {
+            lines.append(
+                "\(prefix)debug frame=\(debugItem.frame) bounds=\(String(describing: debugItem.record.bounds))"
+            )
         }
         return lines.joined(separator: " | ")
     }
 
-    private func translucentShapeFillRecords(in displayList: DisplayList) -> [(bounds: CGRect, color: VUI.Color)] {
-        var records = shapeFillRecords(in: displayList).filter { $0.color.provider.alpha < 0.8 }
-        for effect in displayList.effects {
-            records.append(contentsOf: translucentShapeFillRecords(in: effect.contents))
+    private func drawingContents(
+        in displayList: DisplayList
+    ) -> [DisplayList] {
+        displayList.items.reduce(into: []) { result, item in
+            switch item.value {
+            case let .content(content):
+                switch content.value {
+                case let .style(style):
+                    result.append(contentsOf: drawingContents(
+                        in: style.contents
+                    ))
+                case let .crossFade(crossFade):
+                    if let source = crossFade.source {
+                        result.append(contentsOf: drawingContents(
+                            in: source.contents
+                        ))
+                    }
+                    if let target = crossFade.target {
+                        result.append(contentsOf: drawingContents(
+                            in: target.contents
+                        ))
+                    }
+                case let .flattened(contents, _, _):
+                    result.append(contentsOf: drawingContents(
+                        in: contents
+                    ))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        result.append(local.list)
+                        result.append(contentsOf: drawingContents(in: local.list))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(_, contents):
+                result.append(contentsOf: drawingContents(in: contents))
+            case let .states(states):
+                for (_, contents) in states {
+                    result.append(contentsOf: drawingContents(
+                        in: contents
+                    ))
+                }
+            case .empty:
+                break
+            }
         }
-        return records
+    }
+
+    private func recursiveTextCommandBounds(
+        in displayList: DisplayList
+    ) -> [CGRect] {
+        displayList.items.reduce(into: []) { result, item in
+            switch item.value {
+            case let .content(content):
+                if case .text = content.command,
+                   let bounds = content.command.bounds {
+                    result.append(bounds)
+                }
+                switch content.value {
+                case let .style(style):
+                    result.append(contentsOf: recursiveTextCommandBounds(
+                        in: style.contents
+                    ))
+                case let .crossFade(crossFade):
+                    if let source = crossFade.source {
+                        result.append(contentsOf: recursiveTextCommandBounds(
+                            in: source.contents
+                        ))
+                    }
+                    if let target = crossFade.target {
+                        result.append(contentsOf: recursiveTextCommandBounds(
+                            in: target.contents
+                        ))
+                    }
+                case let .flattened(contents, _, _):
+                    result.append(contentsOf: recursiveTextCommandBounds(
+                        in: contents
+                    ))
+                case let .drawing(contents, _, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        result.append(contentsOf: recursiveTextCommandBounds(
+                            in: local.list
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(_, contents):
+                result.append(contentsOf: recursiveTextCommandBounds(in: contents))
+            case let .states(states):
+                for (_, contents) in states {
+                    result.append(contentsOf: recursiveTextCommandBounds(
+                        in: contents
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
+    private func translucentShapeFillRecords(in displayList: DisplayList) -> [(bounds: CGRect, color: VUI.Color)] {
+        shapeFillRecords(in: displayList).filter {
+            $0.color.provider.alpha < 0.8
+        }
     }
 
     private func renderedTranslucentShapeFillRecords(
         in displayList: DisplayList
     ) -> [(bounds: CGRect, color: VUI.Color)] {
-        var records = translucentShapeFillRecords(in: displayList)
-        for item in displayList.items {
-            guard case let .content(content) = item.value,
-                  case let .crossFade(crossFade) = content.value else {
-                continue
-            }
-            if let source = crossFade.source {
-                records.append(contentsOf: renderedTranslucentShapeFillRecords(in: source.contents))
-            }
-            if let target = crossFade.target {
-                records.append(contentsOf: renderedTranslucentShapeFillRecords(in: target.contents))
-            }
-        }
-        return records
+        translucentShapeFillRecords(in: displayList)
     }
 
-    private func renderedTextBounds(in displayList: DisplayList) -> [CGRect] {
-        var bounds = textBounds(in: displayList)
-        for item in displayList.items {
-            guard case let .content(content) = item.value,
-                  case let .crossFade(crossFade) = content.value else {
-                continue
-            }
-            if let source = crossFade.source {
-                bounds.append(contentsOf: renderedTextBounds(in: source.contents))
-            }
-            if let target = crossFade.target {
-                bounds.append(contentsOf: renderedTextBounds(in: target.contents))
+    private func renderedTextBounds(
+        in displayList: DisplayList,
+        matching string: String? = nil
+    ) -> [CGRect] {
+        func applying(
+            _ transform: CGAffineTransform,
+            to bounds: [CGRect]
+        ) -> [CGRect] {
+            guard !transform.isIdentity else { return bounds }
+            return bounds.map {
+                $0.applying(transform).standardized
             }
         }
-        return bounds
+
+        func branchTransform(
+            from sourceBounds: CGRect,
+            to outputBounds: CGRect
+        ) -> CGAffineTransform? {
+            guard sourceBounds.width.magnitude > .ulpOfOne,
+                  sourceBounds.height.magnitude > .ulpOfOne else {
+                return nil
+            }
+            let scaleX = outputBounds.width / sourceBounds.width
+            let scaleY = outputBounds.height / sourceBounds.height
+            return CGAffineTransform(
+                a: scaleX,
+                b: 0,
+                c: 0,
+                d: scaleY,
+                tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                ty: outputBounds.minY - sourceBounds.minY * scaleY
+            )
+        }
+
+        func presentationTransform(
+            for item: DisplayList.Item
+        ) -> CGAffineTransform {
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case .effect:
+                return CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds, !recordedBounds.isNull else {
+                return .identity
+            }
+            return CGAffineTransform(
+                translationX: item.frame.minX - recordedBounds.minX,
+                y: item.frame.minY - recordedBounds.minY
+            )
+        }
+
+        return displayList.items.reduce(into: []) { bounds, item in
+            let itemTransform = presentationTransform(for: item)
+            switch item.value {
+            case let .content(content):
+                let matchesString: Bool
+                if let string,
+                   case let .text(text) = content.value {
+                    matchesString = text.view.text.storage?.string == string
+                } else {
+                    matchesString = string == nil
+                }
+                if matchesString,
+                   case let .text(_, commandBounds) = content.command,
+                   let commandBounds {
+                    bounds.append(
+                        commandBounds
+                            .applying(itemTransform)
+                            .standardized
+                    )
+                }
+                switch content.value {
+                case let .style(style):
+                    bounds.append(contentsOf: applying(
+                        style.transform.concatenating(itemTransform),
+                        to: renderedTextBounds(
+                            in: style.contents,
+                            matching: string
+                        )
+                    ))
+                case let .crossFade(crossFade):
+                    if let source = crossFade.source,
+                       let transform = branchTransform(
+                        from: source.sourceBounds,
+                        to: source.outputBounds
+                       ) {
+                        bounds.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: renderedTextBounds(
+                                in: source.contents,
+                                matching: string
+                            )
+                        ))
+                    }
+                    if let target = crossFade.target,
+                       let transform = branchTransform(
+                        from: target.sourceBounds,
+                        to: target.outputBounds
+                       ) {
+                        bounds.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: renderedTextBounds(
+                                in: target.contents,
+                                matching: string
+                            )
+                        ))
+                    }
+                case let .flattened(contents, origin, _):
+                    bounds.append(contentsOf: applying(
+                        CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform),
+                        to: renderedTextBounds(
+                            in: contents,
+                            matching: string
+                        )
+                    ))
+                case let .drawing(contents, origin, _):
+                    if let local = contents as? DisplayList.LocalContents {
+                        bounds.append(contentsOf: applying(
+                            CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform),
+                            to: renderedTextBounds(
+                                in: local.list,
+                                matching: string
+                            )
+                        ))
+                    }
+                case .backend, .color, .shape, .image, .text:
+                    break
+                }
+            case let .effect(effect, contents):
+                let nested = renderedTextBounds(
+                    in: contents,
+                    matching: string
+                )
+                if case let .transform(projection) = effect,
+                   projection.isAffine {
+                    bounds.append(contentsOf: applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ).concatenating(itemTransform),
+                        to: nested
+                    ))
+                } else {
+                    bounds.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
+                }
+            case let .states(states):
+                if let contents = states.last?.1 {
+                    bounds.append(contentsOf: applying(
+                        itemTransform,
+                        to: renderedTextBounds(
+                            in: contents,
+                            matching: string
+                        )
+                    ))
+                }
+            case .empty:
+                break
+            }
+        }
     }
 
     private func resolvedTextSamples(
@@ -5122,7 +6324,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         environment: EnvironmentValues,
         inheritedOpacity: Double = 1
     ) -> [LayoutSchedulingResolvedTextSample] {
-        displayList.items.reduce(into: []) { samples, item in
+        return displayList.items.reduce(into: []) { samples, item in
             let itemOpacity = inheritedOpacity * Double(item.opacity)
             switch item.value {
             case let .content(content):
@@ -5268,8 +6470,35 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
         }
 
+        func presentationTransform(
+            for item: DisplayList.Item
+        ) -> CGAffineTransform {
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case .effect:
+                return CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds, !recordedBounds.isNull else {
+                return .identity
+            }
+            return CGAffineTransform(
+                translationX: item.frame.minX - recordedBounds.minX,
+                y: item.frame.minY - recordedBounds.minY
+            )
+        }
+
         return displayList.items.reduce(into: []) { samples, item in
             let itemOpacity = inheritedOpacity * Double(item.opacity)
+            let itemTransform = presentationTransform(for: item)
             switch item.value {
             case let .content(content):
                 if case let .text(text) = content.value,
@@ -5282,7 +6511,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         foregroundOpacity = 1
                     }
                     samples.append(LayoutSchedulingResolvedTextSample(
-                        frame: text.frame.applying(text.transform).standardized,
+                        frame: text.frame
+                            .applying(text.transform)
+                            .applying(itemTransform)
+                            .standardized,
                         opacity: itemOpacity * foregroundOpacity
                     ))
                 }
@@ -5300,7 +6532,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         environment: environment,
                         inheritedOpacity: itemOpacity * styleOpacity
                     )
-                    samples.append(contentsOf: applying(style.transform, to: nested))
+                    samples.append(contentsOf: applying(
+                        style.transform.concatenating(itemTransform),
+                        to: nested
+                    ))
                 case let .crossFade(crossFade):
                     let sourceOpacity: Double
                     let targetOpacity: Double
@@ -5326,7 +6561,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             inheritedOpacity: itemOpacity * sourceOpacity
                         )
                         samples.append(contentsOf: applying(
-                            transform.concatenating(crossFade.transform),
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
                             to: nested
                         ))
                     }
@@ -5342,7 +6579,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             inheritedOpacity: itemOpacity * targetOpacity
                         )
                         samples.append(contentsOf: applying(
-                            transform.concatenating(crossFade.transform),
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
                             to: nested
                         ))
                     }
@@ -5354,7 +6593,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         inheritedOpacity: itemOpacity
                     )
                     samples.append(contentsOf: applying(
-                        CGAffineTransform(translationX: origin.x, y: origin.y),
+                        CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform),
                         to: nested
                     ))
                 case let .drawing(contents, origin, _):
@@ -5366,7 +6608,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             inheritedOpacity: itemOpacity
                         )
                         samples.append(contentsOf: applying(
-                            CGAffineTransform(translationX: origin.x, y: origin.y),
+                            CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform),
                             to: nested
                         ))
                     }
@@ -5395,19 +6640,26 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             d: projection.m22,
                             tx: projection.m31,
                             ty: projection.m32
-                        ),
+                        ).concatenating(itemTransform),
                         to: nested
                     ))
                 } else {
-                    samples.append(contentsOf: nested)
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
                 }
             case let .states(states):
                 if let contents = states.last?.1 {
-                    samples.append(contentsOf: renderedResolvedTextSamples(
+                    let nested = renderedResolvedTextSamples(
                         in: contents,
                         matching: string,
                         environment: environment,
                         inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
                     ))
                 }
             case .empty:
@@ -5520,18 +6772,110 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         in displayList: DisplayList,
         inheritedOpacity: Double = 1
     ) -> [LayoutSchedulingSymbolPresentationSample] {
-        displayList.items.reduce(into: []) { samples, item in
+        func applying(
+            _ transform: CGAffineTransform,
+            to samples: [LayoutSchedulingSymbolPresentationSample]
+        ) -> [LayoutSchedulingSymbolPresentationSample] {
+            guard !transform.isIdentity else { return samples }
+            return samples.map { sample in
+                var sample = sample
+                sample.bounds = sample.bounds
+                    .applying(transform)
+                    .standardized
+                return sample
+            }
+        }
+
+        func branchTransform(
+            from sourceBounds: CGRect,
+            to outputBounds: CGRect
+        ) -> CGAffineTransform? {
+            guard sourceBounds.width.magnitude > .ulpOfOne,
+                  sourceBounds.height.magnitude > .ulpOfOne else {
+                return nil
+            }
+            let scaleX = outputBounds.width / sourceBounds.width
+            let scaleY = outputBounds.height / sourceBounds.height
+            return CGAffineTransform(
+                a: scaleX,
+                b: 0,
+                c: 0,
+                d: scaleY,
+                tx: outputBounds.minX - sourceBounds.minX * scaleX,
+                ty: outputBounds.minY - sourceBounds.minY * scaleY
+            )
+        }
+
+        func presentationTransform(
+            for item: DisplayList.Item
+        ) -> CGAffineTransform {
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case .effect:
+                return CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            guard let recordedBounds, !recordedBounds.isNull else {
+                return .identity
+            }
+            return CGAffineTransform(
+                translationX: item.frame.minX - recordedBounds.minX,
+                y: item.frame.minY - recordedBounds.minY
+            )
+        }
+
+        return displayList.items.reduce(into: []) { samples, item in
             let itemOpacity = inheritedOpacity * Double(item.opacity)
+            let itemTransform = presentationTransform(for: item)
             switch item.value {
             case let .content(content):
                 switch content.value {
                 case let .image(image):
+                    let bounds = image.frame
+                        .applying(image.transform)
+                        .applying(itemTransform)
+                        .standardized
                     if let symbol = image.image.symbol {
-                        samples.append(LayoutSchedulingSymbolPresentationSample(
-                            name: symbol.identity.name,
-                            opacity: itemOpacity,
-                            drawProgresses: image.image.symbolDrawProgresses
-                        ))
+                        if let replacement =
+                            image.image.symbolReplacementPresentation {
+                            for symbolPresentation in replacement.symbols {
+                                guard let symbol =
+                                    symbolPresentation.image.symbol else {
+                                    continue
+                                }
+                                for values in symbolPresentation.levels
+                                    where values.opacity > 0 {
+                                    samples.append(
+                                        LayoutSchedulingSymbolPresentationSample(
+                                            name: symbol.identity.name,
+                                            opacity: itemOpacity *
+                                                values.opacity,
+                                            drawProgresses: symbolPresentation
+                                                .drawProgresses,
+                                            bounds: bounds
+                                        )
+                                    )
+                                }
+                            }
+                        } else {
+                            samples.append(
+                                LayoutSchedulingSymbolPresentationSample(
+                                    name: symbol.identity.name,
+                                    opacity: itemOpacity,
+                                    drawProgresses:
+                                        image.image.symbolDrawProgresses,
+                                    bounds: bounds
+                                )
+                            )
+                        }
                     }
                 case let .style(style):
                     let styleOpacity: Double
@@ -5540,9 +6884,13 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                     } else {
                         styleOpacity = 1
                     }
-                    samples.append(contentsOf: symbolPresentationSamples(
+                    let nested = symbolPresentationSamples(
                         in: style.contents,
                         inheritedOpacity: itemOpacity * styleOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        style.transform.concatenating(itemTransform),
+                        to: nested
                     ))
                 case let .crossFade(crossFade):
                     let sourceOpacity: Double
@@ -5557,28 +6905,62 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         sourceOpacity = 1
                         targetOpacity = 1
                     }
-                    if let source = crossFade.source {
-                        samples.append(contentsOf: symbolPresentationSamples(
+                    if let source = crossFade.source,
+                       let transform = branchTransform(
+                        from: source.sourceBounds,
+                        to: source.outputBounds
+                       ) {
+                        let nested = symbolPresentationSamples(
                             in: source.contents,
                             inheritedOpacity: itemOpacity * sourceOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: nested
                         ))
                     }
-                    if let target = crossFade.target {
-                        samples.append(contentsOf: symbolPresentationSamples(
+                    if let target = crossFade.target,
+                       let transform = branchTransform(
+                        from: target.sourceBounds,
+                        to: target.outputBounds
+                       ) {
+                        let nested = symbolPresentationSamples(
                             in: target.contents,
                             inheritedOpacity: itemOpacity * targetOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            transform
+                                .concatenating(crossFade.transform)
+                                .concatenating(itemTransform),
+                            to: nested
                         ))
                     }
-                case let .flattened(nested, _, _):
-                    samples.append(contentsOf: symbolPresentationSamples(
-                        in: nested,
+                case let .flattened(contents, origin, _):
+                    let nested = symbolPresentationSamples(
+                        in: contents,
                         inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform),
+                        to: nested
                     ))
-                case let .drawing(contents, _, _):
+                case let .drawing(contents, origin, _):
                     if let local = contents as? DisplayList.LocalContents {
-                        samples.append(contentsOf: symbolPresentationSamples(
+                        let nested = symbolPresentationSamples(
                             in: local.list,
                             inheritedOpacity: itemOpacity
+                        )
+                        samples.append(contentsOf: applying(
+                            CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform),
+                            to: nested
                         ))
                     }
                 case .backend,
@@ -5587,16 +6969,45 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                      .text:
                     break
                 }
-            case let .effect(_, contents):
-                samples.append(contentsOf: symbolPresentationSamples(
+            case let .effect(effect, contents):
+                let effectOpacity: Double
+                if case let .opacity(opacity) = effect {
+                    effectOpacity = Double(opacity)
+                } else {
+                    effectOpacity = 1
+                }
+                let nested = symbolPresentationSamples(
                     in: contents,
-                    inheritedOpacity: itemOpacity
-                ))
+                    inheritedOpacity: itemOpacity * effectOpacity
+                )
+                if case let .transform(projection) = effect,
+                   projection.isAffine {
+                    samples.append(contentsOf: applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ).concatenating(itemTransform),
+                        to: nested
+                    ))
+                } else {
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
+                    ))
+                }
             case let .states(states):
-                for (_, contents) in states {
-                    samples.append(contentsOf: symbolPresentationSamples(
+                if let contents = states.last?.1 {
+                    let nested = symbolPresentationSamples(
                         in: contents,
                         inheritedOpacity: itemOpacity
+                    )
+                    samples.append(contentsOf: applying(
+                        itemTransform,
+                        to: nested
                     ))
                 }
             case .empty:
@@ -5617,13 +7028,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     private func shapeFillRecords(in displayList: DisplayList) -> [(bounds: CGRect, color: VUI.Color)] {
-        displayList.itemRecords.compactMap { record -> (CGRect, VUI.Color)? in
-            guard record.kind == .shapeFill,
-                  let bounds = record.bounds,
-                  case let .color(color)? = record.shapeStyle else {
+        renderedShapeRecords(in: displayList).compactMap { record in
+            guard record.role == .fill,
+                  let color = record.color else {
                 return nil
             }
-            return (bounds, color)
+            return (record.bounds, color)
         }
     }
 
@@ -5865,7 +7275,7 @@ private struct LayoutSchedulingProbeLayout: Layout {
     }
 }
 
-private final class LayoutSchedulingAnimationProbe {
+private final class LayoutSchedulingAnimationProbe: @unchecked Sendable {
     var toggle: (() -> Void)?
     var plainTextChange: (() -> Void)?
     var completions: [Int] = []
@@ -5891,9 +7301,10 @@ private struct LayoutSchedulingSymbolPresentationSample: CustomStringConvertible
     var name: String
     var opacity: Double
     var drawProgresses: [Double]?
+    var bounds: CGRect
 
     var description: String {
-        "\(name)(opacity: \(opacity), draw: \(String(describing: drawProgresses)))"
+        "\(name)(opacity: \(opacity), draw: \(String(describing: drawProgresses)), bounds: \(bounds))"
     }
 }
 
@@ -6773,6 +8184,46 @@ private struct LayoutSchedulingRapidContentTextRoot: View {
     }
 }
 
+private struct LayoutSchedulingRapidAsymmetricViewTransitionRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var cardVisible = true
+
+    var body: some View {
+        probe.toggle = {
+            withAnimation(.easeInOut(duration: 2)) {
+                cardVisible.toggle()
+            }
+        }
+        return VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                if cardVisible {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.green)
+                        .frame(width: 180, height: 82)
+                        .transition(
+                            .asymmetric(
+                                insertion: .scale(scale: 0.65)
+                                    .combined(with: .opacity),
+                                removal: .move(edge: .trailing)
+                                    .combined(with: .opacity)
+                            )
+                        )
+                }
+            }
+            .frame(width: 430, height: 125)
+
+            Button(cardVisible ? "Remove View" : "Insert View") {
+                withAnimation(.easeInOut(duration: 2)) {
+                    cardVisible.toggle()
+                }
+            }
+        }
+        .frame(width: 500, height: 220)
+    }
+}
+
 private struct LayoutSchedulingResolvedAnimationLabSpringRoot: View {
     let probe: LayoutSchedulingAnimationProbe
     let font: VUI.Font
@@ -7169,6 +8620,37 @@ private struct LayoutSchedulingSymbolDrawTransitionRoot: View {
     }
 }
 
+private struct LayoutSchedulingSymbolDrawLayoutRoot: View {
+    let probe: LayoutSchedulingAnimationProbe
+    @State private var hidden = false
+
+    var body: some View {
+        probe.toggle = {
+            hidden.toggle()
+        }
+        return HStack(spacing: 14) {
+            Button(hidden ? "Restore Draw" : "Hide Draw") {
+                hidden.toggle()
+            }
+
+            VStack(spacing: 4) {
+                Image(systemName: "draw")
+                    .font(.system(size: 40))
+                    .frame(width: 56, height: 56)
+                    .foregroundStyle(Color.blue)
+                    .symbolEffect(
+                        DrawOnSymbolEffect.drawOn.byLayer,
+                        options: .speed(0.25),
+                        isActive: hidden
+                    )
+                Text("by layer")
+                    .font(.system(.caption))
+            }
+        }
+        .frame(width: 500, height: 150)
+    }
+}
+
 private struct LayoutSchedulingSymbolReplaceRoot: View {
     let probe: LayoutSchedulingAnimationProbe
     @State private var usesDraw = false
@@ -7290,6 +8772,14 @@ private struct LayoutSchedulingResolvedTextSample {
     var opacity: Double
 }
 
+private struct LayoutSchedulingShapePresentationSample {
+    var bounds: CGRect
+    var role: ShapeRole
+    var color: VUI.Color?
+    var isStroke: Bool
+    var opacity: Double
+}
+
 private struct LayoutSchedulingAnimationLabInsertionSample {
     var time: Double
     var title: LayoutSchedulingResolvedTextSample?
@@ -7354,7 +8844,10 @@ private struct LayoutSchedulingTransitionTextMarker: View {
             LayoutComputer.fixed(resolvedSize.value)
         }
         let displayList: Attribute<DisplayList> = graph.makeRule {
-            let bounds = CGRect(origin: position.value, size: inputSize.value.value)
+            let bounds = CGRect(
+                origin: .zero,
+                size: inputSize.value.value
+            )
             var list = DisplayList()
             list.appendTextItem(foreground: .color(.red), bounds: bounds) { _ in }
             list.appendDebugItem(bounds: bounds) { _ in }
@@ -7417,18 +8910,16 @@ private struct LayoutSchedulingTextMarker: View {
         let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
         var cachedEnvironment = cachedEnvironmentAttribute.value
         let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
-        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
         cachedEnvironmentAttribute.value = cachedEnvironment
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer.fixed(view._attribute.value.size)
         }
         let displayListAttr: Attribute<DisplayList> = graph.makeRule {
-            let position = positionAttr.value
             let size = sizeAttr.value.value
             var list = DisplayList()
             list.appendTextItem(
                 foreground: .color(.red),
-                bounds: CGRect(origin: position, size: size)
+                bounds: CGRect(origin: .zero, size: size)
             ) { _ in }
             return list
         }
@@ -7500,19 +8991,17 @@ private struct LayoutSchedulingEnvironmentTextMarker: View {
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
         var cachedEnvironment = cachedEnvironmentAttr.value
         let sizeAttr = cachedEnvironment.animatedSize(for: inputs)
-        let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
         cachedEnvironmentAttr.value = cachedEnvironment
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             _ = cachedEnvironmentAttr.value.environment.value.font
             return LayoutComputer.fixed(view._attribute.value.size)
         }
         let displayListAttr: Attribute<DisplayList> = graph.makeRule {
-            let position = positionAttr.value
             let size = sizeAttr.value.value
             var list = DisplayList()
             list.appendTextItem(
                 foreground: .color(.red),
-                bounds: CGRect(origin: position, size: size)
+                bounds: CGRect(origin: .zero, size: size)
             ) { _ in }
             return list
         }

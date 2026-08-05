@@ -601,6 +601,18 @@ enum _ShapeStyle_LayerID: Equatable {
 }
 
 final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
+    enum AddLayerResult {
+        case direct(
+            group: _ShapeStyle_InterpolatorGroup,
+            serial: UInt32
+        )
+        case replacement(
+            style: _ShapeStyle_Pack.Style?,
+            group: _ShapeStyle_InterpolatorGroup,
+            serial: UInt32
+        )
+    }
+
     struct Layer {
         var id: _ShapeStyle_LayerID
         var serial: UInt32
@@ -646,7 +658,7 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
     func addLayer(
         id: _ShapeStyle_LayerID,
         style: _ShapeStyle_Pack.Style?
-    ) -> UInt32 {
+    ) -> AddLayerResult {
         let index = Int(cursor)
         cursor += 1
 
@@ -662,32 +674,38 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
                     isRemoved: false
                 )
             )
-            return layerSerial
+            return .direct(group: self, serial: layerSerial)
         }
 
         precondition(index < layers.count)
         guard layers[index].id == id else {
             layers[index].isRemoved = true
-            fatalError(
-                "Shape-style layer replacement requires the rendered-layer producer."
+            return .replacement(
+                style: layers[index].style,
+                group: self,
+                serial: layers[index].serial
             )
         }
         layers[index].style = style
         layers[index].isRemoved = false
-        return layers[index].serial
+        return .direct(group: self, serial: layers[index].serial)
     }
 
-    func finishLayers() {
-        let firstUnused = Int(cursor)
-        if firstUnused < layers.count {
-            for index in firstUnused..<layers.count {
-                layers[index].isRemoved = true
-            }
-            cursor = 0
-            fatalError(
-                "Shape-style layer retirement requires the rendered-layer producer."
-            )
+    func nextTrailingLayer() -> (
+        style: _ShapeStyle_Pack.Style?,
+        group: _ShapeStyle_InterpolatorGroup,
+        serial: UInt32
+    )? {
+        let index = Int(cursor)
+        guard index < layers.count else {
+            return nil
         }
+        cursor += 1
+        layers[index].isRemoved = true
+        return (layers[index].style, self, layers[index].serial)
+    }
+
+    func resetLayerCursor() {
         cursor = 0
     }
 
@@ -700,7 +718,8 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
         rasterizationOptions: RasterizationOptions,
         supportsVFD: Bool
     ) {
-        for index in layers.indices {
+        var index = layers.startIndex
+        while index < layers.endIndex {
             if layers[index].state.contentSeed != contentSeed,
                let animation {
                 if layers[index].state.removed.last?.phase == .pending {
@@ -732,13 +751,18 @@ final class _ShapeStyle_InterpolatorGroup: DisplayList.InterpolatorGroup {
             layers[index].state.contentSeed = contentSeed
             layers[index].state.supportsVFD = supportsVFD
             layers[index].state.contents.numericValue = transition.numericValue
-        }
-        if self.contentsScale != contentsScale {
-            self.contentsScale = contentsScale
-            for index in layers.indices {
+
+            if self.contentsScale != contentsScale {
                 layers[index].state.invalidateContentsScale()
             }
+            if layers[index].isRemoved &&
+                layers[index].state.removedCount == 0 {
+                layers.remove(at: index)
+                continue
+            }
+            index += 1
         }
+        self.contentsScale = contentsScale
         self.rasterizationOptions = rasterizationOptions
     }
 
@@ -980,9 +1004,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
                 environment.contentTransitionAddsDrawingGroup {
                 transitionState.options.insert(.addsDrawingGroup)
             }
-            if transitionState.transition.symbolReplaceConfiguration != nil {
-                transitionState.options.insert(.animatesDifferentContent)
-            }
             listener = transaction.combinedAnimationListener
         }
         transitionState.animation = animation
@@ -990,7 +1011,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
             style: transitionState.style,
             layoutDirection: environment.layoutDirection
         )
-
         lastContent = targetContent
         lastSize = targetSize
 
@@ -1110,6 +1130,7 @@ extension _ViewOutputs {
                 contentVersion: DisplayList.Version()
             )
         )
+        interpolated.flags = .transactional
         preferences.setValue(interpolated.identifier, for: DisplayList.Key.self)
     }
 }
@@ -1140,8 +1161,6 @@ private extension DisplayList {
                     version: version
                 ) || rewritten
                 items[index].value = .effect(.identity, contents)
-                items[index].frame = contents.interpolationBounds ??
-                    items[index].frame
             case let .effect(effect, contents):
                 var contents = contents
                 rewritten = contents.rewriteInterpolation(

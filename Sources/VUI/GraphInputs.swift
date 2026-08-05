@@ -7,59 +7,6 @@
 
 import Foundation
 
-// PropertyKey hierarchy for graph inputs.
-//
-// PropertyKey  (PropertyList.swift) - base: defaultValue, valuesEqual
-//   -> GraphInput - adds AG reuse support (makeReusable, tryToReuse, isTriviallyReusable)
-//      -> ViewInput - marker: keys stored in _ViewInputs.customInputs channel
-
-/// Opaque map passed to GraphReusable methods.
-/// Reserved for AG reuse bookkeeping.
-struct IndirectAttributeMap {}
-
-/// Protocol for values that support AG node reuse.
-protocol GraphReusable {
-    mutating func makeReusable(indirectMap: IndirectAttributeMap)
-    mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool
-    static var isTriviallyReusable: Bool { get }
-}
-
-extension GraphReusable {
-    mutating func makeReusable(indirectMap: IndirectAttributeMap) {}
-    mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { false }
-    static var isTriviallyReusable: Bool { false }
-}
-
-/// Refinement of PropertyKey that participates in AG node reuse.
-/// Keys conforming to GraphInput can be stored in _GraphInputs.customInputs (base channel).
-protocol GraphInput: PropertyKey {
-    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value)
-    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool
-    static var isTriviallyReusable: Bool { get }
-}
-
-extension GraphInput {
-    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value) {}
-    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { false }
-    static var isTriviallyReusable: Bool { false }
-}
-
-extension GraphInput where Value: GraphReusable {
-    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value) {
-        value.makeReusable(indirectMap: indirectMap)
-    }
-    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool {
-        var copy = a
-        return copy.tryToReuse(by: b, indirectMap: indirectMap, testOnly: testOnly)
-    }
-    static var isTriviallyReusable: Bool { Value.isTriviallyReusable }
-}
-
-/// Marker refinement of GraphInput for view-level channel.
-/// Keys conforming to ViewInput are stored in _ViewInputs.customInputs (view channel).
-/// No additional requirements.
-protocol ViewInput: GraphInput {}
-
 protocol Feature: ViewInputBoolFlag {
     static var isEnabled: Bool { get }
 }
@@ -152,15 +99,6 @@ struct ArchivedViewInput: ViewInput {
     static var defaultValue: Value { Value() }
 }
 
-/// A generic single-owner reference box.
-/// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
-/// (a struct) still shares the same `CachedEnvironment` instance across
-/// all descendants of the same view subtree.
-final class MutableBox<Value>: @unchecked Sendable {
-    var value: Value
-    init(_ value: Value) { self.value = value }
-}
-
 /// Animation time value passed through the AG graph.
 /// Only stored property: `seconds: Double` (8 bytes).
 struct Time: Comparable, Hashable {
@@ -199,109 +137,6 @@ private struct SavedTransactionKey: GraphInput {
         lhs.count == rhs.count && zip(lhs, rhs).allSatisfy {
             $0.identifier == $1.identifier
         }
-    }
-}
-
-/// Animated view frame snapshot passed through the animation system.
-/// { origin: CGPoint (16 bytes), size: ViewSize (32 bytes) }
-/// Total size: 48 bytes.
-struct ViewFrame: Equatable {
-    var origin: CGPoint
-    var size: ViewSize
-
-    init(size: ViewSize) {
-        self.origin = .zero
-        self.size = size
-    }
-    init(origin: CGPoint, size: ViewSize) {
-        self.origin = origin
-        self.size = size
-    }
-
-    mutating func round(toMultipleOf value: CGFloat) {
-        origin.x = (origin.x / value).rounded() * value
-        origin.y = (origin.y / value).rounded() * value
-        size.value.width  = (size.value.width  / value).rounded() * value
-        size.value.height = (size.value.height / value).rounded() * value
-    }
-}
-
-/// Shared environment cache passed down the view tree via `_GraphInputs`.
-/// Copying `_GraphInputs` preserves the same `CachedEnvironment` reference
-/// (via `MutableBox`) so all descendants share a single environment Attribute.
-struct CachedEnvironment {
-
-    struct ID: Equatable {
-        var base: UniqueID
-    }
-
-    struct MapItem {
-        var key: ID
-        var value: AGAttribute
-    }
-
-    struct AnimatedFrame {
-        var position:          Attribute<CGPoint>
-        var size:              Attribute<ViewSize>
-        var pixelLength:       Attribute<CGFloat>
-        var time:              Attribute<Time>
-        var transaction:       Attribute<Transaction>
-        var viewPhase:         Attribute<Phase>
-        var animatedFrame:     Attribute<ViewFrame>
-        var _animatedPosition: Attribute<CGPoint>?
-        var _animatedSize:     Attribute<ViewSize>?
-        var _animatedCGSize:   Attribute<CGSize>?
-    }
-
-    /// The live `EnvironmentValues` AG node.
-    /// Reading `.value` inside a rule registers a dependency so the rule
-    /// re-evaluates automatically when the environment changes.
-    var environment: Attribute<EnvironmentValues>
-
-    /// Style-map items threaded through the environment cache.
-    var mapItems: [MapItem]
-
-    /// Per-frame animation layout snapshot.
-    /// Nil until layout AG nodes are wired. Animation modifiers read from here.
-    var animatedFrame: AnimatedFrame?
-
-    /// Cache of resolved shape styles keyed by ResolvedShapeStyles.
-    /// Reserved for resolved shape-style storage.
-    var resolvedShapeStyles: Any?
-
-    /// Platform-specific renderer cache (e.g. Metal layer reference).
-    var platformCache: Any?
-
-    init(environment: Attribute<EnvironmentValues>) {
-        self.environment = environment
-        self.mapItems = []
-        self.animatedFrame = nil
-        self.resolvedShapeStyles = nil
-        self.platformCache = nil
-    }
-
-    func replacingEnvironment(_ environment: Attribute<EnvironmentValues>) -> CachedEnvironment {
-        var copy = CachedEnvironment(environment: environment)
-        copy.animatedFrame = animatedFrame
-        return copy
-    }
-
-    mutating func attribute<Value>(
-        id: ID,
-        _ value: @escaping (EnvironmentValues) -> Value
-    ) -> Attribute<Value> {
-        if let item = mapItems.first(where: { $0.key == id }) {
-            return Attribute<Value>(item.value)
-        }
-        guard let graph = _AGGraph.current else {
-            fatalError("CachedEnvironment.attribute(id:_:) called outside an active _AGGraph context.")
-        }
-        let environment = environment
-        let attribute = graph.makeRule {
-            value(environment.value)
-        }
-        mapItems.append(MapItem(key: id, value: attribute.identifier))
-        return attribute
     }
 }
 
@@ -602,63 +437,5 @@ extension _ViewListInputs {
     var savedTransactions: [Attribute<Transaction>] {
         get { base[SavedTransactionKey.self] }
         set { base[SavedTransactionKey.self] = newValue }
-    }
-}
-
-// MARK: - Merged* AG Rules
-// All three follow the same pattern: weak ref to self attr + strong raw of other attr.
-// updateValue() reads both (registering AG dependencies), merges, returns result.
-// When the weak ref is invalid (subgraph was deallocated), returns other's value unchanged.
-
-// Merges two EnvironmentValues with the strong input taking priority over the weak fallback.
-struct MergedEnvironment: Rule, AsyncAttribute {
-    typealias Value = EnvironmentValues
-    let selfWeak: AGWeakAttribute
-    let otherRaw: UInt32
-
-    var value: EnvironmentValues {
-        let graph = _AGGraph.current!
-        let otherAttr = Attribute<EnvironmentValues>(AGAttribute(rawValue: otherRaw))
-        let otherEnv = otherAttr.value
-        guard selfWeak.isValid(in: graph) else { return otherEnv.trackingCopy() }
-        let selfEnv = Attribute<EnvironmentValues>(selfWeak.toStrong()).value
-        var mergedList = otherEnv._plist
-        mergedList.merge(selfEnv._plist)
-        return EnvironmentValues.tracking(mergedList)
-    }
-}
-
-// Merges two Transactions with the strong input taking priority over the weak fallback.
-struct MergedTransaction: Rule, AsyncAttribute {
-    typealias Value = Transaction
-    let selfWeak: AGWeakAttribute
-    let otherRaw: UInt32
-
-    var value: Transaction {
-        let graph = _AGGraph.current!
-        let otherAttr = Attribute<Transaction>(AGAttribute(rawValue: otherRaw))
-        let otherTx = otherAttr.value
-        guard selfWeak.isValid(in: graph) else { return otherTx }
-        let selfTx = Attribute<Transaction>(selfWeak.toStrong()).value
-        var result = otherTx
-        result.plist.merge(selfTx.plist)
-        return result
-    }
-}
-
-// Merges two Phases while preserving the receiver removal bit.
-struct MergedPhase: Rule, AsyncAttribute {
-    typealias Value = Phase
-    let selfWeak: AGWeakAttribute
-    let otherRaw: UInt32
-
-    var value: Phase {
-        let graph = _AGGraph.current!
-        let otherAttr = Attribute<Phase>(AGAttribute(rawValue: otherRaw))
-        let otherPhase = otherAttr.value
-        guard selfWeak.isValid(in: graph) else { return otherPhase }
-        var result = Attribute<Phase>(selfWeak.toStrong()).value
-        result.merge(otherPhase)
-        return result
     }
 }

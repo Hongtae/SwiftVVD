@@ -2,60 +2,72 @@ import XCTest
 @testable import VUI
 
 final class GeometryEffectSurfaceTests: XCTestCase {
-    func testProjectedDisplayListPreservesMixedItemOrder() throws {
+    func testIdentityEffectCanonicalizationUnwrapsOneChild() throws {
+        let childIdentity = _DisplayList_Identity()
+        var contents = DisplayList()
+        contents.appendItem(
+            kind: .text,
+            bounds: CGRect(x: 2, y: 3, width: 4, height: 5)
+        ) { _ in }
+        contents.items[0].identity = childIdentity
+        contents.items[0].version = DisplayList.Version(value: 7)
+
+        var item = DisplayList.Item(
+            effect: .identity,
+            contents: contents,
+            frame: CGRect(x: 10, y: 20, width: 30, height: 40),
+            identity: _DisplayList_Identity(),
+            version: DisplayList.Version(value: 3)
+        )
+        item.canonicalize(options: [])
+
+        XCTAssertEqual(item.frame, CGRect(x: 12, y: 23, width: 4, height: 5))
+        XCTAssertEqual(item.version, DisplayList.Version(value: 7))
+        XCTAssertEqual(item.identity, childIdentity)
+        guard case .content = item.value else {
+            return XCTFail("A one-child identity effect must unwrap its child value")
+        }
+    }
+
+    func testIdentityEffectCanonicalizationHonorsDisableOption() {
+        var contents = DisplayList()
+        contents.appendItem(
+            kind: .text,
+            bounds: CGRect(x: 2, y: 3, width: 4, height: 5)
+        ) { _ in }
+        var item = DisplayList.Item(
+            effect: .identity,
+            contents: contents,
+            frame: CGRect(x: 10, y: 20, width: 30, height: 40)
+        )
+
+        item.canonicalize(options: .disableCanonicalization)
+
+        XCTAssertEqual(item.frame, CGRect(x: 10, y: 20, width: 30, height: 40))
+        guard case .effect(.identity, _) = item.value else {
+            return XCTFail("Disabled canonicalization must retain the wrapper")
+        }
+    }
+
+    // ASSERTIONS displayListAddEffectLocalOriginNormalizationObserved
+    func testAddEffectRetainsOuterFrameAndNormalizesChildOrigin() throws {
         var source = DisplayList()
         source.appendItem(
-            kind: .shapeFill,
-            bounds: CGRect(x: 10, y: 10, width: 8, height: 6)
+            bounds: CGRect(x: -9, y: 4, width: 48, height: 48)
         ) { _ in }
+        var item = try XCTUnwrap(source.items.first)
+        let originalFrame = item.frame
 
-        var nested = DisplayList()
-        nested.appendItem(
-            kind: .text,
-            bounds: CGRect(x: 12, y: 11, width: 4, height: 3)
-        ) { _ in }
-        source.appendEffect(
-            .opacity(0.5),
-            contents: nested,
-            frame: CGRect(x: 12, y: 11, width: 4, height: 3)
-        )
-        source.appendItem(
-            kind: .shapeStroke,
-            bounds: CGRect(x: 11, y: 12, width: 6, height: 4)
-        ) { _ in }
+        item.addEffect(.identity)
 
-        let projected = _GeometryEffectSupport.projectedDisplayList(
-            source,
-            applying: ProjectionTransform(
-                CGAffineTransform(scaleX: 2, y: 2)
-            ),
-            at: CGPoint(x: 10, y: 10)
-        )
-
-        XCTAssertEqual(projected.items.count, 3)
-        guard projected.items.count == 3 else { return }
-        guard case .content = projected.items[0].value,
-              case let .effect(.opacity(opacity), contents) = projected.items[1].value,
-              case .content = projected.items[2].value else {
-            return XCTFail("Projection must retain content/effect/content order")
+        XCTAssertEqual(item.frame, originalFrame)
+        guard case let .effect(.identity, contents) = item.value else {
+            return XCTFail("Expected the added effect wrapper")
         }
-        XCTAssertEqual(opacity, 0.5)
-        XCTAssertEqual(
-            projected.items[0].command.bounds,
-            CGRect(x: 10, y: 10, width: 16, height: 12)
-        )
-        XCTAssertEqual(
-            projected.items[1].frame,
-            CGRect(x: 14, y: 12, width: 8, height: 6)
-        )
-        XCTAssertEqual(
-            contents.itemCommands.first?.bounds,
-            CGRect(x: 14, y: 12, width: 8, height: 6)
-        )
-        XCTAssertEqual(
-            projected.items[2].command.bounds,
-            CGRect(x: 12, y: 14, width: 12, height: 8)
-        )
+        let child = try XCTUnwrap(contents.items.first)
+        XCTAssertEqual(child.frame.origin, .zero)
+        XCTAssertEqual(child.frame.size, originalFrame.size)
+        XCTAssertEqual(contents.interpolationBounds, child.frame)
     }
 
     func testIgnoredByLayoutForwardsEffectAndAnimatableData() {
@@ -129,10 +141,15 @@ final class GeometryEffectSurfaceTests: XCTestCase {
 
         XCTAssertTrue(ProjectionTransform().isAffine)
         XCTAssertTrue(ProjectionTransform(CGAffineTransform(translationX: 3, y: 4)).isAffine)
+        XCTAssertTrue(ProjectionTransform().isInvertible)
 
         var perspective = ProjectionTransform()
         perspective.m13 = 0.01
         XCTAssertFalse(perspective.isAffine)
+
+        var singular = ProjectionTransform()
+        singular.m11 = 0
+        XCTAssertFalse(singular.isInvertible)
     }
 
     func testRotation3DEffectMatrixAndAnimatableDataScaling() {

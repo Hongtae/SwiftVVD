@@ -1276,9 +1276,10 @@ final class SymbolEffectsTests: XCTestCase {
     }
 
     func testFramedSymbolImageLayoutDoesNotDependOnPresentationGeometry() {
-        let graph = _AGGraph()
+        let host = GraphHost()
 
-        _AGGraph.withCurrent(graph) {
+        host.data.withCurrent {
+            let graph = host.data.graph
             var environment = EnvironmentValues()
             environment.appendSymbolEffect(
                 ResolvedSymbolEffect(
@@ -1315,9 +1316,10 @@ final class SymbolEffectsTests: XCTestCase {
     }
 
     func testSymbolEffectPhaseDoesNotRepublishImageLayoutComputer() throws {
-        let graph = _AGGraph()
+        let host = GraphHost()
 
-        try _AGGraph.withCurrent(graph) {
+        try host.data.withCurrent {
+            let graph = host.data.graph
             var environment = EnvironmentValues()
             environment.appendSymbolEffect(
                 ResolvedSymbolEffect(

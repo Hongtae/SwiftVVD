@@ -37,36 +37,6 @@ final class _TextResourceResolutionState {
     }
 }
 
-final class _TextDisplayListContentState {
-    private var resolvedVersion: Int?
-    private var size: CGSize?
-    private var needsDrawingGroup: Bool?
-    private var rendererID: ObjectIdentifier?
-    private var seed = DisplayList.Seed()
-
-    func contentSeed(
-        updateVersion: DisplayList.Version,
-        resolvedVersion: Int,
-        size: CGSize,
-        needsDrawingGroup: Bool,
-        renderer: TextRendererBoxBase? = nil
-    ) -> DisplayList.Seed {
-        let rendererID = renderer.map(ObjectIdentifier.init)
-        if seed.value == 0 ||
-            self.resolvedVersion != resolvedVersion ||
-            self.size != size ||
-            self.needsDrawingGroup != needsDrawingGroup ||
-            self.rendererID != rendererID {
-            seed = DisplayList.Seed(updateVersion)
-            self.resolvedVersion = resolvedVersion
-            self.size = size
-            self.needsDrawingGroup = needsDrawingGroup
-            self.rendererID = rendererID
-        }
-        return seed
-    }
-}
-
 // TextAlignment: horizontal alignment for multi-line text.
 public enum TextAlignment: Hashable, CaseIterable {
     case leading
@@ -1610,10 +1580,12 @@ public struct Text: Equatable {
         )
 
         func makeStyledText(
-            _ resolved: GraphicsContext.ResolvedText,
+            _ source: GraphicsContext.ResolvedText,
             additionalFeatures: ResolvedProperties.Features = []
         ) -> ResolvedStyledText {
-            ResolvedStyledText(
+            var resolved = source
+            resolved.shading = foregroundShading(in: environment)
+            return ResolvedStyledText(
                 storage: _dynamicArchiveStorage(
                     for: resolved,
                     enabled: needsDynamicArchive
@@ -1849,8 +1821,6 @@ extension Text: View {
         let backendResolvedTextTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _TextResourceResolutionState()
         let inheritedTransactionAttr = inputs.base.transaction
-        let displayListContentState = _TextDisplayListContentState()
-
         // Extract inputs to avoid capturing the entire `inputs` struct
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
         let environmentAttr = cachedEnvironmentAttr.value.environment
@@ -2023,107 +1993,71 @@ extension Text: View {
             )
         } else {
             displayedStyledTextAttr = resolvedStyledTextAttr
-            let textViewAttr: Attribute<StyledTextContentView> = graph.makeRule {
-                let styledText = resolvedStyledTextAttr.value
-                let renderer = textRendererAttr?.value
-                return StyledTextContentView(
-                    text: styledText,
-                    renderer: renderer,
-                    needsDrawingGroup: styledText.needsDrawingGroup
-                )
-            }
             lcAttr = graph.makeStatefulRule(
-                StyledTextLayoutComputer(_textView: textViewAttr)
+                StyledTextLayoutComputer(
+                    _textView: graph.makeRule {
+                        let styledText = resolvedStyledTextAttr.value
+                        return StyledTextContentView(
+                            text: styledText,
+                            renderer: textRendererAttr?.value,
+                            needsDrawingGroup: styledText.needsDrawingGroup
+                        )
+                    }
+                )
             )
         }
 
-        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
-        let dlAttr: Attribute<DisplayList> = graph.makeRule {
-            let text = view._attribute.value // Dependency: text modifiers/colors
-            let environment = cachedEnvironmentAttr.value.environment.value
-            let targetSize = targetSizeAttr.value.value
+        let textViewAttr: Attribute<StyledTextContentView> = graph.makeRule {
             let styledText = displayedStyledTextAttr.value
-            let resolved = styledText.resolvedText
-            let debugLayout = debugLayoutAttr.value
-            let foreground = text.foregroundShading(in: environment)
-            let renderer = textRendererAttr?.value
-            let updateVersion = DisplayList.Version(forUpdate: ())
-
-            var list = DisplayList()
-            let layerSerial = interpolatorGroup.addLayer(
-                id: .unstyled,
-                style: nil
-            )
-            defer {
-                interpolatorGroup.finishLayers()
-            }
-
-            if let resolved = resolved {
-                var frame = CGRect(origin: .zero, size: targetSize)
-                let measuredSize = renderer?.sizeThatFits(
-                    proposal: ProposedViewSize(frame.size),
-                    text: TextProxy(resolved)
-                ) ?? styledText.sizeThatFits(_ProposedSize(frame.size))
-
-                if measuredSize.height < frame.height {
-                    let offset = frame.height - measuredSize.height
-                    frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
-                    frame.size.height = measuredSize.height
-                }
-                let styledTextContent = StyledTextContentView(
-                    text: styledText,
-                    renderer: renderer,
-                    needsDrawingGroup: styledText.needsDrawingGroup
-                )
-                let contentSeed = displayListContentState.contentSeed(
-                    updateVersion: updateVersion,
-                    resolvedVersion: styledText.version,
-                    size: frame.size,
-                    needsDrawingGroup: styledText.needsDrawingGroup,
-                    renderer: renderer
-                )
-                let padding = renderer?.displayPadding ?? EdgeInsets()
-                let displayBounds = CGRect(
-                    x: frame.minX - padding.leading,
-                    y: frame.minY - padding.top,
-                    width: frame.width + padding.leading + padding.trailing,
-                    height: frame.height + padding.top + padding.bottom
-                )
-                list.appendTextItem(
-                    styledTextContent,
-                    size: frame.size,
-                    foreground: foreground,
-                    bounds: frame,
-                    displayBounds: displayBounds,
-                    seed: contentSeed,
-                    version: updateVersion,
-                    environment: environment.untrackedCopy()
-                )
-            } else {
-                // Keep an interpolation endpoint without emitting a render command.
-                list.appendDebugItem(
-                    bounds: CGRect(origin: .zero, size: targetSize)
-                ) { _ in }
-            }
-            if debugLayout {
-                appendDebugOverlay(
-                    to: &list,
-                    frame: CGRect(origin: .zero, size: targetSize),
-                    category: .primitiveView
-                )
-            }
-            return DisplayList.effect(
-                .interpolatorLayer(interpolatorGroup, layerSerial),
-                contents: list
+            return StyledTextContentView(
+                text: styledText,
+                renderer: textRendererAttr?.value,
+                needsDrawingGroup: styledText.needsDrawingGroup
             )
         }
-
-        var outputs = _ViewOutputs()
+        var cachedEnvironment = cachedEnvironmentAttr.value
+        let styles = cachedEnvironment.resolvedShapeStyles(
+            for: inputs,
+            role: .fill
+        )
+        cachedEnvironmentAttr.value = cachedEnvironment
+        let interpolatorGroup = _ShapeStyle_InterpolatorGroup()
+        var leafInputs = inputs
+        leafInputs.size = targetSizeAttr
+        leafInputs.containerPosition = cachedEnvironment.animatedPosition(
+            for: inputs
+        )
+        cachedEnvironmentAttr.value = cachedEnvironment
+        var outputs = StyledTextContentView.makeLeafView(
+            view: _GraphValue(_attribute: textViewAttr),
+            inputs: leafInputs,
+            styles: styles,
+            interpolatorGroup: interpolatorGroup
+        )
         outputs._layoutComputer = OptionalAttribute(lcAttr)
 
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
-        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        if inputs.preferences.keys.contains(DisplayList.Key.self) {
+            let debugDisplayList: Attribute<DisplayList> = graph.makeRule {
+                var list = DisplayList()
+                if debugLayoutAttr.value {
+                    appendDebugOverlay(
+                        to: &list,
+                        frame: CGRect(
+                            origin: .zero,
+                            size: targetSizeAttr.value.value
+                        ),
+                        category: .primitiveView
+                    )
+                }
+                return list
+            }
+            outputs.preferences.append(
+                DisplayList.Key.self,
+                node: debugDisplayList.identifier
+            )
+        }
         var interpolatorInputs = inputs
         interpolatorInputs.base.transaction = resolvedStyledTextTransactionAttr
         interpolatorInputs.size = targetSizeAttr

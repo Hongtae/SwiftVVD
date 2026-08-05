@@ -174,16 +174,6 @@ struct LazyPrefetchPhaseAdvance {
     var didNotify: Bool
 }
 
-/// Holds a non-owning reference for cache relationships that must not extend
-/// the lifetime of a retained child graph.
-struct WeakBox<Base: AnyObject> {
-    weak var base: Base?
-
-    init(_ base: Base?) {
-        self.base = base
-    }
-}
-
 /// Carries the parent cache and the stable child-registration seed assigned to
 /// one materialized lazy item.
 struct LazyLayoutCacheParent {

@@ -354,13 +354,12 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     func openSubmenu(_ item: PlatformItemList.Item, at origin: CGPoint) {
         guard item.isEnabled, !item.children.isEmpty else { return }
         guard openedSubmenuID != item.id else { return }
-        guard _AGGraph.current != nil else {
-            fatalError("ContextMenuWindowController.openSubmenu called outside AG context")
+        let viewPhase = viewGraph.data.withCurrent {
+            guard let phase = viewGraph.phaseAttr else {
+                fatalError("ContextMenuWindowController.openSubmenu requires an instantiated ViewGraph")
+            }
+            return ViewGraphHost.Phase(base: phase.value)
         }
-        guard let phase = viewGraph.phaseAttr else {
-            fatalError("ContextMenuWindowController.openSubmenu requires an instantiated ViewGraph")
-        }
-        let viewPhase = ViewGraphHost.Phase(base: phase.value)
         openedSubmenuID = item.id
         openedSubmenu = nil
         dismissAllPresentationChildren()

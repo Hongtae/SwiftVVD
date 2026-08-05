@@ -1123,6 +1123,13 @@ class WindowController: WindowDelegate,
                 }
             }
 
+            if !events.isEmpty {
+                // Platform event bridges normally finish their Update scope before
+                // host graph evaluation. Buffered events run inside this frame's
+                // outer scope, so drain their queued callbacks at the same boundary.
+                Update.dispatchActions()
+            }
+
             // updateOutputs flushes dirty bits, async changes, then evaluates AG.
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
             flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()

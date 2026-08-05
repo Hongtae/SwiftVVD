@@ -10,6 +10,28 @@ import VVD
 
 extension GraphicsContext {
     public struct ResolvedImage {
+        struct SymbolReplacementLevelPresentation {
+            var scale: CGFloat
+            var opacity: Double
+        }
+
+        struct SymbolReplacementSymbolPresentation {
+            var image: ResolvedImage
+            var levels: [SymbolReplacementLevelPresentation]
+            var isLayered: Bool
+            var drawProgresses: [Double]?
+        }
+
+        final class SymbolReplacementPresentation {
+            var symbols: [SymbolReplacementSymbolPresentation]
+
+            init(
+                symbols: [SymbolReplacementSymbolPresentation]
+            ) {
+                self.symbols = symbols
+            }
+        }
+
         final class Storage: AppLifetimeResource, @unchecked Sendable {
             enum Contents {
                 case texture(Texture)
@@ -58,6 +80,7 @@ extension GraphicsContext {
         public var shading: Shading?
         var symbolLayerOpacities: [Double]?
         var symbolReplacementLayerOpacities: [Double]?
+        var symbolReplacementPresentation: SymbolReplacementPresentation?
         var symbolVariableColorOpacities: [Double]?
         var symbolDrawPathIntervals:
             [[ResolvedVectorSymbol.DrawPathInterval]]?
@@ -106,6 +129,7 @@ extension GraphicsContext {
             self.shading = shading
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
+            self.symbolReplacementPresentation = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
@@ -122,6 +146,7 @@ extension GraphicsContext {
             self.shading = shading
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
+            self.symbolReplacementPresentation = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
@@ -138,6 +163,7 @@ extension GraphicsContext {
             self.shading = shading
             self.symbolLayerOpacities = nil
             self.symbolReplacementLayerOpacities = nil
+            self.symbolReplacementPresentation = nil
             self.symbolVariableColorOpacities = nil
             self.symbolDrawPathIntervals = nil
             self.symbolDrawProgresses = nil
@@ -176,6 +202,16 @@ extension GraphicsContext {
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
+            if let replacement = image.symbolReplacementPresentation {
+                drawSymbolReplacement(
+                    targetSymbol: symbol,
+                    targetImage: image,
+                    presentation: replacement,
+                    in: rect,
+                    style: style
+                )
+                return
+            }
             draw(symbol, image: image, in: rect, style: style)
             return
         }
@@ -212,7 +248,8 @@ extension GraphicsContext {
         _ symbol: ResolvedVectorSymbol,
         image: ResolvedImage,
         in rect: CGRect,
-        style: FillStyle
+        style: FillStyle,
+        opacityMultiplier: Double = 1
     ) {
         let viewport = symbol.viewport
         guard viewport.width > 0, viewport.height > 0 else { return }
@@ -267,7 +304,8 @@ extension GraphicsContext {
                 )
             }
             guard presentationOpacity > 0 else { continue }
-            let layerOpacity = layer.opacity * presentationOpacity
+            let layerOpacity = layer.opacity * presentationOpacity *
+                opacityMultiplier
             let layerPath = layer.path.applying(transform)
             let shading = image.shading ?? symbolShading(for: layer.semanticLevel)
             let fillStyle = FillStyle(
@@ -351,6 +389,69 @@ extension GraphicsContext {
                 style: fillStyle
             )
         }
+    }
+
+    private func drawSymbolReplacement(
+        targetSymbol _: ResolvedVectorSymbol,
+        targetImage _: ResolvedImage,
+        presentation: ResolvedImage.SymbolReplacementPresentation,
+        in rect: CGRect,
+        style: FillStyle
+    ) {
+        for symbolPresentation in presentation.symbols.reversed() {
+            guard let symbol = symbolPresentation.image.symbol else {
+                preconditionFailure(
+                    "A symbol replacement presentation requires symbol input."
+                )
+            }
+            for (level, values) in
+                symbolPresentation.levels.enumerated()
+                where values.opacity > 0 {
+                var image = symbolPresentation.image
+                image.symbolReplacementPresentation = nil
+                image.symbolReplacementLayerOpacities = replacementLayerMask(
+                    for: symbol,
+                    level: level,
+                    isLayered: symbolPresentation.isLayered
+                )
+                if let progresses = symbolPresentation.drawProgresses {
+                    image.symbolDrawProgresses = progresses
+                    image.symbolDrawFallbackProgresses = progresses
+                }
+                draw(
+                    symbol,
+                    image: image,
+                    in: centeredScaledRect(rect, scale: values.scale),
+                    style: style,
+                    opacityMultiplier: values.opacity
+                )
+            }
+        }
+    }
+
+    private func replacementLayerMask(
+        for symbol: ResolvedVectorSymbol,
+        level: Int,
+        isLayered: Bool
+    ) -> [Double]? {
+        guard isLayered else { return nil }
+        let count = max(symbol.replacementLevelCount, 1)
+        guard level < count else { return nil }
+        var opacities = [Double](repeating: 0, count: count)
+        opacities[level] = 1
+        return opacities
+    }
+
+    private func centeredScaledRect(
+        _ rect: CGRect,
+        scale: CGFloat
+    ) -> CGRect {
+        CGRect(
+            x: rect.midX - rect.width * scale * 0.5,
+            y: rect.midY - rect.height * scale * 0.5,
+            width: rect.width * scale,
+            height: rect.height * scale
+        )
     }
 
     private func symbolShading(for semanticLevel: Int) -> Shading {
@@ -572,6 +673,12 @@ extension GraphicsContext.ResolvedImage: InterpolatableContent {
     }
 
     func modifyTransition(state: inout ContentTransition.State, to target: Self) {
+        if symbol != nil,
+           let targetSymbol = target.symbol,
+           !targetSymbol.allowsContentTransitions {
+            state.transition = .identity
+            return
+        }
         guard !state.options.contains(.animatesDifferentContent) else { return }
         guard requiresTransition(to: target) else { return }
         state.transition = .opacity

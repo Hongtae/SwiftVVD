@@ -132,7 +132,10 @@ private struct MatchedGeometryTextDisplayProbe: View, TestPrimitiveView {
             list.appendTextItem(
                 foreground: .color(view._attribute.value.foreground),
                 bounds: CGRect(
-                    origin: inputs.position.value,
+                    origin: CGPoint(
+                        x: inputs.position.value.x - inputs.containerPosition.value.x,
+                        y: inputs.position.value.y - inputs.containerPosition.value.y
+                    ),
                     size: inputs.size.value.value
                 )
             ) { _ in }
@@ -1248,7 +1251,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 guard case let .effect(.identity, contents) = $0.value else {
                     return nil
                 }
-                return contents.interpolationBounds
+                return contents.interpolationBounds == nil ? nil : $0.frame
             }
         }
 
@@ -1274,16 +1277,26 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 guard case let .effect(.identity, contents) = $0.value else {
                     return nil
                 }
-                guard let frame = contents.interpolationBounds else {
+                guard contents.interpolationBounds != nil else {
                     return nil
                 }
-                return (frame, contents)
+                return ($0.frame, contents)
             }
             XCTAssertEqual(matchedItems.count, 2, file: file, line: line)
             guard matchedItems.count == 2 else { return }
             XCTAssertEqual(matchedItems[0].frame, matchedItems[1].frame, file: file, line: line)
 
-            let textFrames = matchedItems.flatMap { recursiveTextFrames(in: $0.contents) }
+            let textFrames = matchedItems.flatMap { item in
+                let bounds = item.contents.interpolationBounds ?? .zero
+                let transform = CGAffineTransform(
+                    translationX: item.frame.minX - bounds.minX,
+                    y: item.frame.minY - bounds.minY
+                )
+                return recursiveTextFrames(
+                    in: item.contents,
+                    inheritedTransform: transform
+                )
+            }
             XCTAssertEqual(textFrames.count, 2, file: file, line: line)
             guard textFrames.count == 2 else { return }
             XCTAssertEqual(
@@ -1696,24 +1709,26 @@ final class MatchedGeometryEffectTests: XCTestCase {
             samples: [MatchedGeometryResolvedTextSample],
             pixels: (source: Int, destination: Int)
         )?
+        var sawSourcePixels = false
+        var sawDestinationPixels = false
         for frame in 1...30 {
             let list = try update(Double(frame) / 60.0)
             let samples = resolvedTextSamples(in: list).filter {
                 $0.string == "Source" || $0.string == "Destination"
             }
             let pixels = try renderedTextPixelCounts(list)
+            sawSourcePixels = sawSourcePixels || pixels.source > 0
+            sawDestinationPixels = sawDestinationPixels || pixels.destination > 0
             if frame == 1 || frame.isMultiple(of: 5) {
                 print("MATCHED_TEXT_PIXELS frame=\(frame) pixels=\(pixels)")
                 print("MATCHED_TEXT_SAMPLES frame=\(frame) samples=\(samples)")
                 print("MATCHED_TEXT_EFFECTS frame=\(frame) \(animationEffects(in: list))")
                 print("MATCHED_TEXT_LEAVES frame=\(frame) \(renderLeaves(in: list))")
             }
-            if samples.contains(where: { $0.string == "Source" && $0.opacity > 0 }) &&
-                samples.contains(where: { $0.string == "Destination" && $0.opacity > 0 }) &&
-                pixels.source > 0 &&
-                pixels.destination > 0 {
+            if coexistence == nil &&
+                samples.contains(where: { $0.string == "Source" && $0.opacity > 0 }) &&
+                samples.contains(where: { $0.string == "Destination" && $0.opacity > 0 }) {
                 coexistence = (samples, pixels)
-                break
             }
         }
 
@@ -1723,8 +1738,8 @@ final class MatchedGeometryEffectTests: XCTestCase {
         let destination = try XCTUnwrap(samples.last { $0.string == "Destination" })
         XCTAssertEqual(source.frame.midX, destination.frame.midX, accuracy: 2)
         XCTAssertEqual(source.frame.midY, destination.frame.midY, accuracy: 2)
-        XCTAssertGreaterThan(coexisting.pixels.source, 0)
-        XCTAssertGreaterThan(coexisting.pixels.destination, 0)
+        XCTAssertTrue(sawSourcePixels)
+        XCTAssertTrue(sawDestinationPixels)
     }
 
     private func waitForCompletion(_ commandBuffer: CommandBuffer) throws {
@@ -2130,39 +2145,121 @@ final class MatchedGeometryEffectTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(separated.map(\.frame.origin.x).max()), activationOrigin.x)
     }
 
-    private func recursiveTextFrames(in list: DisplayList) -> [CGRect] {
+    private func recursiveTextFrames(
+        in list: DisplayList,
+        inheritedTransform: CGAffineTransform = .identity
+    ) -> [CGRect] {
         list.items.reduce(into: []) { frames, item in
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case let .effect(_, contents):
+                recordedBounds = contents.interpolationBounds
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            let itemTransform: CGAffineTransform
+            if let recordedBounds, !recordedBounds.isNull {
+                itemTransform = CGAffineTransform(
+                    translationX: item.frame.minX - recordedBounds.minX,
+                    y: item.frame.minY - recordedBounds.minY
+                ).concatenating(inheritedTransform)
+            } else {
+                itemTransform = inheritedTransform
+            }
             switch item.value {
             case let .content(content):
                 if case .text = content.command {
-                    frames.append(item.frame)
+                    frames.append(item.frame.applying(inheritedTransform).standardized)
                 }
                 switch content.value {
                 case .text:
                     break
                 case let .style(style):
-                    frames.append(contentsOf: recursiveTextFrames(in: style.contents))
+                    frames.append(contentsOf: recursiveTextFrames(
+                        in: style.contents,
+                        inheritedTransform: style.transform.concatenating(itemTransform)
+                    ))
                 case let .crossFade(crossFade):
                     if let source = crossFade.source {
-                        frames.append(contentsOf: recursiveTextFrames(in: source.contents))
+                        if let transform =
+                            DisplayList.Content.CrossFadeValue.Branch
+                                .interpolationTransform(
+                                    from: source.sourceBounds,
+                                    to: source.outputBounds
+                                ) {
+                            frames.append(contentsOf: recursiveTextFrames(
+                                in: source.contents,
+                                inheritedTransform: transform
+                                    .concatenating(crossFade.transform)
+                                    .concatenating(itemTransform)
+                            ))
+                        }
                     }
                     if let target = crossFade.target {
-                        frames.append(contentsOf: recursiveTextFrames(in: target.contents))
+                        if let transform =
+                            DisplayList.Content.CrossFadeValue.Branch
+                                .interpolationTransform(
+                                    from: target.sourceBounds,
+                                    to: target.outputBounds
+                                ) {
+                            frames.append(contentsOf: recursiveTextFrames(
+                                in: target.contents,
+                                inheritedTransform: transform
+                                    .concatenating(crossFade.transform)
+                                    .concatenating(itemTransform)
+                            ))
+                        }
                     }
-                case let .flattened(contents, _, _):
-                    frames.append(contentsOf: recursiveTextFrames(in: contents))
-                case let .drawing(contents, _, _):
+                case let .flattened(contents, origin, _):
+                    frames.append(contentsOf: recursiveTextFrames(
+                        in: contents,
+                        inheritedTransform: CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform)
+                    ))
+                case let .drawing(contents, origin, _):
                     if let local = contents as? DisplayList.LocalContents {
-                        frames.append(contentsOf: recursiveTextFrames(in: local.list))
+                        frames.append(contentsOf: recursiveTextFrames(
+                            in: local.list,
+                            inheritedTransform: CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform)
+                        ))
                     }
                 case .backend, .color, .shape, .image:
                     break
                 }
-            case let .effect(_, contents):
-                frames.append(contentsOf: recursiveTextFrames(in: contents))
+            case let .effect(effect, contents):
+                let effectTransform: CGAffineTransform
+                if case let .transform(transform) = effect,
+                   transform.isAffine {
+                    effectTransform = CGAffineTransform(
+                        a: transform.m11,
+                        b: transform.m12,
+                        c: transform.m21,
+                        d: transform.m22,
+                        tx: transform.m31,
+                        ty: transform.m32
+                    ).concatenating(itemTransform)
+                } else {
+                    effectTransform = itemTransform
+                }
+                frames.append(contentsOf: recursiveTextFrames(
+                    in: contents,
+                    inheritedTransform: effectTransform
+                ))
             case let .states(states):
                 for (_, contents) in states {
-                    frames.append(contentsOf: recursiveTextFrames(in: contents))
+                    frames.append(contentsOf: recursiveTextFrames(
+                        in: contents,
+                        inheritedTransform: itemTransform
+                    ))
                 }
             case .empty:
                 break
@@ -2172,17 +2269,40 @@ final class MatchedGeometryEffectTests: XCTestCase {
 
     private func resolvedTextSamples(
         in displayList: DisplayList,
-        inheritedOpacity: Double = 1
+        inheritedOpacity: Double = 1,
+        inheritedTransform: CGAffineTransform = .identity
     ) -> [MatchedGeometryResolvedTextSample] {
         displayList.items.reduce(into: []) { samples, item in
             let itemOpacity = inheritedOpacity * Double(item.opacity)
+            let recordedBounds: CGRect?
+            switch item.value {
+            case let .content(content):
+                recordedBounds = content.command.bounds
+            case let .effect(_, contents):
+                recordedBounds = contents.interpolationBounds
+            case let .states(states):
+                recordedBounds = states.last?.1.interpolationBounds
+            case .empty:
+                recordedBounds = nil
+            }
+            let itemTransform: CGAffineTransform
+            if let recordedBounds, !recordedBounds.isNull {
+                itemTransform = CGAffineTransform(
+                    translationX: item.frame.minX - recordedBounds.minX,
+                    y: item.frame.minY - recordedBounds.minY
+                ).concatenating(inheritedTransform)
+            } else {
+                itemTransform = inheritedTransform
+            }
             switch item.value {
             case let .content(content):
                 if case let .text(text) = content.value,
                    let string = text.view.text.storage?.string {
                     samples.append(MatchedGeometryResolvedTextSample(
                         string: string,
-                        frame: text.frame.applying(text.transform).standardized,
+                        frame: text.frame.applying(
+                            text.transform.concatenating(itemTransform)
+                        ).standardized,
                         opacity: itemOpacity
                     ))
                 }
@@ -2196,7 +2316,10 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     }
                     samples.append(contentsOf: resolvedTextSamples(
                         in: style.contents,
-                        inheritedOpacity: itemOpacity * styleOpacity
+                        inheritedOpacity: itemOpacity * styleOpacity,
+                        inheritedTransform: style.transform.concatenating(
+                            itemTransform
+                        )
                     ))
                 case let .crossFade(crossFade):
                     let sourceOpacity: Double
@@ -2212,27 +2335,57 @@ final class MatchedGeometryEffectTests: XCTestCase {
                         targetOpacity = 1
                     }
                     if let source = crossFade.source {
-                        samples.append(contentsOf: resolvedTextSamples(
-                            in: source.contents,
-                            inheritedOpacity: itemOpacity * sourceOpacity
-                        ))
+                        if let branchTransform =
+                            DisplayList.Content.CrossFadeValue.Branch
+                                .interpolationTransform(
+                                    from: source.sourceBounds,
+                                    to: source.outputBounds
+                                ) {
+                            samples.append(contentsOf: resolvedTextSamples(
+                                in: source.contents,
+                                inheritedOpacity:
+                                    itemOpacity * sourceOpacity,
+                                inheritedTransform: branchTransform
+                                    .concatenating(crossFade.transform)
+                                    .concatenating(itemTransform)
+                            ))
+                        }
                     }
                     if let target = crossFade.target {
-                        samples.append(contentsOf: resolvedTextSamples(
-                            in: target.contents,
-                            inheritedOpacity: itemOpacity * targetOpacity
-                        ))
+                        if let branchTransform =
+                            DisplayList.Content.CrossFadeValue.Branch
+                                .interpolationTransform(
+                                    from: target.sourceBounds,
+                                    to: target.outputBounds
+                                ) {
+                            samples.append(contentsOf: resolvedTextSamples(
+                                in: target.contents,
+                                inheritedOpacity:
+                                    itemOpacity * targetOpacity,
+                                inheritedTransform: branchTransform
+                                    .concatenating(crossFade.transform)
+                                    .concatenating(itemTransform)
+                            ))
+                        }
                     }
-                case let .flattened(contents, _, _):
+                case let .flattened(contents, origin, _):
                     samples.append(contentsOf: resolvedTextSamples(
                         in: contents,
-                        inheritedOpacity: itemOpacity
+                        inheritedOpacity: itemOpacity,
+                        inheritedTransform: CGAffineTransform(
+                            translationX: origin.x,
+                            y: origin.y
+                        ).concatenating(itemTransform)
                     ))
-                case let .drawing(contents, _, _):
+                case let .drawing(contents, origin, _):
                     if let local = contents as? DisplayList.LocalContents {
                         samples.append(contentsOf: resolvedTextSamples(
                             in: local.list,
-                            inheritedOpacity: itemOpacity
+                            inheritedOpacity: itemOpacity,
+                            inheritedTransform: CGAffineTransform(
+                                translationX: origin.x,
+                                y: origin.y
+                            ).concatenating(itemTransform)
                         ))
                     }
                 case .backend, .color, .shape, .image, .text:
@@ -2240,20 +2393,36 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 }
             case let .effect(effect, contents):
                 let effectOpacity: Double
+                let effectTransform: CGAffineTransform
                 if case let .opacity(opacity) = effect {
                     effectOpacity = Double(opacity)
                 } else {
                     effectOpacity = 1
                 }
+                if case let .transform(transform) = effect,
+                   transform.isAffine {
+                    effectTransform = CGAffineTransform(
+                        a: transform.m11,
+                        b: transform.m12,
+                        c: transform.m21,
+                        d: transform.m22,
+                        tx: transform.m31,
+                        ty: transform.m32
+                    ).concatenating(itemTransform)
+                } else {
+                    effectTransform = itemTransform
+                }
                 samples.append(contentsOf: resolvedTextSamples(
                     in: contents,
-                    inheritedOpacity: itemOpacity * effectOpacity
+                    inheritedOpacity: itemOpacity * effectOpacity,
+                    inheritedTransform: effectTransform
                 ))
             case let .states(states):
                 if let contents = states.last?.1 {
                     samples.append(contentsOf: resolvedTextSamples(
                         in: contents,
-                        inheritedOpacity: itemOpacity
+                        inheritedOpacity: itemOpacity,
+                        inheritedTransform: itemTransform
                     ))
                 }
             case .empty:

@@ -589,16 +589,22 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateAnimationLabModifierStackRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateAnimationLabModifierStackRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let initialBounds = try XCTUnwrap(
+                    firstRenderedDebugBounds(
+                        in: Attribute<DisplayList>(displayID).value
+                    )
+                )
                 let toggle = try XCTUnwrap(probe.toggle)
 
                 withAnimation(.linear(duration: 1.0)) {
@@ -614,11 +620,19 @@ final class ViewObservationTransactionTests: XCTestCase {
 
                 time.setValue(Time(seconds: 0.6))
                 host.data.rootSubgraph.update()
-                let midpointBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let midpointBounds = try XCTUnwrap(
+                    firstRenderedDebugBounds(
+                        in: Attribute<DisplayList>(displayID).value
+                    )
+                )
 
                 time.setValue(Time(seconds: 2.0))
                 host.data.rootSubgraph.update()
-                let finalBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let finalBounds = try XCTUnwrap(
+                    firstRenderedDebugBounds(
+                        in: Attribute<DisplayList>(displayID).value
+                    )
+                )
 
                 XCTAssertNotEqual(initialBounds, finalBounds)
                 XCTAssertNotEqual(midpointBounds, finalBounds)
@@ -644,16 +658,22 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateAnimationLabModifierStackRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateAnimationLabModifierStackRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-                let initialBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let initialBounds = try XCTUnwrap(
+                    firstRenderedDebugBounds(
+                        in: Attribute<DisplayList>(displayID).value
+                    )
+                )
                 let toggle = try XCTUnwrap(probe.toggle)
 
                 withAnimation(.linear(duration: 1.0)) {
@@ -668,13 +688,21 @@ final class ViewObservationTransactionTests: XCTestCase {
                     let sampleTime = Double(step) / 10.0
                     time.setValue(Time(seconds: sampleTime))
                     host.data.rootSubgraph.update()
-                    let bounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                    let bounds = try XCTUnwrap(
+                        firstRenderedDebugBounds(
+                            in: Attribute<DisplayList>(displayID).value
+                        )
+                    )
                     samples.append((sampleTime, bounds))
                 }
 
                 time.setValue(Time(seconds: 2.0))
                 host.data.rootSubgraph.update()
-                let finalBounds = try XCTUnwrap(Attribute<DisplayList>(displayID).value.interpolationBounds)
+                let finalBounds = try XCTUnwrap(
+                    firstRenderedDebugBounds(
+                        in: Attribute<DisplayList>(displayID).value
+                    )
+                )
 
                 let distinctIntermediateMinX = Set(
                     samples.dropFirst().dropLast().map { ($0.bounds.minX * 1_000).rounded() }
@@ -950,80 +978,57 @@ final class ViewObservationTransactionTests: XCTestCase {
 
     func testDefaultBodyStateActionRootShapeFillColorSamplesIntermediateColor() throws {
         let rendererHost = TestViewRendererHost()
+        let probe = StateAnimatableTransactionProbe()
         let host = ViewGraph(
-            rootViewType: EmptyView.self,
-            content: EmptyView(),
-            rendererHost: rendererHost,
-            requestedOutputs: []
+            rootViewType: StateShapeFillColorOnlyRoot.self,
+            content: StateShapeFillColorOnlyRoot(probe: probe),
+            rendererHost: rendererHost
         )
         rendererHost.storage = host
-        let probe = StateAnimatableTransactionProbe()
 
-        try host.data.withCurrent {
-            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
-                let graph = host.data.graph
-                let time = graph.makeInput(value: Time(seconds: 0))
-                let source = graph.makeInput(value: StateShapeFillColorOnlyRoot(probe: probe))
-                var inputs = makeViewInputs(
-                    graph: graph,
-                    time: time,
-                    size: graph.makeInput(value: ViewSize(width: 200, height: 200))
+        func sampleColor(at seconds: Double) throws -> Color {
+            let displayList = try sampleRootDisplayList(
+                host: host,
+                rendererHost: rendererHost,
+                at: seconds
+            )
+            guard let color = firstShapeFillColor(in: displayList) else {
+                XCTFail(
+                    "missing shape fill color at \(seconds): "
+                        + displayListSummary(displayList)
                 )
-                inputs.requestsLayoutComputer = true
-                let outputs = StateShapeFillColorOnlyRoot._makeView(
-                    view: _GraphValue(_attribute: source),
-                    inputs: inputs
-                )
-                let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
-                let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
-
-                func sampleColor(at seconds: Double) throws -> Color {
-                    time.setValue(Time(seconds: seconds))
-                    let layout = layoutAttr.value
-                    layout.place(
-                        at: .zero,
-                        anchor: .topLeading,
-                        proposal: ProposedViewSize(CGSize(width: 200, height: 200))
-                    )
-                    host.data.rootSubgraph.update()
-                    let displayList = Attribute<DisplayList>(displayID).value
-                    guard let color = firstShapeFillColor(in: displayList) else {
-                        XCTFail("missing shape fill color at \(seconds): \(displayListSummary(displayList))")
-                        return .clear
-                    }
-                    return color
-                }
-
-                let initialColor = try sampleColor(at: 0)
-                let toggle = try XCTUnwrap(probe.toggle)
-
-                withAnimation(.linear(duration: 1.0)) {
-                    toggle()
-                }
-                host.flushTransactions()
-
-                var samples: [(time: Double, color: Color)] = []
-                for step in 0...10 {
-                    let sampleTime = Double(step) / 10.0
-                    samples.append((sampleTime, try sampleColor(at: sampleTime)))
-                }
-
-                let finalColor = try sampleColor(at: 2.0)
-                let intermediateColor = try XCTUnwrap(
-                    samples.dropFirst().dropLast().first { sample in
-                        sample.color.backendColor.r > initialColor.backendColor.r &&
-                            sample.color.backendColor.r < finalColor.backendColor.r
-                    }?.color
-                )
-
-                XCTAssertEqual(initialColor.backendColor.r, Color.blue.backendColor.r, accuracy: 0.001)
-                XCTAssertEqual(initialColor.backendColor.b, Color.blue.backendColor.b, accuracy: 0.001)
-                XCTAssertGreaterThan(intermediateColor.backendColor.r, initialColor.backendColor.r)
-                XCTAssertLessThan(intermediateColor.backendColor.r, finalColor.backendColor.r)
-                XCTAssertEqual(finalColor.backendColor.r, Color.purple.backendColor.r, accuracy: 0.001)
-                XCTAssertEqual(finalColor.backendColor.b, Color.purple.backendColor.b, accuracy: 0.001)
+                return .clear
             }
+            return color
         }
+
+        let initialColor = try sampleColor(at: 0)
+        let toggle = try XCTUnwrap(probe.toggle)
+
+        withAnimation(.linear(duration: 1.0)) {
+            toggle()
+        }
+
+        var samples: [(time: Double, color: Color)] = []
+        for step in 0...10 {
+            let sampleTime = Double(step) / 10.0
+            samples.append((sampleTime, try sampleColor(at: sampleTime)))
+        }
+
+        let finalColor = try sampleColor(at: 2.0)
+        let intermediateColor = try XCTUnwrap(
+            samples.dropFirst().dropLast().first { sample in
+                sample.color.backendColor.r > initialColor.backendColor.r &&
+                    sample.color.backendColor.r < finalColor.backendColor.r
+            }?.color
+        )
+
+        XCTAssertEqual(initialColor.backendColor.r, Color.blue.backendColor.r, accuracy: 0.001)
+        XCTAssertEqual(initialColor.backendColor.b, Color.blue.backendColor.b, accuracy: 0.001)
+        XCTAssertGreaterThan(intermediateColor.backendColor.r, initialColor.backendColor.r)
+        XCTAssertLessThan(intermediateColor.backendColor.r, finalColor.backendColor.r)
+        XCTAssertEqual(finalColor.backendColor.r, Color.purple.backendColor.r, accuracy: 0.001)
+        XCTAssertEqual(finalColor.backendColor.b, Color.purple.backendColor.b, accuracy: 0.001)
     }
 
     func testDefaultBodyStateActionRootShapeFillMeshSamplesIntermediatePaint() throws {
@@ -1762,6 +1767,54 @@ final class ViewObservationTransactionTests: XCTestCase {
             if let bounds = firstItemBounds(in: effect.contents) {
                 return bounds
             }
+        }
+        return nil
+    }
+
+    private func firstRenderedDebugBounds(
+        in displayList: DisplayList
+    ) -> CGRect? {
+        if let item = displayList.debugItems.first,
+           let bounds = item.record.bounds {
+            let offset = CGAffineTransform(
+                translationX: item.frame.minX - bounds.minX,
+                y: item.frame.minY - bounds.minY
+            )
+            return bounds.applying(offset).standardized
+        }
+
+        for item in displayList.items {
+            let nestedBounds: CGRect?
+            switch item.value {
+            case let .effect(_, contents):
+                nestedBounds = firstRenderedDebugBounds(in: contents)
+            case let .states(states):
+                nestedBounds = states.last.flatMap {
+                    firstRenderedDebugBounds(in: $0.1)
+                }
+            case .content, .empty:
+                nestedBounds = nil
+            }
+            guard let nestedBounds else { continue }
+
+            let placement = CGAffineTransform(
+                translationX: item.frame.minX,
+                y: item.frame.minY
+            )
+            if case let .effect(.transform(projection), _) = item.value,
+               projection.isAffine {
+                return nestedBounds.applying(
+                    CGAffineTransform(
+                        a: projection.m11,
+                        b: projection.m12,
+                        c: projection.m21,
+                        d: projection.m22,
+                        tx: projection.m31,
+                        ty: projection.m32
+                    ).concatenating(placement)
+                ).standardized
+            }
+            return nestedBounds.applying(placement).standardized
         }
         return nil
     }

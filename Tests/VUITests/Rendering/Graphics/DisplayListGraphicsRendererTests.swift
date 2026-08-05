@@ -174,46 +174,6 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertGreaterThan(afterDecoded.value, decoded.value)
     }
 
-    func testTextContentSeedChangesOnlyWithTypedContentInputs() {
-        let state = _TextDisplayListContentState()
-        let size = CGSize(width: 120, height: 30)
-        let first = state.contentSeed(
-            updateVersion: DisplayList.Version(forUpdate: ()),
-            resolvedVersion: 10,
-            size: size,
-            needsDrawingGroup: false
-        )
-        let unchanged = state.contentSeed(
-            updateVersion: DisplayList.Version(forUpdate: ()),
-            resolvedVersion: 10,
-            size: size,
-            needsDrawingGroup: false
-        )
-        let resized = state.contentSeed(
-            updateVersion: DisplayList.Version(forUpdate: ()),
-            resolvedVersion: 10,
-            size: CGSize(width: 121, height: 30),
-            needsDrawingGroup: false
-        )
-        let regrouped = state.contentSeed(
-            updateVersion: DisplayList.Version(forUpdate: ()),
-            resolvedVersion: 10,
-            size: CGSize(width: 121, height: 30),
-            needsDrawingGroup: true
-        )
-        let replaced = state.contentSeed(
-            updateVersion: DisplayList.Version(forUpdate: ()),
-            resolvedVersion: 11,
-            size: CGSize(width: 121, height: 30),
-            needsDrawingGroup: true
-        )
-
-        XCTAssertEqual(unchanged, first)
-        XCTAssertNotEqual(resized, unchanged)
-        XCTAssertNotEqual(regrouped, resized)
-        XCTAssertNotEqual(replaced, regrouped)
-    }
-
     func testTypedTextContentSurvivesAffineTransformation() {
         let styledText = ResolvedStyledText(version: 7, needsDrawingGroup: true)
         let view = StyledTextContentView(

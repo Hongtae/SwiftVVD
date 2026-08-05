@@ -13,10 +13,6 @@ struct AnimatedFrameAttributes {
     var frame: Attribute<ViewFrame>
 }
 
-private extension CachedEnvironment.ID {
-    static let animationPixelLength = CachedEnvironment.ID(base: UniqueID())
-}
-
 private struct FrameVelocityFilter {
     var currentVelocity: Double?
     var previous: (time: Time, data: ViewFrame.AnimatableData)?
@@ -250,7 +246,7 @@ func makeAnimatableFrameAttributes(
     var cachedEnvironment = inputs.cachedEnvironment.value
     let environment = cachedEnvironment.environment
     let pixelLength: Attribute<CGFloat> = cachedEnvironment.attribute(
-        id: .animationPixelLength
+        id: .pixelLength
     ) {
         $0.animationPixelLength
     }
@@ -360,7 +356,7 @@ extension CachedEnvironment {
         }
 
         let pixelLength: Attribute<CGFloat> = attribute(
-            id: .animationPixelLength
+            id: .pixelLength
         ) {
             $0.animationPixelLength
         }

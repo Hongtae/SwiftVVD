@@ -459,6 +459,13 @@ private final class ViewGraphDisplayLink {
 // GestureGraph ownership is shared with the renderer host for event dispatch.
 class ViewGraph: ViewGraphHost {
 
+    static var current: ViewGraph {
+        guard let graph = GraphHost.currentHost as? ViewGraph else {
+            fatalError("ViewGraph.current accessed outside an active ViewGraph host context.")
+        }
+        return graph
+    }
+
     override func hostKind() -> CustomEventTrace.InstantiationEventType.Kind {
         .view
     }
@@ -510,6 +517,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var timeAttr: Attribute<Time>?
     private(set) var transactionAttr: Attribute<Transaction>?
     private(set) var phaseAttr: Attribute<_GraphInputs.Phase>?
+    private(set) var zeroPointAttr: Attribute<CGPoint>?
 
     // AG output attributes collected after V._makeView.
     private(set) var rootAnyViewContentInput: Attribute<AnyView>?
@@ -901,6 +909,7 @@ class ViewGraph: ViewGraphHost {
 
             let transformAttr    = g.makeInput(value: ViewTransform.identity)
             let containerPosAttr = g.makeInput(value: CGPoint.zero)
+            self.zeroPointAttr = containerPosAttr
             let sizeAttr         = g.makeInput(value: ViewSize(.zero))
             let safeAreaInsetsAttr = g.makeInput(
                 value: _SafeAreaInsetsModifier()

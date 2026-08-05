@@ -148,6 +148,52 @@ final class PresentationEnvironmentTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS viewGraphHostEnvironmentWrapperOwnershipObserved
+    @MainActor
+    func testContextMenuSubmenuReadsParentPopupPhaseFromItsOwningGraph() throws {
+        let leaf = PlatformItemList.Item(
+            id: "leaf",
+            label: AnyView(Text("Leaf")),
+            action: {},
+            role: nil
+        )
+        let submenu = PlatformItemList.Item(
+            id: "submenu",
+            label: AnyView(Text("Submenu")),
+            action: nil,
+            role: nil,
+            children: [leaf],
+            secondaryNavigationBehavior: .submenu
+        )
+        let actions = ContextMenuPopupActions()
+        let session = ContextMenuPresentationSession()
+        let root = ContextMenuWindowController(
+            content: EmptyView(),
+            environment: EnvironmentValues(),
+            viewPhase: ViewGraphHost.Phase(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(ContextMenuSubmenuPhaseProbe.self)
+            ),
+            anchor: .zero,
+            items: [submenu],
+            actions: actions,
+            usesPlatformWindow: false,
+            session: session
+        )
+        root.viewGraph.updateOutputs(at: .zero)
+        XCTAssertNil(_AGGraph.current)
+
+        root.openSubmenu(submenu, at: CGPoint(x: 20, y: 10))
+
+        var presentedChildren: [PresentationChildWindowController] = []
+        root.forEachPresentationChild { presentedChildren.append($0) }
+        XCTAssertEqual(presentedChildren.count, 1)
+        presentedChildren[0].viewGraph.updateOutputs(at: .zero)
+        XCTAssertNotNil(presentedChildren[0].viewGraph.parentPhase)
+        root.dismissAllPresentationChildren()
+    }
+
     @MainActor
     func testPresentationEnvironmentUpdateDoesNotEnterActiveChildGraph() {
         var initial = EnvironmentValues()
@@ -230,6 +276,8 @@ private struct UncheckedSendableValue<Value>: @unchecked Sendable {
         self.value = value
     }
 }
+
+private struct ContextMenuSubmenuPhaseProbe {}
 
 private struct PresentationEnvironmentProbeKey: EnvironmentKey {
     static let defaultValue = "default"

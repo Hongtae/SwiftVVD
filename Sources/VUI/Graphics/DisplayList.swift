@@ -1669,6 +1669,14 @@ struct DisplayList: Equatable, CustomStringConvertible {
             "(display-list-item \(identity) \(version.value))"
         }
 
+        init() {
+            self.frame = .zero
+            self.version = Version()
+            self.value = .empty
+            self.identity = .none
+            self.opacity = 1
+        }
+
         init(
             command: ItemCommand,
             identity: _DisplayList_Identity = .none,
@@ -1860,26 +1868,72 @@ struct DisplayList: Equatable, CustomStringConvertible {
             )
         }
 
+        mutating func addEffect(_ effect: DisplayList.Effect) {
+            var child = self
+            child.frame.origin = .zero
+
+            var contents = DisplayList()
+            contents.items.append(child)
+            contents.interpolationBounds = child.frame
+            value = .effect(effect, contents)
+        }
+
+        mutating func canonicalize(options: DisplayList.Options) {
+            guard !options.contains(.disableCanonicalization),
+                  case let .effect(.identity, contents) = value,
+                  contents.items.count == 1,
+                  contents.debugItems.isEmpty,
+                  let child = contents.items.first else {
+                return
+            }
+
+            frame = CGRect(
+                origin: CGPoint(
+                    x: frame.origin.x + child.frame.origin.x,
+                    y: frame.origin.y + child.frame.origin.y
+                ),
+                size: child.frame.size
+            )
+            version.combine(with: child.version)
+            value = child.value
+            if child.identity != .none {
+                identity = child.identity
+            }
+            opacity *= child.opacity
+            styleChain = child.styleChain.appendingOuter(styleChain)
+        }
+
         func presentationContext(from context: GraphicsContext) -> GraphicsContext {
-            let recordedBounds: CGRect?
+            let offset: CGSize
             switch value {
             case let .content(content):
-                recordedBounds = content.command.bounds
-            case let .effect(_, contents):
-                recordedBounds = contents.interpolationBounds
+                guard let recordedBounds = content.command.bounds,
+                      !recordedBounds.isNull else {
+                    return context
+                }
+                offset = CGSize(
+                    width: frame.origin.x - recordedBounds.origin.x,
+                    height: frame.origin.y - recordedBounds.origin.y
+                )
+            case .effect:
+                // Effect contents remain in their own local coordinate space.
+                // The outer frame is the placement applied before replaying them.
+                offset = CGSize(
+                    width: frame.origin.x,
+                    height: frame.origin.y
+                )
             case let .states(states):
-                recordedBounds = states.last?.1.interpolationBounds
+                guard let recordedBounds = states.last?.1.interpolationBounds,
+                      !recordedBounds.isNull else {
+                    return context
+                }
+                offset = CGSize(
+                    width: frame.origin.x - recordedBounds.origin.x,
+                    height: frame.origin.y - recordedBounds.origin.y
+                )
             case .empty:
-                recordedBounds = nil
-            }
-            guard let recordedBounds,
-                  !recordedBounds.isNull else {
                 return context
             }
-            let offset = CGSize(
-                width: frame.origin.x - recordedBounds.origin.x,
-                height: frame.origin.y - recordedBounds.origin.y
-            )
             guard offset.width != 0 || offset.height != 0 else {
                 return context
             }

@@ -252,6 +252,7 @@ struct DefaultCombiningAnimation: CustomAnimation {
                         childContext.isLogicallyComplete
                     return nil
                 }
+                output = nextEntries[index].value
                 continue
             }
 
@@ -447,49 +448,6 @@ extension _RotationEffect: ExtendedAnimatable {
         return angleMagnitudeSquared < angleThreshold * angleThreshold &&
             delta.second.first == 0 &&
             delta.second.second == 0
-    }
-}
-
-extension ViewFrame: ExtendedAnimatable {
-    typealias AnimatableData = AnimatablePair<CGPoint.AnimatableData, ViewSize.AnimatableData>
-
-    var animatableData: AnimatableData {
-        get { AnimatableData(origin.animatableData, size.animatableData) }
-        set {
-            origin.animatableData = newValue.first
-            size.animatableData = newValue.second
-        }
-    }
-
-    static func shouldFinishEarly(in context: AnimationSettlingContext<AnimatableData>) -> Bool {
-        let pixelLength = context.environment.animationPixelLength
-        let doublePixelLength = pixelLength * 2
-        return componentSettled(
-            delta: context.delta.first.first,
-            velocity: context.velocity.first.first,
-            threshold: pixelLength
-        ) && componentSettled(
-            delta: context.delta.first.second,
-            velocity: context.velocity.first.second,
-            threshold: pixelLength
-        ) && componentSettled(
-            delta: context.delta.second.first,
-            velocity: context.velocity.second.first,
-            threshold: doublePixelLength
-        ) && componentSettled(
-            delta: context.delta.second.second,
-            velocity: context.velocity.second.second,
-            threshold: doublePixelLength
-        )
-    }
-
-    private static func componentSettled(
-        delta: CGFloat,
-        velocity: CGFloat,
-        threshold: CGFloat
-    ) -> Bool {
-        let thresholdSquared = threshold * threshold
-        return delta * delta + velocity * velocity < thresholdSquared
     }
 }
 

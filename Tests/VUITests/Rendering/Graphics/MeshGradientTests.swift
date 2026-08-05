@@ -265,7 +265,7 @@ final class MeshGradientTests: XCTestCase {
         // ASSERTIONS meshGradientHDRDynamicRangeResolutionObserved
     }
 
-    func testDirectShapeStyleResolverTracksUsedDynamicRangeValues() throws {
+    func testShapeStyleResolverTracksUsedDynamicRangeValues() throws {
         let graph = _AGGraph()
         let context = _AGGraphContext(graph: graph)
 
@@ -281,21 +281,19 @@ final class MeshGradientTests: XCTestCase {
             var environment = EnvironmentValues()
             environment.allowedDynamicRange = .high
             let environmentInput = graph.makeInput(value: environment)
-            let tracker = _PropertyListTracker()
-            let output = graph.makeStatefulRule(
-                DirectShapeStyleResolver(
-                    style: OptionalAttribute(mesh),
-                    environment: environmentInput,
-                    role: .fill,
-                    animationsDisabled: false,
-                    helper: AnimatableAttributeHelper(
-                        _phase: phase,
-                        _time: time,
-                        _transaction: transaction
-                    ),
-                    tracker: tracker
+            let resolver = ShapeStyleResolver(
+                style: OptionalAttribute(mesh),
+                environment: environmentInput,
+                role: .fill,
+                animationsDisabled: false,
+                helper: AnimatableAttributeHelper(
+                    _phase: phase,
+                    _time: time,
+                    _transaction: transaction
                 )
             )
+            let tracker = resolver.tracker
+            let output = graph.makeStatefulRule(resolver)
 
             func dynamicRange(
                 _ pack: _ShapeStyle_Pack
@@ -318,24 +316,22 @@ final class MeshGradientTests: XCTestCase {
             environmentInput.setValue(standardEnvironment)
             XCTAssertEqual(try dynamicRange(output.value), .standard)
 
-            let standardTracker = _PropertyListTracker()
             let standardMesh = graph.makeInput(
                 value: makeSolidMesh(color: .red)
             )
-            let standardOutput = graph.makeStatefulRule(
-                DirectShapeStyleResolver(
-                    style: OptionalAttribute(standardMesh),
-                    environment: environmentInput,
-                    role: .fill,
-                    animationsDisabled: false,
-                    helper: AnimatableAttributeHelper(
-                        _phase: phase,
-                        _time: time,
-                        _transaction: transaction
-                    ),
-                    tracker: standardTracker
+            let standardResolver = ShapeStyleResolver(
+                style: OptionalAttribute(standardMesh),
+                environment: environmentInput,
+                role: .fill,
+                animationsDisabled: false,
+                helper: AnimatableAttributeHelper(
+                    _phase: phase,
+                    _time: time,
+                    _transaction: transaction
                 )
             )
+            let standardTracker = standardResolver.tracker
+            let standardOutput = graph.makeStatefulRule(standardResolver)
             XCTAssertEqual(try dynamicRange(standardOutput.value), .standard)
 
             var unusedRangeChange = standardEnvironment
@@ -351,7 +347,7 @@ final class MeshGradientTests: XCTestCase {
         }
     }
 
-    func testDirectShapeStyleResolverKeepsSamplingAfterPlainActiveTargetChange() throws {
+    func testShapeStyleResolverKeepsSamplingAfterPlainActiveTargetChange() throws {
         let rendererHost = TestViewRendererHost()
         let host = ViewGraph(
             rootViewType: EmptyView.self,
@@ -370,7 +366,7 @@ final class MeshGradientTests: XCTestCase {
                 let mesh = graph.makeInput(value: makeShiftedMesh(offset: 0))
                 let environment = graph.makeInput(value: EnvironmentValues())
                 let output = graph.makeStatefulRule(
-                    DirectShapeStyleResolver(
+                    ShapeStyleResolver(
                         style: OptionalAttribute(mesh),
                         environment: environment,
                         role: .fill,

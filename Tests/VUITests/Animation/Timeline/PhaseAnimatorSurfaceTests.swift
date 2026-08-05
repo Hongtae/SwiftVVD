@@ -147,12 +147,50 @@ private struct TransactionSizedPhaseView: View, TestPrimitiveView {
 }
 
 private func firstPhaseItemBounds(in displayList: DisplayList) -> CGRect? {
-    if let bounds = displayList.itemRecords.compactMap(\.bounds).first {
-        return bounds
-    }
-    for effect in displayList.effects {
-        if let bounds = firstPhaseItemBounds(in: effect.contents) {
-            return bounds
+    for item in displayList.items {
+        switch item.value {
+        case let .content(content):
+            if let bounds = content.command.bounds {
+                return bounds.applying(
+                    CGAffineTransform(
+                        translationX: item.frame.minX - bounds.minX,
+                        y: item.frame.minY - bounds.minY
+                    )
+                ).standardized
+            }
+        case let .effect(effect, contents):
+            guard let bounds = firstPhaseItemBounds(in: contents) else {
+                continue
+            }
+            let placement = CGAffineTransform(
+                translationX: item.frame.minX,
+                y: item.frame.minY
+            )
+            if case let .transform(projection) = effect,
+               projection.isAffine {
+                return bounds.applying(
+                    CGAffineTransform(
+                        a: projection.m11,
+                        b: projection.m12,
+                        c: projection.m21,
+                        d: projection.m22,
+                        tx: projection.m31,
+                        ty: projection.m32
+                    ).concatenating(placement)
+                ).standardized
+            }
+            return bounds.applying(placement).standardized
+        case let .states(states):
+            if let contents = states.last?.1,
+               let bounds = firstPhaseItemBounds(in: contents) {
+                let recordedOrigin = contents.interpolationBounds?.origin ?? .zero
+                return bounds.offsetBy(
+                    dx: item.frame.minX - recordedOrigin.x,
+                    dy: item.frame.minY - recordedOrigin.y
+                ).standardized
+            }
+        case .empty:
+            continue
         }
     }
     return nil
@@ -369,6 +407,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 size: graph.makeInput(value: ViewSize(width: 86, height: 86))
             )
             inputs.preferences.keys.add(DisplayList.Key.self)
+            inputs.needsGeometry = true
             let source: Attribute<PhaseAnimatorVisualBodyRoot>
             let outputs: _ViewOutputs
             (source, outputs) = AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
@@ -404,8 +443,8 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             let midpoint = displayList.value
 
             XCTAssertNotEqual(
-                triggered.interpolationBounds,
-                midpoint.interpolationBounds
+                firstPhaseItemBounds(in: triggered),
+                firstPhaseItemBounds(in: midpoint)
             )
             XCTAssertEqual(compactedPhases(recorder.phases), [1])
         }

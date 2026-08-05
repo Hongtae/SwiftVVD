@@ -12,107 +12,216 @@ public protocol GeometryEffect: Animatable, ViewModifier where Self.Body == Neve
     static var _affectsLayout: Bool { get }
 }
 
+private protocol GeometryEffectProvider {
+    associatedtype Effect: GeometryEffect
+
+    static func resolve(
+        effect: Effect,
+        origin: inout CGPoint,
+        size: CGSize,
+        layoutDirection: LayoutDirection
+    ) -> DisplayList.Effect
+}
+
+private struct DefaultGeometryEffectProvider<Effect: GeometryEffect>:
+    GeometryEffectProvider {
+    static func resolve(
+        effect: Effect,
+        origin: inout CGPoint,
+        size: CGSize,
+        layoutDirection: LayoutDirection
+    ) -> DisplayList.Effect {
+        var transform = effect.effectValue(size: size)
+        if layoutDirection == .rightToLeft {
+            transform.flipRTL(width: size.width)
+        }
+
+        guard transform.isInvertible else {
+            Log.warning("ignoring singular matrix: \(transform)")
+            return .identity
+        }
+
+        if transform.isAffine,
+           transform.m11 == 1,
+           transform.m12 == 0,
+           transform.m21 == 0,
+           transform.m22 == 1 {
+            origin.x += transform.m31
+            origin.y += transform.m32
+            return .identity
+        }
+        return .transform(transform)
+    }
+}
+
+private struct GeometryEffectTransform<Effect: GeometryEffect>:
+    Rule, AsyncAttribute {
+    var _effect: Attribute<Effect>
+    var _size: Attribute<CGSize>
+    var _position: Attribute<CGPoint>
+    var _transform: Attribute<ViewTransform>
+    var _layoutDirection: Attribute<LayoutDirection>
+
+    var value: ViewTransform {
+        var transform = _transform.value
+        transform.appendPosition(_position.value)
+
+        var projection = _effect.value.effectValue(size: _size.value)
+        if _layoutDirection.value == .rightToLeft {
+            projection.flipRTL(width: _size.value.width)
+        }
+        transform.appendProjectionTransform(projection, inverse: true)
+        return transform
+    }
+}
+
+private struct RoundedSize: Rule, AsyncAttribute {
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _pixelLength: Attribute<CGFloat>
+
+    var value: ViewSize {
+        var frame = ViewFrame(
+            origin: _position.value,
+            size: _size.value
+        )
+        frame.round(toMultipleOf: _pixelLength.value)
+        return frame.size
+    }
+}
+
+private struct GeometryEffectDisplayList<Provider: GeometryEffectProvider>:
+    Rule, AsyncAttribute {
+    var identity: _DisplayList_Identity
+    var _effect: Attribute<Provider.Effect>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<CGSize>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _containerPosition: Attribute<CGPoint>
+    var _content: OptionalAttribute<DisplayList>
+    var options: DisplayList.Options
+
+    var value: DisplayList {
+        guard let content = _content.value else {
+            return DisplayList()
+        }
+
+        let position = _position.value
+        let containerPosition = _containerPosition.value
+        let size = _size.value
+        var origin = CGPoint(
+            x: position.x - containerPosition.x,
+            y: position.y - containerPosition.y
+        )
+        let effect = Provider.resolve(
+            effect: _effect.value,
+            origin: &origin,
+            size: size,
+            layoutDirection: _layoutDirection.value
+        )
+        var item = DisplayList.Item(
+            effect: effect,
+            contents: content,
+            frame: CGRect(origin: origin, size: size),
+            identity: identity,
+            version: DisplayList.Version(forUpdate: ())
+        )
+        item.canonicalize(options: options)
+
+        var result = DisplayList()
+        result.items.append(item)
+        result.recordInterpolationBounds(item.frame)
+        result.numericValue = content.numericValue
+        return result
+    }
+}
+
 enum _GeometryEffectSupport {
-    static func makeView<Modifier: ViewModifier>(
-        modifier: _GraphValue<Modifier>,
+    static func makeView<Effect: GeometryEffect>(
+        modifier: _GraphValue<Effect>,
         inputs: _ViewInputs,
-        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs,
-        effectValue: @escaping (Modifier, CGSize) -> ProjectionTransform
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
+            fatalError("\(Effect.self)._makeView called outside an active _AGGraph context.")
+        }
+        guard inputs.needsGeometry else {
+            return body(_Graph(), inputs)
         }
 
         let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
         var cachedEnvironment = cachedEnvironmentAttribute.value
+        let layoutDirection = cachedEnvironment.attribute(
+            id: .layoutDirection,
+            \.layoutDirection
+        )
         let sizeAttr = cachedEnvironment.animatedCGSize(for: inputs)
         let positionAttr = cachedEnvironment.animatedPosition(for: inputs)
+        let pixelLength = cachedEnvironment.attribute(
+            id: .pixelLength,
+            \.animationPixelLength
+        )
         cachedEnvironmentAttribute.value = cachedEnvironment
-        let parentTransformAttr = inputs.transform
-        let effectAttr: Attribute<ProjectionTransform> = graph.makeRule {
-            effectValue(modifier._attribute.value, sizeAttr.value)
-        }
-        let transformAttr: Attribute<ViewTransform> = graph.makeRule {
-            var transform = parentTransformAttr.value
-            transform.appendPosition(positionAttr.value)
-            transform.appendProjectionTransform(effectAttr.value, inverse: true)
-            return transform
-        }
+        let transformAttr = graph.makeRule(
+            GeometryEffectTransform(
+                _effect: modifier._attribute,
+                _size: sizeAttr,
+                _position: positionAttr,
+                _transform: inputs.transform,
+                _layoutDirection: layoutDirection
+            )
+        )
 
         var modifiedInputs = inputs
-        modifiedInputs.transform = transformAttr
-        var outputs = body(_Graph(), modifiedInputs)
-        applyProjectionEffect(
-            to: &outputs.preferences,
-            effect: effectAttr,
-            position: positionAttr,
-            graph: graph
+        modifiedInputs.base.options.formUnion(
+            _GraphInputs.Options(rawValue: 0x1c)
         )
-        return outputs
-    }
+        modifiedInputs.transform = transformAttr
+        guard let zeroPoint = ViewGraph.current.zeroPointAttr else {
+            fatalError("GeometryEffect requires an instantiated ViewGraph zero point.")
+        }
+        modifiedInputs.position = zeroPoint
+        modifiedInputs.containerPosition = zeroPoint
+        modifiedInputs.size = graph.makeRule(
+            RoundedSize(
+                _position: inputs.position,
+                _size: inputs.size,
+                _pixelLength: pixelLength
+            )
+        )
+        var outputs = body(_Graph(), modifiedInputs)
+        if let content = outputs.preferences.reducedValue(
+            for: DisplayList.Key.self,
+            in: graph
+        ) {
+            var displayEnvironment = cachedEnvironmentAttribute.value
+            let displayPosition = displayEnvironment.animatedPosition(
+                for: inputs
+            )
+            let displaySize = displayEnvironment.animatedCGSize(for: inputs)
+            cachedEnvironmentAttribute.value = displayEnvironment
 
-    static func applyProjectionEffect(
-        to preferences: inout PreferencesOutputs,
-        effect: Attribute<ProjectionTransform>,
-        position: Attribute<CGPoint>,
-        graph: _AGGraph
-    ) {
-        let displayNodes = preferences.values(for: DisplayList.Key.self)
-        guard !displayNodes.isEmpty else { return }
-
-        // Capture weak display-list handles so removed retained subgraphs do not
-        // keep drawing commands alive after their AG nodes are invalidated.
-        let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-        let transformedAttr: Attribute<DisplayList> = graph.makeRule {
-            var combined = DisplayList.Key.defaultValue
-            for weakNode in weakNodes where weakNode.isValid(in: graph) {
-                let list = Attribute<DisplayList>(weakNode.toStrong()).value
-                DisplayList.Key.reduce(value: &combined) { list }
-            }
-            return projectedDisplayList(
-                combined,
-                applying: effect.value,
-                at: position.value
+            var identityInputs = inputs
+            let displayList = graph.makeRule(
+                GeometryEffectDisplayList<
+                    DefaultGeometryEffectProvider<Effect>
+                >(
+                    identity: identityInputs.pushIdentity(),
+                    _effect: modifier._attribute,
+                    _position: displayPosition,
+                    _size: displaySize,
+                    _layoutDirection: layoutDirection,
+                    _containerPosition: inputs.containerPosition,
+                    _content: OptionalAttribute(content),
+                    options: inputs[DisplayList.Options.self]
+                )
+            )
+            outputs.preferences.setValue(
+                displayList.identifier,
+                for: DisplayList.Key.self
             )
         }
-
-        let displayKeyID = ObjectIdentifier(DisplayList.Key.self)
-        preferences.preferences.removeAll {
-            ObjectIdentifier($0.key) == displayKeyID
-        }
-        preferences.append(DisplayList.Key.self, node: transformedAttr.identifier)
-    }
-
-    static func projectedDisplayList(
-        _ source: DisplayList,
-        applying transform: ProjectionTransform,
-        at position: CGPoint
-    ) -> DisplayList {
-        guard let affine = affineTransform(from: transform, at: position),
-              !affine.isIdentity else {
-            return source
-        }
-        return source.transformed(by: affine)
-    }
-
-    private static func affineTransform(
-        from transform: ProjectionTransform,
-        at position: CGPoint
-    ) -> CGAffineTransform? {
-        // The current renderer path accepts affine projection effects. Non-affine
-        // perspective transforms need a later renderer-side implementation.
-        guard transform.m13 == 0,
-              transform.m23 == 0,
-              transform.m33 == 1 else {
-            return nil
-        }
-        let a = transform.m11
-        let b = transform.m12
-        let c = transform.m21
-        let d = transform.m22
-        let tx = transform.m31 + position.x - position.x * a - position.y * c
-        let ty = transform.m32 + position.y - position.x * b - position.y * d
-        return CGAffineTransform(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+        return outputs
     }
 }
 
@@ -127,12 +236,10 @@ private struct _ResolvedGeometryEffectModifier<Base: GeometryEffect>: ViewModifi
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
         _GeometryEffectSupport.makeView(
-            modifier: modifier,
+            modifier: modifier[\.base],
             inputs: inputs,
             body: body
-        ) { modifier, size in
-            modifier.base.effectValue(size: size)
-        }
+        )
     }
 
     static func _makeViewList(
@@ -159,15 +266,16 @@ extension GeometryEffect {
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
+        guard inputs.needsGeometry else {
+            return body(_Graph(), inputs)
+        }
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
         return _GeometryEffectSupport.makeView(
             modifier: modifier,
             inputs: inputs,
             body: body
-        ) { modifier, size in
-            modifier.effectValue(size: size)
-        }
+        )
     }
 
     public static func _makeViewList(

@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+
 public protocol ShapeStyle: Sendable {
     static func _makeView<S>(view: _GraphValue<_ShapeView<S, Self>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape
 
@@ -237,6 +239,41 @@ enum _ShapeStyle_Substrate: Hashable, Sendable {
     case caLayer
     case graphicsContext
     case archive
+}
+
+struct _ShapeStyle_ResolverMode: Hashable, Sendable {
+    struct Options: OptionSet, Hashable, Sendable {
+        var rawValue: UInt8
+
+        init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        static let foregroundPalette = Options(rawValue: 1 << 0)
+        static let background = Options(rawValue: 1 << 1)
+        static let multicolor = Options(rawValue: 1 << 2)
+    }
+
+    var bundle: Bundle?
+    var foregroundLevels: UInt16
+    var options: Options
+
+    init(
+        foregroundLevels: UInt16 = 1,
+        options: Options = []
+    ) {
+        self.bundle = nil
+        self.foregroundLevels = foregroundLevels
+        self.options = options
+    }
+
+    mutating func formUnion(_ other: Self) {
+        if bundle == nil {
+            bundle = other.bundle
+        }
+        foregroundLevels = max(foregroundLevels, other.foregroundLevels)
+        options.formUnion(other.options)
+    }
 }
 
 public struct _ShapeStyle_ShapeType {

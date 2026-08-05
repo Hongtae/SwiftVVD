@@ -635,18 +635,18 @@ extension ContentTransition.Style: ProtobufEncodableMessage, ProtobufDecodableMe
     }
 }
 
-private struct ContentTransitionKey: EnvironmentKey {
-    static let defaultValue = ContentTransition.defaultTransition
-}
-
 private struct ContentTransitionAddsDrawingGroupKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
 extension EnvironmentValues {
     public var contentTransition: ContentTransition {
-        get { self[ContentTransitionKey.self] }
-        set { self[ContentTransitionKey.self] = newValue }
+        get { self[ContentTransition.State.self].transition }
+        set {
+            var state = self[ContentTransition.State.self]
+            state.transition = newValue
+            self[ContentTransition.State.self] = state
+        }
     }
 
     public var contentTransitionAddsDrawingGroup: Bool {

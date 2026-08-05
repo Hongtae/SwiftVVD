@@ -51,6 +51,29 @@ final class ContentTransitionSurfaceTests: XCTestCase {
         XCTAssertTrue(values.contentTransitionAddsDrawingGroup)
     }
 
+    func testContentTransitionEnvironmentWritePreservesHiddenState() {
+        let animation = Animation.linear(duration: 0.75)
+        var values = EnvironmentValues()
+        values.contentTransitionState = ContentTransition.State(
+            transition: .opacity,
+            style: .animatedWidget,
+            animation: animation,
+            options: [.formsGroup]
+        )
+
+        values.contentTransition = .symbolEffect(.replace.upUp)
+
+        XCTAssertEqual(
+            values.contentTransitionState.transition,
+            .symbolEffect(.replace.upUp)
+        )
+        XCTAssertEqual(values.contentTransitionState.style, .animatedWidget)
+        XCTAssertEqual(values.contentTransitionState.animation, animation)
+        XCTAssertEqual(values.contentTransitionState.options, [.formsGroup])
+
+        // ASSERTIONS contentTransitionStateEnvironmentStorageObserved
+    }
+
     func testContentTransitionModifierPublishesEnvironmentValue() throws {
         let graph = _AGGraph()
         let recorder = ContentTransitionEnvironmentRecorder()

@@ -17,7 +17,7 @@ public struct _StrokedShape<S>: Shape where S: Shape {
     }
 
     public func path(in rect: CGRect) -> Path {
-        shape.path(in: rect)
+        shape.path(in: rect).strokedPath(style)
     }
 
     public static var role: ShapeRole { .stroke }
@@ -41,27 +41,6 @@ public struct _StrokedShape<S>: Shape where S: Shape {
 
     public var body: Body {
         _ShapeView(shape: self, style: ForegroundStyle())
-    }
-}
-
-protocol ShapeStrokeStyleProviding {
-    var strokeStyle: StrokeStyle { get }
-}
-
-extension _StrokedShape: ShapeStrokeStyleProviding {
-    var strokeStyle: StrokeStyle { style }
-}
-
-protocol ShapeDrawer {
-    func _draw(in frame: CGRect, style: any ShapeStyle, fillStyle: FillStyle, context: GraphicsContext)
-}
-
-extension _StrokedShape: ShapeDrawer {
-    func _draw(in frame: CGRect, style: any ShapeStyle, fillStyle: FillStyle, context: GraphicsContext) {
-        if let drawer = self.shape as? ShapeDrawer {
-            drawer._draw(in: frame, style: style, fillStyle: fillStyle, context: context)
-        }
-        context.stroke(self.path(in: frame), with: .style(style), style: self.style)
     }
 }
 

@@ -154,6 +154,7 @@ struct ResolvedVectorSymbol: Equatable {
     var layers: [Layer]
     var artworkBounds: CGRect
     var intrinsicScale: CGFloat = 1
+    var allowsContentTransitions = false
 
     func applyingEffectiveFontMetrics(
         in environment: EnvironmentValues

@@ -854,6 +854,25 @@ struct StyledTextContentView {
     }
 }
 
+extension StyledTextContentView: ShapeStyledLeafView {
+    typealias ShapeUpdateData = Void
+
+    func shape(
+        in size: CGSize
+    ) -> (shape: _ShapeStyle_RenderedShape.Shape, frame: CGRect) {
+        let frame = renderer.map { renderer in
+            let padding = renderer.displayPadding
+            return CGRect(
+                x: -padding.leading,
+                y: -padding.top,
+                width: size.width + padding.leading + padding.trailing,
+                height: size.height + padding.top + padding.bottom
+            )
+        } ?? CGRect(origin: .zero, size: size)
+        return (.text(self), frame)
+    }
+}
+
 final class ResolvedStyledText: InterpolatableContent {
     private struct MetricsCacheEntry {
         var requestedSize: CGSize
@@ -977,6 +996,38 @@ final class ResolvedStyledText: InterpolatableContent {
 
     var metricsCacheEntryCount: Int {
         metricsCache.count
+    }
+
+    var needsStyledRendering: Bool {
+        if features.contains(.keyColor) {
+            return true
+        }
+        guard features.contains(.attachments),
+              archiveOptions.isArchived else {
+            return false
+        }
+        guard let storage else {
+            return true
+        }
+        return !storage._isDynamicText
+    }
+
+    func frame(
+        in size: CGSize,
+        renderer: TextRendererBoxBase?
+    ) -> CGRect {
+        guard let resolvedText else {
+            return CGRect(origin: .zero, size: size)
+        }
+        let measured = renderer?.sizeThatFits(
+            proposal: ProposedViewSize(size),
+            text: TextProxy(resolvedText)
+        ) ?? sizeThatFits(_ProposedSize(size))
+        var frame = CGRect(origin: .zero, size: measured)
+        if measured.height < size.height {
+            frame.origin.y = (size.height - measured.height) * 0.5
+        }
+        return frame
     }
 
     func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {

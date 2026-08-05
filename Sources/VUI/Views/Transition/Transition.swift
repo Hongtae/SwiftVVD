@@ -352,7 +352,7 @@ public struct MoveTransition: Transition {
         }
     }
 
-    struct MoveLayout: ViewModifier, Animatable {
+    struct MoveLayout: UnaryLayout {
         var edge: Edge?
 
         init(edge: Edge?) {
@@ -362,120 +362,33 @@ public struct MoveTransition: Transition {
         typealias AnimatableData = EmptyAnimatableData
         typealias Body = Never
 
-        static func _makeView(
-            modifier: _GraphValue<Self>,
-            inputs: _ViewInputs,
-            body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
-        ) -> _ViewOutputs {
-            guard let graph = _AGGraph.current else {
-                fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
-            }
-
-            let progressSource: Attribute<MoveLayoutProgress> = graph.makeRule {
-                MoveLayoutProgress(value: modifier._attribute.value.edge == nil ? 0 : 1)
-            }
-            var progress = _GraphValue<MoveLayoutProgress>(_attribute: progressSource)
-            MoveLayoutProgress._makeAnimatable(value: &progress, inputs: inputs.base)
-
-            let activeEdge: Attribute<Edge?> = graph.makeStatefulRule(
-                MoveLayoutActiveEdge(modifier: modifier._attribute)
-            )
-            let sizeAttr = inputs.size
-            let positionAttr = inputs.position
-            let parentTransformAttr = inputs.transform
-            let progressAttr = progress._attribute
-
-            let effectAttr: Attribute<ProjectionTransform> = graph.makeRule {
-                Self.effectValue(
-                    edge: activeEdge.value,
-                    progress: progressAttr.value.value,
-                    size: sizeAttr.value.value
-                )
-            }
-            let transformAttr: Attribute<ViewTransform> = graph.makeRule {
-                var transform = parentTransformAttr.value
-                transform.appendProjectionTransform(effectAttr.value, inverse: false)
-                return transform
-            }
-
-            var modifiedInputs = inputs
-            modifiedInputs.transform = transformAttr
-            var outputs = body(_Graph(), modifiedInputs)
-            _GeometryEffectSupport.applyProjectionEffect(
-                to: &outputs.preferences,
-                effect: effectAttr,
-                position: positionAttr,
-                graph: graph
-            )
-            return outputs
+        func sizeThatFits(
+            in proposal: _ProposedSize,
+            context: SizeAndSpacingContext,
+            child: LayoutProxy
+        ) -> CGSize {
+            child.size(in: proposal)
         }
 
-        static func _makeViewList(
-            modifier: _GraphValue<Self>,
-            inputs: _ViewListInputs,
-            body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-        ) -> _ViewListOutputs {
-            guard _AGGraph.current != nil else {
-                fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
-            }
-            var outputs = body(_Graph(), inputs)
-            outputs.multiModifier(modifier, inputs: inputs)
-            return outputs
-        }
-
-        func effectValue(size: CGSize) -> ProjectionTransform {
-            Self.effectValue(
-                edge: edge,
-                progress: edge == nil ? 0 : 1,
-                size: size
-            )
-        }
-
-        private static func effectValue(edge: Edge?, progress: CGFloat, size: CGSize) -> ProjectionTransform {
-            guard progress != 0, let edge else {
-                return ProjectionTransform()
-            }
-            let offset: CGSize
+        func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
+            let position: CGPoint
             switch edge {
-            case .leading:
-                offset = CGSize(width: -size.width * progress, height: 0)
-            case .trailing:
-                offset = CGSize(width: size.width * progress, height: 0)
             case .top:
-                offset = CGSize(width: 0, height: -size.height * progress)
+                position = CGPoint(x: 0, y: -context.size.height)
+            case .leading:
+                position = CGPoint(x: -context.size.width, y: 0)
             case .bottom:
-                offset = CGSize(width: 0, height: size.height * progress)
+                position = CGPoint(x: 0, y: context.size.height)
+            case .trailing:
+                position = CGPoint(x: context.size.width, y: 0)
+            case nil:
+                position = .zero
             }
-            return ProjectionTransform(
-                CGAffineTransform(translationX: offset.width, y: offset.height)
+            return _Placement(
+                proposedSize: context.proposedSize,
+                anchoring: .topLeading,
+                at: position
             )
-        }
-    }
-
-    private struct MoveLayoutActiveEdge: StatefulRule {
-        typealias Value = Edge?
-        var modifier: Attribute<MoveLayout>
-        private var lastEdge: Edge?
-
-        init(modifier: Attribute<MoveLayout>) {
-            self.modifier = modifier
-            self.lastEdge = nil
-        }
-
-        mutating func updateValue() {
-            if let edge = modifier.value.edge {
-                lastEdge = edge
-            }
-            _AGGraph.setStatefulOutput(modifier.value.edge ?? lastEdge)
-        }
-    }
-
-    private struct MoveLayoutProgress: Animatable, Equatable {
-        var value: CGFloat
-
-        var animatableData: CGFloat {
-            get { value }
-            set { value = newValue }
         }
     }
 }
