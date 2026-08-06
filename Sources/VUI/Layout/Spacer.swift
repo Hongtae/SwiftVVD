@@ -461,20 +461,15 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
             fatalError("\(self).makeRepresentation called outside an active _AGGraph context.")
         }
 
-        // Use an identity attribute to produce a stable platform item identifier.
-        let identityAttr: Attribute<Void> = graph.makeRule { () }
-        let itemID = PlatformItemList.stableID(identityAttr.identifier)
-        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-            var list = PlatformItemList()
-            list.append(PlatformItemList.Item(
-                id: itemID,
-                label: AnyView(EmptyView()),
-                action: nil,
-                role: nil,
-                systemItem: .divider
-            ))
-            return list
-        }
+        let preferenceAttr = GraphHost.currentHost.intern(
+            PlatformItemList(
+                items: [
+                    PlatformItemList.Item(systemItem: .divider)
+                ]
+            ),
+            for: Divider.self,
+            id: .defaultValue
+        )
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
     }
 }

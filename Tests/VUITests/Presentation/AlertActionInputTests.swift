@@ -105,13 +105,22 @@ final class AlertActionInputTests: XCTestCase {
 
     private func alertPreference(state: AlertActionInputState) -> AlertPreference {
         var actions = PlatformItemList()
-        actions.append(PlatformItemList.Item(
-            label: AnyView(Text("Delete")),
-            action: {
+        var item = PlatformItemList.Item(systemItem: .button)
+        item.text = NSAttributedString(string: "Delete")
+        item.buttonRole = .destructive
+        item.selectionBehavior = .init(
+            isMomentary: true,
+            isContainerSelection: true,
+            yieldsToContainerSelection: false,
+            isPickerOption: false,
+            visualStyle: .plain,
+            onSelect: {
                 state.actionCount += 1
             },
-            role: .destructive
-        ))
+            onDeselect: nil,
+            springLoadingBehavior: .automatic
+        )
+        actions.append(item)
         return AlertPreference(
             identity: ViewIdentity(),
             title: Text("Delete Item?"),

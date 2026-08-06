@@ -11,36 +11,30 @@ public protocol ContainerValueKey {
     static var defaultValue: Self.Value { get }
 }
 
-// ContainerValues is a dictionary-like store for container-specific values
-// attached to individual views inside variadic containers (List, Grid, etc.).
-// Read via LayoutSubview.containerValues in Layout.placeSubviews.
 public struct ContainerValues {
-    var storage: [ObjectIdentifier: Any] = [:]
+    var base: ViewTraitCollection
+
+    init(base: ViewTraitCollection = ViewTraitCollection()) {
+        self.base = base
+    }
 
     public subscript<Key: ContainerValueKey>(key: Key.Type) -> Key.Value {
         get {
-            storage[ObjectIdentifier(key)] as? Key.Value ?? Key.defaultValue
+            base[ContainerValueViewTraitKey<Key>.self]
         }
         set {
-            storage[ObjectIdentifier(key)] = newValue
+            base[ContainerValueViewTraitKey<Key>.self] = newValue
         }
     }
 }
 
-// ContainerValuesInput is the GraphInput key that carries ContainerValues
-// through the customInputs stack. Written by _ContainerValueWritingModifier,
-// read by containers (Layout, VariadicView) when collecting subview metadata.
-struct ContainerValuesInput: GraphInput {
-    typealias Value = ContainerValues
-    static var defaultValue: ContainerValues { ContainerValues() }
-    static func valuesEqual(_ a: ContainerValues, _ b: ContainerValues) -> Bool { false }
-    var description: String { "ContainerValuesInput" }
+private struct ContainerValueViewTraitKey<Key>: _ViewTraitKey
+    where Key: ContainerValueKey {
+    static var defaultValue: Key.Value {
+        Key.defaultValue
+    }
 }
 
-// _ContainerValueWritingModifier<Value> writes a single
-// ContainerValues entry (identified by keyPath) into customInputs so that
-// the enclosing container can read it via LayoutSubview.containerValues.
-// Body = Never. Custom _makeView/_makeViewList pass through with input mutation.
 public struct _ContainerValueWritingModifier<Value> {
     public var keyPath: WritableKeyPath<ContainerValues, Value>
     public var value: Value
@@ -54,15 +48,25 @@ public struct _ContainerValueWritingModifier<Value> {
 extension _ContainerValueWritingModifier: ViewModifier {
     public typealias Body = Never
 
+    private struct AddTrait: Rule {
+        var _modifier: Attribute<_ContainerValueWritingModifier>
+        var _traits: OptionalAttribute<ViewTraitCollection>
+
+        var value: ViewTraitCollection {
+            var values = ContainerValues(
+                base: _traits.value ?? ViewTraitCollection()
+            )
+            let modifier = _modifier.value
+            values[keyPath: modifier.keyPath] = modifier.value
+            return values.base
+        }
+    }
+
     public static func _makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        var inputs = inputs
-        var cv = inputs.base.customInputs.value(forKey: ContainerValuesInput.self)
-        cv[keyPath: modifier._attribute.value.keyPath] = modifier._attribute.value.value
-        inputs.base.customInputs.setValue(cv, forKey: ContainerValuesInput.self)
         return body(_Graph(), inputs)
     }
 
@@ -71,11 +75,20 @@ extension _ContainerValueWritingModifier: ViewModifier {
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        var inputs = inputs
-        var cv = inputs.base.customInputs.value(forKey: ContainerValuesInput.self)
-        cv[keyPath: modifier._attribute.value.keyPath] = modifier._attribute.value.value
-        inputs.base.customInputs.setValue(cv, forKey: ContainerValuesInput.self)
-        return body(_Graph(), inputs)
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "\(Self.self)._makeViewList called outside an active _AGGraph context."
+            )
+        }
+        let traits: Attribute<ViewTraitCollection> = graph.makeRule(
+            AddTrait(
+                _modifier: modifier._attribute,
+                _traits: inputs._traits
+            )
+        )
+        var modifiedInputs = inputs
+        modifiedInputs._traits = OptionalAttribute(traits)
+        return body(_Graph(), modifiedInputs)
     }
 }
 

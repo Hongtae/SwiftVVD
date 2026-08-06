@@ -288,10 +288,15 @@ func orderedDialogOverlayActions(_ items: [PlatformItemList.Item],
     guard maxVisibleCount > 0 else { return [] }
     let ordered = items.enumerated().map { offset, item in
         DialogOverlayAction(item: item,
-                            isDefaultAction: offset == 0 && item.role == nil)
+                            isDefaultAction:
+                                offset == 0 && item.buttonRole == nil)
     }
-    let nonCancel = ordered.filter { $0.item.role != .cancel }
-    let cancel    = ordered.filter { $0.item.role == .cancel }
+    let nonCancel = ordered.filter {
+        $0.item.buttonRole != .cancel
+    }
+    let cancel = ordered.filter {
+        $0.item.buttonRole == .cancel
+    }
     let orderedActions = nonCancel + cancel
     guard orderedActions.count > maxVisibleCount else {
         return orderedActions
@@ -403,7 +408,9 @@ struct DialogOverlayPanel: View {
     private var actions: some View {
         if let buttonItems, !buttonItems.isEmpty {
             let items = orderedDialogOverlayActions(buttonItems)
-            let reverseHorizontal = items.count == 2 && items.last?.item.role == .cancel
+            let reverseHorizontal =
+                items.count == 2
+                && items.last?.item.buttonRole == .cancel
             DialogOverlayActionsLayout(reverseTwoButtonHorizontal: reverseHorizontal) {
                 ForEach(0..<items.count, id: \.self) { i in
                     actionButton(items[i])
@@ -416,125 +423,61 @@ struct DialogOverlayPanel: View {
 
     private func actionButton(_ action: DialogOverlayAction) -> some View {
         let item = action.item
-        return Button(role: item.role, action: {
+        return Button(role: item.buttonRole, action: {
             guard item.isEnabled else { return }
-            item.action?()
+            item.selectionBehavior?.onSelect?()
             isPresented.wrappedValue = false
         }) {
-            item.label
+            platformItemText(item)
         }
-        .buttonStyle(DialogOverlayActionButtonStyle(role: item.role,
+        .buttonStyle(DialogOverlayActionButtonStyle(role: item.buttonRole,
                                                     isDefaultAction: action.isDefaultAction))
         .environment(\.isEnabled, item.isEnabled)
     }
 }
 
 struct PlatformItemListButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.tintColor) private var tint
+    @Environment(\.displayMenuAsPalette)
+    private var displayMenuAsPalette
+    @Environment(\.paletteSelectionEffect) private var effect
+
     func makeBody(configuration: Configuration) -> some View {
-        PlatformItemListButtonBody(configuration: configuration)
-    }
-}
-
-private func platformItemFallbackLabel(role: ButtonRole?) -> Text {
-    switch role {
-    case .cancel:
-        return Text("Cancel")
-    case .destructive:
-        return Text("Delete")
-    default:
-        return Text("OK")
-    }
-}
-
-private func platformItemButtonLabelSurface(
-    source: AnySource?,
-    fallback: Text
-) -> (label: AnyView, image: AnyView?) {
-    // Button labels that are Label values flatten into the platform menu item
-    // surface. Text icons become the final title. Image icons stay in the image
-    // slot. Do not store the whole Label as the row label, because menu row
-    // rendering should consume the platform item surface directly.
-    if let label = source?.snapshotValue(as: Label<Text, Image>.self) {
-        return (AnyView(label.title), AnyView(label.icon))
-    }
-    if let label = source?.snapshotValue(as: Label<Text, Text>.self) {
-        return (AnyView(label.icon), nil)
-    }
-    return (source?.snapshot() ?? AnyView(fallback), nil)
-}
-
-private func platformItemButtonLabelSource(
-    _ inputs: _ViewInputs
-) -> AnySource? {
-    var sources = inputs.base[
-        SourceInput<ButtonStyleConfiguration.Label>.self
-    ]
-    guard let relay = sources.pop() else {
-        return nil
-    }
-    if relay.isSource(PrimitiveButtonStyleConfiguration.Label.self) {
-        return sources.pop()
-    }
-    return relay
-}
-
-private struct PlatformItemListButtonBody: View {
-    let configuration: PrimitiveButtonStyleConfiguration
-    @Environment(\.isEnabled) private var isEnabled: Bool
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("PlatformItemListButtonBody._makeView called outside AG context")
-        }
-
-        let configurationAttr = view[\.configuration]._attribute
-        let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        let source = platformItemButtonLabelSource(inputs)
-        let itemID = PlatformItemList.stableID(configurationAttr.identifier)
-        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-            let configuration = configurationAttr.value
-            let surface = platformItemButtonLabelSurface(
-                source: source,
-                fallback: platformItemFallbackLabel(role: configuration.role)
+        let label = StaticIf<
+            _SemanticFeature<Semantics_v4_4>,
+            LabelGroup<Configuration.Label>,
+            Configuration.Label
+        >(
+            trueBody: LabelGroup(content: configuration.label),
+            falseBody: configuration.label
+        )
+        .modifier(
+            OnPlatformContainerSelectionModifier(
+                action: configuration.trigger,
+                isMomentary: true
             )
-            var list = PlatformItemList()
-            list.append(PlatformItemList.Item(
-                id: itemID,
-                label: surface.label,
-                image: surface.image,
-                action: { configuration.trigger() },
-                role: configuration.role,
-                keyboardShortcut: environmentAttr.value.keyboardShortcut,
-                isEnabled: environmentAttr.value.isEnabled
-            ))
-            return list
+        )
+        let action = ModifiedContent(
+            content: label,
+            modifier:
+            PlatformButtonActionModifier(
+                action: configuration.trigger
+            )
+        )
+        return action
+        .platformItemTint(tint)
+        .transformPlatformItemList(
+            LayoutPlatformItemListFlags.self
+        ) { list in
+            list.modify { item in
+                guard item.systemItem == nil else {
+                    return
+                }
+                item.systemItem = displayMenuAsPalette
+                    ? .palette(effect: effect)
+                    : .button
+            }
         }
-        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
-            LayoutComputer.fixed(.zero)
-        }))
-        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
-        return outputs
-    }
-
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
-
-    var body: some View {
-        configuration.label
-            .preference(key: PlatformItemList.Key.self, value: itemList)
-            ._onButtonGesture(pressing: { _ in }, perform: { configuration.trigger() })
-    }
-
-    private var itemList: PlatformItemList {
-        var list = PlatformItemList()
-        list.append(PlatformItemList.Item(
-            label: AnyView(platformItemFallbackLabel(role: configuration.role)),
-            action: { configuration.trigger() },
-            role: configuration.role,
-            isEnabled: isEnabled
-        ))
-        return list
     }
 }
 

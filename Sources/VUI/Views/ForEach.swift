@@ -45,16 +45,10 @@ extension ForEach: View where Content: View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        let rootAttr: Attribute<VStackLayout> = graph.makeRule { VStackLayout() }
-        return VStackLayout._makeLayoutView(
-            root: _GraphValue(_attribute: rootAttr),
-            inputs: inputs
-        ) { _, _ in
-            Self._makeViewList(view: view, inputs: _ViewListInputs(from: inputs))
-        }
+        return makeImplicitRoot(view: view, inputs: inputs)
     }
 
     // ForEach returns .dynamicList(Attribute<any ViewList>, nil) wrapping a ForEachList.
@@ -79,7 +73,7 @@ extension ForEach: View where Content: View {
             }
             return _ViewListOutputs(
                 views: .dynamicList(viewListAttr, nil),
-                nextImplicitID: 0,
+                nextImplicitID: inputs.implicitID,
                 staticCount: nil
             )
         }
@@ -115,7 +109,7 @@ extension ForEach: View where Content: View {
 
         return _ViewListOutputs(
             views: .dynamicList(viewListAttr, nil),
-            nextImplicitID: 0,
+            nextImplicitID: inputs.implicitID,
             staticCount: nil
         )
     }

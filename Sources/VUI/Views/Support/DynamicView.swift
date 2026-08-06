@@ -13,6 +13,10 @@ protocol TupleDescriptor: ProtocolDescriptor {}
 
 struct ViewDescriptor: ConditionalProtocolDescriptor, TupleDescriptor {}
 
+protocol ViewTypeVisitor {
+    mutating func visit<V>(type: V.Type) where V: View
+}
+
 struct TypeConformance<Descriptor> {
     var storage: (type: Any.Type, conformance: UnsafeRawPointer)
 
@@ -607,7 +611,7 @@ private struct DynamicViewList<V: DynamicView>: StatefulRule, AsyncAttribute {
                 var childInputs = inputs
                 childInputs.base.cachedEnvironment = MutableBox(childInputs.base.cachedEnvironment.value)
                 if V.canTransition {
-                    childInputs.options |= _ViewListInputs.canTransitionOptions
+                    childInputs.options.insert(.canTransition)
                 }
                 childInputs.implicitID = 0
                 let outputs = AGSubgraph.withCurrent(subgraph) {

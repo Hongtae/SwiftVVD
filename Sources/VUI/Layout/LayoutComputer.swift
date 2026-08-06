@@ -109,26 +109,6 @@ struct LayoutComputer: Defaultable {
         seed = 0
     }
 
-    // MARK: - Static helpers
-
-    static func fixed(_ size: CGSize) -> LayoutComputer {
-        LayoutComputer(FixedEngine(size: size))
-    }
-
-    /// Local fixed-size adapter for surfaces that do not yet own a concrete
-    /// layout engine.
-    ///
-    /// Keep this private and keep production call sites narrow. It can be
-    /// removed once each caller publishes its own role-specific layout engine;
-    /// it must not become part of the shared layout-engine hierarchy.
-    private struct FixedEngine: LayoutEngine {
-        var size: CGSize
-
-        mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-            size
-        }
-    }
-
     /// Supplies proposal-derived fallback sizing when no concrete engine is connected.
     struct DefaultEngine: LayoutEngine {
         mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {

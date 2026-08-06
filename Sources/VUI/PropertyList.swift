@@ -170,6 +170,12 @@ extension PropertyList {
         var seenKeys = Set<ObjectIdentifier>()
         return elements?.forEachValue(ofType: valueType, seenKeys: &seenKeys, body) ?? false
     }
+
+    func forEachValue<T: PropertyKey>(forKey key: T.Type,
+                                      _ body: (T.Value, inout Bool) -> Void) {
+        var stop = false
+        elements?.forEachValue(forKey: key, stop: &stop, body)
+    }
 }
 
 // Base protocol for PropertyList key types.
@@ -606,6 +612,28 @@ extension PropertyList {
                 element = current.after
             }
             return false
+        }
+
+        func forEachValue<T: PropertyKey>(
+            forKey key: T.Type,
+            stop: inout Bool,
+            _ body: (T.Value, inout Bool) -> Void
+        ) {
+            var element: Element? = self
+            while let current = element, !stop {
+                current.before?.forEachValue(
+                    forKey: key,
+                    stop: &stop,
+                    body
+                )
+                if stop {
+                    return
+                }
+                if current.keyType == key {
+                    body((current as! TypedElement<T>).value, &stop)
+                }
+                element = current.after
+            }
         }
 
         func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {

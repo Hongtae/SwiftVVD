@@ -292,6 +292,23 @@ extension Transaction {
         }
     }
 
+    var animationIgnoringTransitionPhase: Animation? {
+        guard disablesAnimations else {
+            return animation
+        }
+        var result: Animation?
+        plist.forEachValue(
+            forKey: TransactionKeyItem<AnimationTransactionKey>.self
+        ) { value, stop in
+            guard let value else {
+                return
+            }
+            result = value
+            stop = true
+        }
+        return result
+    }
+
     mutating func addAnimationListener(_ listener: AnimationListener) {
         Transaction.addPendingListener(listener)
         if let existing = animationListener {

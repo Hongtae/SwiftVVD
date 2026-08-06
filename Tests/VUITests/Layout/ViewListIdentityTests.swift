@@ -39,66 +39,6 @@ final class ViewListIdentityTests: XCTestCase {
         XCTAssertEqual(element.canonicalID.explicitID, AnyHashable("row"))
     }
 
-    func testViewListIDElementIDMaterializesGeneratedRowAndSharedSeeds() {
-        let rowSeed = _ViewList_ID.GeneratedIDSeed(
-            base: UniqueID(value: 1_000),
-            kind: .rowLocal
-        )
-        let sharedSeed = _ViewList_ID.GeneratedIDSeed(
-            base: UniqueID(value: 2_000),
-            kind: .shared
-        )
-
-        var generatedOnly = _ViewList_ID(implicitID: 0)
-        generatedOnly.bindGeneratedID(
-            seed: rowSeed,
-            owner: .invalid,
-            isUnary: false,
-            reuseID: _ViewList_ID.generatedRowReuseID
-        )
-        generatedOnly.bindGeneratedID(
-            seed: sharedSeed,
-            owner: .invalid,
-            isUnary: false,
-            reuseID: _ViewList_ID.generatedSectionReuseID
-        )
-
-        let firstGenerated = generatedOnly.elementID(at: 0)
-        let thirdGenerated = generatedOnly.elementID(at: 2)
-
-        XCTAssertEqual(firstGenerated.explicitIDs.count, 2)
-        XCTAssertEqual((firstGenerated.explicitIDs[0].id.base as? UniqueID)?.value, 1_001)
-        XCTAssertEqual((thirdGenerated.explicitIDs[0].id.base as? UniqueID)?.value, 1_003)
-        XCTAssertEqual((firstGenerated.explicitIDs[1].id.base as? UniqueID)?.value, 2_000)
-        XCTAssertEqual((thirdGenerated.explicitIDs[1].id.base as? UniqueID)?.value, 2_000)
-        XCTAssertEqual(firstGenerated.explicitIDs.map(\.isUnary), [true, false])
-        XCTAssertEqual(firstGenerated.canonicalID.explicitID, firstGenerated.explicitIDs[0].id)
-
-        var explicitRow = _ViewList_ID(implicitID: 0)
-        explicitRow.bind(explicitID: "row", owner: .invalid, isUnary: true, reuseID: 17)
-        explicitRow.bindGeneratedID(
-            seed: rowSeed,
-            owner: .invalid,
-            isUnary: false,
-            reuseID: _ViewList_ID.generatedRowReuseID
-        )
-        explicitRow.bindGeneratedID(
-            seed: sharedSeed,
-            owner: .invalid,
-            isUnary: false,
-            reuseID: _ViewList_ID.generatedSectionReuseID
-        )
-
-        let explicitElement = explicitRow.elementID(at: 4)
-
-        XCTAssertEqual(explicitElement.explicitIDs.count, 3)
-        XCTAssertEqual(explicitElement.explicitIDs[0].id, AnyHashable("row"))
-        XCTAssertEqual((explicitElement.explicitIDs[1].id.base as? UniqueID)?.value, 1_005)
-        XCTAssertEqual((explicitElement.explicitIDs[2].id.base as? UniqueID)?.value, 2_000)
-        XCTAssertEqual(explicitElement.explicitIDs.map(\.isUnary), [true, false, false])
-        XCTAssertEqual(explicitElement.canonicalID.explicitID, AnyHashable("row"))
-    }
-
     func testViewListIDCanonicalUsesFirstExplicitIDAndUnarySentinel() {
         var id = _ViewList_ID(implicitID: 5)
         id.explicitIDs = [
@@ -423,7 +363,145 @@ final class ViewListIdentityTests: XCTestCase {
         }
     }
 
-    func testViewListGroupAddsEntryIdentityForSiblingLists() {
+    func testViewListSectionApplyNodesAlignsOffsetsAndUsesRegionStyles() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            func region() -> (
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            ) {
+                let attribute: Attribute<any ViewList> = graph.makeInput(
+                    value: BaseViewList(
+                        elements: FixedCountViewListElements(count: 1)
+                    ) as any ViewList
+                )
+                return (attribute.value, attribute)
+            }
+
+            let section = _ViewList_Section(
+                id: 42,
+                base: _ViewList_Group(lists: [
+                    region(),
+                    region(),
+                    region(),
+                ])
+            )
+            var from = 5
+            var starts: [Int] = []
+            var styles: [UInt] = []
+            var ids: [UInt32] = []
+            var headerFlags: [Bool] = []
+            var footerFlags: [Bool] = []
+
+            let completed = section.applyNodes(
+                from: &from,
+                style: _ViewList_IteratorStyle(value: 6),
+                transform: _ViewList_TemporarySublistTransform()
+            ) { nodeFrom, style, node, info, _ in
+                guard case .sublist = node else {
+                    return false
+                }
+                starts.append(nodeFrom)
+                styles.append(style.value)
+                ids.append(info.id)
+                headerFlags.append(info.isHeader)
+                footerFlags.append(info.isFooter)
+                return true
+            }
+
+            XCTAssertTrue(completed)
+            XCTAssertEqual(from, 0)
+            XCTAssertEqual(starts, [3, 0, 0])
+            XCTAssertEqual(styles, [7, 6, 7])
+            XCTAssertEqual(ids, [42, 42, 42])
+            XCTAssertEqual(headerFlags, [true, false, false])
+            XCTAssertEqual(footerFlags, [false, false, true])
+
+            var hierarchicalFrom = 0
+            var hierarchicalRegions = 0
+            XCTAssertTrue(
+                _ViewList_Section(
+                    id: 42,
+                    base: section.base,
+                    isHierarchical: true
+                ).applyNodes(
+                    from: &hierarchicalFrom,
+                    style: _ViewList_IteratorStyle(value: 2),
+                    transform: _ViewList_TemporarySublistTransform()
+                ) { _, _, _, _, _ in
+                    hierarchicalRegions += 1
+                    return true
+                }
+            )
+            XCTAssertEqual(hierarchicalRegions, 1)
+        }
+    }
+
+    func testViewListNodeApplySublistsScalesSkipAndResetsVisitedOffset() {
+        let sublist = _ViewList_Sublist(
+            start: 0,
+            count: 2,
+            id: _ViewList_ID(implicitID: 4),
+            elements: _ViewList_SubgraphElements(
+                base: FixedCountViewListElements(count: 2)
+            ),
+            traits: ViewTraitCollection(),
+            list: nil
+        )
+        let node = _ViewList_Node.sublist(sublist)
+        let transform = _ViewList_TemporarySublistTransform()
+            .withPushedItem(ApplyingIDTransformItem(id: "section"))
+
+        var skippedFrom = 4
+        var skippedCallbacks = 0
+        XCTAssertTrue(
+            node.applySublists(
+                from: &skippedFrom,
+                style: _ViewList_IteratorStyle(value: 5),
+                transform: transform
+            ) { _ in
+                skippedCallbacks += 1
+                return true
+            }
+        )
+        XCTAssertEqual(skippedFrom, 0)
+        XCTAssertEqual(skippedCallbacks, 0)
+
+        var visitedFrom = 3
+        var visitedIDs: [[AnyHashable]] = []
+        XCTAssertTrue(
+            node.applySublists(
+                from: &visitedFrom,
+                style: _ViewList_IteratorStyle(value: 5),
+                transform: transform
+            ) { transformed in
+                visitedIDs.append(transformed.id.allExplicitIDs)
+                return true
+            }
+        )
+        XCTAssertEqual(visitedFrom, 0)
+        XCTAssertEqual(visitedIDs, [[AnyHashable("section")]])
+    }
+
+    func testForEachSublistDefaultUsesCollectionIteratorStyle() {
+        let log = IteratorStyleLog()
+        let list = IteratorStyleRecordingViewList(log: log)
+        var counts: [Int] = []
+
+        XCTAssertTrue(
+            _forEachSublist(in: list) { sublist in
+                counts.append(sublist.count)
+                return true
+            }
+        )
+
+        XCTAssertEqual(log.values, [2])
+        XCTAssertEqual(counts, [1])
+    }
+
+    func testViewListGroupForwardsSiblingIdentityWithoutAddingEntryIDs() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -448,13 +526,9 @@ final class ViewListIdentityTests: XCTestCase {
 
             XCTAssertTrue(completed)
             XCTAssertEqual(ids.count, 2)
-            XCTAssertNotEqual(ids[0].canonicalID, ids[1].canonicalID)
-            let firstEntry = ids[0].canonicalID.explicitID?.base as? _ViewList_GroupEntryID
-            let secondEntry = ids[1].canonicalID.explicitID?.base as? _ViewList_GroupEntryID
-            XCTAssertEqual(firstEntry?.index, 0)
-            XCTAssertEqual(secondEntry?.index, 1)
-            XCTAssertEqual(firstEntry?.owner, first.identifier.rawValue)
-            XCTAssertEqual(secondEntry?.owner, second.identifier.rawValue)
+            XCTAssertEqual(ids[0].canonicalID, ids[1].canonicalID)
+            XCTAssertTrue(ids[0].allExplicitIDs.isEmpty)
+            XCTAssertTrue(ids[1].allExplicitIDs.isEmpty)
         }
     }
 
@@ -480,9 +554,7 @@ final class ViewListIdentityTests: XCTestCase {
             XCTAssertTrue(completed)
             XCTAssertEqual(ids.count, 1)
             XCTAssertEqual(ids[0].canonicalID.explicitID, AnyHashable("row"))
-            XCTAssertTrue(ids[0].allExplicitIDs.contains { explicitID in
-                explicitID.base is _ViewList_GroupEntryID
-            })
+            XCTAssertEqual(ids[0].allExplicitIDs, [AnyHashable("row")])
         }
     }
 
@@ -637,6 +709,46 @@ private struct CanonicalIDsOnlyViewList: ViewList {
 
 private final class TransformCallLog {
     var events: [String] = []
+}
+
+private final class IteratorStyleLog {
+    var values: [UInt] = []
+}
+
+private struct IteratorStyleRecordingViewList: ViewList {
+    var log: IteratorStyleLog
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        1
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (
+            inout Int,
+            _ViewList_IteratorStyle,
+            _ViewList_Node,
+            _ViewList_TemporarySublistTransform
+        ) -> Bool
+    ) -> Bool {
+        log.values.append(style.value)
+        let sublist = _ViewList_Sublist(
+            start: from,
+            count: 1,
+            id: _ViewList_ID(implicitID: 0),
+            elements: _ViewList_SubgraphElements(
+                base: FixedCountViewListElements(count: 1)
+            ),
+            traits: ViewTraitCollection(),
+            list: list
+        )
+        let result = to(&from, style, .sublist(sublist), transform)
+        from = 0
+        return result
+    }
 }
 
 private struct RecordingTransformItem: _ViewList_SublistTransform_Item {

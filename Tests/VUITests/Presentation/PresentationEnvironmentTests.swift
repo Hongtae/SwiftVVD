@@ -151,20 +151,25 @@ final class PresentationEnvironmentTests: XCTestCase {
     // ASSERTIONS viewGraphHostEnvironmentWrapperOwnershipObserved
     @MainActor
     func testContextMenuSubmenuReadsParentPopupPhaseFromItsOwningGraph() throws {
-        let leaf = PlatformItemList.Item(
-            id: "leaf",
-            label: AnyView(Text("Leaf")),
-            action: {},
-            role: nil
+        var leaf = PlatformItemList.Item(systemItem: .button)
+        leaf.text = NSAttributedString(string: "Leaf")
+        leaf.selectionBehavior = .init(
+            isMomentary: true,
+            isContainerSelection: true,
+            yieldsToContainerSelection: false,
+            isPickerOption: false,
+            visualStyle: .plain,
+            onSelect: {},
+            onDeselect: nil,
+            springLoadingBehavior: .automatic
         )
-        let submenu = PlatformItemList.Item(
-            id: "submenu",
-            label: AnyView(Text("Submenu")),
-            action: nil,
-            role: nil,
-            children: [leaf],
-            secondaryNavigationBehavior: .submenu
-        )
+        var submenu = PlatformItemList.Item(systemItem: .menu)
+        submenu.text = NSAttributedString(string: "Submenu")
+        submenu.platformIdentifier = "submenu"
+        submenu.children = PlatformItemList(items: [leaf])
+        let items = contextMenuPresentationItems([submenu])
+        let presentedSubmenu = try XCTUnwrap(items.first)
+
         let actions = ContextMenuPopupActions()
         let session = ContextMenuPresentationSession()
         let root = ContextMenuWindowController(
@@ -176,7 +181,7 @@ final class PresentationEnvironmentTests: XCTestCase {
                 sceneID: SceneID(ContextMenuSubmenuPhaseProbe.self)
             ),
             anchor: .zero,
-            items: [submenu],
+            items: items,
             actions: actions,
             usesPlatformWindow: false,
             session: session
@@ -184,7 +189,10 @@ final class PresentationEnvironmentTests: XCTestCase {
         root.viewGraph.updateOutputs(at: .zero)
         XCTAssertNil(_AGGraph.current)
 
-        root.openSubmenu(submenu, at: CGPoint(x: 20, y: 10))
+        root.openSubmenu(
+            presentedSubmenu,
+            at: CGPoint(x: 20, y: 10)
+        )
 
         var presentedChildren: [PresentationChildWindowController] = []
         root.forEachPresentationChild { presentedChildren.append($0) }

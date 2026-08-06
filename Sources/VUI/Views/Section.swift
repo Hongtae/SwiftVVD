@@ -24,75 +24,36 @@ public struct Section<Parent, Content, Footer> {
     }
 }
 
-extension Section: View where Parent: View, Content: View, Footer: View {
+extension Section: View
+where Parent: View, Content: View, Footer: View {
     public typealias Body = Never
-
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-
-        guard platformItemListShouldCollectStaticItemContributors(inputs) else {
-            // Non-menu section rendering/list behavior is not wired yet.
-            // Current implementation keeps menu producer behavior as the active path.
-            return Content._makeView(view: view[\.content], inputs: inputs)
-        }
-
-        let headerAttr = view[\.header]._attribute
-        let contentAttr = view[\.content]._attribute
-        let sectionIDSource = view._attribute.identifier
-        let contentListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
-            PlatformItemListGenerator<AllPlatformItemListFlags, Content>(
-                content: contentAttr,
-                inputs: inputs,
-                inputsIncludeGeometry: true
-            )
-        )
-        let hasHeader = Parent.self != EmptyView.self
-        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-            var list = PlatformItemList()
-            list.append(PlatformItemList.Item(
-                id: PlatformItemList.stableID(sectionIDSource, slot: 0),
-                label: AnyView(EmptyView()),
-                action: nil,
-                role: nil,
-                systemItem: .divider
-            ))
-            if hasHeader {
-                list.append(PlatformItemList.Item(
-                    id: PlatformItemList.stableID(sectionIDSource, slot: 1),
-                    label: AnyView(headerAttr.value),
-                    action: nil,
-                    role: nil,
-                    isEnabled: true,
-                    presentationRole: .sectionHeader
-                ))
-            }
-            list.merge(contentListAttr.value)
-            // Explicit footers are not materialized in the platform item list.
-            list.append(PlatformItemList.Item(
-                id: PlatformItemList.stableID(sectionIDSource, slot: 2),
-                label: AnyView(EmptyView()),
-                action: nil,
-                role: nil,
-                systemItem: .divider
-            ))
-            return list
-        }
-        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-            LayoutComputer.fixed(.zero)
-        }
-        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
-        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
-        return outputs
-    }
-
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
 }
 
-extension Section: PrimitiveView where Parent: View, Content: View, Footer: View {
+extension Section: PrimitiveView
+where Parent: View, Content: View, Footer: View {}
+
+extension Section: PubliclyPrimitiveView
+where Parent: View, Content: View, Footer: View {
+    var internalBody: some View {
+        ResolvedSectionStyle(
+            configuration: SectionStyleConfiguration(
+                header: SectionStyleConfiguration.Header(),
+                footer: SectionStyleConfiguration.Footer(),
+                actions: SectionStyleConfiguration.Actions(),
+                rawContent: SectionStyleConfiguration.RawContent(),
+                isExpanded: isExpanded
+            )
+        )
+        .viewAlias(SectionStyleConfiguration.Header.self) {
+            header
+        }
+        .viewAlias(SectionStyleConfiguration.Footer.self) {
+            footer
+        }
+        .viewAlias(SectionStyleConfiguration.RawContent.self) {
+            content
+        }
+    }
 }
 
 extension Section where Parent: View, Content: View, Footer: View {

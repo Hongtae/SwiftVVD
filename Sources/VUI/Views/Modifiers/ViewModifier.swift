@@ -538,10 +538,8 @@ extension View {
 /// without evaluating a modifier body.
 protocol PrimitiveViewModifier: ViewModifier {}
 
-/// View-modifier marker that provides the default multi-element list wrapper.
-/// Primitive construction is a separate capability and is intentionally not
-/// implied by this protocol.
-protocol MultiViewModifier: ViewModifier where Body == Never {}
+/// Primitive view-modifier marker that provides the default multi-element list wrapper.
+protocol MultiViewModifier: PrimitiveViewModifier where Body == Never {}
 
 extension MultiViewModifier {
     // Calls body to get inner outputs, then wraps via multiModifier.
@@ -1395,8 +1393,8 @@ where PlacementContextType == _PositionAwarePlacementContext {
 
 extension _ViewInputs {
     /// Pushes a makeView closure onto the BodyInput stack.
-    mutating func pushModifierBody<T: ViewModifier>(_ type: T.Type, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
-        base.append(BodyInputElement(makeView: body), forKey: BodyInput<T.Content>.self)
+    mutating func pushModifierBody<T>(_ type: T.Type, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
+        base.append(BodyInputElement(makeView: body), forKey: BodyInput<T>.self)
     }
 
     /// Returns the top element of the Stack for a ViewInput key without consuming it. Delegates to _GraphInputs.top.
@@ -1412,7 +1410,7 @@ extension _ViewInputs {
 
 extension _ViewListInputs {
     /// Pushes a makeViewList closure onto the BodyInput stack.
-    mutating func pushModifierBody<T: ViewModifier>(_ type: T.Type, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
-        base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<T.Content>.self)
+    mutating func pushModifierBody<T>(_ type: T.Type, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
+        base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<T>.self)
     }
 }

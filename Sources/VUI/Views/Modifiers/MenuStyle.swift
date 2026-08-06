@@ -227,82 +227,25 @@ extension MenuStyle where Self == ButtonMenuStyle {
 }
 
 struct PlatformItemListMenuStyle: MenuStyle {
+    @Namespace private var namespace
+    @Environment(\.menuIndicatorVisibility)
+    private var menuIndicatorVisibility
+    @Environment(\.tintColor) private var tintColor
+
     func makeBody(configuration: Configuration) -> some View {
-        PlatformItemListMenuBody(configuration: configuration)
-    }
-}
-
-private struct PlatformItemListMenuBody: View {
-    let configuration: MenuStyleConfiguration
-    @Environment(\.isEnabled) private var isEnabled: Bool
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("PlatformItemListMenuBody._makeView called outside AG context")
-        }
-
-        let configurationAttr = view[\.configuration]._attribute
-        let contentAttr = view[\.configuration][\.content]._attribute
-        let labelView = view[\.configuration][\.label]
-        let labelSource = inputs.base.customInputs
-            .value(forKey: SourceInput<MenuStyleConfiguration.Label>.self).top
-        let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        let itemID = PlatformItemList.stableID(configurationAttr.identifier)
-
-        // Collect nested content into PlatformItemList and append one submenu-capable item.
-        let childrenAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
-            PlatformItemListGenerator<SelectionPlatformItemListFlags, MenuStyleConfiguration.Content>(
-                content: contentAttr,
-                inputs: inputs,
-                inputsIncludeGeometry: true
-            )
+        _UnaryViewAdaptor(
+            LabelGroup(content: configuration.label)
         )
-
-        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-            let configuration = configurationAttr.value
-            let label = labelSource?.snapshot() ?? AnyView(EmptyView())
-            var list = PlatformItemList()
-            list.append(PlatformItemList.Item(
-                id: itemID,
-                label: label,
-                action: configuration._primaryAction,
-                role: nil,
-                isEnabled: environmentAttr.value.isEnabled,
-                children: childrenAttr.value.menuItems,
-                secondaryNavigationBehavior: .submenu
-            ))
-            return list
+        .platformItemIdentifier(String(describing: namespace))
+        .platformItemTint(tintColor)
+        .platformItemChildren(
+            systemItem: .menu,
+            primaryAction: configuration._primaryAction,
+            menuIndicatorVisibility: menuIndicatorVisibility,
+            controlSize: .regular
+        ) {
+            configuration.content
         }
-
-        var outputs = MenuStyleConfiguration.Label._makeView(
-            view: labelView,
-            inputs: platformItemListRenderOnlyInputs(inputs)
-        )
-        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
-        return outputs
-    }
-
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
-
-    var body: some View {
-        // Fallback body path for non-AG inspection. The AG path above writes the
-        // platform item preference; standalone Menu presentation is implemented separately.
-        configuration.label
-            .preference(key: PlatformItemList.Key.self, value: itemList)
-    }
-
-    private var itemList: PlatformItemList {
-        var list = PlatformItemList()
-        list.append(PlatformItemList.Item(
-            label: AnyView(configuration.label),
-            action: configuration._primaryAction,
-            role: nil,
-            isEnabled: isEnabled,
-            secondaryNavigationBehavior: .submenu
-        ))
-        return list
     }
 }
 

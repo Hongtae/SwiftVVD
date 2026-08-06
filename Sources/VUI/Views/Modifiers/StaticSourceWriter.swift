@@ -207,3 +207,16 @@ extension StaticSourceWriter: _GraphInputsModifier where Source: View, Type: Vie
         inputs.customInputs.setValue(stack, forKey: SourceInput<Source>.self)
     }
 }
+
+extension View {
+    func viewAlias<Alias: ViewAlias, Source: View>(
+        _ alias: Alias.Type,
+        @ViewBuilder source: () -> Source
+    ) -> some View {
+        modifier(
+            StaticSourceWriter<Alias, Source>(
+                source: source()
+            )
+        )
+    }
+}

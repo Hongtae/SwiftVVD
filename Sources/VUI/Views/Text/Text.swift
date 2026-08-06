@@ -172,19 +172,19 @@ class AnyTextStorage: CustomDebugStringConvertible {
 }
 
 private func _dynamicArchiveStorage(
-    for resolved: GraphicsContext.ResolvedText,
+    for storage: NSAttributedString,
     enabled: Bool
 ) -> NSAttributedString? {
     guard enabled else { return nil }
-    let storage = NSMutableAttributedString(attributedString: resolved.attributedStorage)
-    if storage.length > 0 {
-        storage.addAttribute(
+    let dynamicStorage = NSMutableAttributedString(attributedString: storage)
+    if dynamicStorage.length > 0 {
+        dynamicStorage.addAttribute(
             .updateSchedule,
             value: true,
-            range: NSRange(location: 0, length: storage.length)
+            range: NSRange(location: 0, length: dynamicStorage.length)
         )
     }
-    return storage
+    return dynamicStorage
 }
 
 private struct CodableRawRepresentable<Value>: Codable, Equatable, @unchecked Sendable
@@ -1437,26 +1437,23 @@ public struct Text: Equatable {
         context: any TextResolutionContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText? {
-        var font = self.font ?? context.environment.font
-        if font == nil {
-            font = .system(.body)
-        }
+        var font = self.font ?? context.environment.effectiveFont
         if let fontWeight {
-            font = font?.weight(fontWeight)
+            font = font.weight(fontWeight)
         } else if boldValue == true {
-            font = font?.bold()
+            font = font.bold()
         }
         if italicValue == true {
-            font = font?.italic()
+            font = font.italic()
         }
         var resolutionContext = context
         resolutionContext.environment.font = font
-        font = font?.resolved(in: context.environment)
-        let defaultFace = font?.typeface(
+        font = font.resolved(in: context.environment)
+        let defaultFace = font.typeface(
             forContext: context.sceneResources,
             contentScaleFactor: context.contentScaleFactor
         )
-        let fallbackFaces = font?.fallbackTypefaces ?? []
+        let fallbackFaces = font.fallbackTypefaces
         let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
 
         if faces.isEmpty == false {
@@ -1549,7 +1546,7 @@ public struct Text: Equatable {
             environment: environment,
             referenceDate: referenceDate
         )
-        hasher.combine(environment.font?.hashValue ?? 0)
+        hasher.combine(environment.effectiveFont.hashValue)
         hasher.combine(environment.defaultFontRenderingMode)
         hasher.combine(environment.displayScale)
         customAttributes.hash(into: &hasher)
@@ -1585,11 +1582,24 @@ public struct Text: Equatable {
         ) -> ResolvedStyledText {
             var resolved = source
             resolved.shading = foregroundShading(in: environment)
+            let attributedStorage = resolved.attributedStorage
+            let resolvedString = _resolveText(
+                in: environment,
+                referenceDate: referenceDate
+            )
+            let storage: NSAttributedString
+            if attributedStorage.length == 0 && !resolvedString.isEmpty {
+                storage = NSAttributedString(string: resolvedString)
+            } else {
+                storage = attributedStorage
+            }
             return ResolvedStyledText(
-                storage: _dynamicArchiveStorage(
-                    for: resolved,
-                    enabled: needsDynamicArchive
-                ),
+                storage: needsDynamicArchive
+                    ? _dynamicArchiveStorage(
+                        for: storage,
+                        enabled: true
+                    ) ?? storage
+                    : storage,
                 layoutProperties: layoutProperties,
                 archiveOptions: archiveOptions,
                 features: features
@@ -1634,7 +1644,7 @@ public struct Text: Equatable {
             return nil
         }
 
-        var font = self.font ?? context.environment.font ?? .system(.body)
+        var font = self.font ?? context.environment.effectiveFont
         if let fontWeight {
             font = font.weight(fontWeight)
         } else if boldValue == true {
@@ -1688,12 +1698,12 @@ extension Text {
         if let foregroundColor {
             return .color(foregroundColor)
         }
-        if let styles = environment.foregroundStyleLevels {
+        if let style = environment.currentForegroundStyle {
             var shape = _ShapeStyle_Shape(
                 operation: .fallbackColor(level: 0),
                 environment: environment
             )
-            styles.primary._apply(to: &shape)
+            style._apply(to: &shape)
             if let shading = shape.resolvedShading {
                 return shading
             }
@@ -1810,6 +1820,24 @@ extension Text {
 }
 
 extension Text: View {
+    struct MakeRepresentableContext: Rule {
+        var _text: Attribute<ResolvedStyledText>
+        var _referenceDate: WeakAttribute<Date?>
+        var _environment: Attribute<EnvironmentValues>
+
+        var value: PlatformTextRepresentableContext {
+            let context = ResolvableStringResolutionContext(
+                referenceDate: _referenceDate.value.flatMap { $0 },
+                environment: _environment.value,
+                maximumWidth: nil
+            )
+            let text = _text.value
+            return PlatformTextRepresentableContext(
+                text: text.resolvedContent(in: context) ?? text.storage
+            )
+        }
+    }
+
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
@@ -2068,22 +2096,20 @@ extension Text: View {
             animatesSize: false,
             defersRender: false
         )
-        if platformItemListShouldCollectStaticItemContributors(inputs) {
-            // Plain Text under MenuStyleContext contributes a disabled platform item.
-            let textAttr = view._attribute
-            let itemID = PlatformItemList.stableID(textAttr.identifier)
-            let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-                var list = PlatformItemList()
-                list.append(PlatformItemList.Item(
-                    id: itemID,
-                    label: AnyView(textAttr.value),
-                    action: nil,
-                    role: nil,
-                    isEnabled: false
+        if let representable = inputs.requestedTextRepresentation,
+           representable.shouldMakeRepresentation(inputs: inputs) {
+            _ = representable.representationOptions(inputs: inputs)
+            let context: Attribute<PlatformTextRepresentableContext> =
+                graph.makeRule(MakeRepresentableContext(
+                    _text: resolvedStyledTextAttr,
+                    _referenceDate: inputs[ReferenceDateInput.self],
+                    _environment: environmentAttr
                 ))
-                return list
-            }
-            outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
+            representable.makeRepresentation(
+                inputs: inputs,
+                context: context,
+                outputs: &outputs
+            )
         }
 
         return outputs

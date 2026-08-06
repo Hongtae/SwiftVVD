@@ -41,6 +41,14 @@ struct TestClosureLayoutEngine: LayoutEngine {
     }
 }
 
+private struct TestFixedLayoutEngine: LayoutEngine {
+    var size: CGSize
+
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        size
+    }
+}
+
 func testLayoutComputer(
     sizeThatFits: @escaping (_ProposedSize) -> CGSize,
     spacing: Spacing = Spacing(),
@@ -65,6 +73,10 @@ func testLayoutComputer(
 }
 
 extension LayoutComputer {
+    static func fixed(_ size: CGSize) -> LayoutComputer {
+        LayoutComputer(TestFixedLayoutEngine(size: size))
+    }
+
     /// Drives the current child-geometry pipeline from tests that previously
     /// invoked the removed renderer-placement callback directly.
     func place(

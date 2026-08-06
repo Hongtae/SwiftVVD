@@ -14,6 +14,10 @@ public protocol _VariadicView_Root {
 extension _VariadicView_Root {
     public static var _viewListOptions: Int { 0 }
 
+    static var viewListOptions: _ViewListInputs.Options {
+        _ViewListInputs.Options(rawValue: _viewListOptions)
+    }
+
     public static func _viewListCount(
         inputs: _ViewListCountInputs,
         body: (_ViewListCountInputs) -> Int?
@@ -237,6 +241,155 @@ public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
 public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
 }
 
+protocol _VariadicView_AnyImplicitRoot {
+    static func visitType<Visitor>(
+        visitor: inout Visitor
+    ) where Visitor: _VariadicView_ImplicitRootVisitor
+}
+
+protocol _VariadicView_ImplicitRootVisitor {
+    mutating func visit<Root>(
+        type: Root.Type
+    ) where Root: _VariadicView_ImplicitRoot
+}
+
+protocol _VariadicView_ImplicitRoot:
+    _VariadicView_ViewRoot,
+    _VariadicView_AnyImplicitRoot
+{
+    static var implicitRoot: Self { get }
+}
+
+extension _VariadicView_ImplicitRoot {
+    static func visitType<Visitor>(
+        visitor: inout Visitor
+    ) where Visitor: _VariadicView_ImplicitRootVisitor {
+        visitor.visit(type: Self.self)
+    }
+}
+
+private struct ImplicitRootType: PropertyKey {
+    typealias Value = any _VariadicView_AnyImplicitRoot.Type
+
+    static var defaultValue: Value {
+        _VStackLayout.self
+    }
+
+    static func valuesEqual(_ lhs: Value, _ rhs: Value) -> Bool {
+        ObjectIdentifier(lhs) == ObjectIdentifier(rhs)
+    }
+}
+
+extension _ViewInputs {
+    var implicitRootType: any _VariadicView_AnyImplicitRoot.Type {
+        get {
+            base.customInputs.value(forKey: ImplicitRootType.self)
+        }
+        set {
+            base.customInputs.setValue(
+                newValue,
+                forKey: ImplicitRootType.self
+            )
+        }
+    }
+
+    fileprivate mutating func formUnionViewListOptions(
+        _ options: _ViewListInputs.Options
+    ) {
+        var value = base.customInputs.value(
+            forKey: ViewListOptionsInput.self
+        )
+        value.formUnion(options)
+        base.customInputs.setValue(
+            value,
+            forKey: ViewListOptionsInput.self
+        )
+    }
+}
+
+extension _ViewListInputs {
+    var implicitRootType: any _VariadicView_AnyImplicitRoot.Type {
+        get {
+            base.customInputs.value(forKey: ImplicitRootType.self)
+        }
+        set {
+            base.customInputs.setValue(
+                newValue,
+                forKey: ImplicitRootType.self
+            )
+        }
+    }
+}
+
+private struct MakeViewRoot: _VariadicView_ImplicitRootVisitor {
+    var inputs: _ViewInputs
+    var body: (_Graph, _ViewInputs) -> _ViewListOutputs
+    var outputs: _ViewOutputs?
+
+    mutating func visit<Root>(
+        type: Root.Type
+    ) where Root: _VariadicView_ImplicitRoot {
+        let root = inputs.intern(
+            Root.implicitRoot,
+            id: .implicitViewRoot
+        )
+        var rootInputs = inputs
+        rootInputs.formUnionViewListOptions(Root.viewListOptions)
+        outputs = Root._makeView(
+            root: _GraphValue(_attribute: root),
+            inputs: rootInputs,
+            body: body
+        )
+    }
+}
+
+extension View {
+    static func makeImplicitRoot(
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewListOutputs
+    ) -> _ViewOutputs {
+        var visitor = MakeViewRoot(
+            inputs: inputs,
+            body: body,
+            outputs: nil
+        )
+        inputs.implicitRootType.visitType(visitor: &visitor)
+        guard let outputs = visitor.outputs else {
+            fatalError(
+                "\(Self.self).makeImplicitRoot did not produce view outputs."
+            )
+        }
+        return outputs
+    }
+
+    static func makeImplicitRoot(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        makeImplicitRoot(inputs: inputs) { _, inputs in
+            Self._makeViewList(
+                view: view,
+                inputs: inputs.listInputs
+            )
+        }
+    }
+}
+
+extension MultiView {
+    public static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        makeImplicitRoot(view: view, inputs: inputs)
+    }
+
+    public static func _viewListCount(
+        inputs: _ViewListCountInputs
+    ) -> Int? {
+        nil
+    }
+}
+
 /// UnaryViewRoot-specific generator for unary variadic roots.
 struct BodyUnaryViewGenerator {
     var body: (_ViewInputs) -> _ViewOutputs
@@ -421,7 +574,9 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Root._makeView(root: view[\.root], inputs: inputs) { _, inputs in
             var listInputs = inputs.listInputs
-            listInputs.formUnion(viewListOptions: Root._viewListOptions)
+            listInputs.formUnion(
+                viewListOptions: Root.viewListOptions
+            )
             return Content._makeViewList(view: view[\.content], inputs: listInputs)
         }
     }
@@ -433,10 +588,14 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
         // entering through _makeViewList. Restore the non-root assertion only
         // after the Tree._makeViewList root invariant is fully modeled.
         var rootInputs = inputs
-        rootInputs.formUnion(viewListOptions: Root._viewListOptions)
+        rootInputs.formUnion(
+            viewListOptions: Root.viewListOptions
+        )
         return Root._makeViewList(root: view[\.root], inputs: rootInputs) { _, inputs in
             var listInputs = inputs
-            listInputs.formUnion(viewListOptions: Root._viewListOptions)
+            listInputs.formUnion(
+                viewListOptions: Root.viewListOptions
+            )
             return Content._makeViewList(view: view[\.content], inputs: listInputs)
         }
     }

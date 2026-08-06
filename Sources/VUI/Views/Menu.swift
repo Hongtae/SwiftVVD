@@ -15,24 +15,51 @@ public struct Menu<Label, Content>: View where Label: View, Content: View {
     let onPresentationChanged: ((Bool) -> Void)?
 
     public var body: some View {
-        ResolvedMenuStyle(primaryAction: primaryAction,
-                          onPresentationChanged: onPresentationChanged)
-            .modifier(StaticSourceWriter<MenuStyleConfiguration.Label, Label>(source: self.label))
+        ResolvedMenuStyle(
+            primaryAction: primaryAction,
+            onPresentationChanged: onPresentationChanged
+        )
+            .viewAlias(MenuStyleConfiguration.Label.self) {
+                label
+            }
+            .viewAlias(MenuStyleConfiguration.Content.self) {
+                content
+                    .modifier(
+                        SectionStyleModifier(
+                            style: DefaultSectionStyle()
+                        )
+                    )
+                    .modifier(
+                        LabelStyleWritingModifier(
+                            style: DefaultLabelStyle()
+                        )
+                    )
+                    .environment(
+                        \.menuIndicatorVisibility,
+                        .automatic
+                    )
+                    .input(LabelVisibilityConfigured.self)
+                    .modifier(
+                        StyleContextWriter<MenuStyleContext>()
+                    )
+            }
             .modifier(
-                StaticSourceWriter<MenuStyleConfiguration.Content, ModifiedContent<Content, StyleContextWriter<MenuStyleContext>>>(
-                source: self.content.modifier(StyleContextWriter<MenuStyleContext>())
-                ))
-            // Install PlatformItemListMenuStyle inside MenuStyleContext so nested
-            // Menu values become submenu platform items for context menus.
-            .modifier(
-                StaticIf<StyleContextAcceptsPredicate<MenuStyleContext>,
-                         MenuStyleModifier<PlatformItemListMenuStyle>,
-                         EmptyModifier>(
-                    trueBody: MenuStyleModifier(style: PlatformItemListMenuStyle()),
+                StaticIf<
+                    StyleContextAcceptsPredicate<MenuStyleContext>,
+                    MenuStyleModifier<PlatformItemListMenuStyle>,
+                    EmptyModifier
+                >(
+                    trueBody: MenuStyleModifier(
+                        style: PlatformItemListMenuStyle()
+                    ),
                     falseBody: EmptyModifier()
                 )
             )
     }
+}
+
+struct LabelVisibilityConfigured: ViewInputBoolFlag {
+    typealias Value = Bool
 }
 
 extension Menu {
@@ -372,11 +399,15 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
 
         let session = ContextMenuPresentationSession()
         let actions = ContextMenuPopupActions()
-        let initialItems = itemList.value.menuItems
+        let initialItems = contextMenuPresentationItems(
+            itemList.value.menuItems
+        )
         let liveContentSubgraph = AGSubgraph()
         AGSubgraph.withCurrent(liveContentSubgraph) {
             graph.makeSideEffectRule { [weak session] in
-                let items = self.itemList.value.menuItems
+                let items = contextMenuPresentationItems(
+                    self.itemList.value.menuItems
+                )
                 let environment = self.environment.value.untrackedCopy()
                 let viewPhase = ViewGraphHost.Phase(base: self.phase.value)
                 session?.root?.replaceMenuItems(items)

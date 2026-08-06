@@ -375,13 +375,15 @@ struct ConfirmationDialogOverlayView: View {
     }
 
     private func confirmationDialogItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
-        guard !items.isEmpty && items.allSatisfy({ $0.role == nil }) else {
+        guard !items.isEmpty,
+              items.allSatisfy({ $0.buttonRole == nil }) else {
             return items
         }
         var result = items
-        result.append(PlatformItemList.Item(label: AnyView(Text("Cancel")),
-                                            action: nil,
-                                            role: .cancel))
+        var cancel = PlatformItemList.Item()
+        cancel.text = NSAttributedString(string: "Cancel")
+        cancel.buttonRole = .cancel
+        result.append(cancel)
         return result
     }
 }

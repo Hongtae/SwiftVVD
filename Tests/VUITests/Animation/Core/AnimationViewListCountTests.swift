@@ -965,7 +965,7 @@ final class AnimationViewListCountTests: XCTestCase {
                 transaction: graph.makeInput(value: transaction)
             ),
             implicitID: 0,
-            options: 0,
+            options: [],
             _traits: OptionalAttribute(),
             traitKeys: nil,
             containerContext: nil,

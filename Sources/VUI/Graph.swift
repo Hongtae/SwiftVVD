@@ -29,6 +29,10 @@ public struct _GraphValue<Value> {
         self._attribute = _attribute
     }
 
+    init<R: Rule>(_ rule: R) where Value == R.Value {
+        _attribute = Attribute(rule)
+    }
+
     /// Returns a child `_GraphValue` for the given KeyPath, creating an AG node if needed.
     public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
         guard let graph = _AGGraph.current else {
@@ -52,6 +56,13 @@ public struct _GraphValue<Value> {
     func unsafeCast<U>(to type: U.Type) -> _GraphValue<U> {
         _GraphValue<U>(_attribute: Attribute<U>(_attribute.identifier))
     }
+
+    /// Projects the same byte-zero value through an offset attribute.
+    func unsafeBitCast<U>(to type: U.Type) -> _GraphValue<U> {
+        _GraphValue<U>(
+            _attribute: _attribute.unsafeBitCast(to: type)
+        )
+    }
 }
 
 extension _GraphValue: Equatable {
@@ -59,4 +70,3 @@ extension _GraphValue: Equatable {
         lhs._attribute.identifier == rhs._attribute.identifier
     }
 }
-

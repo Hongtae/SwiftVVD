@@ -18,19 +18,40 @@ public struct TupleView<T>: View {
 }
 
 private extension TupleView {
-    static var _subviewTypes: [(name: String, offset: Int, type: any View.Type)] {
-        var types: [(name: String, offset: Int,  type: any View.Type)] = []
+    static var _subviewTypes: [
+        (name: String, index: Int, offset: Int, type: any View.Type)
+    ] {
+        if let viewType = T.self as? any View.Type {
+            return [(name: "", index: 0, offset: 0, type: viewType)]
+        }
+
+        var types: [
+            (name: String, index: Int, offset: Int, type: any View.Type)
+        ] = []
+        var index = 0
         _forEachField(of: T.self) { charPtr, offset, fieldType in
             if let viewType = fieldType as? any View.Type {
                 let name = String(cString: charPtr)
-                types.append((name: name, offset: offset, type: viewType))
+                types.append(
+                    (
+                        name: name,
+                        index: index,
+                        offset: offset,
+                        type: viewType
+                    )
+                )
             }
+            index += 1
             return true
         }
         return types
     }
 
     var _subviews: [any View] {
+        if let view = value as? any View {
+            return [view]
+        }
+
         var views: [any View] = []
         func restore<V: View>(_ ptr: UnsafeRawPointer, _: V.Type) -> V {
             let view = ptr.assumingMemoryBound(to: V.self)
@@ -74,103 +95,161 @@ private extension TupleView {
         }
         fatalError("Field: \(name) not found!")
     }
+
+    struct MakeUnary: ViewTypeVisitor {
+        var view: _GraphValue<TupleView<T>>
+        var inputs: _ViewInputs
+        var outputs: _ViewOutputs?
+
+        mutating func visit<V>(type: V.Type) where V: View {
+            outputs = V._makeView(
+                view: view.unsafeBitCast(to: type),
+                inputs: inputs
+            )
+        }
+    }
+
+    struct MakeList: ViewTypeVisitor {
+        var view: _GraphValue<TupleView<T>>
+        var inputs: _ViewListInputs
+        var index: Int
+        var offset: Int
+        var wrapChildren: Bool
+        var includeOffsets: Bool
+        var outputs: [_ViewListOutputs]
+
+        mutating func visit<V>(type: V.Type) where V: View {
+            var childInputs = inputs
+            childInputs.base.pushStableIndex(index)
+
+            let child = _GraphValue<V>(
+                _attribute: view._attribute.unsafeOffset(
+                    at: offset,
+                    as: type
+                )
+            )
+            let output: _ViewListOutputs
+            if wrapChildren {
+                output = .unaryViewList(
+                    view: child,
+                    inputs: childInputs
+                )
+            } else {
+                output = V._makeViewList(
+                    view: child,
+                    inputs: childInputs
+                )
+            }
+
+            outputs.append(output)
+            inputs.implicitID = output.nextImplicitID
+            if includeOffsets {
+                inputs.updateContentOffset(outputs: output)
+            }
+        }
+    }
+
+    struct CountViews: ViewTypeVisitor {
+        var inputs: _ViewListCountInputs
+        var count: Int?
+
+        mutating func visit<V>(type: V.Type) where V: View {
+            guard let count,
+                  let childCount = V._viewListCount(inputs: inputs) else {
+                self.count = nil
+                return
+            }
+            self.count = count + childCount
+        }
+    }
 }
 
 extension TupleView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(self)._makeView called outside an active _AGGraph context.")
         }
-        let body: (_Graph, _ViewInputs) -> _ViewListOutputs = { _, viewInputs in
-            Self._makeViewList(view: view, inputs: _ViewListInputs(from: viewInputs))
-        }
-        if inputs[ImplicitRootLayoutInput.self] == .zStack {
-            let rootAttr = graph.makeInput(value: ZStackLayout(alignment: .center))
-            return ZStackLayout._makeLayoutView(
-                root: _GraphValue(_attribute: rootAttr),
+
+        let subviewTypes = _subviewTypes
+        switch subviewTypes.count {
+        case 0:
+            return _ViewOutputs()
+        case 1:
+            var visitor = MakeUnary(
+                view: view,
                 inputs: inputs,
-                body: body
+                outputs: nil
             )
+            let viewType = subviewTypes[0].type
+            func open<V: View>(_ type: V.Type) {
+                visitor.visit(type: type)
+            }
+            open(viewType)
+            guard let outputs = visitor.outputs else {
+                fatalError(
+                    "\(Self.self).MakeUnary did not produce view outputs."
+                )
+            }
+            return outputs
+        default:
+            return makeImplicitRoot(view: view, inputs: inputs)
         }
-        let rootAttr: Attribute<VStackLayout> = graph.makeInput(value: VStackLayout())
-        let rootGraph = _GraphValue<VStackLayout>(_attribute: rootAttr)
-        return VStackLayout._makeLayoutView(root: rootGraph, inputs: inputs, body: body)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
 
-        var children: [_ViewListOutputs] = []
+        let createsUnaryElements =
+            inputs.options.contains(.tupleViewCreatesUnaryElements)
+        let requiresContentOffsets =
+            inputs.options.contains(.requiresContentOffsets)
 
-        // For each View-typed field in T, create an AG rule node that extracts that field
-        // from the TupleView attribute.  Reading `view._attribute.value` inside the rule
-        // registers a dependency on the TupleView node, so any update to the TupleView
-        // propagates automatically.
-        func makeChild<V: View>(_: V.Type, offset: Int) {
-            let childAttr: Attribute<V> = graph.makeRule {
-                let t = view._attribute.value.value   // TupleView<T>.value is T
-                return withUnsafeBytes(of: t) { buf in
-                    buf.baseAddress!
-                        .advanced(by: offset)
-                        .assumingMemoryBound(to: V.self)
-                        .pointee
-                }
-            }
-            let childGraph = _GraphValue<V>(_attribute: childAttr)
-            children.append(V._makeViewList(view: childGraph, inputs: inputs))
+        var childInputs = inputs
+        if createsUnaryElements {
+            childInputs.options.remove(.tupleViewCreatesUnaryElements)
         }
 
-        _forEachField(of: T.self) { _, offset, fieldType in
-            if let viewType = fieldType as? any View.Type {
-                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
-                open(viewType)
+        var visitor = MakeList(
+            view: view,
+            inputs: childInputs,
+            index: 0,
+            offset: 0,
+            wrapChildren: createsUnaryElements,
+            includeOffsets: requiresContentOffsets,
+            outputs: []
+        )
+        for descriptor in _subviewTypes {
+            visitor.index = descriptor.index
+            visitor.offset = descriptor.offset
+            func open<V: View>(_ type: V.Type) {
+                visitor.visit(type: type)
             }
-            return true
+            open(descriptor.type)
         }
 
-        if inputs.needsSectionListOutputs {
-            return _ViewListOutputs.sectionListOutputs(children, inputs: inputs)
-        }
-
-        if children.contains(where: { output in
-            if case .dynamicList = output.views { return true }
-            return false
-        }) {
-            let listAttributes: [Attribute<any ViewList>] = children.map { output in
-                switch output.views {
-                case .staticList(let elements):
-                    return graph.makeRule {
-                        BaseViewList(elements: elements)
-                    }
-                case .dynamicList(let attr, _):
-                    return attr
-                }
-            }
-            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-                let lists: [(list: any ViewList, attribute: Attribute<any ViewList>)] = listAttributes.map { attr in
-                    (attr.value, attr)
-                }
-                return _ViewList_Group(lists: lists)
-            }
-            return _ViewListOutputs(
-                views: .dynamicList(viewListAttr, nil),
-                nextImplicitID: 0,
-                staticCount: nil
-            )
-        }
-
-        let count = children.count
-        return _ViewListOutputs(
-            views: .staticList(.merged(children)),
-            nextImplicitID: count,
-            staticCount: count
+        return .concat(
+            visitor.outputs,
+            inputs: visitor.inputs
         )
     }
 
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
-        _subviewTypes.count
+        let subviewTypes = _subviewTypes
+        if inputs.options.contains(.tupleViewCreatesUnaryElements) {
+            return subviewTypes.count
+        }
+
+        var visitor = CountViews(inputs: inputs, count: 0)
+        for descriptor in subviewTypes {
+            guard visitor.count != nil else { break }
+            func open<V: View>(_ type: V.Type) {
+                visitor.visit(type: type)
+            }
+            open(descriptor.type)
+        }
+        return visitor.count
     }
 }
 

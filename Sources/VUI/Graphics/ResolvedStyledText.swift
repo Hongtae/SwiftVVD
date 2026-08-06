@@ -986,6 +986,13 @@ final class ResolvedStyledText: InterpolatableContent {
         }
     }
 
+    func resolvedContent(
+        in context: ResolvableStringResolutionContext
+    ) -> NSAttributedString? {
+        _ = context
+        return storage
+    }
+
     var maxFontMetrics: ResolvedFontMetrics? {
         if !didComputeMaxFontMetrics {
             _computedMaxFontMetrics = resolvedText?.maximumFontMetrics

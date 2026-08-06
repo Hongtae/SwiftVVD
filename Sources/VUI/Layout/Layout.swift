@@ -135,15 +135,6 @@ private struct DynamicLayoutViewChildGeometry: StatefulRule, AsyncAttribute {
     }
 }
 
-private struct LayoutGeometryPlacementState: Rule {
-    var geometry: Attribute<ViewGeometry>
-
-    var value: Bool {
-        _ = geometry.value
-        return true
-    }
-}
-
 /// Type-erased construction bridge used while a dynamic container materializes
 /// a child owned by a concrete scrollable layout.
 ///
@@ -798,45 +789,6 @@ struct DynamicContainerWillRemoveBeforeInvalidation: GraphInput {
     static var defaultValue: Bool { false }
 }
 
-struct DynamicContainerTransitionPhaseInput: ViewInput {
-    static var defaultValue: OptionalAttribute<TransitionPhase> {
-        OptionalAttribute()
-    }
-
-    static func valuesEqual(
-        _ lhs: OptionalAttribute<TransitionPhase>,
-        _ rhs: OptionalAttribute<TransitionPhase>
-    ) -> Bool {
-        lhs.base.identifier == rhs.base.identifier
-    }
-}
-
-struct LayoutPlacementStateInput: ViewInput {
-    static var defaultValue: OptionalAttribute<Bool> {
-        OptionalAttribute()
-    }
-
-    static func valuesEqual(
-        _ lhs: OptionalAttribute<Bool>,
-        _ rhs: OptionalAttribute<Bool>
-    ) -> Bool {
-        lhs.base.identifier == rhs.base.identifier
-    }
-}
-
-struct LayoutPlacementTransactionInput: ViewInput {
-    static var defaultValue: OptionalAttribute<Transaction> {
-        OptionalAttribute()
-    }
-
-    static func valuesEqual(
-        _ lhs: OptionalAttribute<Transaction>,
-        _ rhs: OptionalAttribute<Transaction>
-    ) -> Bool {
-        lhs.base.identifier == rhs.base.identifier
-    }
-}
-
 /// Keeps a phase-3 retained-unused item cached after its later animated removal
 /// listener completes. Cache-owned lazy hosts use this to preserve source state
 /// across same-identity removal/reinsertion windows.
@@ -1350,13 +1302,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
 
             var childPosition = geometry?.origin() ?? fallbackPosition
             var childSize = geometry?.size() ?? fallbackSize
-            if let geometry {
-                childInputs[LayoutPlacementStateInput.self] = OptionalAttribute(
-                    graph.makeRule(
-                        LayoutGeometryPlacementState(geometry: geometry)
-                    )
-                )
-            }
             if let scrollContext, let scrollLayoutComputer {
                 let scrollGeometry = scrollContext.makeGeometry(
                     uniqueId: uniqueId,
@@ -2014,10 +1959,6 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 inputs: baseInputs,
                 containerInfo: container
             ) { childInputs in
-                // Insertion setup filters the ordinary child transaction. Keep
-                // the transaction that entered the transition body available
-                // to presentation-frame consumers before replacing that input.
-                let placementTransaction = childInputs.base.transaction
                 let transaction: Attribute<Transaction> =
                     graph.makeStatefulRule(
                         DynamicTransaction(
@@ -2034,20 +1975,6 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                         uniqueId: uniqueId
                     )
                 )
-                childInputs[
-                    DynamicContainerTransitionPhaseInput.self
-                ] = OptionalAttribute(
-                    graph.makeRule(
-                        DynamicTransitionPhase(
-                            containerInfo: container,
-                            uniqueId: uniqueId,
-                            initialPhase: phase
-                        )
-                    )
-                )
-                childInputs[
-                    LayoutPlacementTransactionInput.self
-                ] = OptionalAttribute(placementTransaction)
             }
             let resultItem = DynamicContainer._ItemInfo<A>(
                 item: item,
@@ -2439,9 +2366,6 @@ extension Layout {
                 childInputs.copyCaches()
                 childInputs.base.options.insert(.viewNeedsGeometry)
                 childInputs.requestsLayoutComputer = true
-                childInputs[LayoutPlacementStateInput.self] = OptionalAttribute(
-                    graph.makeRule(LayoutGeometryPlacementState(geometry: geometry))
-                )
                 // Both child inputs project from the same geometry rule so a
                 // placement update cannot publish independently recomputed
                 // position and size values.
@@ -2561,9 +2485,9 @@ extension Layout {
                     ScrollTargetRole.SetLayout(role: role, collection: collection)
                 )
                 dynMergedPreferences.makePreferenceTransformer(
+                    inputs: inputs.preferences,
                     key: ScrollTargetRole.ContentKey.self,
-                    transformAttr: transform,
-                    graph: graph
+                    transform: transform
                 )
             }
             if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
@@ -2572,9 +2496,9 @@ extension Layout {
                     ScrollTargetRole.SetLayout(role: role, collection: collection)
                 )
                 dynMergedPreferences.makePreferenceTransformer(
+                    inputs: inputs.preferences,
                     key: ScrollTargetRole.Key.self,
-                    transformAttr: transform,
-                    graph: graph
+                    transform: transform
                 )
             }
             if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
@@ -2585,9 +2509,9 @@ extension Layout {
                     }
                 }
                 dynMergedPreferences.makePreferenceTransformer(
+                    inputs: inputs.preferences,
                     key: ScrollablePreferenceKey.self,
-                    transformAttr: transform,
-                    graph: graph
+                    transform: transform
                 )
             }
             if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
@@ -2601,9 +2525,9 @@ extension Layout {
                     }
                 }
                 dynMergedPreferences.makePreferenceTransformer(
+                    inputs: inputs.preferences,
                     key: UpdateScrollStateRequestKey.self,
-                    transformAttr: transform,
-                    graph: graph
+                    transform: transform
                 )
             }
             mergedPreferences = dynMergedPreferences

@@ -59,15 +59,6 @@ public struct ViewDimensions: Equatable {
         self.size = size
     }
 
-    /// Convenience init for places that only know width/height (no explicit alignments).
-    /// Creates a stub ClosureLayoutEngine that returns the given size.
-    public init(width: CGFloat, height: CGFloat) {
-        let cgSize = CGSize(width: width, height: height)
-        let lc = LayoutComputer.fixed(cgSize)
-        self.guideComputer = lc
-        self.size = ViewSize(cgSize)
-    }
-
     public static func == (lhs: ViewDimensions, rhs: ViewDimensions) -> Bool {
         lhs.guideComputer == rhs.guideComputer && lhs.size == rhs.size
     }

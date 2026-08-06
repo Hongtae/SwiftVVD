@@ -69,30 +69,28 @@ private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
     }
 }
 
-private final class LayoutPlacementStateCapture: @unchecked Sendable {
-    var attribute: Attribute<Bool>?
+private final class LayoutGeometryCapture: @unchecked Sendable {
     var position: Attribute<CGPoint>?
     var size: Attribute<ViewSize>?
     var transform: Attribute<ViewTransform>?
 }
 
-private struct LayoutPlacementStateProbe: View, TestPrimitiveView {
+private struct LayoutGeometryProbe: View, TestPrimitiveView {
     typealias Body = Never
 
-    var capture: LayoutPlacementStateCapture
+    var capture: LayoutGeometryCapture
 
     static func _makeView(
         view: _GraphValue<Self>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        view._attribute.value.capture.attribute =
-            inputs[LayoutPlacementStateInput.self].attribute
-        view._attribute.value.capture.position = inputs.position
-        view._attribute.value.capture.size = inputs.size
-        view._attribute.value.capture.transform = inputs.transform
         guard let graph = _AGGraph.current else {
-            fatalError("LayoutPlacementStateProbe called outside an active graph.")
+            fatalError("LayoutGeometryProbe called outside an active graph.")
         }
+        let capture = view._attribute.value.capture
+        capture.position = inputs.position
+        capture.size = inputs.size
+        capture.transform = inputs.transform
         return _ViewOutputs(
             layoutComputer: OptionalAttribute(
                 graph.makeInput(value: LayoutComputer.fixed(
@@ -213,6 +211,33 @@ final class MatchedGeometryEffectTests: XCTestCase {
         XCTAssertTrue(capture.hasScope)
     }
 
+    // ASSERTIONS matchedGeometryFieldMetadataObserved matchedGeometryDirectRegistrationInputsObserved
+    func testRegistrationStorageMatchesFieldMetadata() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let value = registration(
+                graph: graph,
+                owner: graph.makeInput(value: true).identifier,
+                isSource: true,
+                position: CGPoint(x: 12, y: 34),
+                size: CGSize(width: 56, height: 78)
+            )
+
+            XCTAssertEqual(
+                Mirror(reflecting: value).children.compactMap(\.label),
+                [
+                    "attribute",
+                    "args",
+                    "transaction",
+                    "phase",
+                    "size",
+                    "position",
+                    "transform",
+                ]
+            )
+        }
+    }
+
     func testOverlaySecondaryGeometryComesFromDedicatedQuery() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -258,7 +283,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
     func testUnaryLayoutSeparatesOuterFrameFromBodyGeometry() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
-            let capture = LayoutPlacementStateCapture()
+            let capture = LayoutGeometryCapture()
             var inputs = makeViewInputs(graph: graph)
             inputs.needsGeometry = true
             inputs.requestsLayoutComputer = true
@@ -453,69 +478,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
 
             secondPhase.setValue(removed)
             XCTAssertNil(scope.sourceInfo(frameIndex: frameIndex))
-        }
-    }
-
-    // ASSERTIONS matchedGeometryGraphAndDisplayDisassemblyObserved
-    func testScopeKeepsPlacedRemovingSourceUntilReplacementSourceIsPlaced() throws {
-        let graph = _AGGraph()
-        try _AGGraph.withCurrent(graph) {
-            var inputs = makeViewInputs(graph: graph)
-            inputs.makeRootMatchedGeometryScope()
-            let scope = try XCTUnwrap(
-                inputs.base.customInputs.value(forKey: MatchedGeometryScope.self)
-            )
-            let namespace = Namespace().wrappedValue
-            let key = AnyHashable(MatchedGeometryKeyForTest(
-                id: "hero",
-                namespace: namespace
-            ))
-            let oldPhase = graph.makeInput(value: Phase())
-            let oldPlacement = graph.makeInput(value: true)
-            var frameIndex: Int?
-            _ = scope.frame(
-                index: &frameIndex,
-                for: key,
-                view: registration(
-                    graph: graph,
-                    owner: graph.makeInput(value: 1).identifier,
-                    isSource: true,
-                    position: CGPoint(x: 100, y: 50),
-                    size: CGSize(width: 80, height: 40),
-                    phase: oldPhase,
-                    placement: oldPlacement
-                )
-            )
-
-            var removed = Phase()
-            removed.isBeingRemoved = true
-            oldPhase.setValue(removed)
-            let replacementPlacement = graph.makeInput(value: false)
-            var replacementIndex: Int?
-            _ = scope.frame(
-                index: &replacementIndex,
-                for: key,
-                view: registration(
-                    graph: graph,
-                    owner: graph.makeInput(value: 2).identifier,
-                    isSource: true,
-                    position: .zero,
-                    size: .zero,
-                    placement: replacementPlacement
-                )
-            )
-
-            let index = try XCTUnwrap(frameIndex)
-            XCTAssertEqual(
-                scope.sourceInfo(frameIndex: index)?.frame.origin,
-                CGPoint(x: 100, y: 50)
-            )
-            XCTAssertFalse(
-                try XCTUnwrap(scope.sourceInfo(frameIndex: index)).phase.isBeingRemoved
-            )
-
-            replacementPlacement.setValue(true)
-            XCTAssertEqual(scope.sourceInfo(frameIndex: index)?.frame.origin, .zero)
         }
     }
 
@@ -899,29 +861,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
-    func testStaticLayoutPublishesProjectedGeometryOnDemand() throws {
-        let graph = _AGGraph()
-        try _AGGraph.withCurrent(graph) {
-            let capture = LayoutPlacementStateCapture()
-            let root = ZStack {
-                LayoutPlacementStateProbe(capture: capture)
-            }
-            let source = graph.makeInput(value: root)
-            let outputs = type(of: root)._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: makeViewInputs(graph: graph)
-            )
-            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
-            let placement = try XCTUnwrap(capture.attribute)
-            _ = layout.sizeThatFits(.unspecified)
-            XCTAssertTrue(placement.value)
-            XCTAssertEqual(
-                try XCTUnwrap(capture.position).value,
-                CGPoint(x: -20, y: -10)
-            )
-        }
-    }
-
     // ASSERTIONS matchedGeometryDisplayListCanonicalizationObserved
     func testMatchedDisplayUsesIdentityWrapperWithPresentationFrame() throws {
         let graph = _AGGraph()
@@ -1034,7 +973,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             func makeMatchedOutputs(
                 isSource: Bool,
                 position: CGPoint,
-                capture: LayoutPlacementStateCapture
+                capture: LayoutGeometryCapture
             ) -> _ViewOutputs {
                 let modifier = graph.makeInput(value: _MatchedGeometryEffect(
                     id: "hero",
@@ -1054,7 +993,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     inputs: inputs
                 ) { _, childInputs in
                     let root = ZStack {
-                        LayoutPlacementStateProbe(capture: capture)
+                        LayoutGeometryProbe(capture: capture)
                     }
                     let source = graph.makeInput(value: root)
                     var outputs = type(of: root)._makeView(
@@ -1078,7 +1017,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 }
             }
 
-            let sourceCapture = LayoutPlacementStateCapture()
+            let sourceCapture = LayoutGeometryCapture()
             let sourceOutputs = makeMatchedOutputs(
                 isSource: true,
                 position: CGPoint(x: 100, y: 50),
@@ -1094,7 +1033,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 sourceOutputs.preferences.value(for: DisplayList.Key.self)
             )).value
 
-            let followerCapture = LayoutPlacementStateCapture()
+            let followerCapture = LayoutGeometryCapture()
             let followerOutputs = makeMatchedOutputs(
                 isSource: false,
                 position: CGPoint(x: 300, y: 200),
@@ -1958,7 +1897,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
                     args: args,
                     transaction: transaction,
                     phase: phase,
-                    placement: OptionalAttribute(),
                     size: graph.makeInput(value: ViewSize(size)),
                     position: graph.makeInput(value: position),
                     transform: graph.makeInput(value: transform)
@@ -2445,8 +2383,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         isSource: Bool,
         position: CGPoint,
         size: CGSize,
-        phase: Attribute<Phase>? = nil,
-        placement: Attribute<Bool>? = nil
+        phase: Attribute<Phase>? = nil
     ) -> MatchedGeometryScope.ViewRegistration {
         var transform = ViewTransform()
         transform.appendPosition(position)
@@ -2459,7 +2396,6 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )),
             transaction: graph.makeInput(value: Transaction()),
             phase: phase ?? graph.makeInput(value: Phase()),
-            placement: placement.map(OptionalAttribute.init) ?? OptionalAttribute(),
             size: graph.makeInput(value: ViewSize(size)),
             position: graph.makeInput(value: position),
             transform: graph.makeInput(value: transform)

@@ -13,6 +13,7 @@ struct Semantics: Comparable, Hashable, Sendable {
     // These tokens only need stable ordering between compatibility baselines.
     // They are intentionally local monotonic values.
     static let v4 = Semantics(rawValue: 400)
+    static let v4_4 = Semantics(rawValue: 440)
     static let v5 = Semantics(rawValue: 500)
     static let v6 = Semantics(rawValue: 600)
     static let v6_4 = Semantics(rawValue: 640)
@@ -65,6 +66,10 @@ extension SemanticFeature {
 // Semantic version marker types used with _SemanticFeature<T>.
 struct Semantics_v4: SemanticProtocol {
     static var semantic: Semantics { .v4 }
+}
+
+struct Semantics_v4_4: SemanticProtocol {
+    static var semantic: Semantics { .v4_4 }
 }
 
 struct Semantics_v5: SemanticProtocol {

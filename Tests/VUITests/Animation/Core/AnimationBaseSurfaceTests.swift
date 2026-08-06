@@ -2,6 +2,24 @@ import XCTest
 @testable import VUI
 
 final class AnimationBaseSurfaceTests: XCTestCase {
+    // ASSERTIONS matchedGeometryTransitionPhaseAnimationLookupObserved
+    func testTransitionPhaseAnimationLookupSkipsDisabledNilOverride() throws {
+        var transaction = Transaction(animation: .linear(duration: 0.25))
+        transaction.animation = nil
+        transaction.disablesAnimations = true
+
+        XCTAssertNil(transaction.animation)
+        let animation = try XCTUnwrap(
+            transaction.animationIgnoringTransitionPhase
+        )
+        XCTAssertEqual(animation.box.duration, 0.25, accuracy: 0.000_001)
+
+        var empty = Transaction()
+        empty.animation = nil
+        empty.disablesAnimations = true
+        XCTAssertNil(empty.animationIgnoringTransitionPhase)
+    }
+
     func testBuiltInAnimationsExposeConcreteCustomAnimationBases() throws {
         XCTAssertTrue(Animation.default.base is DefaultAnimation)
 

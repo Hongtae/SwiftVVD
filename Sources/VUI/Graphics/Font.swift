@@ -19,6 +19,10 @@ enum FontEnvironmentKey: EnvironmentKey {
     static var defaultValue: Font? { return nil }
 }
 
+enum DefaultFontKey: EnvironmentKey {
+    static var defaultValue: Font? { nil }
+}
+
 private enum DefaultFontRenderingModeKey: EnvironmentKey {
     static var defaultValue: Font.DefaultRenderingMode { .bitmap() }
 }
@@ -27,6 +31,15 @@ extension EnvironmentValues {
     public var font: Font? {
         set { self[FontEnvironmentKey.self] = newValue }
         get { self[FontEnvironmentKey.self] }
+    }
+
+    var defaultFont: Font? {
+        set { self[DefaultFontKey.self] = newValue }
+        get { self[DefaultFontKey.self] }
+    }
+
+    var effectiveFont: Font {
+        font ?? defaultFont ?? .system(.body)
     }
 
     public var defaultFontRenderingMode: Font.DefaultRenderingMode {

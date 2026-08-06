@@ -98,6 +98,11 @@ public struct VStackLayout: Layout {
 public typealias _VStackLayout = VStackLayout
 extension _VStackLayout: _VariadicView_UnaryViewRoot {}
 extension _VStackLayout: _VariadicView_ViewRoot {}
+extension _VStackLayout: _VariadicView_ImplicitRoot {
+    static var implicitRoot: Self {
+        Self()
+    }
+}
 extension _VStackLayout: Sendable {}
 
 extension _VStackLayout: HVStack {

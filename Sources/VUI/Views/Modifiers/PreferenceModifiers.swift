@@ -116,7 +116,7 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(Self.self)._makeView called outside _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
@@ -125,9 +125,9 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         // field propagate downstream through modifier[\.transform].
         let transformAttr: Attribute<(inout Key.Value) -> Void> = modifier[\.transform]._attribute
         outputs.preferences.makePreferenceTransformer(
+            inputs: inputs.preferences,
             key: Key.self,
-            transformAttr: transformAttr,
-            graph: graph
+            transform: transformAttr
         )
         return outputs
     }
@@ -137,14 +137,14 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         inputs: _SceneInputs,
         body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs
     ) -> _SceneOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(Self.self)._makeScene called outside _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.preferences.makePreferenceTransformer(
+            inputs: inputs.preferences,
             key: Key.self,
-            transformAttr: modifier[\.transform]._attribute,
-            graph: graph
+            transform: modifier[\.transform]._attribute
         )
         return outputs
     }

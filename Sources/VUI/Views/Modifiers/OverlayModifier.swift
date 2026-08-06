@@ -7,14 +7,6 @@
 
 import Foundation
 
-enum ImplicitRootLayout {
-    case zStack
-}
-
-struct ImplicitRootLayoutInput: ViewInput {
-    static var defaultValue: ImplicitRootLayout? { nil }
-}
-
 private func resolveSecondaryLayerGeometry(
     alignment: Alignment,
     layoutDirection: LayoutDirection,
@@ -102,7 +94,7 @@ func makeSecondaryLayerView<Secondary: View>(
     )
     var secondaryInputs = inputs
     secondaryInputs.copyCaches()
-    secondaryInputs[ImplicitRootLayoutInput.self] = .zStack
+    secondaryInputs.implicitRootType = _ZStackLayout.self
 
     let secondaryPosition = graph.subscriptNode(
         parent: geometry,

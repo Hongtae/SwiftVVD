@@ -471,6 +471,10 @@ enum DebugReplaceableViewCount {
     case indeterminate
 }
 
+struct ViewListOptionsInput: ViewInput {
+    static var defaultValue: _ViewListInputs.Options { [] }
+}
+
 /// The bundle of AG context Attributes passed from parent to child during `_makeViewList`.
 ///
 /// Unlike `_ViewInputs`, this struct does NOT carry layout Attributes (`position`, `size`,
@@ -482,9 +486,27 @@ enum DebugReplaceableViewCount {
 /// Additional list-specific fields (`implicitID`, `options`, `_traits`, etc.) are reserved
 /// for ForEach ID tracking, ViewTrait propagation, and container-context injection respectively.
 public struct _ViewListInputs {
-    static let canTransitionOptions: UInt32 = 0x1
-    static let transitionOptionsMask: UInt32 = 0x3
-    static let sectionListOptions: UInt32 = 0x100
+    struct Options: OptionSet {
+        let rawValue: Int
+
+        static let canTransition = Self(rawValue: 0x1)
+        static let disableTransitions = Self(rawValue: 0x2)
+        static let requiresDepthAndSections = Self(rawValue: 0x4)
+        static let requiresNonEmptyGroupParent = Self(rawValue: 0x8)
+        static let isNonEmptyParent = Self(rawValue: 0x10)
+        static let resetHeaderStyleContext = Self(rawValue: 0x20)
+        static let resetFooterStyleContext = Self(rawValue: 0x40)
+        static let layoutPriorityIsTrait = Self(rawValue: 0x80)
+        static let requiresSections = Self(rawValue: 0x100)
+        static let tupleViewCreatesUnaryElements = Self(rawValue: 0x200)
+        static let previewContext = Self(rawValue: 0x400)
+        static let needsDynamicTraits = Self(rawValue: 0x800)
+        static let allowsNestedSections = Self(rawValue: 0x1000)
+        static let sectionsConcatenateFooter = Self(rawValue: 0x2000)
+        static let needsArchivedAnimationTraits = Self(rawValue: 0x4000)
+        static let sectionsAreHierarchical = Self(rawValue: 0x8000)
+        static let requiresContentOffsets = Self(rawValue: 0x1_0000)
+    }
 
     /// Shared graph-level inputs such as time, environment, and transaction.
     var base: _GraphInputs
@@ -494,7 +516,7 @@ public struct _ViewListInputs {
     var implicitID: Int
 
     /// Additional options controlling list traversal behaviour (separate from base.options).
-    var options: UInt32
+    var options: Options
 
     /// AG node carrying ViewTrait values propagated from child views to their container.
     var _traits: OptionalAttribute<ViewTraitCollection>
@@ -514,11 +536,15 @@ public struct _ViewListInputs {
     var debugReplaceableViewCount: MutableBox<DebugReplaceableViewCount>?
 
     var needsSectionListOutputs: Bool {
-        (options & Self.sectionListOptions) != 0
+        options.contains(.requiresSections)
     }
 
-    mutating func formUnion(viewListOptions: Int) {
-        options |= UInt32(truncatingIfNeeded: viewListOptions)
+    mutating func formUnion(viewListOptions: Options) {
+        options.formUnion(viewListOptions)
+        base.customInputs.setValue(
+            options,
+            forKey: ViewListOptionsInput.self
+        )
     }
 }
 
@@ -530,9 +556,11 @@ extension _ViewListInputs {
         self.init(
             base: viewInputs.base,
             implicitID: 0,
-            options: 0,
+            options: viewInputs.base.customInputs.value(
+                forKey: ViewListOptionsInput.self
+            ),
             _traits: OptionalAttribute(),
-            traitKeys: nil,
+            traitKeys: ViewTraitKeys(),
             containerContext: nil,
             contentOffset: nil,
             debugReplaceableViewCount: nil
@@ -545,9 +573,9 @@ extension _ViewListInputs {
 // count resolution happens before concrete child layout attributes exist.
 public struct _ViewListCountInputs {
     var base: _GraphInputs
-    var options: UInt32
+    var options: _ViewListInputs.Options
 
-    init(base: _GraphInputs, options: UInt32 = 0) {
+    init(base: _GraphInputs, options: _ViewListInputs.Options = []) {
         self.base = base
         self.options = options
     }
@@ -584,9 +612,92 @@ extension _ViewListInputs {
     var countInputs: _ViewListCountInputs {
         _ViewListCountInputs(self)
     }
+
+    private struct ContentOffsetMutation: Rule, AsyncAttribute {
+        var lhs: Attribute<Int>
+        var rhs: Attribute<Int>
+
+        var value: Int {
+            lhs.value + rhs.value
+        }
+    }
+
+    mutating func updateStaticContentOffset(
+        count: Int,
+        needsDynamicView: Bool
+    ) {
+        switch contentOffset {
+        case nil:
+            contentOffset = .staticCount(count, needsDynamicView)
+        case .staticCount(let previousCount, let previousNeedsDynamicView):
+            contentOffset = .staticCount(
+                previousCount + count,
+                previousNeedsDynamicView || needsDynamicView
+            )
+        case .dynamic(let attribute, let offset):
+            contentOffset = .dynamic(attribute, offset + count)
+        }
+    }
+
+    mutating func updateContentOffset(outputs: _ViewListOutputs) {
+        if let staticCount = outputs.staticCount {
+            let needsDynamicView: Bool
+            switch outputs.views {
+            case .staticList:
+                needsDynamicView = false
+            case .dynamicList:
+                needsDynamicView = true
+            }
+            updateStaticContentOffset(
+                count: staticCount,
+                needsDynamicView: needsDynamicView
+            )
+            return
+        }
+
+        switch outputs.views {
+        case .staticList(let elements):
+            updateStaticContentOffset(
+                count: elements.count,
+                needsDynamicView: false
+            )
+        case .dynamicList(let list, _):
+            guard let graph = _AGGraph.current else {
+                fatalError(
+                    "_ViewListInputs.updateContentOffset(outputs:) called outside an active graph."
+                )
+            }
+            let count = graph.makeRule {
+                list.value.count(style: _ViewList_IteratorStyle())
+            }
+            switch contentOffset {
+            case nil:
+                contentOffset = .dynamic(count, 0)
+            case .staticCount(let offset, _):
+                contentOffset = .dynamic(count, offset)
+            case .dynamic(let previousCount, let offset):
+                contentOffset = .dynamic(
+                    graph.makeRule(
+                        ContentOffsetMutation(
+                            lhs: previousCount,
+                            rhs: count
+                        )
+                    ),
+                    offset
+                )
+            }
+        }
+    }
 }
 
 extension _ViewInputs {
+    func intern<Value>(
+        _ value: Value,
+        id: GraphHost.ConstantID
+    ) -> Attribute<Value> {
+        GraphHost.currentHost.intern(value, for: Value.self, id: id)
+    }
+
     mutating func configureStableIDs(
         root: _DisplayList_StableIdentityRoot
     ) {
@@ -634,6 +745,10 @@ extension _ViewInputs {
 
     /// Create list inputs from these view inputs, carrying only the base context.
     var listInputs: _ViewListInputs { _ViewListInputs(from: self) }
+
+    var implicitRootBodyInputs: _ViewListInputs {
+        _ViewListInputs(from: self)
+    }
 }
 
 /// The AG nodes produced by a view's `_makeView` call.
@@ -735,10 +850,16 @@ extension _ViewListOutputs {
         case .staticList(let elements):
             let implicitID = inputs.implicitID
             let traitKeys = inputs.traitKeys
-            let traits = inputs._traits
+            let traits: OptionalAttribute<ViewTraitCollection>
+            if case .unaryElements(let unary) = elements,
+               let generator = unary.typedGenerator {
+                traits = generator.traitListAttr
+            } else {
+                traits = inputs._traits
+            }
             let canTransition =
-                inputs.options & _ViewListInputs.transitionOptionsMask ==
-                _ViewListInputs.canTransitionOptions
+                inputs.options.contains(.canTransition)
+                && !inputs.options.contains(.disableTransitions)
             return graph.makeRule {
                 var values = traits.attribute?.value ?? ViewTraitCollection()
                 if canTransition {
@@ -758,7 +879,7 @@ extension _ViewListOutputs {
         let generator = TypedUnaryViewGenerator(view, inputs: inputs)
         return _ViewListOutputs(
             views: .staticList(.unaryElements(UnaryElements(generator: generator))),
-            nextImplicitID: 1,
+            nextImplicitID: inputs.implicitID + 1,
             staticCount: 1
         )
     }
@@ -773,8 +894,290 @@ extension _ViewListOutputs {
         let _ = BodyUnaryViewGenerator(body: body, viewType: viewType)
         return _ViewListOutputs(
             views: .staticList(.unaryElements(UnaryElements(body: body, baseInputs: inputs.base))),
-            nextImplicitID: 1,
+            nextImplicitID: inputs.implicitID + 1,
             staticCount: 1
         )
+    }
+
+    static func concat(
+        _ outputs: [_ViewListOutputs],
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "_ViewListOutputs.concat(_:inputs:) called outside an active graph."
+            )
+        }
+        guard let first = outputs.first else {
+            return _ViewListOutputs(
+                views: .staticList(.merged([])),
+                nextImplicitID: inputs.implicitID,
+                staticCount: 0
+            )
+        }
+        guard outputs.count > 1 else {
+            return first
+        }
+
+        var staticCount: Int? = 0
+        var hasDynamicList = false
+        for output in outputs {
+            if let accumulated = staticCount,
+               let childCount = output.staticCount {
+                staticCount = accumulated + childCount
+            } else {
+                staticCount = nil
+            }
+            if case .dynamicList = output.views {
+                hasDynamicList = true
+            }
+        }
+
+        guard hasDynamicList else {
+            return _ViewListOutputs(
+                views: .staticList(.merged(outputs)),
+                nextImplicitID: inputs.implicitID,
+                staticCount: staticCount
+            )
+        }
+
+        var listAttributes: [Attribute<any ViewList>] = []
+        var staticStart = outputs.startIndex
+        var attributeInputs = inputs
+
+        func appendStaticRange(endingAt end: Int) {
+            guard staticStart < end else { return }
+            let rangeOutputs = Array(outputs[staticStart..<end])
+            let range: _ViewListOutputs
+            if rangeOutputs.count == 1 {
+                range = rangeOutputs[0]
+            } else {
+                range = _ViewListOutputs(
+                    views: .staticList(.merged(rangeOutputs)),
+                    nextImplicitID: attributeInputs.implicitID + 1,
+                    staticCount: rangeOutputs.reduce(Optional(0)) {
+                        partial, output in
+                        guard let partial, let count = output.staticCount else {
+                            return nil
+                        }
+                        return partial + count
+                    }
+                )
+            }
+            listAttributes.append(
+                range.makeAttribute(inputs: attributeInputs)
+            )
+            attributeInputs.implicitID += 1
+        }
+
+        for index in outputs.indices {
+            guard case .dynamicList = outputs[index].views else {
+                continue
+            }
+            appendStaticRange(endingAt: index)
+            listAttributes.append(
+                outputs[index].makeAttribute(inputs: attributeInputs)
+            )
+            staticStart = outputs.index(after: index)
+        }
+        appendStaticRange(endingAt: outputs.endIndex)
+
+        let listAttribute: Attribute<any ViewList>
+        if listAttributes.count == 1 {
+            listAttribute = listAttributes[0]
+        } else {
+            listAttribute = graph.makeRule {
+                _ViewList_Group(
+                    lists: listAttributes.map { ($0.value, $0) }
+                ) as any ViewList
+            }
+        }
+        return _ViewListOutputs(
+            views: .dynamicList(listAttribute, nil),
+            nextImplicitID: attributeInputs.implicitID,
+            staticCount: staticCount
+        )
+    }
+
+    static func groupViewList<Parent, Footer>(
+        parent: _GraphValue<Parent>,
+        footer: Attribute<Footer>,
+        inputs: _ViewListInputs,
+        body: (
+            _Graph,
+            _ViewListInputs
+        ) -> _ViewListOutputs
+    ) -> _ViewListOutputs where Parent: View, Footer: View {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "_ViewListOutputs.groupViewList called outside an active graph."
+            )
+        }
+
+        let originalOptions = inputs.options
+        var workingInputs = inputs
+        let nestedSectionOptions: _ViewListInputs.Options = [
+            .requiresNonEmptyGroupParent,
+            .requiresSections,
+        ]
+        if !originalOptions.contains(.allowsNestedSections),
+           !originalOptions.isDisjoint(with: nestedSectionOptions) {
+            workingInputs.options.subtract(nestedSectionOptions)
+        }
+        if originalOptions.contains(.requiresDepthAndSections) {
+            workingInputs._traits = OptionalAttribute(
+                graph.makeRule(
+                    SectionedTrait(_traits: workingInputs._traits)
+                )
+            )
+            workingInputs.traitKeys?.insert(IsSectionedTraitKey.self)
+        }
+
+        var headerInputs = workingInputs
+        if originalOptions.contains(.requiresNonEmptyGroupParent) {
+            headerInputs.options.insert(.isNonEmptyParent)
+            headerInputs._traits = OptionalAttribute(
+                graph.makeRule(
+                    SectionHeaderTrait(_traits: headerInputs._traits)
+                )
+            )
+            headerInputs.traitKeys?.insert(IsSectionHeaderTraitKey.self)
+        }
+        if originalOptions.contains(.resetHeaderStyleContext) {
+            headerInputs.base.customInputs.setValue(
+                .defaultValue,
+                forKey: StyleContextInput.self
+            )
+        }
+        let header = Parent._makeViewList(
+            view: parent,
+            inputs: headerInputs
+        )
+        workingInputs.implicitID = header.nextImplicitID
+        if originalOptions.contains(.requiresContentOffsets) {
+            workingInputs.updateContentOffset(outputs: header)
+        }
+
+        if originalOptions.contains(.requiresDepthAndSections) {
+            workingInputs._traits = OptionalAttribute(
+                graph.makeRule(
+                    DepthTrait(_traits: workingInputs._traits)
+                )
+            )
+            workingInputs.traitKeys?.insert(DepthTraitKey.self)
+        }
+        let content = body(_Graph(), workingInputs)
+        workingInputs.implicitID = content.nextImplicitID
+        if originalOptions.contains(.requiresContentOffsets) {
+            workingInputs.updateContentOffset(outputs: content)
+        }
+
+        var footerInputs = workingInputs
+        if originalOptions.contains(.requiresNonEmptyGroupParent) {
+            footerInputs.options.remove(.requiresNonEmptyGroupParent)
+            footerInputs._traits = OptionalAttribute(
+                graph.makeRule(
+                    SectionFooterTrait(_traits: footerInputs._traits)
+                )
+            )
+            footerInputs.traitKeys?.insert(IsSectionFooterTraitKey.self)
+        }
+        if originalOptions.contains(.resetFooterStyleContext) {
+            footerInputs.base.customInputs.setValue(
+                .defaultValue,
+                forKey: StyleContextInput.self
+            )
+        }
+        let footerOutput = Footer._makeViewList(
+            view: _GraphValue(_attribute: footer),
+            inputs: footerInputs
+        )
+
+        let outputs = [header, content, footerOutput]
+        if originalOptions.contains(.requiresSections) {
+            return sectionListOutputs(outputs, inputs: inputs)
+        }
+        return concat(outputs, inputs: workingInputs)
+    }
+
+    static func groupViewListCount<Content, Header, Footer>(
+        inputs: _ViewListCountInputs,
+        contentType: Content.Type,
+        headerType: Header.Type,
+        footerType: Footer.Type
+    ) -> Int? where Content: View, Header: View, Footer: View {
+        var childInputs = inputs
+        let originalOptions = inputs.options
+        let nestedSectionOptions: _ViewListInputs.Options = [
+            .requiresNonEmptyGroupParent,
+            .requiresSections,
+        ]
+        if !originalOptions.contains(.allowsNestedSections),
+           !originalOptions.isDisjoint(with: nestedSectionOptions) {
+            childInputs.options.subtract(nestedSectionOptions)
+        }
+        guard let headerCount = Header._viewListCount(inputs: childInputs),
+              let contentCount = Content._viewListCount(inputs: childInputs),
+              let footerCount = Footer._viewListCount(inputs: childInputs)
+        else {
+            return nil
+        }
+        return headerCount + contentCount + footerCount
+    }
+}
+
+private struct DepthTraitKey: _ViewTraitKey {
+    static var defaultValue: Int { 0 }
+}
+
+struct IsSectionedTraitKey: _ViewTraitKey {
+    static var defaultValue: Bool { false }
+}
+
+private struct IsSectionHeaderTraitKey: _ViewTraitKey {
+    static var defaultValue: Bool { false }
+}
+
+private struct IsSectionFooterTraitKey: _ViewTraitKey {
+    static var defaultValue: Bool { false }
+}
+
+private struct SectionedTrait: Rule {
+    var _traits: OptionalAttribute<ViewTraitCollection>
+
+    var value: ViewTraitCollection {
+        var traits = _traits.value ?? ViewTraitCollection()
+        traits[IsSectionedTraitKey.self] = true
+        return traits
+    }
+}
+
+private struct SectionFooterTrait: Rule {
+    var _traits: OptionalAttribute<ViewTraitCollection>
+
+    var value: ViewTraitCollection {
+        var traits = _traits.value ?? ViewTraitCollection()
+        traits[IsSectionFooterTraitKey.self] = true
+        return traits
+    }
+}
+
+struct DepthTrait: Rule {
+    var _traits: OptionalAttribute<ViewTraitCollection>
+
+    var value: ViewTraitCollection {
+        var traits = _traits.value ?? ViewTraitCollection()
+        traits[DepthTraitKey.self] += 1
+        return traits
+    }
+}
+
+struct SectionHeaderTrait: Rule {
+    var _traits: OptionalAttribute<ViewTraitCollection>
+
+    var value: ViewTraitCollection {
+        var traits = _traits.value ?? ViewTraitCollection()
+        traits[IsSectionHeaderTraitKey.self] = true
+        return traits
     }
 }

@@ -724,7 +724,7 @@ final class TransactionModifierTests: XCTestCase {
         _ViewListInputs(
             base: base,
             implicitID: 0,
-            options: 0,
+            options: [],
             _traits: OptionalAttribute(),
             traitKeys: nil,
             containerContext: nil,

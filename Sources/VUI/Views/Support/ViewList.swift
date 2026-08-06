@@ -47,16 +47,12 @@ extension ViewList {
         var traversalOffset = 0
         var from = 0
         var found: Int?
-        _ = applyNodes(
+        _ = applySublists(
             from: &from,
             style: style,
-            list: nil,
+            listAttribute: nil,
             transform: _ViewList_TemporarySublistTransform()
-        ) { _, _, node, transform in
-            guard case .sublist(var sublist) = node else {
-                return true
-            }
-            transform.apply(to: &sublist)
+        ) { sublist in
             for offset in 0..<sublist.count {
                 let elementIndex = sublist.start + offset
                 let elementID = sublist.id.elementID(at: elementIndex)
@@ -120,15 +116,12 @@ extension ViewList {
         var nextIndex = index
         var completed = true
         var from = 0
-        _ = applyNodes(
+        _ = applySublists(
             from: &from,
             style: style,
-            list: listAttribute,
-            transform: _ViewList_TemporarySublistTransform()
-        ) { _, _, node, temporaryTransform in
-            guard case .sublist(var sublist) = node else { return true }
-            temporaryTransform.apply(to: &sublist)
-            sublistTransform.apply(to: &sublist)
+            listAttribute: listAttribute,
+            transform: sublistTransform
+        ) { sublist in
             for offset in 0..<sublist.count {
                 if traversalIndex < startIndex {
                     traversalIndex += 1
@@ -147,6 +140,29 @@ extension ViewList {
         }
         index = nextIndex
         return completed
+    }
+
+    @discardableResult
+    func applySublists(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        listAttribute: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to body: (_ViewList_Sublist) -> Bool
+    ) -> Bool {
+        applyNodes(
+            from: &from,
+            style: style,
+            list: listAttribute,
+            transform: transform
+        ) { nodeFrom, nodeStyle, node, nodeTransform in
+            node.applySublists(
+                from: &nodeFrom,
+                style: nodeStyle,
+                transform: nodeTransform,
+                to: body
+            )
+        }
     }
 
     func edit(forID: _ViewList_ID, since: TransactionID) -> _ViewList_Edit? { nil }
@@ -264,6 +280,312 @@ struct EmptyViewList: ViewList {
     }
 }
 
+/// A bounded view-list window used by section content carriers.
+struct ViewListSublistSlice: ViewList {
+    final class ViewIDsSlice: _ViewList_ID_Views {
+        let base: _ViewList_ID_Views
+        let bounds: Range<Int>
+
+        init(base: _ViewList_ID_Views, bounds: Range<Int>) {
+            precondition(
+                base.indices.contains(bounds.lowerBound)
+                    || bounds.lowerBound == base.endIndex
+            )
+            precondition(bounds.upperBound <= base.endIndex)
+            self.base = base
+            self.bounds = bounds
+            super.init(isDataDependent: base.isDataDependent)
+        }
+
+        required init(isDataDependent: Bool) {
+            fatalError("ViewIDsSlice requires a base collection and bounds.")
+        }
+
+        override var endIndex: Int {
+            bounds.count
+        }
+
+        override subscript(position: Int) -> _ViewList_ID {
+            precondition(indices.contains(position))
+            return base[bounds.lowerBound + position]
+        }
+
+        override func isEqual(to other: _ViewList_ID_Views) -> Bool {
+            guard let other = other as? ViewIDsSlice else {
+                return false
+            }
+            return bounds == other.bounds && base == other.base
+        }
+    }
+
+    var base: any ViewList
+    var bounds: Range<Int>
+
+    init(base: any ViewList, bounds: Range<Int>) {
+        precondition(bounds.lowerBound >= 0)
+        precondition(bounds.upperBound <= base.count(
+            style: _ViewList_IteratorStyle()
+        ))
+        self.base = base
+        self.bounds = bounds
+    }
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        bounds.count
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        bounds.count
+    }
+
+    var traitKeys: ViewTraitKeys? {
+        nil
+    }
+
+    var traits: ViewTraitCollection {
+        ViewTraitCollection()
+    }
+
+    var viewIDs: _ViewList_ID_Views? {
+        guard let baseIDs = base.viewIDs,
+              bounds.upperBound <= baseIDs.endIndex else {
+            return nil
+        }
+        return ViewIDsSlice(base: baseIDs, bounds: bounds)
+    }
+
+    func appendViewIDs(
+        into accumulator: inout HeterogeneousViewIDsAccumulator
+    ) {
+        var index = bounds.lowerBound
+        var remaining = bounds.count
+        _ = base.applyIDs(from: &index) { id in
+            guard remaining > 0 else {
+                return false
+            }
+            accumulator.append(id.canonicalID)
+            remaining -= 1
+            return remaining > 0
+        }
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform callbackTransform: _ViewList_TemporarySublistTransform,
+        to: (
+            inout Int,
+            _ViewList_IteratorStyle,
+            _ViewList_Node,
+            _ViewList_TemporarySublistTransform
+        ) -> Bool
+    ) -> Bool {
+        let lowerBound = bounds.lowerBound
+        let upperBound = bounds.upperBound
+        var globalStart = 0
+        var baseFrom = 0
+
+        func emitSublist(
+            _ sourceSublist: _ViewList_Sublist,
+            style: _ViewList_IteratorStyle,
+            temporaryTransforms: [_ViewList_TemporarySublistTransform],
+            sublistTransforms: [_ViewList_SublistTransform]
+        ) -> Bool {
+            var sublist = sourceSublist
+            for temporaryTransform in temporaryTransforms {
+                temporaryTransform.apply(to: &sublist)
+            }
+            for sublistTransform in sublistTransforms {
+                sublistTransform.apply(to: &sublist)
+            }
+
+            let sublistStart = globalStart
+            let sublistEnd = sublistStart + sublist.count
+            globalStart = sublistEnd
+
+            let sliceStart = max(lowerBound, sublistStart)
+            let sliceEnd = min(upperBound, sublistEnd)
+            guard sliceStart < sliceEnd else {
+                return true
+            }
+
+            let localOffset = sliceStart - sublistStart
+            sublist.start += localOffset
+            sublist.count = sliceEnd - sliceStart
+
+            if from > 0 {
+                if from >= sublist.count {
+                    from -= sublist.count
+                    return true
+                }
+                sublist.start += from
+                sublist.count -= from
+                from = 0
+            }
+
+            return to(
+                &from,
+                style,
+                .sublist(sublist),
+                _ViewList_TemporarySublistTransform()
+            )
+        }
+
+        func applySection(
+            _ section: _ViewList_Section,
+            style: _ViewList_IteratorStyle,
+            temporaryTransforms: [_ViewList_TemporarySublistTransform],
+            sublistTransforms: [_ViewList_SublistTransform]
+        ) -> Bool {
+            return applyRegion(
+                section.header,
+                style: style,
+                temporaryTransforms: temporaryTransforms,
+                sublistTransforms: sublistTransforms
+            ) && applyRegion(
+                section.content,
+                style: style,
+                temporaryTransforms: temporaryTransforms,
+                sublistTransforms: sublistTransforms
+            ) && applyRegion(
+                section.footer,
+                style: style,
+                temporaryTransforms: temporaryTransforms,
+                sublistTransforms: sublistTransforms
+            )
+        }
+
+        func applyRegion(
+            _ region: (
+                list: any ViewList,
+                attribute: Attribute<any ViewList>?
+            )?,
+            style: _ViewList_IteratorStyle,
+            temporaryTransforms: [_ViewList_TemporarySublistTransform],
+            sublistTransforms: [_ViewList_SublistTransform]
+        ) -> Bool {
+            guard let region else {
+                return true
+            }
+            var regionFrom = 0
+            return region.list.applyNodes(
+                from: &regionFrom,
+                style: style,
+                list: region.attribute,
+                transform: _ViewList_TemporarySublistTransform()
+            ) { _, nestedStyle, node, temporaryTransform in
+                let nestedTemporaryTransforms =
+                    temporaryTransforms + [temporaryTransform]
+                switch node {
+                case .sublist(let sublist):
+                    return emitSublist(
+                        sublist,
+                        style: nestedStyle,
+                        temporaryTransforms: nestedTemporaryTransforms,
+                        sublistTransforms: sublistTransforms
+                    )
+                case .section(let nestedSection):
+                    return applySection(
+                        nestedSection,
+                        style: nestedStyle,
+                        temporaryTransforms: nestedTemporaryTransforms,
+                        sublistTransforms: sublistTransforms
+                    )
+                case .list(let nestedList, let nestedAttribute):
+                    return applyRegion(
+                        (nestedList, nestedAttribute),
+                        style: nestedStyle,
+                        temporaryTransforms: nestedTemporaryTransforms,
+                        sublistTransforms: sublistTransforms
+                    )
+                case .group(let group):
+                    for entry in group.lists {
+                        if !applyRegion(
+                            entry,
+                            style: nestedStyle,
+                            temporaryTransforms: nestedTemporaryTransforms,
+                            sublistTransforms: sublistTransforms
+                        ) {
+                            return false
+                        }
+                    }
+                    return true
+                }
+            }
+        }
+
+        return base.applyNodes(
+            from: &baseFrom,
+            style: style,
+            list: list,
+            transform: callbackTransform
+        ) { _, nestedStyle, node, temporaryTransform in
+            switch node {
+            case .sublist(let sublist):
+                return emitSublist(
+                    sublist,
+                    style: nestedStyle,
+                    temporaryTransforms: [temporaryTransform],
+                    sublistTransforms: []
+                )
+            case .section(let section):
+                return applySection(
+                    section,
+                    style: nestedStyle,
+                    temporaryTransforms: [temporaryTransform],
+                    sublistTransforms: []
+                )
+            case .list(let nestedList, let nestedAttribute):
+                return applyRegion(
+                    (nestedList, nestedAttribute),
+                    style: nestedStyle,
+                    temporaryTransforms: [temporaryTransform],
+                    sublistTransforms: []
+                )
+            case .group(let group):
+                for entry in group.lists {
+                    if !applyRegion(
+                        entry,
+                        style: nestedStyle,
+                        temporaryTransforms: [temporaryTransform],
+                        sublistTransforms: []
+                    ) {
+                        return false
+                    }
+                }
+                return true
+            }
+        }
+    }
+
+    func firstOffset<A: Hashable>(
+        forID id: A,
+        style: _ViewList_IteratorStyle
+    ) -> Int? {
+        guard let offset = base.firstOffset(forID: id, style: style),
+              bounds.contains(offset) else {
+            return nil
+        }
+        return offset - bounds.lowerBound
+    }
+
+    func edit(
+        forID id: _ViewList_ID,
+        since transaction: TransactionID
+    ) -> _ViewList_Edit? {
+        base.edit(forID: id, since: transaction)
+    }
+
+    func print(into printer: inout SExpPrinter) {
+        base.print(into: &printer)
+    }
+
+    var debugDescription: String {
+        "ViewListSublistSlice(\(bounds))"
+    }
+}
+
 // MARK: - _ViewList_IteratorStyle
 
 /// Controls granularity when traversing a ViewList.
@@ -280,25 +602,6 @@ struct _ViewList_IteratorStyle: Equatable {
 /// Current storage keeps the known index, implicit ID, and explicit ID list.
 /// Explicit binding behavior remains partial.
 struct _ViewList_ID {
-    enum GeneratedIDKind: Hashable {
-        case rowLocal
-        case shared
-    }
-
-    struct GeneratedIDSeed: Hashable {
-        var base: UniqueID
-        var kind: GeneratedIDKind
-
-        func uniqueID(at index: Int) -> UniqueID {
-            switch kind {
-            case .rowLocal:
-                return UniqueID(value: base.value &+ UInt32(truncatingIfNeeded: index &+ 1))
-            case .shared:
-                return base
-            }
-        }
-    }
-
     struct Canonical: Hashable, CustomStringConvertible {
         var _index: Int32
         var implicitID: Int32
@@ -395,9 +698,6 @@ struct _ViewList_ID {
     var implicitID: Int32
     var explicitIDs: [Explicit] = []
 
-    static let generatedRowReuseID = 8_397_012_648
-    static let generatedSectionReuseID = Int(bitPattern: ObjectIdentifier(_ViewList_ID.self))
-
     var index: Int { Int(_index) }
 
     init(implicitID: Int = 0) {
@@ -471,35 +771,10 @@ struct _ViewList_ID {
         )
     }
 
-    mutating func bindGeneratedID(
-        seed: GeneratedIDSeed,
-        owner: AGAttribute,
-        isUnary: Bool,
-        reuseID: Int
-    ) {
-        bind(explicitID: seed, owner: Optional(owner), isUnary: isUnary, reuseID: reuseID)
-    }
-
     func elementID(at index: Int) -> _ViewList_ID {
         var id = self
         id._index = Int32(index)
-        id.materializeGeneratedIDs(at: index)
         return id
-    }
-
-    private mutating func materializeGeneratedIDs(at index: Int) {
-        var hasUnary = false
-        for explicitIndex in explicitIDs.indices {
-            if let seed = explicitIDs[explicitIndex].id.base as? GeneratedIDSeed {
-                explicitIDs[explicitIndex].id = AnyHashable(seed.uniqueID(at: index))
-                if seed.kind == .rowLocal {
-                    explicitIDs[explicitIndex].isUnary = !hasUnary
-                }
-            }
-            if explicitIDs[explicitIndex].isUnary {
-                hasUnary = true
-            }
-        }
     }
 
     var canonicalID: Canonical {
@@ -1841,9 +2116,95 @@ enum _ViewList_Node {
     case group(_ViewList_Group)
     case section(_ViewList_Section)
     case sublist(_ViewList_Sublist)
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (
+            inout Int,
+            _ViewList_IteratorStyle,
+            _ViewList_Node,
+            _ViewList_TemporarySublistTransform
+        ) -> Bool
+    ) -> Bool {
+        switch self {
+        case .list(let list, let attribute):
+            return list.applyNodes(
+                from: &from,
+                style: style,
+                list: attribute,
+                transform: transform,
+                to: to
+            )
+        case .group(let group):
+            return group.applyNodes(
+                from: &from,
+                style: style,
+                transform: transform,
+                to: to
+            )
+        case .section, .sublist:
+            return to(&from, style, self, transform)
+        }
+    }
+
+    func applySublists(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        transform: _ViewList_TemporarySublistTransform,
+        to body: (_ViewList_Sublist) -> Bool
+    ) -> Bool {
+        switch self {
+        case .sublist(var sublist):
+            let traversalCount: Int
+            if style.value & 1 == 0 {
+                traversalCount = sublist.count
+            } else {
+                traversalCount = sublist.count * Int(style.value >> 1)
+            }
+            let remaining = from - traversalCount
+            guard remaining < 0 else {
+                from = remaining
+                return true
+            }
+            transform.apply(to: &sublist)
+            let result = body(sublist)
+            from = 0
+            return result
+
+        case .section(let section):
+            return section.applyNodes(
+                from: &from,
+                style: style,
+                transform: transform
+            ) { nodeFrom, nodeStyle, node, _, nodeTransform in
+                node.applySublists(
+                    from: &nodeFrom,
+                    style: nodeStyle,
+                    transform: nodeTransform,
+                    to: body
+                )
+            }
+
+        case .list, .group:
+            return applyNodes(
+                from: &from,
+                style: style,
+                transform: transform
+            ) { nodeFrom, nodeStyle, node, nodeTransform in
+                node.applySublists(
+                    from: &nodeFrom,
+                    style: nodeStyle,
+                    transform: nodeTransform,
+                    to: body
+                )
+            }
+        }
+    }
 }
 
-/// Carries the ordered regions and identity transforms for one logical section.
+/// Carries the ordered regions for one logical section.
 struct _ViewList_Section: ViewList {
     /// Identifies a section region and whether it occupies an edge role.
     struct Info {
@@ -1862,26 +2223,17 @@ struct _ViewList_Section: ViewList {
     var base: _ViewList_Group
     var traits: ViewTraitCollection
     var isHierarchical: Bool
-    var containerValues: ContainerValues
-    var subviewIDTransform: _ViewList_SublistTransform
-    var headerFooterSubviewIDTransform: _ViewList_SublistTransform
 
     init(
         id: UInt32 = 0,
         base: _ViewList_Group = _ViewList_Group(lists: []),
         traits: ViewTraitCollection = ViewTraitCollection(),
-        isHierarchical: Bool = false,
-        containerValues: ContainerValues = ContainerValues(),
-        subviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
-        headerFooterSubviewIDTransform: _ViewList_SublistTransform = _ViewList_SublistTransform()
+        isHierarchical: Bool = false
     ) {
         self.id = id
         self.base = base
         self.traits = traits
         self.isHierarchical = isHierarchical
-        self.containerValues = containerValues
-        self.subviewIDTransform = subviewIDTransform
-        self.headerFooterSubviewIDTransform = headerFooterSubviewIDTransform
     }
 
     var header: (list: any ViewList, attribute: Attribute<any ViewList>)? {
@@ -1911,6 +2263,17 @@ struct _ViewList_Section: ViewList {
         base.estimatedCount(style: style)
     }
 
+    var traitKeys: ViewTraitKeys? {
+        base.traitKeys
+    }
+
+    var viewIDs: _ViewList_ID_Views? {
+        if isHierarchical {
+            return base.lists.first?.list.viewIDs
+        }
+        return base.viewIDs
+    }
+
     /// Uses only the leading region for hierarchical sections; flat sections append all regions.
     func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
         if isHierarchical {
@@ -1921,6 +2284,69 @@ struct _ViewList_Section: ViewList {
         } else {
             base.appendViewIDs(into: &accumulator)
         }
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (
+            inout Int,
+            _ViewList_IteratorStyle,
+            _ViewList_Node,
+            Info,
+            _ViewList_TemporarySublistTransform
+        ) -> Bool
+    ) -> Bool {
+        let granularity = Int(style.value >> 1)
+
+        func alignTraversalOffset() {
+            guard from != 0, granularity != 1 else {
+                return
+            }
+            precondition(
+                granularity != 0,
+                "A nonzero section traversal offset requires a nonzero iterator granularity."
+            )
+            from -= from % granularity
+        }
+
+        alignTraversalOffset()
+
+        let regionCount = isHierarchical ? min(1, base.lists.count) : base.lists.count
+        let edgeStyleValue = style.value & ~UInt(1)
+        let edgeStyle = _ViewList_IteratorStyle(
+            value: edgeStyleValue == 2 ? edgeStyleValue : edgeStyleValue + 1
+        )
+
+        for regionIndex in 0..<regionCount {
+            let entry = base.lists[regionIndex]
+            let regionStyle = regionIndex == 1 ? style : edgeStyle
+            let info = Info(
+                id: id,
+                isHeader: regionIndex == 0,
+                isFooter: regionIndex == 2
+            )
+            guard entry.list.applyNodes(
+                from: &from,
+                style: regionStyle,
+                list: entry.attribute,
+                transform: transform,
+                to: { nodeFrom, nodeStyle, node, nodeTransform in
+                    to(
+                        &nodeFrom,
+                        nodeStyle,
+                        node,
+                        info,
+                        nodeTransform
+                    )
+                }
+            ) else {
+                return false
+            }
+            alignTraversalOffset()
+        }
+        return true
     }
 
     func applyNodes(
@@ -1940,19 +2366,58 @@ struct _ViewList_Section: ViewList {
 
 // MARK: - _ViewList_Group
 
-/// Wraps multiple ViewList entries for mixed static+dynamic content.
-/// Created when TupleView/ViewBuilder mixes static and dynamic content (Text + ForEach, etc.).
-/// applyNodes iterates each entry and delegates to its list.applyNodes, passing entry.attribute
-/// as the list: parameter so each sublist has its own AG reactivity anchor.
+/// Wraps multiple ViewList entries for mixed static and dynamic content.
 struct _ViewList_Group: ViewList {
-    /// Each entry is (current ViewList value, its AG node for dependency tracking).
     var lists: [(list: any ViewList, attribute: Attribute<any ViewList>)]
 
     func count(style: _ViewList_IteratorStyle) -> Int {
         lists.reduce(0) { $0 + $1.list.count(style: style) }
     }
 
-    /// Preserves the stored region order while forwarding each concrete list witness.
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        lists.reduce(0) {
+            $0 + $1.list.estimatedCount(style: style)
+        }
+    }
+
+    var traitKeys: ViewTraitKeys? {
+        var result = ViewTraitKeys()
+        for entry in lists {
+            guard let keys = entry.list.traitKeys else {
+                return nil
+            }
+            result.formUnion(keys)
+        }
+        return result
+    }
+
+    var viewIDs: _ViewList_ID_Views? {
+        var collected: [_ViewList_ID_Views] = []
+        var isDataDependent = false
+        collected.reserveCapacity(lists.count)
+        for entry in lists {
+            guard let ids = entry.list.viewIDs else {
+                return nil
+            }
+            collected.append(ids)
+            isDataDependent = isDataDependent || ids.isDataDependent
+        }
+        switch collected.count {
+        case 0:
+            return _ViewList_ID._Views(
+                EmptyCollection<_ViewList_ID>(),
+                isDataDependent: false
+            )
+        case 1:
+            return collected[0]
+        default:
+            return _ViewList_ID.JoinedViews(
+                collected,
+                isDataDependent: isDataDependent
+            )
+        }
+    }
+
     func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
         for entry in lists {
             entry.list.appendViewIDs(into: &accumulator)
@@ -1962,77 +2427,46 @@ struct _ViewList_Group: ViewList {
     func applyNodes(
         from: inout Int,
         style: _ViewList_IteratorStyle,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        for entry in lists {
+            guard entry.list.applyNodes(
+                from: &from,
+                style: style,
+                list: entry.attribute,
+                transform: transform,
+                to: to
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
         list: Attribute<any ViewList>?,
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        for (entryIndex, entry) in lists.enumerated() {
-            let entryTransform = transform.withPushedItem(
-                _ViewList_GroupEntryTransform(
-                    owner: entry.attribute.identifier,
-                    index: entryIndex
-                )
+        to(&from, style, .group(self), transform)
+    }
+}
+
+extension _ViewList_Group {
+    struct Init: Rule {
+        var lists: [Attribute<any ViewList>]
+
+        var value: any ViewList {
+            _ViewList_Group(
+                lists: lists.map { attribute in
+                    (attribute.value, attribute)
+                }
             )
-            let cont = entry.list.applyNodes(
-                from: &from,
-                style: style,
-                list: entry.attribute,
-                transform: entryTransform,
-                to: to
-            )
-            if !cont { return false }
         }
-        return true
     }
-}
-
-/// Distinguishes a child identity by its stored group entry and owner.
-struct _ViewList_GroupEntryID: Hashable {
-    var owner: UInt32
-    var index: Int
-    var child: _ViewList_ID.Canonical
-}
-
-/// Binds a group-entry lane without replacing a child's primary identity.
-private struct _ViewList_GroupEntryTransform: _ViewList_SublistTransform_Item {
-    var owner: AGAttribute
-    var index: Int
-
-    private static let reuseID = Int(bitPattern: ObjectIdentifier(_ViewList_GroupEntryTransform.self))
-
-    func apply(sublist: inout _ViewList_Sublist) {
-        bindID(&sublist.id)
-    }
-
-    func bindID(_ id: inout _ViewList_ID) {
-        let groupID = _ViewList_GroupEntryID(
-            owner: owner.rawValue,
-            index: index,
-            child: id.canonicalID
-        )
-        id.explicitIDs.append(
-            _ViewList_ID.Explicit(
-                id: AnyHashable(groupID),
-                reuseID: Self.reuseID,
-                owner: owner,
-                isUnary: false
-            )
-        )
-    }
-}
-
-func _viewListTransformDroppingGroupEntryIDs(
-    _ transform: _ViewList_SublistTransform
-) -> _ViewList_SublistTransform {
-    var filtered = _ViewList_SublistTransform()
-    for item in transform.items {
-        if item is _ViewList_GroupEntryTransform {
-            continue
-        }
-        filtered.push(item)
-    }
-    filtered.subgraphCount = transform.subgraphCount
-    return filtered
 }
 
 /// A contiguous slice of a ViewList passed to the `applyNodes` callback.
@@ -2296,11 +2730,17 @@ extension ViewListElements: _ViewList_Elements {
 // MARK: - Trait types
 
 /// Type-erased storage for a single trait entry in a `ViewTraitCollection`.
-protocol AnyViewTrait {}
+protocol AnyViewTrait {
+    var keyType: ObjectIdentifier { get }
+}
 
 /// Typed wrapper for one `_ViewTraitKey` value.
 struct AnyTrait<Key: _ViewTraitKey>: AnyViewTrait {
     var value: Key.Value
+
+    var keyType: ObjectIdentifier {
+        ObjectIdentifier(Key.self)
+    }
 }
 
 /// Per-view trait values propagated from child to container.
@@ -2322,6 +2762,24 @@ struct ViewTraitCollection {
             return
         }
         storage.append(AnyTrait<K>(value: value))
+    }
+
+    /// Replaces a trait by key while preserving type-erased storage.
+    mutating func setErasedValue(_ trait: any AnyViewTrait) {
+        if let index = storage.firstIndex(where: {
+            $0.keyType == trait.keyType
+        }) {
+            storage[index] = trait
+        } else {
+            storage.append(trait)
+        }
+    }
+
+    /// Applies overriding traits in collection order.
+    mutating func merge(_ overriding: ViewTraitCollection) {
+        for trait in overriding.storage {
+            setErasedValue(trait)
+        }
     }
 
     /// Supplies an element identity as the default tag for its concrete ID type.
@@ -2532,29 +2990,88 @@ enum ViewListContent {
 
 // MARK: - Generator extraction helper
 
+/// Expands list and group nodes through their concrete traversal overloads.
+@discardableResult
+func _applyNodesExpandingGroups(
+    in list: any ViewList,
+    from: inout Int,
+    style: _ViewList_IteratorStyle,
+    listAttribute: Attribute<any ViewList>?,
+    transform: _ViewList_TemporarySublistTransform,
+    to body: (
+        inout Int,
+        _ViewList_IteratorStyle,
+        _ViewList_Node,
+        _ViewList_TemporarySublistTransform
+    ) -> Bool
+) -> Bool {
+    func applyNode(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        node: _ViewList_Node,
+        transform: _ViewList_TemporarySublistTransform
+    ) -> Bool {
+        switch node {
+        case .list(let list, let attribute):
+            return _applyNodesExpandingGroups(
+                in: list,
+                from: &from,
+                style: style,
+                listAttribute: attribute,
+                transform: transform,
+                to: body
+            )
+        case .group(let group):
+            return group.applyNodes(
+                from: &from,
+                style: style,
+                transform: transform
+            ) { childFrom, childStyle, childNode, childTransform in
+                applyNode(
+                    from: &childFrom,
+                    style: childStyle,
+                    node: childNode,
+                    transform: childTransform
+                )
+            }
+        case .section, .sublist:
+            return body(&from, style, node, transform)
+        }
+    }
+
+    return list.applyNodes(
+        from: &from,
+        style: style,
+        list: listAttribute,
+        transform: transform
+    ) { nodeFrom, nodeStyle, node, nodeTransform in
+        applyNode(
+            from: &nodeFrom,
+            style: nodeStyle,
+            node: node,
+            transform: nodeTransform
+        )
+    }
+}
+
 /// Traverses a ViewList via applyNodes and visits each sublist in order.
 @discardableResult
 func _forEachSublist(
     in list: any ViewList,
     listAttribute: Attribute<any ViewList>? = nil,
-    style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
+    style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(value: 2),
     sublistTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
     body: (_ViewList_Sublist) -> Bool
 ) -> Bool {
     var from = 0
-    return list.applyNodes(
+    return _applySublists(
+        in: list,
         from: &from,
+        listAttribute: listAttribute,
         style: style,
-        list: listAttribute,
-        transform: _ViewList_TemporarySublistTransform()
-    ) { _, _, node, transform in
-        guard case .sublist(var sublist) = node else { return true }
-        // Empty sublists do not participate in element traversal.
-        guard sublist.count > 0 else { return true }
-        transform.apply(to: &sublist)
-        sublistTransform.apply(to: &sublist)
-        return body(sublist)
-    }
+        sublistTransform: sublistTransform,
+        body: body
+    )
 }
 
 /// Applies a callback to sublists before materializing children.
@@ -2563,23 +3080,18 @@ func _applySublists(
     in list: any ViewList,
     from: inout Int,
     listAttribute: Attribute<any ViewList>? = nil,
-    style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
+    style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(value: 2),
     sublistTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
     body: (_ViewList_Sublist) -> Bool
 ) -> Bool {
-    list.applyNodes(
-        from: &from,
-        style: style,
-        list: listAttribute,
-        transform: _ViewList_TemporarySublistTransform()
-    ) { _, _, node, transform in
-        guard case .sublist(var sublist) = node else { return true }
-        // The count gate precedes transformation and callback dispatch, so an
-        // empty branch cannot become a zero-view dynamic container item.
-        guard sublist.count > 0 else { return true }
-        transform.apply(to: &sublist)
-        sublistTransform.apply(to: &sublist)
-        return body(sublist)
+    sublistTransform.withTemporaryTransform { transform in
+        list.applySublists(
+            from: &from,
+            style: style,
+            listAttribute: listAttribute,
+            transform: transform,
+            to: body
+        )
     }
 }
 

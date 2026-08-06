@@ -174,14 +174,18 @@ final class ContextMenuResponder: ViewResponder {
         parent.dismissAllPresentationChildren()
         let session = ContextMenuPresentationSession()
         let actions = ContextMenuPopupActions()
-        let initialItems = self.itemList.value.menuItems
+        let initialItems = contextMenuPresentationItems(
+            self.itemList.value.menuItems
+        )
         let liveContentSubgraph = AGSubgraph()
         AGSubgraph.withCurrent(liveContentSubgraph) {
             // Update the already-open popup root content when the collected
             // item-list source invalidates. The session owns this subgraph so
             // dismissing the menu also stops the source-graph side effect.
             graph.makeSideEffectRule { [weak session] in
-                let items = self.itemList.value.menuItems
+                let items = contextMenuPresentationItems(
+                    self.itemList.value.menuItems
+                )
                 let environment = self.environment.value.untrackedCopy()
                 let viewPhase = ViewGraphHost.Phase(base: self.phase.value)
                 session?.root?.replaceMenuItems(items)
@@ -304,8 +308,161 @@ final class ContextMenuPresentationSession {
     }
 }
 
+struct ContextMenuPresentationItem: Identifiable {
+    struct ID: Hashable {
+        enum Source: Hashable {
+            case platformIdentifier(String)
+            case indexPath([Int])
+        }
+
+        enum Role: Hashable {
+            case item
+            case sectionLeadingDivider
+            case sectionHeader
+            case sectionTrailingDivider
+        }
+
+        var source: Source
+        var role: Role
+    }
+
+    enum Kind {
+        case item
+        case sectionHeader
+        case divider
+    }
+
+    var id: ID
+    var item: PlatformItemList.Item
+    var kind: Kind
+    var children: [ContextMenuPresentationItem]
+
+    var isDivider: Bool {
+        if case .divider = kind {
+            return true
+        }
+        return false
+    }
+
+    var isSectionHeader: Bool {
+        if case .sectionHeader = kind {
+            return true
+        }
+        return false
+    }
+
+    var isMenu: Bool {
+        if case .menu? = item.systemItem {
+            return true
+        }
+        return false
+    }
+
+    var hasImage: Bool {
+        item.namedResolvedImage != nil || item.resolvedImage != nil
+    }
+
+    @ViewBuilder
+    var image: some View {
+        if let image = item.namedResolvedImage {
+            image
+        } else if let image = item.resolvedImage {
+            PlatformItemResolvedImageView(image: image)
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+func contextMenuPresentationItems(
+    _ items: [PlatformItemList.Item],
+    parentPath: [Int] = []
+) -> [ContextMenuPresentationItem] {
+    var result: [ContextMenuPresentationItem] = []
+    for (index, item) in items.enumerated() {
+        let path = parentPath + [index]
+        let source: ContextMenuPresentationItem.ID.Source
+        if let platformIdentifier = item.platformIdentifier {
+            source = .platformIdentifier(platformIdentifier)
+        } else {
+            source = .indexPath(path)
+        }
+
+        if case .section? = item.systemItem {
+            var divider = PlatformItemList.Item(systemItem: .divider)
+            divider.isEnabled = false
+            result.append(
+                ContextMenuPresentationItem(
+                    id: .init(
+                        source: source,
+                        role: .sectionLeadingDivider
+                    ),
+                    item: divider,
+                    kind: .divider,
+                    children: []
+                )
+            )
+            if item.label != nil || item.text != nil {
+                result.append(
+                    ContextMenuPresentationItem(
+                        id: .init(
+                            source: source,
+                            role: .sectionHeader
+                        ),
+                        item: item,
+                        kind: .sectionHeader,
+                        children: []
+                    )
+                )
+            }
+            if let children = item.children {
+                result.append(
+                    contentsOf: contextMenuPresentationItems(
+                        children.items,
+                        parentPath: path + [0]
+                    )
+                )
+            }
+            result.append(
+                ContextMenuPresentationItem(
+                    id: .init(
+                        source: source,
+                        role: .sectionTrailingDivider
+                    ),
+                    item: divider,
+                    kind: .divider,
+                    children: []
+                )
+            )
+            continue
+        }
+
+        let kind: ContextMenuPresentationItem.Kind
+        if case .divider? = item.systemItem {
+            kind = .divider
+        } else {
+            kind = .item
+        }
+        let children = item.children.map {
+            contextMenuPresentationItems(
+                $0.items,
+                parentPath: path + [0]
+            )
+        } ?? []
+        result.append(
+            ContextMenuPresentationItem(
+                id: .init(source: source, role: .item),
+                item: item,
+                kind: kind,
+                children: children
+            )
+        )
+    }
+    return result
+}
+
 final class ContextMenuPopupActions {
-    var openSubmenu: ((PlatformItemList.Item, CGPoint) -> Void)?
+    var openSubmenu: ((ContextMenuPresentationItem, CGPoint) -> Void)?
     var closeSubmenus: (() -> Void)?
     var dismiss: (() -> Void)?
 }
@@ -323,8 +480,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private let popupActions: ContextMenuPopupActions
     private let menuSession: ContextMenuPresentationSession
     private let submenuPlacement: ContextMenuSubmenuPlacement?
-    private var menuItems: [PlatformItemList.Item]
-    private var openedSubmenuID: AnyHashable?
+    private var menuItems: [ContextMenuPresentationItem]
+    private var openedSubmenuID: ContextMenuPresentationItem.ID?
     private weak var openedSubmenu: ContextMenuWindowController?
 
     init<Content: View>(content: Content,
@@ -332,7 +489,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
          viewPhase: ViewGraphHost.Phase,
          scene: WindowKey,
          anchor: CGPoint,
-         items: [PlatformItemList.Item],
+         items: [ContextMenuPresentationItem],
          actions: ContextMenuPopupActions,
          usesPlatformWindow: Bool,
          session: ContextMenuPresentationSession,
@@ -351,8 +508,15 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         self.contentAttr = viewGraph.rootAnyViewContentInput
     }
 
-    func openSubmenu(_ item: PlatformItemList.Item, at origin: CGPoint) {
-        guard item.isEnabled, !item.children.isEmpty else { return }
+    func openSubmenu(
+        _ item: ContextMenuPresentationItem,
+        at origin: CGPoint
+    ) {
+        guard item.item.isEnabled,
+              item.isMenu,
+              !item.children.isEmpty else {
+            return
+        }
         guard openedSubmenuID != item.id else { return }
         let viewPhase = viewGraph.data.withCurrent {
             guard let phase = viewGraph.phaseAttr else {
@@ -446,7 +610,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
 
     // Keep already-open child popups in step with the in-place root item-list
     // refresh instead of rebuilding the whole menu presentation.
-    func replaceMenuItems(_ items: [PlatformItemList.Item]) {
+    func replaceMenuItems(_ items: [ContextMenuPresentationItem]) {
         menuItems = items
         replaceMenuContent(with: items)
         refreshOpenedSubmenu()
@@ -458,7 +622,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         dismissAllPresentationChildren()
     }
 
-    private func replaceMenuContent(with items: [PlatformItemList.Item]) {
+    private func replaceMenuContent(
+        with items: [ContextMenuPresentationItem]
+    ) {
         guard let contentAttr else { return }
         let graph = viewGraph.graph
         let content = UnsafeBox(AnyView(contextMenuPopupContent(items: items,
@@ -472,8 +638,11 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
 
     private func refreshOpenedSubmenu() {
         guard let openedSubmenuID else { return }
-        guard let item = menuItems.first(where: { $0.id == openedSubmenuID }),
-              item.isEnabled,
+        guard let item = menuItems.first(where: {
+            $0.id == openedSubmenuID
+        }),
+              item.item.isEnabled,
+              item.isMenu,
               !item.children.isEmpty else {
             closeSubmenus()
             return
@@ -552,16 +721,16 @@ private struct ContextMenuPopupLayout {
     static let empty = ContextMenuPopupLayout(showsStateColumn: false,
                                               showsImageColumn: false)
 
-    static func make(for items: [PlatformItemList.Item],
+    static func make(for items: [ContextMenuPresentationItem],
                      showsStateColumn: Bool? = nil) -> ContextMenuPopupLayout {
         var groupShowsStateColumn = false
         var showsImageColumn = false
-        for item in items where item.systemItem == nil {
-            if item.image != nil {
+        for item in items where !item.isDivider {
+            if item.hasImage {
                 showsImageColumn = true
             }
             // Toggle rows reserve the state column even when the current state is off.
-            if item.selectionBehavior != nil {
+            if item.item.toggleState != nil {
                 groupShowsStateColumn = true
             }
         }
@@ -569,11 +738,14 @@ private struct ContextMenuPopupLayout {
                                       showsImageColumn: showsImageColumn)
     }
 
-    static func makeRowLayouts(for items: [PlatformItemList.Item]) -> [AnyHashable: ContextMenuPopupLayout] {
-        var result: [AnyHashable: ContextMenuPopupLayout] = [:]
-        var group: [PlatformItemList.Item] = []
+    static func makeRowLayouts(
+        for items: [ContextMenuPresentationItem]
+    ) -> [ContextMenuPresentationItem.ID: ContextMenuPopupLayout] {
+        var result:
+            [ContextMenuPresentationItem.ID: ContextMenuPopupLayout] = [:]
+        var group: [ContextMenuPresentationItem] = []
         let menuShowsStateColumn = items.contains {
-            $0.systemItem == nil && $0.selectionBehavior != nil
+            !$0.isDivider && $0.item.toggleState != nil
         }
 
         func flushGroup() {
@@ -588,7 +760,7 @@ private struct ContextMenuPopupLayout {
 
         // Only the image column resets per displayed separator group.
         for item in items {
-            if item.systemItem != nil {
+            if item.isDivider {
                 flushGroup()
             } else {
                 group.append(item)
@@ -836,16 +1008,18 @@ private struct ContextMenuSubmenuIndicatorShape: Shape {
     }
 }
 
-func contextMenuPopupContent(items: [PlatformItemList.Item],
+func contextMenuPopupContent(items: [ContextMenuPresentationItem],
                              actions: ContextMenuPopupActions) -> some View {
     ContextMenuPopupView(items: items, actions: actions)
 }
 
-private func contextMenuPopupRenderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
-    var result: [PlatformItemList.Item] = []
+private func contextMenuPopupRenderedItems(
+    _ items: [ContextMenuPresentationItem]
+) -> [ContextMenuPresentationItem] {
+    var result: [ContextMenuPresentationItem] = []
     var previousWasDivider = false
     for item in items {
-        let isDivider = item.systemItem != nil
+        let isDivider = item.isDivider
         // The collected item model can contain consecutive or edge separators.
         // The popup renderer collapses consecutive separators to a single row
         // and suppresses edge separators from visible height.
@@ -855,21 +1029,24 @@ private func contextMenuPopupRenderedItems(_ items: [PlatformItemList.Item]) -> 
         result.append(item)
         previousWasDivider = isDivider
     }
-    while result.last?.systemItem != nil {
+    while result.last?.isDivider == true {
         result.removeLast()
     }
     return result
 }
 
 private struct ContextMenuPopupView: View {
-    let items: [PlatformItemList.Item]
+    let items: [ContextMenuPresentationItem]
     let actions: ContextMenuPopupActions
-    @State private var activeSubmenuID: AnyHashable?
+    @State private var activeSubmenuID: ContextMenuPresentationItem.ID?
 
     var body: some View {
         let activeSubmenuID = activeSubmenuID.flatMap { id in
-            items.contains {
-                $0.id == id && $0.isEnabled && !$0.children.isEmpty
+            items.contains { item in
+                item.id == id
+                    && item.item.isEnabled
+                    && item.isMenu
+                    && !item.children.isEmpty
             } ? id : nil
         }
         ContextMenuPopupPanel(
@@ -879,7 +1056,11 @@ private struct ContextMenuPopupView: View {
                 actions.dismiss?()
             },
             openSubmenu: { item, origin in
-                guard item.isEnabled, !item.children.isEmpty else { return }
+                guard item.item.isEnabled,
+                      item.isMenu,
+                      !item.children.isEmpty else {
+                    return
+                }
                 self.activeSubmenuID = item.id
                 actions.openSubmenu?(item, origin)
             },
@@ -895,30 +1076,35 @@ private struct ContextMenuPopupView: View {
 }
 
 private struct ContextMenuPopupPanel: View {
-    let items: [PlatformItemList.Item]
-    let activeItemID: AnyHashable?
+    let items: [ContextMenuPresentationItem]
+    let activeItemID: ContextMenuPresentationItem.ID?
     let dismiss: () -> Void
-    let openSubmenu: (PlatformItemList.Item, CGPoint) -> Void
+    let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
-    private var renderedItems: [PlatformItemList.Item] {
+    private var renderedItems: [ContextMenuPresentationItem] {
         contextMenuPopupRenderedItems(items)
     }
-    private var rowLayouts: [AnyHashable: ContextMenuPopupLayout] {
+    private var rowLayouts:
+        [ContextMenuPresentationItem.ID: ContextMenuPopupLayout] {
         ContextMenuPopupLayout.makeRowLayouts(for: renderedItems)
     }
 
-    private func rowTopOffset(for id: AnyHashable) -> CGFloat {
+    private func rowTopOffset(
+        for id: ContextMenuPresentationItem.ID
+    ) -> CGFloat {
         var offset = contextMenuPopupPanelPadding
         for item in renderedItems {
             if item.id == id { return offset }
-            offset += item.systemItem == nil
-                ? contextMenuPopupRowHeight
-                : contextMenuPopupDividerHeight
+            offset += item.isDivider
+                ? contextMenuPopupDividerHeight
+                : contextMenuPopupRowHeight
         }
         return contextMenuPopupPanelPadding
     }
 
-    private func submenuOrigin(for item: PlatformItemList.Item) -> CGPoint {
+    private func submenuOrigin(
+        for item: ContextMenuPresentationItem
+    ) -> CGPoint {
         let provisionalPopupWidth = contextMenuPopupPlainTitleOrigin +
             contextMenuPopupTrailingGap +
             contextMenuPopupSubmenuIndicatorWidth +
@@ -952,33 +1138,30 @@ private struct ContextMenuPopupPanel: View {
 }
 
 private struct ContextMenuPopupRow: View {
-    let item: PlatformItemList.Item
+    let item: ContextMenuPresentationItem
     let layout: ContextMenuPopupLayout
     let isSubmenuOpen: Bool
     let submenuOrigin: CGPoint
     let dismiss: () -> Void
-    let openSubmenu: (PlatformItemList.Item, CGPoint) -> Void
+    let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
     @State private var isPressed = false
     @State private var isHovered = false
 
     private var hasSubmenu: Bool {
-        item.secondaryNavigationBehavior == .submenu && !item.children.isEmpty
+        item.isMenu && !item.children.isEmpty
     }
 
     private var isSectionHeader: Bool {
-        item.presentationRole == .sectionHeader
+        item.isSectionHeader
     }
 
     private var isToggleOn: Bool {
-        if case let .toggle(value)? = item.selectionBehavior {
-            return value
-        }
-        return false
+        item.item.toggleState == .on
     }
 
     private var shortcutLabel: String? {
-        guard let keyboardShortcut = item.keyboardShortcut else {
+        guard let keyboardShortcut = item.item.keyboardShortcut else {
             return nil
         }
         return keyboardShortcut.displayLabel
@@ -995,7 +1178,7 @@ private struct ContextMenuPopupRow: View {
         if isHighlighted {
             return contextMenuPopupHighlightedForeground
         }
-        if isSectionHeader || !item.isEnabled {
+        if isSectionHeader || !item.item.isEnabled {
             // Static Text/Label menu rows are disabled platform items and render
             // with disabled foreground, not a normal actionable-row foreground.
             return contextMenuPopupDisabledForeground
@@ -1004,14 +1187,16 @@ private struct ContextMenuPopupRow: View {
     }
 
     private var isHighlighted: Bool {
-        guard item.systemItem == nil, !isSectionHeader, item.isEnabled else {
+        guard !item.isDivider,
+              !isSectionHeader,
+              item.item.isEnabled else {
             return false
         }
         return isHovered || isPressed || (isSubmenuOpen && hasSubmenu)
     }
 
     var body: some View {
-        if item.systemItem != nil {
+        if item.isDivider {
             ContextMenuDividerShape()
                 .fill(contextMenuPopupSeparatorColor)
                 .frame(height: contextMenuPopupDividerHeight)
@@ -1034,8 +1219,8 @@ private struct ContextMenuPopupRow: View {
                         .frame(width: 0, height: 0)
                 }
                 if layout.showsImageColumn {
-                    if let image = item.image {
-                        image
+                    if item.hasImage {
+                        item.image
                             .frame(width: contextMenuPopupImageWidth,
                                    height: contextMenuPopupImageWidth,
                                    alignment: .center)
@@ -1048,7 +1233,7 @@ private struct ContextMenuPopupRow: View {
                     Color.clear
                         .frame(width: 0, height: 0)
                 }
-                item.label
+                platformItemText(item.item)
                     .font(isSectionHeader ? .system(size: contextMenuPopupSectionHeaderFontSize) : nil)
                     .fixedSize(horizontal: true, vertical: false)
                 if let shortcutLabel {
@@ -1076,23 +1261,28 @@ private struct ContextMenuPopupRow: View {
                     return
                 }
                 isPressed = pressing
-                if pressing, item.isEnabled, hasSubmenu {
+                if pressing, item.item.isEnabled, hasSubmenu {
                     openSubmenu(item, submenuOrigin)
                 }
             }, perform: {
-                guard !isSectionHeader, item.isEnabled else { return }
+                guard !isSectionHeader, item.item.isEnabled else {
+                    return
+                }
                 if hasSubmenu {
                     openSubmenu(item, submenuOrigin)
                     // Submenu primary-action split is not wired yet.
                     return
                 }
                 clearSubmenus()
-                guard let action = item.action else { return }
+                guard let action =
+                    item.item.selectionBehavior?.onSelect else {
+                    return
+                }
                 action()
                 dismiss()
             })
             .onHover { hovering in
-                guard !isSectionHeader, item.isEnabled else {
+                guard !isSectionHeader, item.item.isEnabled else {
                     isHovered = false
                     return
                 }
@@ -1104,7 +1294,7 @@ private struct ContextMenuPopupRow: View {
                     clearSubmenus()
                 }
             }
-            .environment(\.isEnabled, item.isEnabled)
+            .environment(\.isEnabled, item.item.isEnabled)
         }
     }
 }

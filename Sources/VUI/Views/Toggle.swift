@@ -168,6 +168,9 @@ struct ResolvedToggleStyle: StyleableView {
 
     var body: some View {
         Toggle(configuration)
+            .platformItemToggleState(
+                configuration._toggleState.wrappedValue
+            )
     }
 
     typealias DefaultStyleModifier = ToggleStyleModifier<DefaultToggleStyle>
@@ -240,59 +243,12 @@ public struct ButtonToggleStyle: ToggleStyle {
 
 struct CheckmarkToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
-        CheckmarkToggleBody(configuration: configuration)
-    }
-}
-
-private struct CheckmarkToggleBody: View {
-    typealias Body = Never
-    let configuration: ToggleStyleConfiguration
-
-    var body: Never {
-        fatalError("\(Self.self) may not have Body == Never")
-    }
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
+        Button(action: {
+            let binding = configuration.$isOn
+            binding.wrappedValue.toggle()
+        }) {
+            configuration.label
         }
-
-        // Build an action-capable collected item and write ToggleState onto the
-        // item model so the ToggleStyleConfiguration.Label source alias remains renderable.
-        let labelView = view[\.configuration][\.label]
-        var outputs = ToggleStyleConfiguration.Label._makeView(
-            view: labelView,
-            inputs: platformItemListRenderOnlyInputs(inputs)
-        )
-        let configurationAttr = view[\.configuration]._attribute
-        let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        let source = inputs.base.customInputs.value(forKey: SourceInput<ToggleStyleConfiguration.Label>.self).top
-        let itemID = PlatformItemList.stableID(configurationAttr.identifier)
-        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-            let configuration = configurationAttr.value
-            let label = source?.snapshot() ?? AnyView(EmptyView())
-            let isOn = configuration._toggleState.wrappedValue.isOn
-            var list = PlatformItemList()
-            list.append(PlatformItemList.Item(
-                id: itemID,
-                label: label,
-                action: {
-                    let binding = configuration.$isOn
-                    binding.wrappedValue.toggle()
-                },
-                role: nil,
-                keyboardShortcut: environmentAttr.value.keyboardShortcut,
-                isEnabled: environmentAttr.value.isEnabled,
-                selectionBehavior: .toggle(isOn)
-            ))
-            return list
-        }
-        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
-        return outputs
-    }
-
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -308,40 +264,14 @@ extension ToggleStyle where Self == ButtonToggleStyle {
     public static var button: ButtonToggleStyle { ButtonToggleStyle() }
 }
 
-private struct PlatformItemToggleStateModifier: ViewModifier {
-    typealias Body = Never
-    let state: ToggleState
-
-    static func _makeView(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewInputs,
-        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
-    ) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        var outputs = body(_Graph(), inputs)
-        let stateAttr = modifier[\.state]._attribute
-        let transformAttr: Attribute<(inout PlatformItemList) -> Void> = graph.makeRule {
-            let state = stateAttr.value
-            return { itemList in
-                itemList.modify { item in
-                    item.selectionBehavior = .toggle(state.isOn)
-                }
-            }
-        }
-        outputs.preferences.makePreferenceTransformer(
-            key: PlatformItemList.Key.self,
-            transformAttr: transformAttr,
-            graph: graph
-        )
-        return outputs
-    }
-}
-
 extension View {
     func platformItemToggleState(_ state: ToggleState) -> some View {
-        modifier(PlatformItemToggleStateModifier(state: state))
+        transformPlatformItemList(LayoutPlatformItemListFlags.self) {
+            itemList in
+            itemList.modify { item in
+                item.toggleState = state
+            }
+        }
     }
 
     public func toggleStyle<S>(_ style: S) -> some View where S: ToggleStyle {

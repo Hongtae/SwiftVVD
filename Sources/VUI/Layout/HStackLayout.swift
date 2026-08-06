@@ -97,6 +97,11 @@ public struct HStackLayout: Layout {
 public typealias _HStackLayout = HStackLayout
 extension _HStackLayout: _VariadicView_UnaryViewRoot {}
 extension _HStackLayout: _VariadicView_ViewRoot {}
+extension _HStackLayout: _VariadicView_ImplicitRoot {
+    static var implicitRoot: Self {
+        Self()
+    }
+}
 extension _HStackLayout: Sendable {}
 
 extension _HStackLayout: HVStack {

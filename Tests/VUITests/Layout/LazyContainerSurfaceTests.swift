@@ -2636,7 +2636,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutSectionRegionSubviewIDsKeepRowGeneratedLaneContentOnly() {
+    func testLazyLayoutSectionRegionSubviewIDsPreserveDirectTransformOrder() {
         let host = GraphHost()
 
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
@@ -2665,7 +2665,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let sectionsAttr = graph.makeInput(value: sections)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: sections)._makeViewList(
                 view: _GraphValue(_attribute: sectionsAttr),
                 inputs: inputs
@@ -2679,16 +2679,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
             let subviews = cache.subviews(context: context)
 
-            var sectionNode: _LazyLayout_Section?
-            var nodeFrom = 0
-            _ = subviews.applyNodes(from: &nodeFrom) { _, node, stop in
-                guard case .section(let section) = node else {
-                    return
-                }
-                sectionNode = section
-                stop = true
-            }
-            guard let section = sectionNode else {
+            guard let section = lazyLayoutSections(in: subviews).first else {
                 XCTFail("expected a lazy section node")
                 return
             }
@@ -2703,21 +2694,17 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 XCTFail("expected header/content/footer IDs")
                 return
             }
-            XCTAssertEqual(contentID.explicitIDs.count, 4)
+            XCTAssertEqual(contentID.explicitIDs.count, 3)
             XCTAssertEqual(contentID.explicitIDs[0].id, AnyHashable("row-id"))
             XCTAssertTrue(contentID.explicitIDs[1].id.base is UniqueID)
             XCTAssertEqual(contentID.explicitIDs[2].id, AnyHashable("section-id"))
-            XCTAssertTrue(contentID.explicitIDs[3].id.base is UniqueID)
-            XCTAssertEqual(contentID.explicitIDs[1].reuseID, _ViewList_ID.generatedRowReuseID)
-            XCTAssertEqual(contentID.explicitIDs.map(\.isUnary), [true, false, false, false])
-            XCTAssertEqual(headerID.explicitIDs, Array(contentID.explicitIDs.suffix(2)))
-            XCTAssertEqual(footerID.explicitIDs, Array(contentID.explicitIDs.suffix(2)))
-            XCTAssertFalse(headerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
-            XCTAssertFalse(footerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+            XCTAssertEqual(contentID.explicitIDs.map(\.isUnary), [true, false, false])
+            XCTAssertEqual(headerID.explicitIDs, Array(contentID.explicitIDs.suffix(1)))
+            XCTAssertEqual(footerID.explicitIDs, Array(contentID.explicitIDs.suffix(1)))
         }
     }
 
-    func testLazyLayoutSectionedViewListGeneratedRowsAdvanceBySection() {
+    func testLazyLayoutSectionNodesPreserveDirectRowAndSectionIDs() {
         let host = GraphHost()
 
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
@@ -2754,7 +2741,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let sectionsAttr = graph.makeInput(value: sections)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: sections)._makeViewList(
                 view: _GraphValue(_attribute: sectionsAttr),
                 inputs: inputs
@@ -2769,25 +2756,26 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let subviews = cache.subviews(context: context)
 
             var rowIDs: [_ViewList_ID] = []
-            var nodeFrom = 0
-            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
-                guard case .section(let section) = node,
-                      let id = firstID(in: section.content) else {
-                    return
+            for section in lazyLayoutSections(in: subviews) {
+                if let id = firstID(in: section.content) {
+                    rowIDs.append(id)
                 }
-                rowIDs.append(id)
             }
 
             XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
-            assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 3)
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].id, rowIDs[1].explicitIDs[1].id)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true, false, false,
+                true, false, false,
+            ])
         }
     }
 
-    func testLazyLayoutSectionedViewListGeneratedOnlyRowsUseUnaryGeneratedLane() {
+    func testLazyLayoutSectionNodesUseGeneratedCanonicalRowID() {
         let host = GraphHost()
 
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
@@ -2822,7 +2810,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let sectionsAttr = graph.makeInput(value: sections)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: sections)._makeViewList(
                 view: _GraphValue(_attribute: sectionsAttr),
                 inputs: inputs
@@ -2839,12 +2827,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var headerIDs: [_ViewList_ID] = []
             var rowIDs: [_ViewList_ID] = []
             var footerIDs: [_ViewList_ID] = []
-            var nodeFrom = 0
-            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
-                guard case .section(let section) = node,
-                      let headerID = firstID(in: section.header),
+            for section in lazyLayoutSections(in: subviews) {
+                guard let headerID = firstID(in: section.header),
                       let id = firstID(in: section.content) else {
-                    return
+                    continue
                 }
                 headerIDs.append(headerID)
                 rowIDs.append(id)
@@ -2856,51 +2842,33 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(headerIDs.count, 2)
             XCTAssertEqual(rowIDs.count, 2)
             XCTAssertEqual(footerIDs.count, 2)
-            XCTAssertEqual(headerIDs.map(\.implicitID), [0, 0])
-            XCTAssertEqual(rowIDs.map(\.implicitID), [0, 0])
-            XCTAssertEqual(footerIDs.map(\.implicitID), [1, 1])
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
-            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
             XCTAssertEqual(
                 headerIDs.map { $0.explicitIDs },
-                rowIDs.map { Array($0.explicitIDs.suffix(2)) }
+                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
             )
             XCTAssertEqual(
                 footerIDs.map { $0.explicitIDs },
-                rowIDs.map { Array($0.explicitIDs.suffix(2)) }
+                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
             )
-            XCTAssertTrue(headerIDs.allSatisfy {
-                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
-            })
-            XCTAssertTrue(footerIDs.allSatisfy {
-                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
-            })
-
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[0].reuseID,
+                rowIDs[1].explicitIDs[0].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false,
-                true, false, false,
+                true, false,
+                true, false,
             ])
             XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
     }
 
-    func testLazyLayoutSectionedViewListPlainGeneratedOnlyRowsUseSampledStride() {
+    func testLazyLayoutPlainSectionNodesKeepOnlyGeneratedRowID() {
         let host = GraphHost()
 
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
@@ -2933,7 +2901,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let sectionsAttr = graph.makeInput(value: sections)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: sections)._makeViewList(
                 view: _GraphValue(_attribute: sectionsAttr),
                 inputs: inputs
@@ -2950,12 +2918,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var headerIDs: [_ViewList_ID] = []
             var rowIDs: [_ViewList_ID] = []
             var footerIDs: [_ViewList_ID] = []
-            var nodeFrom = 0
-            _ = subviews.applyNodes(from: &nodeFrom) { _, node, _ in
-                guard case .section(let section) = node,
-                      let headerID = firstID(in: section.header),
+            for section in lazyLayoutSections(in: subviews) {
+                guard let headerID = firstID(in: section.header),
                       let id = firstID(in: section.content) else {
-                    return
+                    continue
                 }
                 headerIDs.append(headerID)
                 rowIDs.append(id)
@@ -2967,50 +2933,26 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(headerIDs.count, 2)
             XCTAssertEqual(rowIDs.count, 2)
             XCTAssertEqual(footerIDs.count, 2)
-            XCTAssertEqual(headerIDs.map(\.implicitID), [0, 2])
-            XCTAssertEqual(rowIDs.map(\.implicitID), [0, 0])
-            XCTAssertEqual(footerIDs.map(\.implicitID), [1, 3])
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [1, 1])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
-            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
-            XCTAssertEqual(
-                headerIDs.map { $0.explicitIDs },
-                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
-            )
-            XCTAssertEqual(
-                footerIDs.map { $0.explicitIDs },
-                rowIDs.map { Array($0.explicitIDs.suffix(1)) }
-            )
-            XCTAssertTrue(headerIDs.allSatisfy {
-                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
-            })
-            XCTAssertTrue(footerIDs.allSatisfy {
-                !$0.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID }
-            })
-
+            XCTAssertTrue(headerIDs.allSatisfy(\.explicitIDs.isEmpty))
+            XCTAssertTrue(footerIDs.allSatisfy(\.explicitIDs.isEmpty))
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[1].reuseID, rowIDs[1].explicitIDs[1].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[0].reuseID,
+                rowIDs[1].explicitIDs[0].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[1].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false,
-                true, false,
+                true,
+                true,
             ])
             XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
     }
 
-    func testLazyLayoutSectionedViewListNestedSectionContentFlattensIDStack() {
+    func testLazyLayoutSectionNodesFlattenNestedSectionContentIDStack() {
         let host = GraphHost()
 
         func ids(in subviews: _LazyLayout_Subviews) -> [_ViewList_ID] {
@@ -3048,7 +2990,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let sectionsAttr = graph.makeInput(value: sections)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: sections)._makeViewList(
                 view: _GraphValue(_attribute: sectionsAttr),
                 inputs: inputs
@@ -3062,16 +3004,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
             let subviews = cache.subviews(context: context)
 
-            var sectionNode: _LazyLayout_Section?
-            var nodeFrom = 0
-            _ = subviews.applyNodes(from: &nodeFrom) { _, node, stop in
-                guard case .section(let section) = node else {
-                    return
-                }
-                sectionNode = section
-                stop = true
-            }
-            guard let section = sectionNode else {
+            guard let section = lazyLayoutSections(in: subviews).first else {
                 XCTFail("expected a lazy section node")
                 return
             }
@@ -3109,7 +3042,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(nestedHeader[0].id, AnyHashable("nested-section"))
             XCTAssertFalse(nestedHeader[0].isUnary)
             XCTAssertTrue(nestedHeader[1].id.base is UniqueID)
-            XCTAssertEqual(nestedHeader[1].reuseID, _ViewList_ID.generatedRowReuseID)
             XCTAssertFalse(nestedHeader[1].isUnary)
             XCTAssertEqual(nestedHeader[2].id, AnyHashable("outer-section"))
             XCTAssertFalse(nestedHeader[2].isUnary)
@@ -3119,13 +3051,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(nestedRow[0].id, AnyHashable("nested-row"))
             XCTAssertTrue(nestedRow[0].isUnary)
             XCTAssertTrue(nestedRow[1].id.base is UniqueID)
-            XCTAssertEqual(nestedRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
             XCTAssertFalse(nestedRow[1].isUnary)
             XCTAssertEqual(nestedRow[2].id, AnyHashable("nested-section"))
             XCTAssertFalse(nestedRow[2].isUnary)
             XCTAssertEqual(nestedRow[3].id, nestedHeader[1].id)
             XCTAssertEqual(nestedRow[3].owner, nestedHeader[1].owner)
-            XCTAssertEqual(nestedRow[3].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(nestedRow[3].reuseID, nestedHeader[1].reuseID)
             XCTAssertFalse(nestedRow[3].isUnary)
             XCTAssertEqual(nestedRow[4].id, AnyHashable("outer-section"))
             XCTAssertFalse(nestedRow[4].isUnary)
@@ -3135,7 +3066,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertTrue(outerRow[0].isUnary)
             XCTAssertEqual(outerRow[1].id, nestedHeader[1].id)
             XCTAssertEqual(outerRow[1].owner, nestedHeader[1].owner)
-            XCTAssertEqual(outerRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(outerRow[1].reuseID, nestedHeader[1].reuseID)
             XCTAssertFalse(outerRow[1].isUnary)
             XCTAssertEqual(outerRow[2].id, AnyHashable("outer-section"))
             XCTAssertFalse(outerRow[2].isUnary)
@@ -3168,12 +3099,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             XCTAssertEqual(recorder.sectionCount, 2)
             XCTAssertEqual(recorder.regionCounts, [
                 SectionCollectionRecorder.RegionCounts(header: 1, content: 1, footer: 1),
@@ -3212,12 +3142,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             XCTAssertEqual(recorder.snapshots, [
                 SectionContainerValuesRecorder.Snapshot(
                     section: "section",
@@ -3232,6 +3161,184 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     footer: "none"
                 ),
             ])
+        }
+    }
+
+    func testSectionAccumulatorRoutesEmptySectionTraitsToNativeOwners() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+
+            func traits(_ value: String) -> ViewTraitCollection {
+                var traits = ViewTraitCollection()
+                traits[SectionAccumulatorProbeTraitKey.self] = value
+                return traits
+            }
+
+            func entry(_ list: any ViewList) -> (
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            ) {
+                (list, graph.makeInput(value: list))
+            }
+
+            func section(
+                id: UInt32,
+                rowCount: Int,
+                trait: String
+            ) -> any ViewList {
+                let lists: [(
+                    list: any ViewList,
+                    attribute: Attribute<any ViewList>
+                )]
+                if rowCount == 0 {
+                    lists = []
+                } else {
+                    lists = [
+                        entry(EmptyViewList()),
+                        entry(
+                            BaseViewList(
+                                elements: CountingViewListElements(
+                                    count: rowCount
+                                )
+                            )
+                        ),
+                        entry(EmptyViewList()),
+                    ]
+                }
+                return _ViewList_Section(
+                    id: id,
+                    base: _ViewList_Group(lists: lists),
+                    traits: traits(trait),
+                    isHierarchical: false
+                )
+            }
+
+            let source: any ViewList = _ViewList_Group(
+                lists: [
+                    entry(section(id: 10, rowCount: 0, trait: "leading")),
+                    entry(section(id: 11, rowCount: 1, trait: "first")),
+                    entry(section(id: 12, rowCount: 0, trait: "trailing")),
+                    entry(section(id: 13, rowCount: 1, trait: "second")),
+                ]
+            )
+            let sourceAttribute = graph.makeInput(value: source)
+            var accumulator = SectionAccumulator(
+                contentSubgraph: nil,
+                options: [],
+                accumulationStrategy: .chunked
+            )
+
+            accumulator.formResult(
+                from: source,
+                listAttribute: sourceAttribute
+            )
+
+            XCTAssertEqual(accumulator.items.count, 2)
+            XCTAssertEqual(
+                accumulator.items[0].traits.map {
+                    $0[SectionAccumulatorProbeTraitKey.self]
+                },
+                ["leading", "first", "trailing"]
+            )
+            XCTAssertEqual(
+                accumulator.items[1].traits.map {
+                    $0[SectionAccumulatorProbeTraitKey.self]
+                },
+                ["second"]
+            )
+            XCTAssertEqual(accumulator.items.map(\.count), [1, 1])
+            XCTAssertEqual(accumulator.items.map(\.start), [0, 0])
+            XCTAssertTrue(
+                accumulator.items.allSatisfy {
+                    $0.list is _ViewList_Section
+                }
+            )
+            XCTAssertTrue(accumulator.pendingEmptySectionTraits.isEmpty)
+            XCTAssertEqual(accumulator.viewCount, 2)
+            XCTAssertEqual(accumulator.lastExplicitSectionEnd, 2)
+        }
+    }
+
+    func testSectionAccumulatorDoesNotMaterializeAnEmptyImplicitItem() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let emptySection: any ViewList = _ViewList_Section()
+            let source: any ViewList = _ViewList_Group(
+                lists: [
+                    (
+                        emptySection,
+                        graph.makeInput(value: emptySection)
+                    )
+                ]
+            )
+            let sourceAttribute = graph.makeInput(value: source)
+            var accumulator = SectionAccumulator(
+                contentSubgraph: nil,
+                options: [],
+                accumulationStrategy: .chunked
+            )
+
+            accumulator.formResult(
+                from: source,
+                listAttribute: sourceAttribute
+            )
+
+            XCTAssertTrue(accumulator.items.isEmpty)
+            XCTAssertEqual(accumulator.viewCount, 0)
+            XCTAssertEqual(accumulator.lastExplicitSectionEnd, 0)
+        }
+    }
+
+    func testSectionAccumulatorKeepsUnsectionedNestedListAsOneChunk() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let first: any ViewList = BaseViewList(
+                elements: CountingViewListElements(count: 1),
+                implicitID: 4,
+                traitKeys: ViewTraitKeys(),
+                traits: ViewTraitCollection()
+            )
+            let second: any ViewList = BaseViewList(
+                elements: CountingViewListElements(count: 2),
+                implicitID: 8,
+                traitKeys: ViewTraitKeys(),
+                traits: ViewTraitCollection()
+            )
+            let nested: any ViewList = _ViewList_Group(
+                lists: [
+                    (first, graph.makeInput(value: first)),
+                    (second, graph.makeInput(value: second)),
+                ]
+            )
+            let nestedAttribute = graph.makeInput(value: nested)
+            let source: any ViewList = SectionAccumulatorNestedList(
+                base: nested,
+                attribute: nestedAttribute
+            )
+            let sourceAttribute = graph.makeInput(value: source)
+            var accumulator = SectionAccumulator(
+                contentSubgraph: nil,
+                options: [],
+                accumulationStrategy: .chunked
+            )
+
+            accumulator.formResult(
+                from: source,
+                listAttribute: sourceAttribute
+            )
+
+            XCTAssertEqual(accumulator.items.count, 1)
+            XCTAssertEqual(accumulator.items[0].count, 3)
+            XCTAssertEqual(accumulator.items[0].ids.chunks.count, 1)
+            XCTAssertEqual(accumulator.items[0].ids.chunks[0].count, 3)
+            XCTAssertEqual(accumulator.items[0].ids.chunks[0].lowerBound, 0)
+            XCTAssertEqual(accumulator.viewCount, 3)
         }
     }
 
@@ -3259,12 +3366,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             guard let snapshot = recorder.snapshots.first else {
                 XCTFail("expected a captured section ID snapshot")
                 return
@@ -3286,23 +3392,23 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 "row-id",
                 "section-id",
             ])
-            XCTAssertEqual(rowID.explicitIDs.count, 4)
+            XCTAssertEqual(rowID.explicitIDs.count, 3)
             XCTAssertEqual(rowID.explicitIDs[0].id, AnyHashable("row-id"))
             XCTAssertTrue(rowID.explicitIDs[1].id.base is UniqueID)
             XCTAssertEqual(rowID.explicitIDs[2].id, AnyHashable("section-id"))
-            XCTAssertTrue(rowID.explicitIDs[3].id.base is UniqueID)
-            XCTAssertEqual(rowID.explicitIDs[0].reuseID, Int(bitPattern: ObjectIdentifier(Text.self)))
-            XCTAssertEqual(rowID.explicitIDs[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(
+                rowID.explicitIDs[0].reuseID,
+                Int(bitPattern: ObjectIdentifier(Text.self))
+            )
             XCTAssertNotEqual(rowID.explicitIDs[2].reuseID, 0)
-            XCTAssertNotEqual(rowID.explicitIDs[3].reuseID, 0)
-            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false, false, false])
+            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false, false])
             XCTAssertTrue(rowID.explicitIDs.allSatisfy { $0.owner != nil })
-            XCTAssertNotEqual(rowID.explicitIDs[0].owner, rowID.explicitIDs[3].owner)
+            XCTAssertNotEqual(rowID.explicitIDs[0].owner, rowID.explicitIDs[1].owner)
             XCTAssertEqual(rowID.canonicalID.explicitID, AnyHashable("row-id"))
-            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
-            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
-            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false, false])
-            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false, false])
+            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(1)))
+            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(1)))
+            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false])
+            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false])
             XCTAssertFalse(headerID.explicitIDs.contains { $0.id == AnyHashable("row-id") })
             XCTAssertFalse(footerID.explicitIDs.contains { $0.id == AnyHashable("row-id") })
         }
@@ -3331,12 +3437,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             guard let rowID = recorder.snapshots.first?.rowID else {
                 XCTFail("expected a captured row _ViewList_ID")
                 return
@@ -3347,25 +3452,20 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
-            XCTAssertEqual(rowID.explicitIDs.count, 3)
+            XCTAssertEqual(rowID.explicitIDs.count, 2)
             XCTAssertTrue(rowID.explicitIDs[0].id.base is UniqueID)
             XCTAssertEqual(rowID.explicitIDs[1].id, AnyHashable("section-id"))
-            XCTAssertTrue(rowID.explicitIDs[2].id.base is UniqueID)
-            XCTAssertEqual(rowID.explicitIDs[0].reuseID, _ViewList_ID.generatedRowReuseID)
-            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false, false])
+            XCTAssertEqual(rowID.explicitIDs.map(\.isUnary), [true, false])
             XCTAssertTrue(rowID.explicitIDs.allSatisfy { $0.owner != nil })
-            XCTAssertNotEqual(rowID.explicitIDs[0].id, rowID.explicitIDs[2].id)
             XCTAssertEqual(rowID.canonicalID.explicitID, rowID.explicitIDs[0].id)
-            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
-            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(2)))
-            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false, false])
-            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false, false])
-            XCTAssertFalse(headerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
-            XCTAssertFalse(footerID.explicitIDs.contains { $0.reuseID == _ViewList_ID.generatedRowReuseID })
+            XCTAssertEqual(headerID.explicitIDs, Array(rowID.explicitIDs.suffix(1)))
+            XCTAssertEqual(footerID.explicitIDs, Array(rowID.explicitIDs.suffix(1)))
+            XCTAssertEqual(headerID.explicitIDs.map(\.isUnary), [false])
+            XCTAssertEqual(footerID.explicitIDs.map(\.isUnary), [false])
         }
     }
 
-    func testGroupSectionsSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+    func testGroupSectionsSubviewIDsPreserveDirectTransformOrderAcrossSections() {
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -3400,40 +3500,33 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             let rowIDs = recorder.snapshots.compactMap(\.rowID)
             XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
 
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[3].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[3].reuseID, rowIDs[1].explicitIDs[3].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[3].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[1].reuseID,
+                rowIDs[1].explicitIDs[1].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[3].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[3].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false, false,
-                true, false, false, false,
+                true, false, false,
+                true, false, false,
             ])
         }
     }
 
-    func testGroupSectionsGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
+    func testGroupSectionsGeneratedOnlySubviewIDsUseDirectCanonicalRows() {
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -3466,42 +3559,33 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewListInputs(graph: graph)
             )
 
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("Group(sections:) should route through a dynamic section-root list")
+            guard case .staticList = outputs.views else {
+                XCTFail("Group(sections:) should preserve the transformed content output kind")
                 return
             }
 
-            materializeAllItems(in: listAttr)
             let rowIDs = recorder.snapshots.compactMap(\.rowID)
             XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
-            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
 
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[0].reuseID,
+                rowIDs[1].explicitIDs[0].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false,
-                true, false, false,
+                true, false,
+                true, false,
             ])
             XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
     }
 
-    func testGroupSectionsPlainSubviewIDGeneratedLanesUseSampledRowLocalStride() {
+    func testGroupSectionsPlainSubviewIDsKeepOnlyRowTransforms() {
         let host = GraphHost()
         let graph = host.data.graph
 
@@ -3535,24 +3619,21 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     inputs: makeViewListInputs(graph: graph)
                 )
 
-                guard case .dynamicList(let listAttr, _) = outputs.views else {
-                    XCTFail("Group(sections:) should route through a dynamic section-root list")
+                guard case .staticList = outputs.views else {
+                    XCTFail("Group(sections:) should preserve the transformed content output kind")
                     return
                 }
 
-                materializeAllItems(in: listAttr)
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 2)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
                 XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
                 XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
-                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
                 XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                    true, false, false,
-                    true, false, false,
+                    true, false,
+                    true, false,
                 ])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
-                XCTAssertEqual(rowIDs[0].explicitIDs[2].id, rowIDs[1].explicitIDs[2].id)
+                XCTAssertNotEqual(rowIDs[0].explicitIDs[1].id, rowIDs[1].explicitIDs[1].id)
             }
 
             do {
@@ -3582,29 +3663,27 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     inputs: makeViewListInputs(graph: graph)
                 )
 
-                guard case .dynamicList(let listAttr, _) = outputs.views else {
-                    XCTFail("Group(sections:) should route through a dynamic section-root list")
+                guard case .staticList = outputs.views else {
+                    XCTFail("Group(sections:) should preserve the transformed content output kind")
                     return
                 }
 
-                materializeAllItems(in: listAttr)
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 2)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [1, 1])
                 XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
-                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
                 XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                    true, false,
-                    true, false,
+                    true,
+                    true,
                 ])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
-                XCTAssertEqual(rowIDs[0].explicitIDs[1].id, rowIDs[1].explicitIDs[1].id)
+                XCTAssertNotEqual(rowIDs[0].explicitIDs[0].id, rowIDs[1].explicitIDs[0].id)
                 XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
             }
         }
     }
 
-    func testSectionGeneratedUniqueIDStrideExtendsAcrossThreeSections() {
+    func testSectionDirectIDShapeExtendsAcrossThreeSections() {
+        // ASSERTIONS sectionStaticTransformOutputKindObserved
         let host = GraphHost()
         let graph = host.data.graph
 
@@ -3640,16 +3719,19 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     SectionIDCaptureView(recorder: recorder, collection: sections)
                 }
 
-                guard materializeDynamicViewList(root, graph: graph) else {
-                    return
-                }
+                materializeViewList(root, graph: graph)
 
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 3)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2, 2])
                 XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b", "row-c"])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
-                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 2)
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+                XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                    true, false,
+                    true, false,
+                    true, false,
+                ])
+                XCTAssertEqual(Set(rowIDs.map { $0.explicitIDs[1].id }).count, 3)
             }
 
             do {
@@ -3683,16 +3765,19 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     SectionIDCaptureView(recorder: recorder, collection: sections)
                 }
 
-                guard materializeDynamicViewList(root, graph: graph) else {
-                    return
-                }
+                materializeViewList(root, graph: graph)
 
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 3)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3, 3])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2, 2])
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
                 XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b", "section-c"])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
-                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 2)
+                XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                    true, false,
+                    true, false,
+                    true, false,
+                ])
+                XCTAssertEqual(Set(rowIDs.map { $0.explicitIDs[0].id }).count, 3)
                 XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
             }
 
@@ -3724,15 +3809,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     SectionConfigurationIDCaptureView(recorder: recorder, section: section)
                 }
 
-                guard materializeDynamicViewList(root, graph: graph) else {
-                    return
-                }
+                materializeViewList(root, graph: graph)
 
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 3)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2, 2])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
-                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 1)
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [1, 1, 1])
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+                XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy(\.isUnary))
+                XCTAssertEqual(Set(rowIDs.map { $0.explicitIDs[0].id }).count, 3)
                 XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowIDs.map { $0.explicitIDs[0].id })
             }
 
@@ -3770,22 +3854,26 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     SectionConfigurationIDCaptureView(recorder: recorder, section: section)
                 }
 
-                guard materializeDynamicViewList(root, graph: graph) else {
-                    return
-                }
+                materializeViewList(root, graph: graph)
 
                 let rowIDs = recorder.snapshots.compactMap(\.rowID)
                 XCTAssertEqual(rowIDs.count, 3)
-                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4, 4])
+                XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3, 3])
                 XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b", "row-c"])
+                XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
                 XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b", "section-c"])
-                assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
-                assertGeneratedUniqueIDShared(rowIDs, generatedIndex: 3)
+                XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                    true, false, false,
+                    true, false, false,
+                    true, false, false,
+                ])
+                XCTAssertEqual(Set(rowIDs.map { $0.explicitIDs[1].id }).count, 3)
             }
         }
     }
 
     func testNestedSectionSubviewIDsFlattenIntoOuterContentRegion() {
+        // ASSERTIONS sectionStaticTransformOutputKindObserved
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -3813,9 +3901,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 SectionIDCaptureView(recorder: recorder, collection: sections)
             }
 
-            guard materializeDynamicViewList(root, graph: graph) else {
-                return
-            }
+            materializeViewList(root, graph: graph)
 
             guard let snapshot = recorder.snapshots.first else {
                 XCTFail("expected one captured nested section snapshot")
@@ -3844,7 +3930,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(nestedHeader[0].id, AnyHashable("nested-section"))
             XCTAssertFalse(nestedHeader[0].isUnary)
             XCTAssertTrue(nestedHeader[1].id.base is UniqueID)
-            XCTAssertEqual(nestedHeader[1].reuseID, _ViewList_ID.generatedRowReuseID)
             XCTAssertFalse(nestedHeader[1].isUnary)
             XCTAssertEqual(nestedHeader[2].id, AnyHashable("outer-section"))
             XCTAssertFalse(nestedHeader[2].isUnary)
@@ -3854,13 +3939,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(nestedRow[0].id, AnyHashable("nested-row"))
             XCTAssertTrue(nestedRow[0].isUnary)
             XCTAssertTrue(nestedRow[1].id.base is UniqueID)
-            XCTAssertEqual(nestedRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
             XCTAssertFalse(nestedRow[1].isUnary)
             XCTAssertEqual(nestedRow[2].id, AnyHashable("nested-section"))
             XCTAssertFalse(nestedRow[2].isUnary)
             XCTAssertEqual(nestedRow[3].id, nestedHeader[1].id)
             XCTAssertEqual(nestedRow[3].owner, nestedHeader[1].owner)
-            XCTAssertEqual(nestedRow[3].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(nestedRow[3].reuseID, nestedHeader[1].reuseID)
             XCTAssertFalse(nestedRow[3].isUnary)
             XCTAssertEqual(nestedRow[4].id, AnyHashable("outer-section"))
             XCTAssertFalse(nestedRow[4].isUnary)
@@ -3870,7 +3954,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertTrue(outerRow[0].isUnary)
             XCTAssertEqual(outerRow[1].id, nestedHeader[1].id)
             XCTAssertEqual(outerRow[1].owner, nestedHeader[1].owner)
-            XCTAssertEqual(outerRow[1].reuseID, _ViewList_ID.generatedRowReuseID)
+            XCTAssertEqual(outerRow[1].reuseID, nestedHeader[1].reuseID)
             XCTAssertFalse(outerRow[1].isUnary)
             XCTAssertEqual(outerRow[2].id, AnyHashable("outer-section"))
             XCTAssertFalse(outerRow[2].isUnary)
@@ -3974,7 +4058,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testForEachSectionsSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+    func testForEachSectionsSubviewIDsForwardDirectTransformOrder() {
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -4017,32 +4101,26 @@ final class LazyContainerSurfaceTests: XCTestCase {
             materializeAllItems(in: listAttr)
             let rowIDs = recorder.snapshots.compactMap(\.rowID)
             XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [4, 4])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[2].id.base as? String }, ["section-a", "section-b"])
 
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[3].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 34)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[3].reuseID, rowIDs[1].explicitIDs[3].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[3].owner, rowIDs[1].explicitIDs[3].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[1].reuseID,
+                rowIDs[1].explicitIDs[1].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[3].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[3].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false, false,
-                true, false, false, false,
+                true, false, false,
+                true, false, false,
             ])
         }
     }
 
-    func testForEachSectionsGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
+    func testForEachSectionsGeneratedOnlySubviewIDsForwardCanonicalRows() {
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -4083,34 +4161,26 @@ final class LazyContainerSurfaceTests: XCTestCase {
             materializeAllItems(in: listAttr)
             let rowIDs = recorder.snapshots.compactMap(\.rowID)
             XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
             XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].id.base as? String }, ["section-a", "section-b"])
-            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[2].id.base is UniqueID })
 
             let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 34)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[0].reuseID,
+                rowIDs[1].explicitIDs[0].reuseID
+            )
             XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[2].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[2].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false,
-                true, false, false,
+                true, false,
+                true, false,
             ])
             XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
     }
 
-    func testForEachSectionsPlainSubviewIDGeneratedLanesShareTrailingSeedAcrossSections() {
+    func testForEachSectionsPlainSubviewIDsForwardOnlyRowTransforms() {
         let host = GraphHost()
         let graph = host.data.graph
         let recorder = SectionIDRecorder()
@@ -4128,71 +4198,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 Section {
                     Text("Row B")
                         .id("row-b")
-                } header: {
-                    Text("Header B")
-                } footer: {
-                    Text("Footer B")
-                }
-            ))) { section in
-                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
-            }
-
-            let rootAttr = graph.makeInput(value: root)
-            let outputs = type(of: root)._makeViewList(
-                view: _GraphValue(_attribute: rootAttr),
-                inputs: makeViewListInputs(graph: graph)
-            )
-
-            guard case .dynamicList(let listAttr, _) = outputs.views else {
-                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
-                return
-            }
-
-            materializeAllItems(in: listAttr)
-            let rowIDs = recorder.snapshots.compactMap(\.rowID)
-            XCTAssertEqual(rowIDs.count, 2)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [3, 3])
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
-            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-a" })
-            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-b" })
-
-            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[2].id }
-            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 1, expectedStride: 29)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[1].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].reuseID, rowIDs[1].explicitIDs[2].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[2].owner, rowIDs[1].explicitIDs[2].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[0].explicitIDs[2].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[1].owner, rowIDs[1].explicitIDs[2].owner)
-            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
-                true, false, false,
-                true, false, false,
-            ])
-        }
-    }
-
-    func testForEachSectionsPlainGeneratedOnlySubviewIDsShareTrailingSeedAcrossSections() {
-        let host = GraphHost()
-        let graph = host.data.graph
-        let recorder = SectionIDRecorder()
-
-        withCurrentTestSubgraph(host) {
-            let root = ForEach(sections: TupleView((
-                Section {
-                    Text("Row A")
-                } header: {
-                    Text("Header A")
-                } footer: {
-                    Text("Footer A")
-                },
-                Section {
-                    Text("Row B")
                 } header: {
                     Text("Header B")
                 } footer: {
@@ -4217,26 +4222,77 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let rowIDs = recorder.snapshots.compactMap(\.rowID)
             XCTAssertEqual(rowIDs.count, 2)
             XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [2, 2])
-            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].id.base as? String }, ["row-a", "row-b"])
             XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[1].id.base is UniqueID })
+            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-a" })
+            XCTAssertTrue(rowIDs.flatMap(\.explicitIDs).allSatisfy { $0.id.base as? String != "section-b" })
 
-            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
-            let trailingGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[1].id }
             XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
-            XCTAssertEqual(trailingGeneratedIDs[0], trailingGeneratedIDs[1])
-            assertRowGeneratedUniqueIDStride(rowIDs, generatedIndex: 0, expectedStride: 29)
-            XCTAssertEqual(rowIDs.map { $0.explicitIDs[0].reuseID }, [
-                _ViewList_ID.generatedRowReuseID,
-                _ViewList_ID.generatedRowReuseID,
-            ])
-            XCTAssertEqual(rowIDs[0].explicitIDs[1].reuseID, rowIDs[1].explicitIDs[1].reuseID)
-            XCTAssertEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
-            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[0].explicitIDs[1].owner)
-            XCTAssertNotEqual(rowIDs[1].explicitIDs[0].owner, rowIDs[1].explicitIDs[1].owner)
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[1].reuseID,
+                rowIDs[1].explicitIDs[1].reuseID
+            )
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[1].owner, rowIDs[1].explicitIDs[1].owner)
             XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
                 true, false,
                 true, false,
+            ])
+        }
+    }
+
+    func testForEachSectionsPlainGeneratedOnlySubviewIDsForwardCanonicalRows() {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = SectionIDRecorder()
+
+        withCurrentTestSubgraph(host) {
+            let root = ForEach(sections: TupleView((
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                },
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+            ))) { section in
+                SectionConfigurationIDCaptureView(recorder: recorder, section: section)
+            }
+
+            let rootAttr = graph.makeInput(value: root)
+            let outputs = type(of: root)._makeViewList(
+                view: _GraphValue(_attribute: rootAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            guard case .dynamicList(let listAttr, _) = outputs.views else {
+                XCTFail("ForEach(sections:) should route through a dynamic section collection list")
+                return
+            }
+
+            materializeAllItems(in: listAttr)
+            let rowIDs = recorder.snapshots.compactMap(\.rowID)
+            XCTAssertEqual(rowIDs.count, 2)
+            XCTAssertEqual(rowIDs.map { $0.explicitIDs.count }, [1, 1])
+            XCTAssertTrue(rowIDs.allSatisfy { $0.explicitIDs[0].id.base is UniqueID })
+
+            let rowGeneratedIDs = rowIDs.map { $0.explicitIDs[0].id }
+            XCTAssertNotEqual(rowGeneratedIDs[0], rowGeneratedIDs[1])
+            XCTAssertEqual(
+                rowIDs[0].explicitIDs[0].reuseID,
+                rowIDs[1].explicitIDs[0].reuseID
+            )
+            XCTAssertNotEqual(rowIDs[0].explicitIDs[0].owner, rowIDs[1].explicitIDs[0].owner)
+            XCTAssertEqual(rowIDs.flatMap { $0.explicitIDs.map(\.isUnary) }, [
+                true,
+                true,
             ])
             XCTAssertEqual(rowIDs.map { $0.canonicalID.explicitID }, rowGeneratedIDs)
         }
@@ -4261,9 +4317,52 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 inputs: makeViewInputs(graph: graph)
             )
             XCTAssertEqual(
-                recorder.options & _ViewListInputs.sectionListOptions,
-                _ViewListInputs.sectionListOptions
+                recorder.options.intersection(.requiresSections),
+                .requiresSections
             )
+        }
+    }
+
+    func testSectionListVariadicChildrenExposeCanonicalImplicitIDs() {
+        let host = GraphHost()
+        let recorder = SectionListVariadicIDRecorder()
+
+        withCurrentTestSubgraph(host) {
+            let graph = host.data.graph
+            let tree = _VariadicView.Tree(
+                SectionListVariadicIDCaptureRoot(recorder: recorder)
+            ) {
+                Section {
+                    Text("Row A")
+                } header: {
+                    Text("Header A")
+                } footer: {
+                    Text("Footer A")
+                }
+
+                Section {
+                    Text("Row B")
+                } header: {
+                    Text("Header B")
+                } footer: {
+                    Text("Footer B")
+                }
+            }
+            let treeAttr = graph.makeInput(value: tree)
+            _ = type(of: tree)._makeViewList(
+                view: _GraphValue(_attribute: treeAttr),
+                inputs: makeViewListInputs(graph: graph)
+            )
+
+            XCTAssertEqual(recorder.ids.count, 6)
+            XCTAssertEqual(
+                [0, 2, 3, 5].compactMap {
+                    (recorder.ids[$0].base as? _ViewList_ID.Canonical)?.implicitID
+                },
+                [0, 1, 2, 3]
+            )
+            XCTAssertTrue(recorder.ids[1].base is UniqueID)
+            XCTAssertTrue(recorder.ids[4].base is UniqueID)
         }
     }
 
@@ -4284,7 +4383,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let tupleAttr = graph.makeInput(value: tuple)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: tuple)._makeViewList(
                 view: _GraphValue(_attribute: tupleAttr),
                 inputs: inputs
@@ -4295,12 +4394,16 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 return
             }
 
+            guard let group = listAttr.value as? _ViewList_Group else {
+                XCTFail("TupleView should preserve the native group envelope")
+                return
+            }
+
             var from = 0
             var nodes: [_ViewList_Node] = []
-            _ = listAttr.value.applyNodes(
+            _ = group.applyNodes(
                 from: &from,
                 style: _ViewList_IteratorStyle(),
-                list: listAttr,
                 transform: _ViewList_TemporarySublistTransform()
             ) { _, _, node, _ in
                 nodes.append(node)
@@ -4323,7 +4426,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutSubviewsApplyNodesSurfacesSectionedViewListNodes() {
+    func testLazyLayoutSubviewsApplyNodesSurfacesSectionNodes() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -4340,7 +4443,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ))
             let tupleAttr = graph.makeInput(value: tuple)
             var inputs = makeViewListInputs(graph: graph)
-            inputs.formUnion(viewListOptions: Int(_ViewListInputs.sectionListOptions))
+            inputs.formUnion(viewListOptions: .requiresSections)
             let outputs = type(of: tuple)._makeViewList(
                 view: _GraphValue(_attribute: tupleAttr),
                 inputs: inputs
@@ -4355,9 +4458,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
             let subviews = cache.subviews(context: context)
 
-            var from = 0
             var observed: [SectionCollectionRecorder.RegionCounts] = []
-            XCTAssertTrue(subviews.applyNodes(from: &from) { _, node, _ in
+            for node in flattenedLazyLayoutNodes(in: subviews) {
                 switch node {
                 case .section(let section):
                     observed.append(SectionCollectionRecorder.RegionCounts(
@@ -4372,7 +4474,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         footer: 0
                     ))
                 }
-            })
+            }
             XCTAssertEqual(observed, [
                 SectionCollectionRecorder.RegionCounts(header: 1, content: 1, footer: 1),
                 SectionCollectionRecorder.RegionCounts(header: 0, content: 1, footer: 0),
@@ -13112,11 +13214,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertFalse(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
-
-        host.flushTransactions()
 
         try host.data.withCurrent {
             let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
@@ -13181,9 +13281,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
             phaseAttr.setValue(phase)
             host.data.rootSubgraph.update(flags: AGAttributeFlags.transactional.rawValue)
 
-            XCTAssertEqual(cache.lru.transactionSeed, 1)
-            XCTAssertEqual(cache.commitSeed, 1)
-            XCTAssertEqual(cache.placementSeed, 1)
+            // Reset publishes generation 1; the dependent placement pass
+            // advances the three cache generations to their settled value.
+            XCTAssertEqual(cache.lru.transactionSeed, 2)
+            XCTAssertEqual(cache.commitSeed, 2)
+            XCTAssertEqual(cache.placementSeed, 2)
             XCTAssertEqual(cache.items.count, 2)
         }
     }
@@ -13238,9 +13340,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
             viewGraph.data.rootSubgraph.update(flags: AGAttributeFlags.transactional.rawValue)
 
             XCTAssertEqual(viewGraph.data._phase.value.resetSeed, 1)
-            XCTAssertEqual(cache.lru.transactionSeed, 1)
-            XCTAssertEqual(cache.commitSeed, 1)
-            XCTAssertEqual(cache.placementSeed, 1)
+            // Reset publishes generation 1; the dependent placement pass
+            // advances the three cache generations to their settled value.
+            XCTAssertEqual(cache.lru.transactionSeed, 2)
+            XCTAssertEqual(cache.commitSeed, 2)
+            XCTAssertEqual(cache.placementSeed, 2)
             XCTAssertEqual(cache.items.count, 2)
         }
     }
@@ -13590,6 +13694,42 @@ final class LazyContainerSurfaceTests: XCTestCase {
         _ViewListInputs(from: makeViewInputs(graph: graph))
     }
 
+    private func flattenedLazyLayoutNodes(
+        in subviews: _LazyLayout_Subviews
+    ) -> [_LazyLayout_Subviews.Node] {
+        var result: [_LazyLayout_Subviews.Node] = []
+
+        func visit(_ subviews: _LazyLayout_Subviews) {
+            var from = 0
+            _ = subviews.applyNodes(from: &from) { _, node, _ in
+                switch node {
+                case .section:
+                    result.append(node)
+                case .subviews(let child):
+                    if case .sublist = child.node {
+                        result.append(node)
+                    } else {
+                        visit(child)
+                    }
+                }
+            }
+        }
+
+        visit(subviews)
+        return result
+    }
+
+    private func lazyLayoutSections(
+        in subviews: _LazyLayout_Subviews
+    ) -> [_LazyLayout_Section] {
+        flattenedLazyLayoutNodes(in: subviews).compactMap { node in
+            guard case .section(let section) = node else {
+                return nil
+            }
+            return section
+        }
+    }
+
     private func materializeAllItems(
         in listAttribute: Attribute<any ViewList>
     ) {
@@ -13604,68 +13744,24 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    private func materializeDynamicViewList<Root: View>(
+    private func materializeViewList<Root: View>(
         _ root: Root,
-        graph: _AGGraph,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
+        graph: _AGGraph
+    ) {
         let rootAttr = graph.makeInput(value: root)
         let outputs = type(of: root)._makeViewList(
             view: _GraphValue(_attribute: rootAttr),
             inputs: makeViewListInputs(graph: graph)
         )
 
-        guard case .dynamicList(let listAttr, _) = outputs.views else {
-            XCTFail("expected a dynamic section list", file: file, line: line)
-            return false
+        switch outputs.views {
+        case .staticList:
+            break
+        case .dynamicList(let listAttr, _):
+            materializeAllItems(in: listAttr)
         }
-
-        materializeAllItems(in: listAttr)
-        return true
     }
 
-    private func assertRowGeneratedUniqueIDStride(
-        _ rowIDs: [_ViewList_ID],
-        generatedIndex: Int,
-        expectedStride: UInt32,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        XCTAssertGreaterThanOrEqual(rowIDs.count, 2, file: file, line: line)
-        let values = rowIDs.compactMap {
-            $0.explicitIDs.indices.contains(generatedIndex)
-                ? ($0.explicitIDs[generatedIndex].id.base as? UniqueID)?.value
-                : nil
-        }
-        XCTAssertEqual(values.count, rowIDs.count, file: file, line: line)
-        guard values.count >= 2 else { return }
-
-        let strides = zip(values, values.dropFirst()).map {
-            UInt32(abs(Int64($0.1) - Int64($0.0)))
-        }
-        XCTAssertEqual(
-            strides,
-            Array(repeating: expectedStride, count: values.count - 1),
-            file: file,
-            line: line
-        )
-    }
-
-    private func assertGeneratedUniqueIDShared(
-        _ rowIDs: [_ViewList_ID],
-        generatedIndex: Int,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let ids = rowIDs.compactMap {
-            $0.explicitIDs.indices.contains(generatedIndex)
-                ? $0.explicitIDs[generatedIndex].id.base as? UniqueID
-                : nil
-        }
-        XCTAssertEqual(ids.count, rowIDs.count, file: file, line: line)
-        XCTAssertEqual(Set(ids).count, 1, file: file, line: line)
-    }
 }
 
 private final class SectionCollectionRecorder {
@@ -13708,6 +13804,10 @@ private struct LazySectionProbeValueKey: ContainerValueKey {
     static var defaultValue: String { "default" }
 }
 
+private struct SectionAccumulatorProbeTraitKey: _ViewTraitKey {
+    static var defaultValue: String { "" }
+}
+
 private extension ContainerValues {
     var lazySectionProbeValue: String {
         get { self[LazySectionProbeValueKey.self] }
@@ -13716,7 +13816,46 @@ private extension ContainerValues {
 }
 
 private final class ViewListOptionsRecorder {
-    var options: UInt32 = 0
+    var options: _ViewListInputs.Options = []
+}
+
+private final class SectionListVariadicIDRecorder {
+    var ids: [AnyHashable] = []
+}
+
+private struct SectionListVariadicIDCaptureRoot: _VariadicView.MultiViewRoot {
+    static var _viewListOptions: Int {
+        _ViewListInputs.Options.requiresSections.rawValue
+    }
+
+    var recorder: SectionListVariadicIDRecorder
+
+    func body(children: _VariadicView.Children) -> SectionListVariadicIDCaptureView {
+        SectionListVariadicIDCaptureView(
+            recorder: recorder,
+            children: children
+        )
+    }
+}
+
+private struct SectionListVariadicIDCaptureView: View, TestPrimitiveView {
+    var recorder: SectionListVariadicIDRecorder
+    var children: _VariadicView.Children
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        let capture = view._attribute.value
+        capture.recorder.ids = capture.children.map(\.id)
+        return _ViewListOutputs(
+            views: .staticList(.merged([])),
+            nextImplicitID: 0,
+            staticCount: 0
+        )
+    }
+
+    typealias Body = Never
 }
 
 private struct ViewListOptionsCaptureView: View, TestPrimitiveView {
@@ -14033,6 +14172,53 @@ private struct CountingViewListElements: _ViewList_Elements {
         }
         from = 0
         return body(inputs) { _ in _ViewOutputs() }
+    }
+}
+
+private struct SectionAccumulatorNestedList: ViewList {
+    var base: any ViewList
+    var attribute: Attribute<any ViewList>
+
+    func count(style: _ViewList_IteratorStyle) -> Int {
+        base.count(style: style)
+    }
+
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
+        base.estimatedCount(style: style)
+    }
+
+    var traitKeys: ViewTraitKeys? {
+        ViewTraitKeys()
+    }
+
+    var viewIDs: _ViewList_ID_Views? {
+        base.viewIDs
+    }
+
+    func appendViewIDs(
+        into accumulator: inout HeterogeneousViewIDsAccumulator
+    ) {
+        base.appendViewIDs(into: &accumulator)
+    }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (
+            inout Int,
+            _ViewList_IteratorStyle,
+            _ViewList_Node,
+            _ViewList_TemporarySublistTransform
+        ) -> Bool
+    ) -> Bool {
+        to(
+            &from,
+            style,
+            .list(base, attribute),
+            transform
+        )
     }
 }
 

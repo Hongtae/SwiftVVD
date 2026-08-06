@@ -43,6 +43,23 @@ extension ShapeStyle {
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
         fatalError()
     }
+
+    func copyStyle(
+        name: _ShapeStyle_Name = .foreground,
+        in environment: EnvironmentValues,
+        foregroundStyle: AnyShapeStyle? = nil
+    ) -> AnyShapeStyle {
+        var shape = _ShapeStyle_Shape(
+            operation: .copyStyle(name: name),
+            environment: environment,
+            foregroundStyle: foregroundStyle
+        )
+        _apply(to: &shape)
+        if case let .style(style) = shape.result {
+            return style
+        }
+        return AnyShapeStyle(self)
+    }
 }
 
 public struct _ShapeStyle_Shape {
@@ -309,7 +326,7 @@ public struct ForegroundStyle: ShapeStyle {
         shape.activeRecursiveStyles.insert(.foreground)
         defer { shape.activeRecursiveStyles.remove(.foreground) }
         if let foregroundStyle = shape.foregroundStyle ??
-            shape.environment.foregroundStyleLevels?.primary {
+            shape.environment.currentForegroundStyle {
             foregroundStyle._apply(to: &shape)
             return
         }
@@ -391,7 +408,8 @@ public struct HierarchicalShapeStyle: ShapeStyle {
         defer { shape.activeRecursiveStyles.remove(.content) }
 
         let levels = shape.environment.foregroundStyleLevels
-        let primary = shape.foregroundStyle ?? levels?.primary
+        let primary = shape.foregroundStyle ??
+            shape.environment.currentForegroundStyle
         if let primary {
             let requestedLevel = shape.operation.levelOffset + Int(id)
             if let tertiary = levels?.tertiary, requestedLevel >= 2 {

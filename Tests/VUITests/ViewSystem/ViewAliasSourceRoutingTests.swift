@@ -220,28 +220,52 @@ final class ViewAliasSourceRoutingTests: XCTestCase {
     }
 
     func testPlatformItemButtonStyleReadsConcreteLabelAfterPrimitiveRelay() throws {
-        let graph = _AGGraph()
-        let context = _AGGraphContext(graph: graph)
-
-        try context.withCurrent {
-            let button = Button(action: {}) {
-                Label("Inspect", systemImage: "draw")
-            }
-            let attribute = graph.makeInput(value: button)
-            let generator: Attribute<PlatformItemList> = graph.makeStatefulRule(
-                PlatformItemListGenerator<
-                    AllPlatformItemListFlags,
-                    Button<Label<Text, Image>>
-                >(
-                    content: attribute,
-                    inputs: makeViewInputs(graph: graph),
-                    inputsIncludeGeometry: false
-                )
+        let button = Button(action: {}) {
+            Label("Inspect", systemImage: "draw")
+        }
+        let content = button.modifier(
+            PrimitiveButtonStyleContainerModifier(
+                style: PlatformItemListButtonStyle()
             )
+        )
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
 
-            let item = try XCTUnwrap(generator.value.buttonItems.first)
-            XCTAssertTrue(item.label._view is Text)
-            XCTAssertTrue(item.image?._view is Image)
+        try viewGraph.data.withCurrent {
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let graph = viewGraph.data.graph
+                let attribute = graph.makeInput(value: content)
+                let generator: Attribute<PlatformItemList> =
+                    graph.makeStatefulRule(
+                        PlatformItemListGenerator<
+                            AllPlatformItemListFlags,
+                            ModifiedContent<
+                                Button<Label<Text, Image>>,
+                                PrimitiveButtonStyleContainerModifier<
+                                    PlatformItemListButtonStyle
+                                >
+                            >
+                        >(
+                            content: attribute,
+                            inputs: makeViewInputs(graph: graph),
+                            inputsIncludeGeometry: false
+                        )
+                    )
+
+                let item = try XCTUnwrap(
+                    generator.value.buttonItems.first
+                )
+                XCTAssertEqual(item.label?.string, "Inspect")
+                XCTAssertTrue(
+                    item.namedResolvedImage != nil
+                        || item.resolvedImage != nil
+                )
+            }
         }
     }
 

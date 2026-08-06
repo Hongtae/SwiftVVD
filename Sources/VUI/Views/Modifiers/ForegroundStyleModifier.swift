@@ -17,10 +17,23 @@ enum ForegroundStyleEnvironmentKey: EnvironmentKey {
     static var defaultValue: _ForegroundStyleLevels? { nil }
 }
 
+enum DefaultForegroundStyleKey: EnvironmentKey {
+    static var defaultValue: AnyShapeStyle? { nil }
+}
+
 extension EnvironmentValues {
     public var foregroundStyleLevels: _ForegroundStyleLevels? {
         get { self[ForegroundStyleEnvironmentKey.self] }
         set { self[ForegroundStyleEnvironmentKey.self] = newValue }
+    }
+
+    var defaultForegroundStyle: AnyShapeStyle? {
+        get { self[DefaultForegroundStyleKey.self] }
+        set { self[DefaultForegroundStyleKey.self] = newValue }
+    }
+
+    var currentForegroundStyle: AnyShapeStyle? {
+        foregroundStyleLevels?.primary ?? defaultForegroundStyle
     }
 }
 

@@ -36,6 +36,30 @@ private struct EncodableStableIdentityProbe: Hashable, Codable {
     var value: Int
 }
 
+private final class TupleStableScopeRecorder {
+    var hashes: [StrongHash] = []
+}
+
+private struct TupleStableScopeProbeView<Payload>: PrimitiveView {
+    var recorder: TupleStableScopeRecorder
+    var payload: Payload
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        guard let scope = inputs.base.stableIDScope?.attribute else {
+            fatalError("Tuple stable-scope probe requires a live scope.")
+        }
+        view._attribute.value.recorder.hashes.append(
+            scope.valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value.hash
+        )
+        return .unaryViewList(view: view, inputs: inputs)
+    }
+}
+
 private struct ZeroCountProbeViewList: ViewList {
     func applyNodes(
         from: inout Int,
@@ -675,6 +699,56 @@ final class DynamicLayoutStateTests: XCTestCase {
             XCTAssertEqual(
                 secondIdentity.value,
                 firstIdentity.value &+ 1
+            )
+        }
+    }
+
+    func testTupleViewUsesLogicalElementIndexForStableIdentityScope()
+        throws {
+        // ASSERTIONS tupleViewMakeListVisitorControlFlowObserved
+        let host = GraphHost()
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            var viewInputs = makeViewInputs(graph: graph)
+            let root = _DisplayList_StableIdentityRoot()
+            viewInputs.configureStableIDs(root: root)
+            let rootHash = try XCTUnwrap(
+                viewInputs.base.stableIDScope?.attribute
+            ).valueAndFlags(
+                options: AGValueOptions(rawValue: 0x4)
+            ).value.hash
+
+            let recorder = TupleStableScopeRecorder()
+            let value = TupleView(
+                (
+                    TupleStableScopeProbeView(
+                        recorder: recorder,
+                        payload: UInt8(1)
+                    ),
+                    TupleStableScopeProbeView(
+                        recorder: recorder,
+                        payload: (
+                            UInt64(2),
+                            UInt64(3),
+                            UInt64(4),
+                            UInt64(5)
+                        )
+                    )
+                )
+            )
+            let attribute = graph.makeInput(value: value)
+
+            _ = type(of: value)._makeViewList(
+                view: _GraphValue(_attribute: attribute),
+                inputs: _ViewListInputs(from: viewInputs)
+            )
+
+            XCTAssertEqual(
+                recorder.hashes,
+                [
+                    childStableHash(id: 0, parent: rootHash),
+                    childStableHash(id: 1, parent: rootHash),
+                ]
             )
         }
     }

@@ -8,6 +8,97 @@
 import Foundation
 import VVD
 
+struct PlatformImageRepresentableContext {
+    var image: GraphicsContext.ResolvedImage
+    var tintColor: Color?
+    var foregroundStyle: AnyShapeStyle?
+}
+
+struct PlatformNamedImageRepresentableContext {
+    var image: Image
+    var environment: EnvironmentValues
+}
+
+protocol PlatformImageRepresentable {
+    static func shouldMakeRepresentation(inputs: _ViewInputs) -> Bool
+    static func makeRepresentation(
+        inputs: _ViewInputs,
+        context: Attribute<PlatformImageRepresentableContext>,
+        outputs: inout _ViewOutputs
+    )
+}
+
+protocol PlatformNamedImageRepresentable {
+    static func shouldMakeRepresentation(inputs: _ViewInputs) -> Bool
+    static func makeRepresentation(
+        inputs: _ViewInputs,
+        context: Attribute<PlatformNamedImageRepresentableContext>,
+        outputs: inout _ViewOutputs
+    )
+}
+
+private struct ImageRepresentationKey: GraphInput {
+    typealias Value = (any PlatformImageRepresentable.Type)?
+
+    static var defaultValue: Value { nil }
+
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool {
+        switch (a, b) {
+        case (nil, nil):
+            true
+        case let (lhs?, rhs?):
+            ObjectIdentifier(lhs) == ObjectIdentifier(rhs)
+        default:
+            false
+        }
+    }
+}
+
+private struct NamedImageRepresentationKey: GraphInput {
+    typealias Value = (any PlatformNamedImageRepresentable.Type)?
+
+    static var defaultValue: Value { nil }
+
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool {
+        switch (a, b) {
+        case (nil, nil):
+            true
+        case let (lhs?, rhs?):
+            ObjectIdentifier(lhs) == ObjectIdentifier(rhs)
+        default:
+            false
+        }
+    }
+}
+
+extension _GraphInputs {
+    var requestedImageRepresentation:
+        (any PlatformImageRepresentable.Type)? {
+        get { self[ImageRepresentationKey.self] }
+        set { self[ImageRepresentationKey.self] = newValue }
+    }
+
+    var requestedNamedImageRepresentation:
+        (any PlatformNamedImageRepresentable.Type)? {
+        get { self[NamedImageRepresentationKey.self] }
+        set { self[NamedImageRepresentationKey.self] = newValue }
+    }
+}
+
+extension _ViewInputs {
+    var requestedImageRepresentation:
+        (any PlatformImageRepresentable.Type)? {
+        get { base.requestedImageRepresentation }
+        set { base.requestedImageRepresentation = newValue }
+    }
+
+    var requestedNamedImageRepresentation:
+        (any PlatformNamedImageRepresentable.Type)? {
+        get { base.requestedNamedImageRepresentation }
+        set { base.requestedNamedImageRepresentation = newValue }
+    }
+}
+
 class AnyImageProviderBox: @unchecked Sendable {
     var requiresBackendResolution: Bool { true }
     var usesSymbolFontMetrics: Bool { false }
@@ -2576,6 +2667,47 @@ extension Image: View {
             animatesSize: false,
             defersRender: false
         )
+        if let representable = inputs.requestedImageRepresentation,
+           representable.shouldMakeRepresentation(inputs: inputs) {
+            let context: Attribute<PlatformImageRepresentableContext> =
+                graph.makeRule {
+                    let image = intrinsicImageAttr.value
+                        ?? GraphicsContext.ResolvedImage(
+                            baseline: 0,
+                            shading: nil,
+                            texture: nil,
+                            textureTransform: .identity,
+                            scaleFactor: 1
+                        )
+                    let environment = envAttr.value
+                    return PlatformImageRepresentableContext(
+                        image: image,
+                        tintColor: nil,
+                        foregroundStyle:
+                            environment.currentForegroundStyle
+                    )
+                }
+            representable.makeRepresentation(
+                inputs: inputs,
+                context: context,
+                outputs: &outputs
+            )
+        }
+        if let representable = inputs.requestedNamedImageRepresentation,
+           representable.shouldMakeRepresentation(inputs: inputs) {
+            let context: Attribute<PlatformNamedImageRepresentableContext> =
+                graph.makeRule {
+                    PlatformNamedImageRepresentableContext(
+                        image: view._attribute.value,
+                        environment: envAttr.value
+                    )
+                }
+            representable.makeRepresentation(
+                inputs: inputs,
+                context: context,
+                outputs: &outputs
+            )
+        }
 
         return outputs
     }

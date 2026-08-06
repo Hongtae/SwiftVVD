@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 
 public protocol Transition {
     associatedtype Body: View
@@ -177,20 +178,48 @@ extension Transition {
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
         var inputs = inputs
-        inputs.base.append(
-            BodyInputElement(makeView: body),
-            forKey: BodyInput<PlaceholderContentView<Self>>.self
-        )
+        inputs.pushModifierBody(PlaceholderContentView<Self>.self, body: body)
         return Body._makeView(view: view, inputs: inputs)
     }
 }
 
-struct ApplyTransitionModifier<T: Transition>: ViewModifier {
+struct ApplyTransitionModifier<T: Transition>: MultiViewModifier {
+    typealias Body = Never
+
     var transition: T
     var phase: TransitionPhase
 
-    func body(content: Content) -> T.Body {
-        transition.body(content: PlaceholderContentView<T>(), phase: phase)
+    private struct Child: Rule, AsyncAttribute {
+        var modifier: Attribute<ApplyTransitionModifier<T>>
+
+        var value: T.Body {
+            guard let graph = _AGGraph.current,
+                  let owner = _AGGraph.currentRuleContextAttribute else {
+                fatalError(
+                    "ApplyTransitionModifier.Child evaluated outside an active rule context."
+                )
+            }
+
+            let inbox = graph.inbox
+            var result: T.Body!
+            withObservationTracking {
+                let modifier = modifier.value
+                result = modifier.transition.body(
+                    content: PlaceholderContentView<T>(),
+                    phase: modifier.phase
+                )
+            } onChange: { [weak inbox] in
+                let transaction = UnsafeBox(Transaction.current)
+                inbox?.enqueue {
+                    _AGGraph.current?.markNeedsEvaluation(
+                        owner,
+                        transaction: transaction.value,
+                        propagateTransaction: !transaction.value.isEmpty
+                    )
+                }
+            }
+            return result
+        }
     }
 
     static func _makeView(
@@ -201,74 +230,15 @@ struct ApplyTransitionModifier<T: Transition>: ViewModifier {
         guard _AGGraph.current != nil else {
             fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
-        var graphInputs = inputs.base
-        let dpFields = DynamicPropertyCache.fields(of: Self.self)
-        let (bodyGV, _) = makeBody(modifier: modifier, inputs: &graphInputs, fields: dpFields)
-
-        var inputs = inputs
-        inputs.base = graphInputs
-        // Store the original body builder under the placeholder key. When the
-        // transition body evaluates PlaceholderContentView, it relays back here.
-        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<PlaceholderContentView<T>>.self)
-        return T.Body._makeView(view: bodyGV, inputs: inputs)
+        let child = _GraphValue(Child(modifier: modifier._attribute))
+        return T.makeView(view: child, inputs: inputs, body: body)
     }
 
-    static func _makeViewList(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewListInputs,
-        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-    ) -> _ViewListOutputs {
-        guard _AGGraph.current != nil else {
-            fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
-        }
-        var graphInputs = inputs.base
-        let dpFields = DynamicPropertyCache.fields(of: Self.self)
-        let (bodyGV, _) = makeBody(modifier: modifier, inputs: &graphInputs, fields: dpFields)
-
-        var inputs = inputs
-        inputs.base = graphInputs
-        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<PlaceholderContentView<T>>.self)
-        return T.Body._makeViewList(view: bodyGV, inputs: inputs)
-    }
-}
-
-struct TransitionBodyAccessor<T: Transition>: BodyAccessor {
-    typealias Container = ApplyTransitionModifier<T>
-    typealias Body = T.Body
-
-    let containerAttr: Attribute<ApplyTransitionModifier<T>>
-
-    mutating func updateBody(of modifier: ApplyTransitionModifier<T>, changed: Bool) -> T.Body {
-        modifier.body(content: _ViewModifier_Content<ApplyTransitionModifier<T>>())
-    }
-
-    static func makeBody(
-        container: _GraphValue<ApplyTransitionModifier<T>>,
-        inputs: inout _GraphInputs,
-        fields: DynamicPropertyCache.Fields
-    ) -> (_GraphValue<T.Body>, Optional<_DynamicPropertyBuffer>) {
-        guard let graph = _AGGraph.current else {
-            fatalError("TransitionBodyAccessor.makeBody called outside _AGGraph context")
-        }
-        let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
-        let accessor = TransitionBodyAccessor(containerAttr: container._attribute)
-        if buffer.isEmpty {
-            let attr = graph.makeStatefulRule(StaticBody<TransitionBodyAccessor<T>, MainThreadFlags>(accessor: accessor))
-            return (_GraphValue(_attribute: attr), nil)
-        } else {
-            let attr = graph.makeStatefulRule(DynamicBody<TransitionBodyAccessor<T>, MainThreadFlags>(accessor: accessor, buffer: buffer))
-            return (_GraphValue(_attribute: attr), buffer)
-        }
-    }
-}
-
-extension ApplyTransitionModifier {
-    static func makeBody(
-        modifier: _GraphValue<Self>,
-        inputs: inout _GraphInputs,
-        fields: DynamicPropertyCache.Fields
-    ) -> (_GraphValue<T.Body>, Optional<_DynamicPropertyBuffer>) {
-        TransitionBodyAccessor<T>.makeBody(container: modifier, inputs: &inputs, fields: fields)
+    static func _viewListCount(
+        inputs: _ViewListCountInputs,
+        body: (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        1
     }
 }
 

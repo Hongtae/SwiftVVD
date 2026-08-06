@@ -983,11 +983,29 @@ extension PreferencesInputs {
     }
 }
 
-private func preferenceValuesCompareEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
-    withUnsafeBytes(of: lhs) { lhsBytes in
-        withUnsafeBytes(of: rhs) { rhsBytes in
-            lhsBytes.elementsEqual(rhsBytes)
+private struct PreferenceTransform<K: PreferenceKey>: Rule, AsyncAttribute,
+    CustomStringConvertible
+{
+    typealias Value = K.Value
+
+    var _transform: Attribute<(inout K.Value) -> Void>
+    var _childValue: OptionalAttribute<K.Value>
+
+    var childValue: K.Value? {
+        _childValue.value
+    }
+
+    var value: K.Value {
+        var value = childValue ?? K.defaultValue
+        let transform = _transform.value
+        _ = ObservationCenter.current._withObservationStashed {
+            transform(&value)
         }
+        return value
+    }
+
+    var description: String {
+        "Transform: " + K.readableName
     }
 }
 
@@ -1197,75 +1215,31 @@ extension PreferencesOutputs {
         _openExistential(key, do: appendOpened)
     }
 
-    /// Registers a preference transform for Key.
-    /// Creates a new AG rule that reads existing K outputs, applies transform, and replaces entry.
-    /// Host-readable keys also feed the host preference combiner through ViewGraph side effects.
     mutating func makePreferenceTransformer<K: PreferenceKey>(
+        inputs: PreferencesInputs,
         key: K.Type,
-        transformAttr: Attribute<(inout K.Value) -> Void>,
-        graph: _AGGraph
+        transform: @autoclosure () -> Attribute<(inout K.Value) -> Void>
     ) {
-        let existingNodes = values(for: K.self)
-        let weakNodes = existingNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-
-        let baseAttr: Attribute<K.Value> = graph.makeRule {
-            var value = K.defaultValue
-            for weakNode in weakNodes where weakNode.isValid(in: graph) {
-                let val = Attribute<K.Value>(weakNode.toStrong()).value
-                K.reduce(value: &value) { val }
-            }
-            transformAttr.value(&value)
-            return value
+        guard inputs.keys.contains(K.self) else {
+            return
         }
-
-        let targetAttr = graph.makeInput(value: K.defaultValue)
-        let targetWeak = targetAttr.asWeak()
-        let host = GraphHost.currentHost
-        var previousValue: K.Value?
-
-        graph.makeSideEffectRule {
-            let value = baseAttr.value
-            if let previousValue,
-               preferenceValuesCompareEqual(previousValue, value) {
-                return
-            }
-            previousValue = value
-
-            let transaction = Transaction.current
-            let id = Transaction.id
-            if host.isUpdating {
-                host.continueTransaction(
-                    CustomGraphMutation {
-                        guard let graph = _AGGraph.current,
-                              targetWeak.isValid(in: graph) else {
-                            return
-                        }
-                        _ = Transaction.withScopedThreadTransaction(transaction) {
-                            targetWeak.toStrong().setValue(value, transaction: transaction)
-                        }
-                    }
-                )
-                return
-            }
-
-            Update.enqueueAction { [weak host] in
-                guard let host else {
-                    return
-                }
-                host.asyncTransaction(
-                    transaction,
-                    id: id,
-                    mutation: AssignmentGraphMutation(targetWeak, newValue: value),
-                    style: .deferred,
-                    mayDeferUpdate: true
-                )
-            }
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "PreferencesOutputs.makePreferenceTransformer "
+                    + "called outside AG context."
+            )
         }
-
-        preferences.removeAll(where: {
-            ObjectIdentifier($0.key) == ObjectIdentifier(K.self)
-        })
-        append(K.self, node: targetAttr.identifier)
+        let childValue = reducedValue(for: K.self, in: graph)
+        let transformAttribute: Attribute<(inout K.Value) -> Void> =
+            transform()
+        let rule = PreferenceTransform<K>(
+            _transform: transformAttribute,
+            _childValue: OptionalAttribute<K.Value>(childValue)
+        )
+        let transformed: Attribute<K.Value> = graph.makeRule(
+            rule
+        )
+        setValue(transformed.identifier, for: K.self)
     }
 
     func values(for key: any PreferenceKey.Type) -> [AGAttribute] {

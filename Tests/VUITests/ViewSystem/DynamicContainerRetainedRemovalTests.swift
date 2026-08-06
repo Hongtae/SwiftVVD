@@ -345,7 +345,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var source: Attribute<any ViewList>!
         var infoAttr: Attribute<DynamicContainer.Info>!
         var viewPhase: Attribute<Phase>!
-        var transitionPhase: Attribute<TransitionPhase>!
         var removalEvents: [String] = []
 
         ref.withCurrent {
@@ -359,9 +358,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     ),
                     makeOutputs: { inputs in
                         viewPhase = inputs.base.phase
-                        transitionPhase = inputs[
-                            DynamicContainerTransitionPhaseInput.self
-                        ].attribute
                         return Self.makeFixedLayoutOutputs(inputs)
                     }
                 )
@@ -381,7 +377,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             }
             XCTAssertEqual(recorder.events, ["identity"])
             XCTAssertFalse(viewPhase.value.isBeingRemoved)
-            XCTAssertEqual(transitionPhase.value, .identity)
         }
 
         let retainedItem = try Update.ensure {
@@ -409,7 +404,6 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 XCTAssertEqual(removalEvents, [])
                 XCTAssertEqual(recorder.events, ["identity", "didDisappear"])
                 XCTAssertTrue(viewPhase.value.isBeingRemoved)
-                XCTAssertEqual(transitionPhase.value, .didDisappear)
                 return item
             }
         }
@@ -707,6 +701,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicLazyVStackForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        // ASSERTIONS lazyInitialPhaseSettlementObserved
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
             disappearBeforeRetainedCompletions: true
         ) { rows, target, recorder, capture in
@@ -727,6 +722,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicLazyHStackForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        // ASSERTIONS lazyInitialPhaseSettlementObserved
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
             disappearBeforeRetainedCompletions: true
         ) { rows, target, recorder, capture in
@@ -747,6 +743,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicLazyVGridForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        // ASSERTIONS lazyInitialPhaseSettlementObserved
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
             disappearBeforeRetainedCompletions: true
         ) { rows, target, recorder, capture in
@@ -767,6 +764,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
     }
 
     func testPublicLazyHGridForEachRetainedRemovalDrainsDisappearBeforeForkedAnimatableCompletions() throws {
+        // ASSERTIONS lazyInitialPhaseSettlementObserved
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
             disappearBeforeRetainedCompletions: true
         ) { rows, target, recorder, capture in
@@ -2049,6 +2047,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         // ASSERTIONS appearanceMergedCallbacksObserved
         // ASSERTIONS retainedForkMergedAppearanceTeardownObserved
         viewGraph.runTransaction(Transaction(), do: sampleLayout, id: nil)
+        // The host settles the scheduled lazy item-phase mutation before the
+        // first user transaction can retarget the visible row.
+        viewGraph.flushTransactions()
         XCTAssertEqual(recorder.events, ["row appear"])
 
         func transaction(label: String) -> Transaction {
@@ -2713,6 +2714,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             XCTAssertEqual(lifecycleEvents, ["row appear", "row disappear", "row appear"])
             XCTAssertEqual(delegate.events, ["change"])
         }
+
+        XCTAssertTrue(host.hasPendingTransactions)
+        // Drain the default delegate's scheduled main-run-loop observers while
+        // their weak host is still alive.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertFalse(host.hasPendingTransactions)
     }
 
     func testUnusedRetentionPrunesOlderPhaseThreeItemsBeyondLimit() throws {

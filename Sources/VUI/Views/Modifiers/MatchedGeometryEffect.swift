@@ -42,7 +42,6 @@ final class MatchedGeometryScope: PropertyKey {
         var args: Attribute<MatchedGeometryArguments>
         var transaction: Attribute<Transaction>
         var phase: Attribute<Phase>
-        var placement: OptionalAttribute<Bool>
         var size: Attribute<ViewSize>
         var position: Attribute<CGPoint>
         var transform: Attribute<ViewTransform>
@@ -137,23 +136,12 @@ final class MatchedGeometryScope: PropertyKey {
         guard !sources.isEmpty else { return nil }
         let soleSource = frame.views.count == 1 ? sources.first : nil
         let activeSource = sources.first(where: {
-            !$0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
+            !$0.phase.value.isBeingRemoved
         })
-        let hasUnplacedActiveSource = sources.contains(where: {
-            !$0.phase.value.isBeingRemoved && !($0.placement.attribute?.value ?? true)
-        })
-        let deferredSource = hasUnplacedActiveSource
-            ? sources.first(where: {
-                $0.phase.value.isBeingRemoved && ($0.placement.attribute?.value ?? true)
-            })
-            : nil
-        let source = soleSource ?? activeSource ?? deferredSource
+        let source = soleSource ?? activeSource
         guard let source else { return nil }
 
-        return makeSourceInfo(
-            source,
-            clearsRemoval: soleSource == nil && activeSource == nil
-        )
+        return makeSourceInfo(source)
     }
 
     func sourceInfo(
@@ -166,12 +154,11 @@ final class MatchedGeometryScope: PropertyKey {
               }) else {
             return nil
         }
-        return makeSourceInfo(source, clearsRemoval: false)
+        return makeSourceInfo(source)
     }
 
     private func makeSourceInfo(
-        _ source: ViewRegistration,
-        clearsRemoval: Bool
+        _ source: ViewRegistration
     ) -> MatchedGeometrySourceInfo {
         let args = source.args.value
         let size = source.size.value
@@ -186,17 +173,9 @@ final class MatchedGeometryScope: PropertyKey {
             y: anchorPosition.y - size.value.height * args.anchor.y
         )
         let transaction = source.transaction.value
-        var phase = source.phase.value
-        if clearsRemoval {
-            // A replacement source can exist before its parent layout has
-            // assigned target geometry. Keep the retained source authoritative
-            // during that gap instead of retargeting the shared frame to the
-            // new layout bridge's placeholder origin.
-            phase.isBeingRemoved = false
-        }
         return MatchedGeometrySourceInfo(
             frame: ViewFrame(origin: origin, size: size),
-            phase: phase,
+            phase: source.phase.value,
             transaction: transaction,
             sourceAttribute: source.attribute
         )
@@ -303,7 +282,8 @@ private struct MatchedGeometrySharedFrame: StatefulRule, ObservedAttribute, Asyn
         }
 
         if previousSource.frame != info.frame {
-            guard let animation = info.transaction.effectiveAnimation else {
+            guard let animation =
+                info.transaction.animationIgnoringTransitionPhase else {
                 finishAnimation()
                 resetSeed = info.phase.resetSeed
                 lastSourceAttribute = AGWeakAttribute(info.sourceAttribute)
@@ -431,7 +411,6 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Observed
     var args: Attribute<MatchedGeometryArguments>
     var transaction: Attribute<Transaction>
     var phase: Attribute<Phase>
-    var placement: OptionalAttribute<Bool>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
     var transform: Attribute<ViewTransform>
@@ -478,7 +457,6 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Observed
                 args: args,
                 transaction: transaction,
                 phase: phase,
-                placement: placement,
                 size: size,
                 position: position,
                 transform: transform
@@ -620,17 +598,6 @@ private struct MatchedDisplayList: Rule, AsyncAttribute {
     }
 }
 
-private struct MatchedGeometrySourcePhase: Rule {
-    var phase: Attribute<Phase>
-    var transitionPhase: Attribute<TransitionPhase>
-
-    var value: Phase {
-        var value = phase.value
-        value.isBeingRemoved = transitionPhase.value == .didDisappear
-        return value
-    }
-}
-
 public struct _MatchedGeometryEffect<ID: Hashable>: MultiViewModifier, PrimitiveViewModifier {
     public var id: ID
     public var namespace: Namespace.ID
@@ -673,28 +640,12 @@ public struct _MatchedGeometryEffect<ID: Hashable>: MultiViewModifier, Primitive
         let targetPosition = inputs.position
         let targetSize = inputs.size
         let targetTransform = inputs.transform
-        let sourcePhase: Attribute<Phase>
-        if let transitionPhase = inputs[
-            DynamicContainerTransitionPhaseInput.self
-        ].attribute {
-            sourcePhase = graph.makeRule(
-                MatchedGeometrySourcePhase(
-                    phase: inputs.base.phase,
-                    transitionPhase: transitionPhase
-                )
-            )
-        } else {
-            sourcePhase = inputs.base.phase
-        }
         let registration: Attribute<MatchedGeometrySharedValue> = graph.makeStatefulRule(
             MatchedGeometryRegistration(
                 modifier: modifier._attribute,
                 args: args,
-                transaction: inputs[
-                    LayoutPlacementTransactionInput.self
-                ].attribute ?? inputs.base.transaction,
-                phase: sourcePhase,
-                placement: inputs[LayoutPlacementStateInput.self],
+                transaction: inputs.base.transaction,
+                phase: inputs.base.phase,
                 size: targetSize,
                 position: targetPosition,
                 transform: targetTransform,

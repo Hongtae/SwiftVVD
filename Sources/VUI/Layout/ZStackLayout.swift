@@ -81,4 +81,9 @@ public struct ZStackLayout: Layout {
 
 public typealias _ZStackLayout = ZStackLayout
 extension _ZStackLayout: _VariadicView_UnaryViewRoot {}
+extension _ZStackLayout: _VariadicView_ImplicitRoot {
+    static var implicitRoot: Self {
+        Self()
+    }
+}
 extension _ZStackLayout: Sendable {}

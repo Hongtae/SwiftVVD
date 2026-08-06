@@ -2453,9 +2453,9 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 ScrollTargetRole.SetLayout(role: role, collection: collection)
             )
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollTargetRole.ContentKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
@@ -2464,9 +2464,9 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 ScrollTargetRole.SetLayout(role: role, collection: collection)
             )
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollTargetRole.Key.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
@@ -2477,9 +2477,9 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 }
             }
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollablePreferenceKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
@@ -2493,9 +2493,9 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 }
             }
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: UpdateScrollStateRequestKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
 

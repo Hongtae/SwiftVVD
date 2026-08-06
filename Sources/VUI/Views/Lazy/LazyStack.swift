@@ -1253,10 +1253,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
         var traversalIndex = baseIndex
         return forEachNode(from: &from, style: style) { nodeFrom, node, temporaryTransform in
             var shouldStop = false
-            var nodeTransform = combinedTransform(with: temporaryTransform)
-            if section.id != nil {
-                nodeTransform = _viewListTransformDroppingGroupEntryIDs(nodeTransform)
-            }
+            let nodeTransform = combinedTransform(with: temporaryTransform)
 
             switch node {
             case .section(let section):
@@ -1353,7 +1350,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 listAttribute: listAttribute,
                 style: style,
                 transform: transform,
-                dropNestedSectionSharedGeneratedID: section.id != nil,
                 body: body
             )
         case .group(let group):
@@ -1362,7 +1358,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 from: &from,
                 style: style,
                 transform: transform,
-                dropNestedSectionSharedGeneratedID: section.id != nil,
                 body: body
             )
         case .section(let section):
@@ -1371,7 +1366,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 from: &from,
                 style: style,
                 transform: transform,
-                dropSectionSharedGeneratedID: self.section.id != nil,
                 body: body
             )
         case .sublist(var sublist):
@@ -1388,19 +1382,16 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
         listAttribute: Attribute<any ViewList>? = nil,
         style: _ViewList_IteratorStyle,
         transform baseTransform: _ViewList_SublistTransform,
-        dropNestedSectionSharedGeneratedID: Bool,
         body: (_ViewList_Sublist) -> Bool
     ) -> Bool {
-        list.applyNodes(
+        _applyNodesExpandingGroups(
+            in: list,
             from: &from,
             style: style,
-            list: listAttribute,
+            listAttribute: listAttribute,
             transform: _ViewList_TemporarySublistTransform()
         ) { nodeFrom, nodeStyle, node, temporaryTransform in
-            var nodeTransform = combinedTransform(baseTransform, with: temporaryTransform)
-            if dropNestedSectionSharedGeneratedID {
-                nodeTransform = _viewListTransformDroppingGroupEntryIDs(nodeTransform)
-            }
+            let nodeTransform = combinedTransform(baseTransform, with: temporaryTransform)
             switch node {
             case .sublist(var sublist):
                 nodeTransform.apply(to: &sublist)
@@ -1412,7 +1403,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     from: &nodeFrom,
                     style: nodeStyle,
                     transform: nodeTransform,
-                    dropSectionSharedGeneratedID: dropNestedSectionSharedGeneratedID,
                     body: body
                 )
 
@@ -1423,7 +1413,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     listAttribute: attribute,
                     style: nodeStyle,
                     transform: nodeTransform,
-                    dropNestedSectionSharedGeneratedID: dropNestedSectionSharedGeneratedID,
                     body: body
                 )
 
@@ -1433,7 +1422,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     from: &nodeFrom,
                     style: nodeStyle,
                     transform: nodeTransform,
-                    dropNestedSectionSharedGeneratedID: dropNestedSectionSharedGeneratedID,
                     body: body
                 )
             }
@@ -1445,26 +1433,15 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
         from: inout Int,
         style: _ViewList_IteratorStyle,
         transform baseTransform: _ViewList_SublistTransform,
-        dropSectionSharedGeneratedID: Bool,
         body: (_ViewList_Sublist) -> Bool
     ) -> Bool {
-        func mergedRegionTransform(
-            _ regionTransform: _ViewList_SublistTransform
-        ) -> _ViewList_SublistTransform {
-            let appended = dropSectionSharedGeneratedID
-                ? _sectionRegionTransformDroppingSharedGeneratedID(regionTransform)
-                : regionTransform
-            return mergedTransform(baseTransform, appending: appended)
-        }
-
         if let header = section.header,
            !forEachSublist(
                in: header.list,
                from: &from,
                listAttribute: header.attribute,
                style: style,
-               transform: mergedRegionTransform(section.headerFooterSubviewIDTransform),
-               dropNestedSectionSharedGeneratedID: true,
+               transform: baseTransform,
                body: body
            ) {
             return false
@@ -1475,8 +1452,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                from: &from,
                listAttribute: content.attribute,
                style: style,
-               transform: mergedRegionTransform(section.subviewIDTransform),
-               dropNestedSectionSharedGeneratedID: true,
+               transform: baseTransform,
                body: body
            ) {
             return false
@@ -1487,25 +1463,12 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                from: &from,
                listAttribute: footer.attribute,
                style: style,
-               transform: mergedRegionTransform(section.headerFooterSubviewIDTransform),
-               dropNestedSectionSharedGeneratedID: true,
+               transform: baseTransform,
                body: body
            ) {
             return false
         }
         return true
-    }
-
-    private func mergedTransform(
-        _ base: _ViewList_SublistTransform,
-        appending appended: _ViewList_SublistTransform
-    ) -> _ViewList_SublistTransform {
-        var merged = base
-        for item in appended.items {
-            merged.push(item)
-        }
-        merged.subgraphCount += appended.subgraphCount
-        return merged
     }
 
     private func forEachNode(
@@ -1527,7 +1490,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
             return group.applyNodes(
                 from: &from,
                 style: style,
-                list: nil,
                 transform: _ViewList_TemporarySublistTransform()
             ) { nodeFrom, _, node, temporaryTransform in
                 body(&nodeFrom, node, temporaryTransform)
@@ -1613,30 +1575,10 @@ struct _LazyLayout_Section: LazyLayoutNamespace {
             cache: cache,
             context: context,
             node: node,
-            transform: regionTransform(for: region),
+            transform: transform,
             section: region.cacheSection(id: base.id),
             baseIndex: baseIndex + precedingEstimatedCount(before: region)
         )
-    }
-
-    private func regionTransform(for region: Region) -> _ViewList_SublistTransform {
-        switch region {
-        case .header, .footer:
-            return mergedTransform(appending: base.headerFooterSubviewIDTransform)
-        case .content:
-            return mergedTransform(appending: base.subviewIDTransform)
-        }
-    }
-
-    private func mergedTransform(
-        appending appended: _ViewList_SublistTransform
-    ) -> _ViewList_SublistTransform {
-        var merged = transform
-        for item in appended.items {
-            merged.push(item)
-        }
-        merged.subgraphCount += appended.subgraphCount
-        return merged
     }
 
     private func entry(
@@ -5866,7 +5808,7 @@ private enum LazyLayoutAccessibilityRole {
 
 extension LazyLayout {
     static var _viewListOptions: Int {
-        Int(_ViewListInputs.sectionListOptions)
+        _ViewListInputs.Options.requiresSections.rawValue
     }
 
     static var layoutProperties: _LazyLayout_Properties {
@@ -6721,9 +6663,9 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 ScrollTargetRole.SetLayout(role: role, collection: collection)
             )
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollTargetRole.ContentKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
@@ -6732,9 +6674,9 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 ScrollTargetRole.SetLayout(role: role, collection: collection)
             )
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollTargetRole.Key.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
@@ -6745,9 +6687,9 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 }
             }
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: ScrollablePreferenceKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
         if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
@@ -6761,9 +6703,9 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 }
             }
             preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
                 key: UpdateScrollStateRequestKey.self,
-                transformAttr: transform,
-                graph: graph
+                transform: transform
             )
         }
 
