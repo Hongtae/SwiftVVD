@@ -556,12 +556,24 @@ class GraphHost: CustomReflectable {
             return
         }
 
-        data.withCurrent {
-            guard let weakAttribute = graph.weakAttributeIfValid(for: attribute) else {
-                return
-            }
-            continueTransaction(invalidating: weakAttribute)
+        // This callback forwards the source host's transaction into this host;
+        // the dependency walk has already invalidated the source attribute.
+        // Re-invalidating it here would create a second mutation cycle.
+        let sourceGraph = AGGraphGetAttributeGraph(attribute)
+        guard let sourceHost = AGGraphGetContext(sourceGraph) as? GraphHost else {
+            fatalError(
+                "GraphHost.graphInvalidation(from:) requires the source graph to have a GraphHost context."
+            )
         }
+        let transaction = sourceHost.data._transaction.value
+
+        // Cross-host invalidation cannot become more deferrable than its
+        // source. This latch is narrowed even when there is no transaction to
+        // forward.
+        narrowMayDeferUpdate(sourceHost.mayDeferUpdate)
+        guard !transaction.isEmpty else { return }
+
+        emptyTransaction(transaction)
     }
 
     func setPhase(_ phase: _GraphInputs.Phase) {

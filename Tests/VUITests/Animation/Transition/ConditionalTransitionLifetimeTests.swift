@@ -76,10 +76,9 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
                             anchor: .center,
                             proposal: ProposedViewSize(size)
                         )
-                        let bounds = try XCTUnwrap(host.rootDisplayList?.value)
-                            .debugItemRecords
-                            .compactMap(\.bounds)
-                            .first
+                        let bounds = firstPresentationDebugBounds(
+                            in: try XCTUnwrap(host.rootDisplayList?.value)
+                        )
                         host.data.graph.drainActionOutbox()
                         return bounds
                     }
@@ -129,10 +128,7 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
                             proposal: ProposedViewSize(size)
                         )
                         let list = try XCTUnwrap(host.rootDisplayList?.value)
-                        let bounds = list
-                            .debugItemRecords
-                            .compactMap(\.bounds)
-                            .first
+                        let bounds = firstPresentationDebugBounds(in: list)
                         host.data.graph.drainActionOutbox()
                         return (bounds, firstOpacity(in: list))
                     }
@@ -230,10 +226,9 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
                             anchor: .center,
                             proposal: ProposedViewSize(size)
                         )
-                        let bounds = host.rootDisplayList?.value
-                            .debugItemRecords
-                            .compactMap(\.bounds)
-                            .first
+                        let bounds = host.rootDisplayList.flatMap {
+                            firstPresentationDebugBounds(in: $0.value)
+                        }
                         host.data.graph.drainActionOutbox()
                         return bounds
                     }
@@ -295,10 +290,9 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
                             anchor: .center,
                             proposal: ProposedViewSize(size)
                         )
-                        let bounds = host.rootDisplayList?.value
-                            .debugItemRecords
-                            .compactMap(\.bounds)
-                            .first
+                        let bounds = host.rootDisplayList.flatMap {
+                            firstPresentationDebugBounds(in: $0.value)
+                        }
                         host.data.graph.drainActionOutbox()
                         return bounds
                     }
@@ -339,8 +333,57 @@ final class ConditionalTransitionLifetimeTests: XCTestCase {
 
         let initial = try XCTUnwrap(sampleBounds(at: 5.1))
         XCTAssertEqual(initial.width, 13, accuracy: 0.25)
-        XCTAssertEqual(initial.minX, 0, accuracy: 0.25)
+        XCTAssertEqual(initial.midX, 0, accuracy: 0.25)
     }
+}
+
+private func firstPresentationDebugBounds(in list: DisplayList) -> CGRect? {
+    firstDebugBounds(in: list.materializingInterpolationContents())
+}
+
+private func firstDebugBounds(in list: DisplayList) -> CGRect? {
+    if let item = list.debugItems.first,
+       let bounds = item.record.bounds {
+        return bounds.offsetBy(
+            dx: item.frame.minX - bounds.minX,
+            dy: item.frame.minY - bounds.minY
+        ).standardized
+    }
+
+    for item in list.items {
+        let nestedBounds: CGRect?
+        switch item.value {
+        case let .effect(_, contents):
+            nestedBounds = firstDebugBounds(in: contents)
+        case let .states(states):
+            nestedBounds = states.last.flatMap {
+                firstDebugBounds(in: $0.1)
+            }
+        case .content, .empty:
+            nestedBounds = nil
+        }
+        guard let nestedBounds else { continue }
+
+        let placement = CGAffineTransform(
+            translationX: item.frame.minX,
+            y: item.frame.minY
+        )
+        if case let .effect(.transform(projection), _) = item.value,
+           projection.isAffine {
+            return nestedBounds.applying(
+                CGAffineTransform(
+                    a: projection.m11,
+                    b: projection.m12,
+                    c: projection.m21,
+                    d: projection.m22,
+                    tx: projection.m31,
+                    ty: projection.m32
+                ).concatenating(placement)
+            ).standardized
+        }
+        return nestedBounds.applying(placement).standardized
+    }
+    return nil
 }
 
 private func firstOpacity(in list: DisplayList) -> Double? {

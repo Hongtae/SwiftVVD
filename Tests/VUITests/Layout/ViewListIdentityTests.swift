@@ -2,6 +2,34 @@ import XCTest
 @testable import VUI
 
 final class ViewListIdentityTests: XCTestCase {
+    func testSExpPrinterMatchesObservedMultilineAndSingleLineFormatting() {
+        // ASSERTIONS sExpPrinterFormattingObserved
+        var multiline = SExpPrinter(tag: "root")
+        multiline.print("value")
+        multiline.push("child")
+        multiline.print("leaf", newline: false)
+        multiline.newline()
+        multiline.print("tail", newline: false)
+        multiline.pop()
+
+        XCTAssertEqual(
+            multiline.end(),
+            "(root\n  value\n  (child leaf\n     tail))"
+        )
+        XCTAssertEqual(multiline.depth, 0)
+        XCTAssertEqual(multiline.indent, "")
+
+        var singleLine = SExpPrinter(tag: "root", singleLine: true)
+        singleLine.print("value")
+        singleLine.push("child")
+        singleLine.print("leaf")
+        singleLine.pop()
+
+        XCTAssertEqual(singleLine.end(), "(root value(child leaf))")
+        XCTAssertEqual(singleLine.depth, 0)
+        XCTAssertEqual(singleLine.indent, "")
+    }
+
     func testSubviewIDStoresFullViewListIDAndForwardsTypedLookup() {
         var base = _ViewList_ID(implicitID: 3)
         base.bind(

@@ -286,12 +286,6 @@ struct TypedUnaryViewGenerator {
     /// `nil` (empty OptionalAttribute) when no `_TraitWritingModifier` was applied.
     /// Set by `_TraitWritingModifier._makeViewList` to a derived `Attribute<ViewTraitCollection>`.
     var traitListAttr: OptionalAttribute<ViewTraitCollection> = OptionalAttribute()
-    /// Per-child reactive environment override.
-    /// `nil` = use baseInputs.cachedEnvironment as-is (common case).
-    /// When set, makeView replaces cachedEnvironment with this attribute so the child
-    /// re-evaluates reactively when the attribute changes (e.g. preferredColorScheme).
-    /// Set by _PreferenceWritingModifier<PreferredColorSchemeKey>._makeViewList.
-    var envAttr: OptionalAttribute<EnvironmentValues> = OptionalAttribute()
 }
 
 extension TypedUnaryViewGenerator {
@@ -319,21 +313,24 @@ extension TypedUnaryViewGenerator {
             fatalError("TypedUnaryViewGenerator.makeView called outside an active _AGGraph context.")
         }
         guard view.isValid(in: graph) else { return nil }
-        let attrID = view.toStrong()
         var inputs = inputs
         var mergedBase = baseInputs
         mergedBase.merge(inputs.base, ignoringPhase: false)
-        mergedBase.applyViewPhaseOverrideIfNeeded()
         inputs.base = mergedBase
-        if let env = envAttr.attribute {
-            // Replace cachedEnvironment with per-child reactive env attribute.
-            // New MutableBox so child's env changes are isolated from siblings.
-            var newCached = inputs.base.cachedEnvironment.value
-            newCached.environment = env
-            inputs.base.cachedEnvironment = MutableBox(newCached)
-        }
+        return makeResolvedView(inputs: inputs, indirectMap: nil)
+    }
+
+    private func makeResolvedView(
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?
+    ) -> _ViewOutputs {
+        let attrID = view.toStrong()
         func call<V: View>(_ t: V.Type) -> _ViewOutputs {
-            let graphValue = _GraphValue<V>(_attribute: Attribute<V>(attrID))
+            var attribute = Attribute<V>(attrID)
+            if let indirectMap {
+                attribute.makeReusable(indirectMap: indirectMap)
+            }
+            let graphValue = _GraphValue<V>(_attribute: attribute)
             return V._makeView(view: graphValue, inputs: inputs)
         }
         return call(viewType)
@@ -349,6 +346,52 @@ extension TypedUnaryViewGenerator {
             var listInputs = inputs
             listInputs.base = baseInputs
             return V._makeViewList(view: _GraphValue<V>(_attribute: Attribute<V>(attrID)), inputs: listInputs)
+        }
+        return call(viewType)
+    }
+}
+
+extension TypedUnaryViewGenerator: UnaryViewGenerator {
+    func makeView(
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "TypedUnaryViewGenerator.makeView called outside an active _AGGraph context."
+            )
+        }
+        guard view.isValid(in: graph) else {
+            return _ViewOutputs()
+        }
+        return makeResolvedView(inputs: inputs, indirectMap: indirectMap)
+    }
+
+    func tryToReuse(
+        by other: TypedUnaryViewGenerator,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "TypedUnaryViewGenerator.tryToReuse called outside an active _AGGraph context."
+            )
+        }
+        guard view.isValid(in: graph),
+              other.view.isValid(in: graph) else {
+            return false
+        }
+
+        let attributeID = view.toStrong()
+        let otherAttributeID = other.view.toStrong()
+        func call<V: View>(_ type: V.Type) -> Bool {
+            var attribute = Attribute<V>(attributeID)
+            let otherAttribute = Attribute<V>(otherAttributeID)
+            return attribute.tryToReuse(
+                by: otherAttribute,
+                indirectMap: indirectMap,
+                testOnly: testOnly
+            )
         }
         return call(viewType)
     }
@@ -371,10 +414,10 @@ extension TypedUnaryViewGenerator: Hashable {
 /// and fills in their values later during the layout pass.
 public struct _ViewInputs {
     /// Shared graph-level inputs such as time, environment, and transaction.
-    /// Base channel: _GraphInputs.customInputs stores GraphInput keys.
     var base: _GraphInputs
 
-    /// View-level input channel. Stores ViewInput keys separately from base.customInputs.
+    /// Inputs bridged across a preference-host boundary.
+    /// Ordinary ViewInput keys route through `base`.
     var customInputs: PropertyList
 
     /// Which preference keys this subtree should collect.
@@ -436,11 +479,24 @@ public struct _ViewInputs {
         requestsLayoutComputer || needsGeometry
     }
 
-    // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
-    // Used by view-specific inputs that should not be stored in the graph channel.
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
-        get { customInputs.value(forKey: key) }
-        set { customInputs.setValue(newValue, forKey: key) }
+        // ViewInput refines GraphInput but does not introduce another storage
+        // channel. Preference-host bridge payloads remain in `customInputs`.
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
+    subscript<T: ViewInput>(_ key: T.Type) -> T.Value
+        where T.Value: GraphReusable {
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
+    mutating func append<T: ViewInput, E: GraphReusable>(
+        _ element: E,
+        to key: T.Type
+    ) where T.Value == Stack<E> {
+        base.append(element, to: key)
     }
 
     /// Copies per-subtree caches (e.g. CachedEnvironment box) before constructing a child
@@ -549,6 +605,18 @@ public struct _ViewListInputs {
 }
 
 extension _ViewListInputs {
+    subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
+        // List traversal observes the same graph-input channel as `_ViewInputs`.
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
+    subscript<T: ViewInput>(_ key: T.Type) -> T.Value
+        where T.Value: GraphReusable {
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
     /// Create list inputs from single-view inputs.
     /// Only `base` (_GraphInputs) is carried over. Layout Attributes are omitted
     /// because they are irrelevant during the list-traversal (wiring) phase.
@@ -599,8 +667,14 @@ public struct _ViewListCountInputs {
         set { base[key] = newValue }
     }
 
+    subscript<T: GraphInput>(_ key: T.Type) -> T.Value
+        where T.Value: GraphReusable {
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
     mutating func append<T: GraphInput, E>(_ element: E, to key: T.Type) where T.Value == Stack<E> {
-        base.append(element, forKey: key)
+        base.append(element, to: key)
     }
 
     mutating func popLast<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
@@ -852,7 +926,9 @@ extension _ViewListOutputs {
             let traitKeys = inputs.traitKeys
             let traits: OptionalAttribute<ViewTraitCollection>
             if case .unaryElements(let unary) = elements,
-               let generator = unary.typedGenerator {
+               let generator = (
+                   unary as? UnaryElements<TypedUnaryViewGenerator>
+               )?.body {
                 traits = generator.traitListAttr
             } else {
                 traits = inputs._traits
@@ -884,16 +960,24 @@ extension _ViewListOutputs {
         )
     }
 
-    /// Closure-backed unary list fallback used until the generic body-unary generator
-    /// wiring path is implemented.
     static func unaryViewList(
         viewType: Any.Type,
         inputs: _ViewListInputs,
         body: @escaping (_ViewInputs) -> _ViewOutputs
     ) -> _ViewListOutputs {
-        let _ = BodyUnaryViewGenerator(body: body, viewType: viewType)
+        let generator = BodyUnaryViewGenerator(
+            body: body,
+            viewType: viewType
+        )
         return _ViewListOutputs(
-            views: .staticList(.unaryElements(UnaryElements(body: body, baseInputs: inputs.base))),
+            views: .staticList(
+                .unaryElements(
+                    UnaryElements(
+                        body: generator,
+                        baseInputs: inputs.base
+                    )
+                )
+            ),
             nextImplicitID: inputs.implicitID + 1,
             staticCount: 1
         )

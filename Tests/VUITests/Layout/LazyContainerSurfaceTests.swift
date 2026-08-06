@@ -12468,14 +12468,17 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var makeViewCount = 0
             let replacementElements = _ViewList_SubgraphElements(
                 base: UnaryElements(
-                    body: { _ in
-                        makeViewCount += 1
-                        return _ViewOutputs(
-                            layoutComputer: OptionalAttribute(
-                                graph.makeInput(value: LayoutComputer.fixed(CGSize(width: 99, height: 99)))
+                    body: BodyUnaryViewGenerator(
+                        body: { _ in
+                            makeViewCount += 1
+                            return _ViewOutputs(
+                                layoutComputer: OptionalAttribute(
+                                    graph.makeInput(value: LayoutComputer.fixed(CGSize(width: 99, height: 99)))
+                                )
                             )
-                        )
-                    },
+                        },
+                        viewType: EmptyView.self
+                    ),
                     baseInputs: makeViewInputs(graph: graph).base
                 )
             )
@@ -12649,15 +12652,18 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let layoutSize = CGSize(width: 31, height: 17)
             let elements = _ViewList_SubgraphElements(
                 base: UnaryElements(
-                    body: { _ in
-                        makeViewCount += 1
-                        observedSubgraph = AGSubgraph.current
-                        return _ViewOutputs(
-                            layoutComputer: OptionalAttribute(
-                                graph.makeInput(value: LayoutComputer.fixed(layoutSize))
+                    body: BodyUnaryViewGenerator(
+                        body: { _ in
+                            makeViewCount += 1
+                            observedSubgraph = AGSubgraph.current
+                            return _ViewOutputs(
+                                layoutComputer: OptionalAttribute(
+                                    graph.makeInput(value: LayoutComputer.fixed(layoutSize))
+                                )
                             )
-                        )
-                    },
+                        },
+                        viewType: EmptyView.self
+                    ),
                     baseInputs: makeViewInputs(graph: graph).base
                 )
             )

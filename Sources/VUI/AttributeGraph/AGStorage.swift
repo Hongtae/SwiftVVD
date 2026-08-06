@@ -2345,7 +2345,10 @@ extension _AGGraph {
         return attr
     }
 
-    func makeIndirectAttribute<V>(source: Attribute<V>) -> Attribute<V> {
+    func makeIndirectAttribute<V>(
+        source: Attribute<V>,
+        withoutInvalidation: Bool = false
+    ) -> Attribute<V> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(
@@ -2354,6 +2357,11 @@ extension _AGGraph {
             valuesEqual: Self.valueComparator(for: V.self),
             kind: .indirect(target: source.identifier, defaultValue: nil)
         )
+        // The native flag controls invalidation callbacks only when an
+        // indirect edge crosses graph contexts that share one graph storage.
+        // This graph has one host context; cross-graph edges use crossGraphRef,
+        // so there is no graph-local flag to retain on the indirect node.
+        _ = withoutInvalidation
         registerAttributeInfo(at: index, valueType: V.self)
         let attribute = Attribute<V>(AGAttribute(rawValue: index))
         indirectDefaultSources[attribute.identifier.rawValue] = source.identifier
@@ -2363,16 +2371,24 @@ extension _AGGraph {
 
     /// Points `indirect` at `concrete` (or nil to detach).
     /// Invalidates `indirect` and its downstream dependents.
-    func setIndirectTarget(_ indirect: AGAttribute, to concrete: AGAttribute?) {
+    func setIndirectTarget(
+        _ indirect: AGAttribute,
+        to concrete: AGAttribute?,
+        withoutInvalidation: Bool = false
+    ) {
         assert(_AGGraph.current === self)
         let index = Int(indirect.rawValue)
-        guard case let .indirect(_, defaultValue) = slots[index].node?.kind else {
+        guard case let .indirect(_, defaultValue) =
+                slots[index].node?.kind else {
             fatalError("setIndirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
         slots[index].node!.kind = .indirect(
             target: concrete,
             defaultValue: defaultValue
         )
+        // Retargeting always invalidates the indirect value. The boolean has
+        // the same cross-context-only role described at creation time.
+        _ = withoutInvalidation
         markNeedsEvaluation(indirect)
     }
 
@@ -2382,7 +2398,8 @@ extension _AGGraph {
     }
 
     func indirectTarget(_ indirect: AGAttribute) -> AGAttribute? {
-        guard case let .indirect(target, _) = slots[Int(indirect.rawValue)].node?.kind else {
+        guard case let .indirect(target, _) =
+                slots[Int(indirect.rawValue)].node?.kind else {
             fatalError("indirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
         return target

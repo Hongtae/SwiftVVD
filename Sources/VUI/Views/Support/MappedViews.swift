@@ -255,14 +255,13 @@ struct MappedViews<Content, MappedContent>: PrimitiveView, MultiView
                 if let indirectMap {
                     mergedInputs.makeReusable(indirectMap: indirectMap)
                 }
-                mergedInputs.applyViewPhaseOverrideIfNeeded()
                 mappedInputs.base = mergedInputs
 
                 return body(mappedInputs) { childInputs in
                     var childInputs = childInputs
                     childInputs.base.append(
                         makeView,
-                        forKey: MappedViewElement.BodyInput.self
+                        to: MappedViewElement.BodyInput.self
                     )
                     return MappedContent._makeView(
                         view: _GraphValue(_attribute: mappedView),

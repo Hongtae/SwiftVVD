@@ -160,11 +160,11 @@ final class ViewAliasSourceRoutingTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph)
             inputs.base.append(
                 AnySource(value: _GraphValue(_attribute: lower)),
-                forKey: SourceInput<ButtonStyleConfiguration.Label>.self
+                to: SourceInput<ButtonStyleConfiguration.Label>.self
             )
             inputs.base.append(
                 AnySource(value: _GraphValue(_attribute: upper)),
-                forKey: SourceInput<ButtonStyleConfiguration.Label>.self
+                to: SourceInput<ButtonStyleConfiguration.Label>.self
             )
             inputs.base[StyleableViewContextInput.self] = ViewAliasSourceProbe.self
 
@@ -202,7 +202,7 @@ final class ViewAliasSourceRoutingTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph)
             inputs.base.append(
                 AnySource(value: _GraphValue(_attribute: source)),
-                forKey: SourceInput<ButtonStyleConfiguration.Label>.self
+                to: SourceInput<ButtonStyleConfiguration.Label>.self
             )
 
             let outputs = PrimitiveButtonStyleConfiguration.Label._makeView(

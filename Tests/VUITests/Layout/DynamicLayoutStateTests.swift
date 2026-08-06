@@ -539,7 +539,10 @@ final class DynamicLayoutStateTests: XCTestCase {
                     views: .staticList(
                         .unaryElements(
                             UnaryElements(
-                                body: { _ in output(value) },
+                                body: BodyUnaryViewGenerator(
+                                    body: { _ in output(value) },
+                                    viewType: EmptyView.self
+                                ),
                                 baseInputs: inputs.base
                             )
                         )

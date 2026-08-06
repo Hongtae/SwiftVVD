@@ -125,10 +125,14 @@ extension _VariadicView_Children: RandomAccessCollection {
         /// Rendering routes through `_ViewList_View._makeView`.
         /// It does not extract TypedUnaryViewGenerator values from the element.
         public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-            let elements = UnaryElements(
+            let generator = BodyUnaryViewGenerator(
                 body: { viewInputs in
                     _ViewList_View._makeView(view: view[\.view], inputs: viewInputs)
                 },
+                viewType: Self.self
+            )
+            let elements = UnaryElements(
+                body: generator,
                 baseInputs: inputs.base
             )
             return _ViewListOutputs(
@@ -390,10 +394,44 @@ extension MultiView {
     }
 }
 
+protocol UnaryViewGenerator {
+    func makeView(
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?
+    ) -> _ViewOutputs
+
+    func tryToReuse(
+        by other: Self,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool
+}
+
 /// UnaryViewRoot-specific generator for unary variadic roots.
 struct BodyUnaryViewGenerator {
     var body: (_ViewInputs) -> _ViewOutputs
     var viewType: Any.Type
+}
+
+extension BodyUnaryViewGenerator: UnaryViewGenerator {
+    func makeView(
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?
+    ) -> _ViewOutputs {
+        body(inputs)
+    }
+
+    func tryToReuse(
+        by other: BodyUnaryViewGenerator,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        _AGCompareValues(
+            body,
+            other.body,
+            options: AGComparisonOptions(rawValue: 0x103)
+        )
+    }
 }
 
 extension _VariadicView_ViewRoot {

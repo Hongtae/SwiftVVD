@@ -116,17 +116,6 @@ struct Time: Comparable, Hashable {
     static func == (lhs: Time, rhs: Time) -> Bool { lhs.seconds == rhs.seconds }
 }
 
-struct ViewPhaseOverride: GraphInput {
-    static var defaultValue: OptionalAttribute<Phase> { OptionalAttribute() }
-
-    static func valuesEqual(
-        _ lhs: OptionalAttribute<Phase>,
-        _ rhs: OptionalAttribute<Phase>
-    ) -> Bool {
-        lhs.base.identifier == rhs.base.identifier
-    }
-}
-
 private struct SavedTransactionKey: GraphInput {
     static var defaultValue: [Attribute<Transaction>] { [] }
 
@@ -254,25 +243,56 @@ public struct _GraphInputs: GraphReusable {
         set { customInputs.setValue(newValue, forKey: key) }
     }
 
-    mutating func applyViewPhaseOverrideIfNeeded() {
-        guard let phaseOverride = self[ViewPhaseOverride.self].attribute else {
-            return
+    subscript<T: GraphInput>(_ key: T.Type) -> T.Value
+        where T.Value: GraphReusable {
+        get { customInputs.value(forKey: key) }
+        set {
+            recordReusableInput(key)
+            customInputs.setValue(newValue, forKey: key)
         }
-        phase = phaseOverride
     }
 
-    // Stack operations for base-channel keys with Stack values.
-    // Used by the ViewModifier body-input stack (BodyInput<Content>).
+    private mutating func recordReusableInput<T: GraphInput>(
+        _ key: T.Type
+    ) where T.Value: GraphReusable {
+        guard GraphReuseOptions.current.contains(.expandedReuse) else {
+            return
+        }
+        var storage = customInputs.value(forKey: ReusableInputs.self)
+        // Consecutive writes of the same key describe one reuse slot.
+        if let top = storage.stack.top,
+           ObjectIdentifier(top) == ObjectIdentifier(key) {
+            return
+        }
+        var filter = BloomFilter()
+        filter.insert(key)
+        storage.filter.value |= filter.value
+        storage.stack = .node(key, storage.stack)
+        customInputs.setValue(
+            storage,
+            forKey: ReusableInputs.self
+        )
+    }
 
-    /// Push an element onto the Stack stored for `key` in the base channel.
-    mutating func append<T: GraphInput, E>(_ element: E, forKey key: T.Type) where T.Value == Stack<E> {
+    mutating func append<T: GraphInput, E>(
+        _ element: E,
+        to key: T.Type
+    ) where T.Value == Stack<E> {
         var stack = customInputs.value(forKey: key)
         stack = .node(element, stack)
         customInputs.setValue(stack, forKey: key)
     }
 
-    /// Pop and return the top element from the Stack stored for `key` in the base channel.
-    /// Returns nil if the stack is empty.
+    mutating func append<T: GraphInput, E: GraphReusable>(
+        _ element: E,
+        to key: T.Type
+    ) where T.Value == Stack<E> {
+        recordReusableInput(key)
+        var stack = customInputs.value(forKey: key)
+        stack = .node(element, stack)
+        customInputs.setValue(stack, forKey: key)
+    }
+
     mutating func popLast<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
         var stack = customInputs.value(forKey: key)
         let elem = stack.pop()
@@ -280,8 +300,6 @@ public struct _GraphInputs: GraphReusable {
         return elem
     }
 
-    /// Peek at the top element of the Stack stored for `key` without consuming it.
-    /// Returns nil if the stack is empty.
     func top<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
         customInputs.value(forKey: key).top
     }
@@ -414,6 +432,191 @@ public struct _GraphInputs: GraphReusable {
     // Alias: merge(_:) == merge(_:ignoringPhase: false)
     mutating func merge(_ other: _GraphInputs) {
         merge(other, ignoringPhase: false)
+    }
+
+    mutating func makeReusable(indirectMap: IndirectAttributeMap) {
+        // Standard graph inputs become indirect attributes before a reusable
+        // element is materialized. The original input bundle remains the key
+        // used later by `tryToReuse`.
+        time.makeReusable(
+            indirectMap: indirectMap,
+            withoutInvalidation: false
+        )
+        phase.makeReusable(
+            indirectMap: indirectMap,
+            withoutInvalidation: false
+        )
+        changedDebugProperties |= 0x40
+
+        var environment = cachedEnvironment.value.environment
+        environment.makeReusable(
+            indirectMap: indirectMap,
+            withoutInvalidation: false
+        )
+        cachedEnvironment = MutableBox(
+            CachedEnvironment(environment: environment)
+        )
+        // A reusable subtree must not retain the previous environment cache
+        // object after its environment attribute becomes indirect.
+        changedDebugProperties |= 0x60
+
+        // Transaction reuse suppresses only cross-context callback forwarding;
+        // retargeting the indirect attribute still propagates dirtiness.
+        transaction.makeReusable(
+            indirectMap: indirectMap,
+            withoutInvalidation: true
+        )
+
+        var storage = customInputs.value(
+            forKey: ReusableInputs.self
+        ).stack
+        while let key = storage.pop() {
+            makeReusableInput(
+                key,
+                indirectMap: indirectMap
+            )
+        }
+    }
+
+    mutating func tryToReuse(
+        by other: _GraphInputs,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        guard time.tryToReuse(
+            by: other.time,
+            indirectMap: indirectMap,
+            withoutInvalidation: false,
+            testOnly: testOnly
+        ) else {
+            return false
+        }
+        guard phase.tryToReuse(
+            by: other.phase,
+            indirectMap: indirectMap,
+            withoutInvalidation: false,
+            testOnly: testOnly
+        ) else {
+            return false
+        }
+
+        var environment = cachedEnvironment.value.environment
+        guard environment.tryToReuse(
+            by: other.cachedEnvironment.value.environment,
+            indirectMap: indirectMap,
+            withoutInvalidation: false,
+            testOnly: testOnly
+        ) else {
+            return false
+        }
+
+        // Keep the transaction's callback boundary consistent with its
+        // reusable indirect attribute above.
+        guard transaction.tryToReuse(
+            by: other.transaction,
+            indirectMap: indirectMap,
+            withoutInvalidation: true,
+            testOnly: testOnly
+        ) else {
+            return false
+        }
+        return reuseCustomInputs(
+            by: other,
+            indirectMap: indirectMap,
+            testOnly: testOnly
+        )
+    }
+
+    private mutating func makeReusableInput<T: GraphInput>(
+        _ key: T.Type,
+        indirectMap: IndirectAttributeMap
+    ) {
+        if T.isTriviallyReusable {
+            return
+        }
+        var value = customInputs.value(forKey: key)
+        T.makeReusable(
+            indirectMap: indirectMap,
+            value: &value
+        )
+        customInputs.setValue(value, forKey: key)
+    }
+
+    private mutating func reuseCustomInputs(
+        by other: _GraphInputs,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        guard GraphReuseOptions.current.contains(.expandedReuse) else {
+            return customInputs.isEqual(to: other.customInputs)
+        }
+
+        // Expanded reuse handles recorded GraphReusable values separately.
+        // All unrecorded property-list values must still compare normally.
+        let lhsStorage = customInputs.value(
+            forKey: ReusableInputs.self
+        )
+        let rhsStorage = other.customInputs.value(
+            forKey: ReusableInputs.self
+        )
+        guard lhsStorage.filter.value == rhsStorage.filter.value else {
+            return false
+        }
+        let lhsTypes = reusableInputTypes(lhsStorage.stack)
+        let rhsTypes = reusableInputTypes(rhsStorage.stack)
+        guard lhsTypes == rhsTypes else {
+            return false
+        }
+
+        var ignoredTypes = lhsTypes
+        ignoredTypes.append(ObjectIdentifier(ReusableInputs.self))
+        guard customInputs.isEqual(
+            to: other.customInputs,
+            ignoring: ignoredTypes
+        ) else {
+            return false
+        }
+
+        var storage = lhsStorage.stack
+        while let key = storage.pop() {
+            guard tryToReuseInput(
+                key,
+                by: other,
+                indirectMap: indirectMap,
+                testOnly: testOnly
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func reusableInputTypes(
+        _ storage: Stack<any GraphInput.Type>
+    ) -> [ObjectIdentifier] {
+        var result: [ObjectIdentifier] = []
+        var storage = storage
+        while let key = storage.pop() {
+            result.append(ObjectIdentifier(key))
+        }
+        return result
+    }
+
+    private mutating func tryToReuseInput<T: GraphInput>(
+        _ key: T.Type,
+        by other: _GraphInputs,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        if T.isTriviallyReusable {
+            return true
+        }
+        return T.tryToReuse(
+            customInputs.value(forKey: key),
+            by: other.customInputs.value(forKey: key),
+            indirectMap: indirectMap,
+            testOnly: testOnly
+        )
     }
 }
 

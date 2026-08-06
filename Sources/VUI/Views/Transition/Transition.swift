@@ -64,7 +64,6 @@ public struct PlaceholderContentView<Value>: View {
                 var viewInputs = viewInputs
                 var mergedBase = inputs.base
                 mergedBase.merge(viewInputs.base, ignoringPhase: false)
-                mergedBase.applyViewPhaseOverrideIfNeeded()
                 viewInputs.base = mergedBase
                 return fn(_Graph(), viewInputs)
             }

@@ -21,7 +21,7 @@ struct CustomModifier<Source, Result>: ViewModifier where Source: View, Result: 
             fatalError("\(Self.self)._makeView called outside an active _AGGraph context.")
         }
         var inputs = inputs
-        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<PlaceholderContentView<Source>>.self)
+        inputs.base.append(BodyInputElement(makeView: body), to: BodyInput<PlaceholderContentView<Source>>.self)
         return Result._makeView(view: modifier[\.result], inputs: inputs)
     }
 
@@ -34,7 +34,7 @@ struct CustomModifier<Source, Result>: ViewModifier where Source: View, Result: 
             fatalError("\(Self.self)._makeViewList called outside an active _AGGraph context.")
         }
         var inputs = inputs
-        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<PlaceholderContentView<Source>>.self)
+        inputs.base.append(BodyInputElement(makeViewList: body), to: BodyInput<PlaceholderContentView<Source>>.self)
         return Result._makeViewList(view: modifier[\.result], inputs: inputs)
     }
 

@@ -599,8 +599,8 @@ struct _ViewList_IteratorStyle: Equatable {
 // MARK: - _ViewList_ID / _ViewList_Edit
 
 /// A stable identity for a specific view in a ViewList.
-/// Current storage keeps the known index, implicit ID, and explicit ID list.
-/// Explicit binding behavior remains partial.
+/// The index and implicit lane identify list position; explicit entries retain
+/// their owner, reuse discriminator, and unary canonicalization state.
 struct _ViewList_ID {
     struct Canonical: Hashable, CustomStringConvertible {
         var _index: Int32
@@ -1754,31 +1754,10 @@ struct EmptyViewListElements: _ViewList_Elements {
 
 // MARK: - UnaryElements
 
-/// Single-view _ViewList_Elements.
-/// makeElements skips one element when from != 0.
-/// When from == 0, it calls body(inputs, makeViewClosure).
-///
-/// This collapses separate generator specializations into one closure path.
-struct UnaryElements: _ViewList_Elements {
-    /// Retained for typed generator construction.
-    /// nil for body-generator construction.
-    var typedGenerator: TypedUnaryViewGenerator?
-    var makeViewClosure: (_ViewInputs) -> _ViewOutputs
+/// Single-view element storage parameterized by its materialization generator.
+struct UnaryElements<Generator: UnaryViewGenerator>: _ViewList_Elements {
+    var body: Generator
     var baseInputs: _GraphInputs
-
-    init(generator: TypedUnaryViewGenerator) {
-        self.typedGenerator = generator
-        self.makeViewClosure = { inputs in generator.makeView(inputs: inputs) ?? _ViewOutputs() }
-        self.baseInputs = generator.baseInputs
-    }
-
-    /// BodyUnaryViewGenerator path.
-    /// Exact layout wiring remains simplified.
-    init(body: @escaping (_ViewInputs) -> _ViewOutputs, baseInputs: _GraphInputs) {
-        self.typedGenerator = nil
-        self.makeViewClosure = body
-        self.baseInputs = baseInputs
-    }
 
     var count: Int { 1 }
 
@@ -1787,14 +1766,63 @@ struct UnaryElements: _ViewList_Elements {
         from: inout Int,
         inputs: _ViewInputs,
         indirectMap: IndirectAttributeMap?,
-        body: (_ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+        body callback: (
+            _ViewInputs,
+            @escaping (_ViewInputs) -> _ViewOutputs
+        ) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
         if from != 0 {
-            from -= 1
+            from = max(from - 1, 0)
             return (nil, true)
         }
-        let closure = makeViewClosure
-        return body(inputs, { i in closure(i) })
+
+        let generator = body
+        let baseInputs = baseInputs
+        return callback(inputs) { inputs in
+            var inputs = inputs
+            var mergedInputs = baseInputs
+            if let indirectMap {
+                mergedInputs.makeReusable(indirectMap: indirectMap)
+            }
+            mergedInputs.merge(inputs.base, ignoringPhase: false)
+            inputs.base = mergedInputs
+            return generator.makeView(
+                inputs: inputs,
+                indirectMap: indirectMap
+            )
+        }
+    }
+
+    func tryToReuseElement(
+        at index: Int,
+        by other: any _ViewList_Elements,
+        at otherIndex: Int,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        guard let other = other as? UnaryElements<Generator>,
+              baseInputs.containsNonEmptyBodyStack,
+              other.baseInputs.containsNonEmptyBodyStack,
+              body.tryToReuse(
+                by: other.body,
+                indirectMap: indirectMap,
+                testOnly: testOnly
+              ) else {
+            return false
+        }
+
+        var reusableInputs = baseInputs
+        return reusableInputs.tryToReuse(
+            by: other.baseInputs,
+            indirectMap: indirectMap,
+            testOnly: testOnly
+        )
+    }
+}
+
+extension UnaryElements where Generator == TypedUnaryViewGenerator {
+    init(generator: TypedUnaryViewGenerator) {
+        self.init(body: generator, baseInputs: generator.baseInputs)
     }
 }
 
@@ -1956,7 +1984,6 @@ struct ModifiedElements: _ViewList_Elements {
             // Merge modifier baseInputs at higher priority than elementInputs.base.
             var mergedBase = capturedBaseInputs
             mergedBase.merge(elementInputs.base, ignoringPhase: false)
-            mergedBase.applyViewPhaseOverrideIfNeeded()
             var mergedInputs = elementInputs
             mergedInputs.base = mergedBase
 
@@ -2687,14 +2714,71 @@ struct TransactionID: Comparable, Hashable {
 
 // MARK: - SExpPrinter
 
-/// Debug pretty-printer for ViewList trees. Stub.
-struct SExpPrinter {}
+/// Builds a nested S-expression while keeping multiline indentation balanced.
+struct SExpPrinter {
+    var output: String
+    var depth: Int
+    var indent: String
+
+    init(tag: String, singleLine: Bool = false) {
+        output = "(" + tag
+        depth = singleLine ? 0 : 1
+        indent = singleLine ? "" : "  "
+    }
+
+    mutating func end() -> String {
+        if depth != 0 {
+            depth -= 1
+            indent.removeLast(2)
+        }
+        output.append(")")
+        return output
+    }
+
+    mutating func push(_ tag: String) {
+        if depth != 0 {
+            output.append("\n")
+            output.append(indent)
+            output.append("(")
+            output.append(tag)
+            depth += 1
+            indent.append("  ")
+        } else {
+            output.append("(")
+            output.append(tag)
+        }
+    }
+
+    mutating func print(_ value: String, newline: Bool = true) {
+        if newline && depth != 0 {
+            output.append("\n")
+            output.append(indent)
+        } else {
+            output.append(" ")
+        }
+        output.append(value)
+    }
+
+    mutating func pop() {
+        if depth != 0 {
+            depth -= 1
+            indent.removeLast(2)
+        }
+        output.append(")")
+    }
+
+    mutating func newline() {
+        guard depth != 0 else { return }
+        output.append("\n")
+        output.append(indent)
+    }
+}
 
 // MARK: - ViewListElements
 
 /// Discriminated union for a fully-static view list structure.
 indirect enum ViewListElements {
-    case unaryElements(UnaryElements)
+    case unaryElements(any _ViewList_Elements)
     case merged([_ViewListOutputs])
     // staticList modifier path.
     case modified(ModifiedElements)

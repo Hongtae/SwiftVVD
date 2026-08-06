@@ -41,7 +41,6 @@ public struct _UnaryViewAdaptor<Content>: View where Content: View {
             var viewInputs = viewInputs
             var mergedBase = inputs.base
             mergedBase.merge(viewInputs.base, ignoringPhase: false)
-            mergedBase.applyViewPhaseOverrideIfNeeded()
             viewInputs.base = mergedBase
             return Self._makeView(view: view, inputs: viewInputs)
         }

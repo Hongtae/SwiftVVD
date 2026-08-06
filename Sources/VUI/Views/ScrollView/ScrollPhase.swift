@@ -90,7 +90,7 @@ extension _GraphInputs {
     }
 
     mutating func appendScrollPhaseState(_ state: OptionalAttribute<ScrollPhaseState>) {
-        append(state, forKey: ScrollPhaseStateKey.self)
+        append(state, to: ScrollPhaseStateKey.self)
     }
 }
 

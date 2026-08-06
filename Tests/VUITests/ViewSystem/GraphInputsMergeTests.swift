@@ -2,7 +2,7 @@ import XCTest
 @testable import VUI
 
 final class GraphInputsMergeTests: XCTestCase {
-    func testUsingGraphicsRendererIsBoolViewInputWithSeparateViewChannel() {
+    func testUsingGraphicsRendererUsesSharedGraphInputChannel() {
         assertBoolViewInput(UsingGraphicsRenderer.self)
 
         let graph = _AGGraph()
@@ -16,16 +16,16 @@ final class GraphInputsMergeTests: XCTestCase {
             inputs[UsingGraphicsRenderer.self] = true
 
             XCTAssertTrue(inputs[UsingGraphicsRenderer.self])
-            XCTAssertFalse(inputs.base[UsingGraphicsRenderer.self])
-
-            inputs.base[UsingGraphicsRenderer.self] = true
-
-            XCTAssertTrue(inputs[UsingGraphicsRenderer.self])
             XCTAssertTrue(inputs.base[UsingGraphicsRenderer.self])
+            XCTAssertFalse(
+                inputs.customInputs.value(
+                    forKey: UsingGraphicsRenderer.self
+                )
+            )
         }
     }
 
-    func testArchivedViewInputMatchesObservedMarkerCarrierAndViewChannel() throws {
+    func testArchivedViewInputMatchesObservedMarkerCarrierAndSharedChannel() throws {
         XCTAssertEqual(MemoryLayout<ArchivedViewInput.Flags>.size, 1)
         XCTAssertEqual(MemoryLayout<ArchivedViewInput.DeploymentVersion>.size, 1)
         XCTAssertEqual(MemoryLayout<ArchivedViewInput.Value>.size, 2)
@@ -83,7 +83,11 @@ final class GraphInputsMergeTests: XCTestCase {
             inputs[ArchivedViewInput.self] = archived
 
             XCTAssertEqual(inputs[ArchivedViewInput.self], archived)
-            XCTAssertEqual(inputs.base[ArchivedViewInput.self], defaultValue)
+            XCTAssertEqual(inputs.base[ArchivedViewInput.self], archived)
+            XCTAssertEqual(
+                inputs.customInputs.value(forKey: ArchivedViewInput.self),
+                defaultValue
+            )
         }
     }
 

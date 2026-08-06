@@ -23,7 +23,9 @@ public struct _Graph {}
 /// - Do NOT read `.value` on it inside `_makeView` (that would pull the value eagerly).
 /// - Use `Attribute<T>.value` inside rule closures instead.
 public struct _GraphValue<Value> {
-    let _attribute: Attribute<Value>
+    // Reuse replaces this cursor's source with a graph-owned indirect
+    // attribute while preserving the cursor's value type.
+    var _attribute: Attribute<Value>
 
     init(_attribute: Attribute<Value>) {
         self._attribute = _attribute

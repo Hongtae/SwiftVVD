@@ -43,6 +43,8 @@ extension Stack: IteratorProtocol {
     mutating func next() -> Element? { pop() }
 }
 
+extension Stack: Equatable where Element: Equatable {}
+
 // Bloom filter for fast negative lookup in PropertyList chains.
 // 64-bit bit-array: if a key's bits are not set, it is definitely not in the chain.
 // False positives are possible (full scan still needed on hit).
@@ -107,6 +109,26 @@ struct PropertyList: CustomStringConvertible {
             return true
         case let (lhs?, rhs?):
             return lhs.isListEqual(to: rhs)
+        default:
+            return false
+        }
+    }
+
+    func isEqual(
+        to other: PropertyList,
+        ignoring ignoredTypes: [ObjectIdentifier]
+    ) -> Bool {
+        // Ignored keys are compared by their GraphReusable witnesses after
+        // the remaining property-list structure has matched.
+        switch (elements, other.elements) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            var ignoredTypes = Set(ignoredTypes)
+            return lhs.isListEqual(
+                to: rhs,
+                ignoredTypes: &ignoredTypes
+            )
         default:
             return false
         }
@@ -537,7 +559,10 @@ extension PropertyList {
             return isListEqual(to: other, ignoredTypes: &ignoredTypes)
         }
 
-        private func isListEqual(to other: Element, ignoredTypes: inout Set<ObjectIdentifier>) -> Bool {
+        fileprivate func isListEqual(
+            to other: Element,
+            ignoredTypes: inout Set<ObjectIdentifier>
+        ) -> Bool {
             guard length == other.length else { return false }
             var lhs: Element? = self
             var rhs: Element? = other

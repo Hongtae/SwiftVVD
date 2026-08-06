@@ -32,7 +32,8 @@ class AppGraph<A: App>: @unchecked Sendable {
         var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
 
         _AGGraph.withCurrent(graph) {
-            // Stub AG input nodes for _GraphInputs fields.
+            // Root input nodes seed the graph inputs used while constructing
+            // the app's scene tree.
             let timeAttr        = graph.makeInput(value: time)
             let phaseAttr       = graph.makeInput(value: Phase())
             let transactionAttr = graph.makeInput(value: Transaction())

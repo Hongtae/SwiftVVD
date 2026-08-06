@@ -4079,7 +4079,13 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     count: 1,
                     id: _ViewList_ID(explicitID: row),
                     elements: _ViewList_SubgraphElements(
-                        base: UnaryElements(body: makeOutputs, baseInputs: baseInputs)
+                        base: UnaryElements(
+                            body: BodyUnaryViewGenerator(
+                                body: makeOutputs,
+                                viewType: EmptyView.self
+                            ),
+                            baseInputs: baseInputs
+                        )
                     ),
                     traits: traits,
                     list: list
@@ -4131,7 +4137,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     id: _ViewList_ID(explicitID: row),
                     elements: _ViewList_SubgraphElements(
                         base: UnaryElements(
-                            body: { inputs in makeOutputs(rowValue, inputs) },
+                            body: BodyUnaryViewGenerator(
+                                body: { inputs in
+                                    makeOutputs(rowValue, inputs)
+                                },
+                                viewType: EmptyView.self
+                            ),
                             baseInputs: baseInputs
                         )
                     ),

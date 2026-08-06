@@ -73,10 +73,18 @@ final class VisualEffectTests: XCTestCase {
 
     // ASSERTIONS visualEffectGeometryRuntimeObserved
     func testViewModifierSuppliesPreEffectGeometryAndAppliesEffectsInOrder() throws {
-        let graph = _AGGraph()
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
         let recorder = VisualEffectGeometryRecorder()
 
-        try _AGGraph.withCurrent(graph) {
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
             let view = VisualEffectDisplaySource().visualEffect { effect, proxy in
                 recorder.size = proxy.size
                 recorder.local = proxy.frame(in: .local)
@@ -90,9 +98,11 @@ final class VisualEffectTests: XCTestCase {
                     .blur(radius: 2, opaque: true)
             }
             let source = graph.makeInput(value: view)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
             let outputs = type(of: view)._makeView(
                 view: _GraphValue(_attribute: source),
-                inputs: makeViewInputs(graph: graph)
+                inputs: inputs
             )
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
@@ -108,33 +118,54 @@ final class VisualEffectTests: XCTestCase {
             )
             XCTAssertEqual(recorder.safeAreaInsets, EdgeInsets())
 
-            let blur = try XCTUnwrap(style(in: try XCTUnwrap(list.items.first)))
+            let blurItem = try XCTUnwrap(list.items.first)
+            let blur = try XCTUnwrap(style(in: blurItem))
             guard case let .blur(radius, isOpaque) = blur.style else {
                 return XCTFail("Expected blur as the outer visual effect")
             }
             XCTAssertEqual(radius, 2)
             XCTAssertTrue(isOpaque)
 
-            let opacity = try XCTUnwrap(style(in: try XCTUnwrap(blur.contents.items.first)))
+            let opacityItem = try XCTUnwrap(blur.contents.items.first)
+            let opacity = try XCTUnwrap(style(in: opacityItem))
             guard case let .opacity(amount) = opacity.style else {
                 return XCTFail("Expected opacity inside blur")
             }
             XCTAssertEqual(amount, 0.4, accuracy: 0.000_001)
+            let sourceItem = try XCTUnwrap(opacity.contents.items.first)
+            let presentationBounds = CGRect(
+                x: 36,
+                y: 28,
+                width: 20,
+                height: 10
+            )
+            XCTAssertEqual(list.interpolationBounds, presentationBounds)
+            XCTAssertEqual(blurItem.frame, presentationBounds)
+            XCTAssertEqual(blur.contents.interpolationBounds, presentationBounds)
+            XCTAssertEqual(blur.transform, .identity)
+            XCTAssertEqual(opacityItem.frame, presentationBounds)
+            XCTAssertEqual(opacity.contents.interpolationBounds, presentationBounds)
+            XCTAssertEqual(opacity.transform, .identity)
+            XCTAssertEqual(sourceItem.frame, presentationBounds)
             XCTAssertEqual(
-                opacity.contents.interpolationBounds,
-                CGRect(x: 6, y: 8, width: 20, height: 10)
+                sourceItem.command.bounds,
+                CGRect(x: 0, y: 0, width: 20, height: 10)
             )
         }
     }
 
     private func style(
         in item: DisplayList.Item
-    ) -> (style: DisplayList.Content.StyleValue.Style, contents: DisplayList)? {
+    ) -> (
+        style: DisplayList.Content.StyleValue.Style,
+        contents: DisplayList,
+        transform: CGAffineTransform
+    )? {
         guard case let .content(content) = item.value,
               case let .style(value) = content.value else {
             return nil
         }
-        return (value.style, value.contents)
+        return (value.style, value.contents, value.transform)
     }
 
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {

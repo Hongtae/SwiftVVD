@@ -8,8 +8,8 @@
 import Foundation
 import Synchronization
 
-// Workaround: `struct PreferenceKey: PreferenceKey` inside ConfirmationDialog would shadow
-// the outer protocol name. Use a private typealias to keep the conformance unambiguous.
+// The nested key name also matches its protocol, so qualify the protocol
+// through a file-private alias to keep conformance lookup unambiguous.
 private typealias _PreferenceKeyProto = PreferenceKey
 
 // Key differences from AlertModifier:

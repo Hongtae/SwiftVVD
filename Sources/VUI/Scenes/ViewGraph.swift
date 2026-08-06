@@ -88,8 +88,8 @@ protocol ViewGraphRenderDelegate: AnyObject {
 }
 
 // ViewGraphRootValueUpdater - notifies ViewGraph when root input values change.
-// Current host code implements no-op stubs for transform, focus, and
-// accessibility paths until those root inputs are wired.
+// Transform, focus, and accessibility requirements have default no-op
+// implementations; concrete hosts override the roots they own.
 // ViewGraphHost.updateDelegate: Optional<ViewGraphRootValueUpdater>
 // WindowController conforms as the host object that updates root input attributes.
 protocol ViewGraphRootValueUpdater: ViewGraphDelegate {

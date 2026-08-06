@@ -12,31 +12,65 @@ import Synchronization
 // One entry on the BodyInput<Content> stack.
 // Stores Swift closures for make-view and make-view-list body paths.
 struct BodyInputElement {
+    private struct ViewBodyStorage {
+        var body: (_Graph, _ViewInputs) -> _ViewOutputs
+    }
+
+    private struct ViewListBodyStorage {
+        var body: (_Graph, _ViewListInputs) -> _ViewListOutputs
+    }
+
     let isViewList: Bool
-    // Valid when isViewList == false:
-    let makeViewFn: ((_Graph, _ViewInputs) -> _ViewOutputs)?
-    // Valid when isViewList == true:
-    let makeViewListFn: ((_Graph, _ViewListInputs) -> _ViewListOutputs)?
+    private let viewBody: ViewBodyStorage?
+    private let viewListBody: ViewListBodyStorage?
+
+    var makeViewFn: ((_Graph, _ViewInputs) -> _ViewOutputs)? {
+        viewBody?.body
+    }
+
+    var makeViewListFn: ((_Graph, _ViewListInputs) -> _ViewListOutputs)? {
+        viewListBody?.body
+    }
 
     init(makeView: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
         self.isViewList = false
-        self.makeViewFn = makeView
-        self.makeViewListFn = nil
+        self.viewBody = ViewBodyStorage(body: makeView)
+        self.viewListBody = nil
     }
 
     init(makeViewList: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
         self.isViewList = true
-        self.makeViewFn = nil
-        self.makeViewListFn = makeViewList
+        self.viewBody = nil
+        self.viewListBody = ViewListBodyStorage(body: makeViewList)
     }
 }
 
 extension BodyInputElement: Equatable {
-    // Different body kinds are not equal. Matching kinds are also conservatively
-    // false because stored Swift closures cannot be compared directly.
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.isViewList == rhs.isViewList else { return false }
-        return false
+        let options = AGComparisonOptions(rawValue: 0x103)
+        if lhs.isViewList {
+            guard lhs.viewListBody != nil,
+                  rhs.viewListBody != nil else {
+                return false
+            }
+            // The wrapper preserves the stored function/context pair when the
+            // element is copied; projecting a bare closure can reabstract it.
+            return _AGCompareValues(
+                lhs.viewListBody,
+                rhs.viewListBody,
+                options: options
+            )
+        }
+        guard lhs.viewBody != nil,
+              rhs.viewBody != nil else {
+            return false
+        }
+        return _AGCompareValues(
+            lhs.viewBody,
+            rhs.viewBody,
+            options: options
+        )
     }
 }
 
@@ -52,7 +86,7 @@ extension BodyInputElement: GraphReusable {
 struct BodyInput<Content>: ViewInput {
     typealias Value = Stack<BodyInputElement>
     static var defaultValue: Stack<BodyInputElement> { .empty }
-    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { a == b }
     // BodyInputElement is trivially reusable, so the stack key is reusable too.
     static var isTriviallyReusable: Bool { true }
 }
@@ -166,7 +200,6 @@ extension _ViewModifier_Content {
                 var viewInputs = viewInputs
                 var mergedBase = inputs.base
                 mergedBase.merge(viewInputs.base, ignoringPhase: false)
-                mergedBase.applyViewPhaseOverrideIfNeeded()
                 viewInputs.base = mergedBase
                 return fn(_Graph(), viewInputs)
             }
@@ -218,6 +251,16 @@ extension ViewModifier {
         }
     }
 
+    static func makeMultiViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
+    }
+
     static func viewListCount(
         inputs: _ViewListCountInputs,
         body: @escaping (_ViewListCountInputs) -> Int?
@@ -257,7 +300,7 @@ extension ViewModifier {
         var inputs = inputs
         inputs.base = graphInputs
         // Default path appends directly to graph inputs instead of using pushModifierBody.
-        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
+        inputs.base.append(BodyInputElement(makeView: body), to: BodyInput<Content>.self)
         return Body._makeView(view: bodyGV, inputs: inputs)
     }
 
@@ -275,7 +318,7 @@ extension ViewModifier {
 
         var inputs = inputs
         inputs.base = graphInputs
-        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
+        inputs.base.append(BodyInputElement(makeViewList: body), to: BodyInput<Content>.self)
         return Body._makeViewList(view: bodyGV, inputs: inputs)
     }
 }
@@ -439,7 +482,7 @@ extension ViewModifier where Self: Animatable {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
         var inputs = inputs
-        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
+        inputs.base.append(BodyInputElement(makeView: body), to: BodyInput<Content>.self)
         return Body._makeView(view: modifier[\._content], inputs: inputs)
     }
 
@@ -454,7 +497,7 @@ extension ViewModifier where Self: Animatable {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
         var inputs = inputs
-        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
+        inputs.base.append(BodyInputElement(makeViewList: body), to: BodyInput<Content>.self)
         return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
     // This extension inherits _viewListCount from the default ViewModifier extension.
@@ -542,7 +585,6 @@ protocol PrimitiveViewModifier: ViewModifier {}
 protocol MultiViewModifier: PrimitiveViewModifier where Body == Never {}
 
 extension MultiViewModifier {
-    // Calls body to get inner outputs, then wraps via multiModifier.
     public static func _makeViewList(
         modifier: _GraphValue<Self>,
         inputs: _ViewListInputs,
@@ -551,9 +593,11 @@ extension MultiViewModifier {
         guard _AGGraph.current != nil else {
             fatalError("\(self)._makeViewList called outside an active _AGGraph context.")
         }
-        var outputs = body(_Graph(), inputs)
-        outputs.multiModifier(modifier, inputs: inputs)
-        return outputs
+        return makeMultiViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
     }
 }
 
@@ -1394,7 +1438,7 @@ where PlacementContextType == _PositionAwarePlacementContext {
 extension _ViewInputs {
     /// Pushes a makeView closure onto the BodyInput stack.
     mutating func pushModifierBody<T>(_ type: T.Type, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
-        base.append(BodyInputElement(makeView: body), forKey: BodyInput<T>.self)
+        base.append(BodyInputElement(makeView: body), to: BodyInput<T>.self)
     }
 
     /// Returns the top element of the Stack for a ViewInput key without consuming it. Delegates to _GraphInputs.top.
@@ -1411,6 +1455,6 @@ extension _ViewInputs {
 extension _ViewListInputs {
     /// Pushes a makeViewList closure onto the BodyInput stack.
     mutating func pushModifierBody<T>(_ type: T.Type, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
-        base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<T>.self)
+        base.append(BodyInputElement(makeViewList: body), to: BodyInput<T>.self)
     }
 }
