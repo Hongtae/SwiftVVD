@@ -554,7 +554,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             explicitLines.sizeThatFits(
                 _ProposedSize(width: 100, height: 0)
             ),
-            CGSize(width: 40, height: 10)
+            CGSize(width: 24, height: 10)
         )
 
         let wrappedLine = ResolvedStyledText(

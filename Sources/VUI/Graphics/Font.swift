@@ -82,6 +82,7 @@ protocol Typeface {
     var lineHeight: CGFloat { get }
     var ascender: CGFloat { get }
     var descender: CGFloat { get }
+    var decorationMetrics: TypefaceDecorationMetrics? { get }
     var resolvedMetrics: ResolvedFontMetrics { get }
     var identifier: String { get }
 
@@ -117,6 +118,8 @@ extension Typeface {
             leading: max(lineHeight - (ascender - descender), 0)
         )
     }
+
+    var decorationMetrics: TypefaceDecorationMetrics? { nil }
 
     func purgeResources(reason: ResourcePurgeReason) {}
 }
@@ -178,6 +181,9 @@ extension VVDFontBackedTypeface {
     var lineHeight: CGFloat { font.height }
     var ascender: CGFloat { font.ascender }
     var descender: CGFloat { font.descender }
+    var decorationMetrics: TypefaceDecorationMetrics? {
+        typefaceDecorationMetrics(for: font)
+    }
 
     var resolvedMetrics: ResolvedFontMetrics {
         let metrics = font.baseMetrics
@@ -220,18 +226,24 @@ private struct ScaleInvariantTypefaceMetrics {
     let font: VVD.Font
     let renderScale: CGFloat
     let embolden: CGFloat
+    let decorationMetrics: TypefaceDecorationMetrics?
 
-    var lineHeight: CGFloat {
-        font.height * renderScale
+    init(
+        font: VVD.Font,
+        renderScale: CGFloat,
+        embolden: CGFloat
+    ) {
+        self.font = font
+        self.renderScale = renderScale
+        self.embolden = embolden
+        self.decorationMetrics = typefaceDecorationMetrics(
+            for: font
+        )?.scaled(by: renderScale)
     }
 
-    var ascender: CGFloat {
-        font.ascender * renderScale
-    }
-
-    var descender: CGFloat {
-        font.descender * renderScale
-    }
+    var lineHeight: CGFloat { font.height * renderScale }
+    var ascender: CGFloat { font.ascender * renderScale }
+    var descender: CGFloat { font.descender * renderScale }
 
     var resolvedMetrics: ResolvedFontMetrics {
         let metrics = font.baseMetrics
@@ -275,6 +287,7 @@ private struct ScaleInvariantTypefaceMetrics {
 struct TextureTypeface: VVDFontBackedTypeface {
     let textureFont: VVD.TextureFont
     private let layoutMetrics: ScaleInvariantTypefaceMetrics?
+    let decorationMetrics: TypefaceDecorationMetrics?
     typealias GlyphData = VVD.TextureFont.GlyphData
 
     init(
@@ -283,14 +296,17 @@ struct TextureTypeface: VVDFontBackedTypeface {
         renderScale: CGFloat = 1,
         logicalEmbolden: CGFloat = 0
     ) {
-        self.textureFont = textureFont
-        self.layoutMetrics = layoutFont.map {
+        let layoutMetrics = layoutFont.map {
             ScaleInvariantTypefaceMetrics(
                 font: $0,
                 renderScale: renderScale,
                 embolden: logicalEmbolden
             )
         }
+        self.textureFont = textureFont
+        self.layoutMetrics = layoutMetrics
+        self.decorationMetrics = layoutMetrics?.decorationMetrics ??
+            typefaceDecorationMetrics(for: textureFont)
     }
 
     var font: VVD.Font { textureFont }
@@ -371,6 +387,7 @@ final class VectorTypeface: VVDFontBackedTypeface {
     let embolden: CGFloat
     let outlineThickness: CGFloat
     private let layoutMetrics: ScaleInvariantTypefaceMetrics?
+    let decorationMetrics: TypefaceDecorationMetrics?
 
     struct GlyphData: @unchecked Sendable {
         let metrics: VVD.Font.GlyphMetrics
@@ -390,16 +407,19 @@ final class VectorTypeface: VVDFontBackedTypeface {
          layoutFont: VVD.Font? = nil,
          renderScale: CGFloat = 1,
          logicalEmbolden: CGFloat? = nil) {
-        self.font = font
-        self.embolden = embolden
-        self.outlineThickness = outlineThickness
-        self.layoutMetrics = layoutFont.map {
+        let layoutMetrics = layoutFont.map {
             ScaleInvariantTypefaceMetrics(
                 font: $0,
                 renderScale: renderScale,
                 embolden: logicalEmbolden ?? embolden
             )
         }
+        self.font = font
+        self.embolden = embolden
+        self.outlineThickness = outlineThickness
+        self.layoutMetrics = layoutMetrics
+        self.decorationMetrics = layoutMetrics?.decorationMetrics ??
+            typefaceDecorationMetrics(for: font)
     }
 
     var lineHeight: CGFloat {

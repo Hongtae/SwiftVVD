@@ -1311,7 +1311,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
             func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
                 guard view.renderer == nil else { return nil }
-                return view.text.resolvedText?.makeDrawing(in: size)
+                return view.text.resolvedText?.makeDrawing(
+                    in: size,
+                    layoutProperties: view.text.layoutProperties
+                )
             }
 
             func glyphAtoms() -> [GraphicsContext.ResolvedText.GlyphAtom]? {
@@ -1319,7 +1322,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
                       let resolvedText = view.text.resolvedText else {
                     return nil
                 }
-                return resolvedText.glyphAtoms(in: size).map { atom in
+                return resolvedText.glyphAtoms(
+                    in: size,
+                    layoutProperties: view.text.layoutProperties
+                ).map { atom in
                     var atom = atom
                     atom.bounds = atom.bounds
                         .offsetBy(dx: frame.minX, dy: frame.minY)
@@ -1343,11 +1349,17 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(source))
                     let layout = source.makeLayout(
                         in: bounds.size,
-                        layoutDirection: context.environment.layoutDirection
+                        layoutDirection: context.environment.layoutDirection,
+                        layoutProperties: view.text.layoutProperties
                     )
                     renderer.draw(layout: layout, in: &context)
                 } else {
-                    context.draw(resolvedText, in: frame, shading: shading)
+                    context.draw(
+                        resolvedText,
+                        in: frame,
+                        shading: shading,
+                        layoutProperties: view.text.layoutProperties
+                    )
                 }
             }
 

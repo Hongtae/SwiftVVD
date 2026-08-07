@@ -1093,7 +1093,10 @@ final class ResolvedStyledText: InterpolatableContent {
             return cached.metrics
         }
 
-        let measured = resolvedText.layoutMetrics(in: requestedSize)
+        let measured = resolvedText.layoutMetrics(
+            in: requestedSize,
+            layoutProperties: layoutProperties
+        )
         metricsCache.append(MetricsCacheEntry(
             requestedSize: requestedSize,
             metrics: measured

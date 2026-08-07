@@ -184,14 +184,26 @@ struct SizeFittingTextCacheValue<Engine: LayoutEngine> {
                 width: proposal.width ?? .infinity,
                 height: proposal.height ?? .infinity
             ),
-            layoutDirection: .leftToRight
+            layoutDirection: .leftToRight,
+            layoutProperties: text.layoutProperties
         )
         if layout.isTruncated {
             return true
         }
-        if let lineLimit = text.layoutProperties.lineLimit,
-           layout.count > lineLimit {
-            return true
+        if let lineLimit = text.layoutProperties.lineLimit {
+            var unrestrictedProperties = text.layoutProperties
+            unrestrictedProperties.lineLimit = nil
+            let unrestricted = resolved.makeLayout(
+                in: CGSize(
+                    width: proposal.width ?? .infinity,
+                    height: proposal.height ?? .infinity
+                ),
+                layoutDirection: .leftToRight,
+                layoutProperties: unrestrictedProperties
+            )
+            if unrestricted.count > lineLimit {
+                return true
+            }
         }
         return false
     }

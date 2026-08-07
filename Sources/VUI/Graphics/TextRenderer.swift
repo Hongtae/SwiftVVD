@@ -94,6 +94,7 @@ public struct TextProxy {
 fileprivate struct _TextLayoutRunStorage: Equatable {
     var glyphRange: Range<Int>
     var attributes: _TextAttributeValues
+    var style: _ResolvedTextRunAttributes
 }
 
 fileprivate struct _TextLayoutLineStorage {
@@ -142,12 +143,19 @@ fileprivate final class _TextLayoutStorage {
         let glyphs = line.glyphs[glyphRange]
         let ascent = glyphs.reduce(CGFloat.zero) { max($0, $1.ascender) } * scale
         let descent = -glyphs.reduce(CGFloat.zero) { min($0, $1.descender) } * scale
+        let leading = glyphs.reduce(CGFloat.zero) {
+            max($0, $1.face.resolvedMetrics.leading)
+        } * scale
+        let baselineOffset = glyphs.first?.baselineOffset ?? 0
         return Text.Layout.TypographicBounds(
-            origin: CGPoint(x: offsets[glyphRange.lowerBound] * scale, y: 0),
+            origin: CGPoint(
+                x: offsets[glyphRange.lowerBound] * scale,
+                y: -baselineOffset * scale
+            ),
             width: (offsets[glyphRange.upperBound] - offsets[glyphRange.lowerBound]) * scale,
             ascent: ascent,
             descent: descent,
-            leading: max(line.ascent + line.descent - ascent - descent, 0)
+            leading: leading
         )
     }
 
@@ -156,8 +164,8 @@ fileprivate final class _TextLayoutStorage {
         let line = lines[lineIndex]
         var glyphs = Array(line.glyphs[glyphRange])
         glyphs[0].kerning = .zero
-        let ascent = glyphs.reduce(CGFloat.zero) { max($0, $1.ascender) }
-        let descender = glyphs.reduce(CGFloat.zero) { min($0, $1.descender) }
+        let ascent = line.ascent * source.scaleFactor
+        let descender = -line.descent * source.scaleFactor
         let width = glyphs.enumerated().reduce(CGFloat.zero) { partial, item in
             partial + item.element.advance.width + (item.offset == 0 ? 0 : item.element.kerning.x)
         }
@@ -309,7 +317,7 @@ extension Text {
             public var typographicBounds: TypographicBounds {
                 let line = _line.storage.lines[_line.index]
                 return TypographicBounds(
-                    origin: .zero,
+                    origin: origin,
                     width: line.width,
                     ascent: line.ascent,
                     descent: line.descent,
@@ -353,12 +361,23 @@ extension Text {
             public var layoutDirection: LayoutDirection { line.storage.layoutDirection }
 
             public var typographicBounds: TypographicBounds {
-                line.storage.bounds(line: line.index, glyphRange: glyphRange)
+                var bounds = line.storage.bounds(
+                    line: line.index,
+                    glyphRange: glyphRange
+                )
+                bounds.origin.x += lineOrigin.x
+                bounds.origin.y += lineOrigin.y
+                return bounds
             }
 
             public var characterIndices: [CharacterIndex] {
-                let prefix = line.storage.lines[..<line.index].reduce(0) { $0 + $1.glyphs.count }
-                return glyphRange.map { CharacterIndex(value: prefix + $0) }
+                glyphRange.map {
+                    CharacterIndex(
+                        value: line.storage.lines[
+                            line.index
+                        ].glyphs[$0].characterIndex
+                    )
+                }
             }
 
             public static func == (lhs: Run, rhs: Run) -> Bool {
@@ -409,10 +428,13 @@ extension Text {
 
             public var typographicBounds: TypographicBounds {
                 let base = run.glyphRange.lowerBound
-                return run.line.storage.bounds(
+                var bounds = run.line.storage.bounds(
                     line: run.line.index,
                     glyphRange: (base + indices.lowerBound)..<(base + indices.upperBound)
                 )
+                bounds.origin.x += run.lineOrigin.x
+                bounds.origin.y += run.lineOrigin.y
+                return bounds
             }
 
             public var characterIndices: [CharacterIndex] {
@@ -431,17 +453,24 @@ extension Text {
 }
 
 extension GraphicsContext.ResolvedText {
-    func makeLayout(in size: CGSize, layoutDirection: LayoutDirection) -> Text.Layout {
+    func makeLayout(
+        in size: CGSize,
+        layoutDirection: LayoutDirection,
+        layoutProperties: TextLayoutProperties? = nil
+    ) -> Text.Layout {
         let width = max(size.width, 0) * scaleFactor
         let height = max(size.height, 0) * scaleFactor
         let maxWidth = width > CGFloat(Int.max)
             ? Int.max
             : Int(ceil(width))
         let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
-        let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
-        let unbounded = makeGlyphs()
-        let isTruncated = lineGlyphs.flatMap { $0.glyphs }.map { $0.scalar } !=
-            unbounded.flatMap { $0.glyphs }.map { $0.scalar }
+        let lineGlyphs = makeGlyphs(
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+            lineLimit: layoutProperties?.lineLimit,
+            truncationMode: layoutProperties?.truncationMode ?? .tail
+        )
+        let isTruncated = lineGlyphs.contains { $0.isTruncated }
         return makeLayout(
             lineGlyphs: lineGlyphs,
             layoutDirection: layoutDirection,
@@ -464,12 +493,20 @@ extension GraphicsContext.ResolvedText {
                 if let last = runs.indices.last,
                    runs[last].glyphRange.upperBound == glyphIndex,
                    runs[last].attributes == glyph.attributes,
-                   line.glyphs[runs[last].glyphRange.lowerBound].face.isEqual(to: glyph.face) {
+                   runs[last].style == glyph.style,
+                   !glyph.isTruncationToken,
+                   !line.glyphs[
+                    runs[last].glyphRange.lowerBound
+                   ].isTruncationToken,
+                   line.glyphs[
+                    runs[last].glyphRange.lowerBound
+                   ].face.isEqual(to: glyph.face) {
                     runs[last].glyphRange = runs[last].glyphRange.lowerBound..<(glyphIndex + 1)
                 } else {
                     runs.append(_TextLayoutRunStorage(
                         glyphRange: glyphIndex..<(glyphIndex + 1),
-                        attributes: glyph.attributes
+                        attributes: glyph.attributes,
+                        style: glyph.style
                     ))
                 }
             }
@@ -521,14 +558,21 @@ extension GraphicsContext {
             return
         }
         let bounds = run.line.storage.bounds(line: run.line.index, glyphRange: glyphRange)
+        let sourceLine = run.line.storage.lines[run.line.index]
         let drawing = run.layoutRenderer.source.makeDrawing(lineGlyphs: [lineGlyphs])
         let origin = CGPoint(
             x: run.lineOrigin.x + bounds.origin.x,
-            y: run.lineOrigin.y - bounds.ascent
+            y: run.lineOrigin.y - sourceLine.ascent
         )
         draw(
             drawing,
-            in: CGRect(origin: origin, size: CGSize(width: bounds.width, height: bounds.ascent + bounds.descent)),
+            in: CGRect(
+                origin: origin,
+                size: CGSize(
+                    width: bounds.width,
+                    height: sourceLine.ascent + sourceLine.descent
+                )
+            ),
             shading: run.layoutRenderer.source.shading,
             snapOrigin: !run.baseDrawingOptions.union(options).contains(.disablesSubpixelQuantization)
         )

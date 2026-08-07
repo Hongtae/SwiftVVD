@@ -171,6 +171,16 @@ class AnyTextStorage: CustomDebugStringConvertible {
     }
 }
 
+class AnyTextModifier {
+    func isEqual(to other: AnyTextModifier) -> Bool {
+        self === other
+    }
+
+    func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
+}
+
 private func _dynamicArchiveStorage(
     for storage: NSAttributedString,
     enabled: Bool
@@ -407,12 +417,15 @@ private final class DateTextStorage: AnyTextStorage {
         let end = formatter.string(from: interval.end)
         let startHour = calendar.component(.hour, from: interval.start)
         let endHour = calendar.component(.hour, from: interval.end)
-        let startDesignator = (
+        // Foundation exposes different nullability for these symbols by platform.
+        let startDesignatorSymbol: String? = (
             startHour < 12 ? formatter.amSymbol : formatter.pmSymbol
-        ) ?? ""
-        let endDesignator = (
+        )
+        let endDesignatorSymbol: String? = (
             endHour < 12 ? formatter.amSymbol : formatter.pmSymbol
-        ) ?? ""
+        )
+        let startDesignator = startDesignatorSymbol ?? ""
+        let endDesignator = endDesignatorSymbol ?? ""
         if !startDesignator.isEmpty,
            startDesignator == endDesignator,
            let range = start.range(of: startDesignator) {
@@ -1109,7 +1122,7 @@ public struct Text: Equatable {
         }
     }
 
-    let storage: Storage
+    var storage: Storage
 
     public enum Case: Hashable {
         case lowercase
@@ -1120,10 +1133,6 @@ public struct Text: Equatable {
         public struct Pattern: Equatable, Sendable {
             let rawValue: Int
 
-            private init(rawValue: Int) {
-                self.rawValue = rawValue
-            }
-
             public static let solid = Pattern(rawValue: 0)
             public static let dot = Pattern(rawValue: 0x100)
             public static let dash = Pattern(rawValue: 0x200)
@@ -1133,6 +1142,9 @@ public struct Text: Equatable {
 
         let nsUnderlineStyleValue: Int
         let color: Color?
+        var pattern: Pattern {
+            Pattern(rawValue: nsUnderlineStyleValue & 0xF00)
+        }
 
         public init(pattern: Text.LineStyle.Pattern = .solid, color: Color? = nil) {
             self.nsUnderlineStyleValue = 1 | pattern.rawValue
@@ -1202,22 +1214,69 @@ public struct Text: Equatable {
     }
 
     enum Modifier: Equatable {
-        case font(Font)
-        case fontWeight(Font.Weight)
-        case foregroundColor(Color)
-        case bold(Bool)
-        case italic(Bool)
-        case strikethrough(Bool, LineStyle.Pattern, Color?)
-        case underline(Bool, LineStyle.Pattern, Color?)
-        case monospacedDigit
+        case color(Color?)
+        case font(Font?)
+        case italic
+        case weight(Font.Weight?)
         case kerning(CGFloat)
         case tracking(CGFloat)
-        case baselineOffset(CGFloat)
-        case textCase(Case)
-        case customAttribute(_AnyTextAttribute)
+        case baseline(CGFloat)
+        case rounded
+        case anyTextModifier(AnyTextModifier)
+
+        static func == (lhs: Modifier, rhs: Modifier) -> Bool {
+            switch (lhs, rhs) {
+            case let (.color(lhs), .color(rhs)):
+                lhs == rhs
+            case let (.font(lhs), .font(rhs)):
+                lhs == rhs
+            case (.italic, .italic), (.rounded, .rounded):
+                true
+            case let (.weight(lhs), .weight(rhs)):
+                lhs == rhs
+            case let (.kerning(lhs), .kerning(rhs)),
+                 let (.tracking(lhs), .tracking(rhs)),
+                 let (.baseline(lhs), .baseline(rhs)):
+                lhs == rhs
+            case let (.anyTextModifier(lhs), .anyTextModifier(rhs)):
+                lhs.isEqual(to: rhs)
+            default:
+                false
+            }
+        }
+
+        func hashResolution(into hasher: inout Hasher) {
+            switch self {
+            case let .color(value):
+                hasher.combine(0)
+                hasher.combine(value)
+            case let .font(value):
+                hasher.combine(1)
+                hasher.combine(value)
+            case .italic:
+                hasher.combine(2)
+            case let .weight(value):
+                hasher.combine(3)
+                hasher.combine(value)
+            case let .kerning(value):
+                hasher.combine(4)
+                hasher.combine(value)
+            case let .tracking(value):
+                hasher.combine(5)
+                hasher.combine(value)
+            case let .baseline(value):
+                hasher.combine(6)
+                hasher.combine(value)
+            case .rounded:
+                hasher.combine(7)
+            case let .anyTextModifier(value):
+                hasher.combine(8)
+                value.hashResolution(into: &hasher)
+            }
+        }
     }
 
-    let modifiers: [Modifier]
+    var modifiers: [Modifier]
 
     public init(
         _ key: LocalizedStringKey,
@@ -1461,7 +1520,10 @@ public struct Text: Equatable {
             if case let .verbatim(text) = self.storage {
                 runs = [.text(faces, text)]
                 return GraphicsContext.ResolvedText(
-                    runs: runs.map { $0.applying(customAttributes) },
+                    runs: runs.map {
+                        $0.applying(customAttributes)
+                            .applying(textModifiers: modifiers)
+                    },
                     scaleFactor: context.contentScaleFactor,
                     displayScale: context.displayScale
                 )
@@ -1474,9 +1536,14 @@ public struct Text: Equatable {
                 ) else {
                     return nil
                 }
-                guard !customAttributes.isEmpty else { return resolved }
+                guard !customAttributes.isEmpty || hasResolvedRunModifiers else {
+                    return resolved
+                }
                 return GraphicsContext.ResolvedText(
-                    runs: resolved.runs.map { $0.applying(customAttributes) },
+                    runs: resolved.runs.map {
+                        $0.applying(customAttributes)
+                            .applying(textModifiers: modifiers)
+                    },
                     scaleFactor: context.contentScaleFactor,
                     displayScale: context.displayScale
                 )
@@ -1549,6 +1616,10 @@ public struct Text: Equatable {
         hasher.combine(environment.effectiveFont.hashValue)
         hasher.combine(environment.defaultFontRenderingMode)
         hasher.combine(environment.displayScale)
+        hasher.combine(environment._contentScaleFactor)
+        for modifier in modifiers {
+            modifier.hashResolution(into: &hasher)
+        }
         customAttributes.hash(into: &hasher)
         return hasher.finalize()
     }
@@ -1664,7 +1735,10 @@ public struct Text: Equatable {
         return variants.map { variant, string in
             let runs: [GraphicsContext.ResolvedText.Run] = [.text(faces, string)]
             let resolved = GraphicsContext.ResolvedText(
-                runs: runs.map { $0.applying(customAttributes) },
+                runs: runs.map {
+                    $0.applying(customAttributes)
+                        .applying(textModifiers: modifiers)
+                },
                 scaleFactor: context.contentScaleFactor,
                 displayScale: context.displayScale
             )
@@ -1673,25 +1747,116 @@ public struct Text: Equatable {
     }
 }
 
+final class BoldTextModifier: AnyTextModifier {
+    let isActive: Bool
+
+    init(isActive: Bool) {
+        self.isActive = isActive
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? BoldTextModifier)?.isActive == isActive
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(BoldTextModifier.self))
+        hasher.combine(isActive)
+    }
+}
+
+final class ItalicTextModifier: AnyTextModifier {
+    let isActive: Bool
+
+    init(isActive: Bool) {
+        self.isActive = isActive
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? ItalicTextModifier)?.isActive == isActive
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(ItalicTextModifier.self))
+        hasher.combine(isActive)
+    }
+}
+
+final class UnderlineTextModifier: AnyTextModifier {
+    let lineStyle: Text.LineStyle?
+
+    init(lineStyle: Text.LineStyle?) {
+        self.lineStyle = lineStyle
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? UnderlineTextModifier)?.lineStyle == lineStyle
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(UnderlineTextModifier.self))
+        hasher.combine(lineStyle)
+    }
+}
+
+final class StrikethroughTextModifier: AnyTextModifier {
+    let lineStyle: Text.LineStyle?
+
+    init(lineStyle: Text.LineStyle?) {
+        self.lineStyle = lineStyle
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? StrikethroughTextModifier)?.lineStyle == lineStyle
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(StrikethroughTextModifier.self))
+        hasher.combine(lineStyle)
+    }
+}
+
+class TextAttributeModifierBase: AnyTextModifier {
+    func apply(to attributes: inout _TextAttributeValues) {}
+}
+
+private final class TextAttributeModifier<Value>: TextAttributeModifierBase
+where Value: TextAttribute {
+    let value: Value
+
+    init(value: Value) {
+        self.value = value
+    }
+
+    override func apply(to attributes: inout _TextAttributeValues) {
+        attributes.set(_AnyTextAttribute(value))
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? TextAttributeModifier<Value>)?.value == value
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(Value.self))
+        hasher.combine(value)
+    }
+}
+
 extension Text {
+    func modified(with modifier: Modifier) -> Text {
+        Text(storage: storage, modifiers: modifiers + [modifier])
+    }
+
     public func foregroundColor(_ color: Color?) -> Text {
-        var modifiers: [Modifier] = []
-        self.modifiers.forEach {
-            if case .foregroundColor(_) = $0 { } else {
-                modifiers.append($0)
-            }
-        }
-        if let color {
-            modifiers.append(.foregroundColor(color))
-        }
-        return Text(storage: self.storage, modifiers: modifiers)
+        modified(with: .color(color))
     }
 
     var foregroundColor: Color? {
-        self.modifiers.compactMap {
-            if case let .foregroundColor(color) = $0 { return color }
-            return nil
-        }.first
+        for modifier in modifiers {
+            if case let .color(color) = modifier {
+                return color
+            }
+        }
+        return nil
     }
 
     func foregroundShading(in environment: EnvironmentValues) -> GraphicsContext.Shading {
@@ -1712,43 +1877,29 @@ extension Text {
     }
 
     public func font(_ font: Font?) -> Text {
-        var modifiers: [Modifier] = []
-        self.modifiers.forEach {
-            if case .font(_) = $0 { } else {
-                modifiers.append($0)
-            }
-        }
-        if let font {
-            modifiers.append(.font(font))
-        }
-        return Text(storage: self.storage, modifiers: modifiers)
+        modified(with: .font(font))
     }
 
     var font: Font? {
-        self.modifiers.compactMap {
-            if case let .font(font) = $0 { return font }
-            return nil
-        }.first
+        for modifier in modifiers {
+            if case let .font(font) = modifier {
+                return font
+            }
+        }
+        return nil
     }
 
     public func fontWeight(_ weight: Font.Weight?) -> Text {
-        var modifiers: [Modifier] = []
-        self.modifiers.forEach {
-            if case .fontWeight(_) = $0 { } else {
-                modifiers.append($0)
-            }
-        }
-        if let weight {
-            modifiers.append(.fontWeight(weight))
-        }
-        return Text(storage: self.storage, modifiers: modifiers)
+        modified(with: .weight(weight))
     }
 
     var fontWeight: Font.Weight? {
-        self.modifiers.compactMap {
-            if case let .fontWeight(weight) = $0 { return weight }
-            return nil
-        }.first
+        for modifier in modifiers {
+            if case let .weight(weight) = modifier {
+                return weight
+            }
+        }
+        return nil
     }
 
     public func bold() -> Text {
@@ -1756,60 +1907,132 @@ extension Text {
     }
 
     public func bold(_ isActive: Bool) -> Text {
-        var modifiers = modifiers.filter {
-            guard case .bold = $0 else { return true }
-            return false
-        }
-        modifiers.append(.bold(isActive))
-        return Text(storage: storage, modifiers: modifiers)
+        modified(with: .anyTextModifier(BoldTextModifier(
+            isActive: isActive
+        )))
     }
 
     var boldValue: Bool? {
         for modifier in modifiers {
-            if case let .bold(value) = modifier { return value }
+            guard case let .anyTextModifier(value) = modifier,
+                  let value = value as? BoldTextModifier else {
+                continue
+            }
+            return value.isActive
         }
         return nil
     }
 
     public func italic() -> Text {
-        italic(true)
+        modified(with: .italic)
     }
 
     public func italic(_ isActive: Bool) -> Text {
-        var modifiers = modifiers.filter {
-            guard case .italic = $0 else { return true }
-            return false
+        if isActive {
+            return italic()
         }
-        modifiers.append(.italic(isActive))
-        return Text(storage: storage, modifiers: modifiers)
+        return modified(with: .anyTextModifier(ItalicTextModifier(
+            isActive: false
+        )))
     }
 
     var italicValue: Bool? {
         for modifier in modifiers {
-            if case let .italic(value) = modifier { return value }
+            switch modifier {
+            case .italic:
+                return true
+            case let .anyTextModifier(value):
+                if let value = value as? ItalicTextModifier {
+                    return value.isActive
+                }
+            default:
+                continue
+            }
         }
         return nil
+    }
+
+    public func strikethrough(
+        _ isActive: Bool = true,
+        color: Color? = nil
+    ) -> Text {
+        strikethrough(isActive, pattern: .solid, color: color)
+    }
+
+    public func strikethrough(
+        _ isActive: Bool = true,
+        pattern: LineStyle.Pattern,
+        color: Color? = nil
+    ) -> Text {
+        modified(with: .anyTextModifier(StrikethroughTextModifier(
+            lineStyle: isActive
+                ? LineStyle(pattern: pattern, color: color)
+                : nil
+        )))
+    }
+
+    public func underline(
+        _ isActive: Bool = true,
+        color: Color? = nil
+    ) -> Text {
+        underline(isActive, pattern: .solid, color: color)
+    }
+
+    public func underline(
+        _ isActive: Bool = true,
+        pattern: LineStyle.Pattern,
+        color: Color? = nil
+    ) -> Text {
+        modified(with: .anyTextModifier(UnderlineTextModifier(
+            lineStyle: isActive
+                ? LineStyle(pattern: pattern, color: color)
+                : nil
+        )))
+    }
+
+    public func kerning(_ kerning: CGFloat) -> Text {
+        modified(with: .kerning(kerning))
+    }
+
+    public func tracking(_ tracking: CGFloat) -> Text {
+        modified(with: .tracking(tracking))
+    }
+
+    public func baselineOffset(_ baselineOffset: CGFloat) -> Text {
+        modified(with: .baseline(baselineOffset))
     }
 }
 
 extension Text {
     public func customAttribute<T>(_ value: T) -> Text where T: TextAttribute {
-        let attribute = _AnyTextAttribute(value)
-        var modifiers = modifiers.filter {
-            guard case let .customAttribute(existing) = $0 else { return true }
-            return existing.type != attribute.type
-        }
-        modifiers.append(.customAttribute(attribute))
-        return Text(storage: storage, modifiers: modifiers)
+        modified(with: .anyTextModifier(TextAttributeModifier(value: value)))
     }
 
     var customAttributes: _TextAttributeValues {
         var attributes = _TextAttributeValues()
         for modifier in modifiers {
-            guard case let .customAttribute(attribute) = modifier else { continue }
-            attributes.set(attribute)
+            guard case let .anyTextModifier(value) = modifier,
+                  let value = value as? TextAttributeModifierBase else {
+                continue
+            }
+            value.apply(to: &attributes)
         }
         return attributes
+    }
+
+    var hasResolvedRunModifiers: Bool {
+        modifiers.contains { modifier in
+            switch modifier {
+            case .kerning, .tracking, .baseline:
+                return true
+            case let .anyTextModifier(value):
+                return value is UnderlineTextModifier ||
+                    value is StrikethroughTextModifier ||
+                    value is TextAttributeModifierBase
+            default:
+                return false
+            }
+        }
     }
 
     public static func + (lhs: Text, rhs: Text) -> Text {

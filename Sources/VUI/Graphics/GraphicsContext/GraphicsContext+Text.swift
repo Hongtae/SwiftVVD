@@ -71,6 +71,92 @@ extension GraphicsContext {
                     return self
                 }
             }
+
+            func applying(textModifiers: [Text.Modifier]) -> Run {
+                let faces: [Typeface]
+                let text: String
+                let attributes: _TextAttributeValues
+                var style: _ResolvedTextRunAttributes
+                let hadStyle: Bool
+
+                switch self {
+                case let .text(runFaces, runText):
+                    faces = runFaces
+                    text = runText
+                    attributes = _TextAttributeValues()
+                    style = _ResolvedTextRunAttributes()
+                    hadStyle = false
+                case let .attributedText(runFaces, runText, runAttributes):
+                    faces = runFaces
+                    text = runText
+                    attributes = runAttributes
+                    style = _ResolvedTextRunAttributes()
+                    hadStyle = false
+                case let .styledText(
+                    runFaces,
+                    runText,
+                    runAttributes,
+                    runStyle
+                ):
+                    faces = runFaces
+                    text = runText
+                    attributes = runAttributes
+                    style = runStyle
+                    hadStyle = true
+                case .attachment, .attributedAttachment:
+                    return self
+                }
+
+                if style.tracking == nil {
+                    for modifier in textModifiers {
+                        if case let .tracking(value) = modifier {
+                            style.tracking = value
+                            break
+                        }
+                    }
+                }
+                if style.tracking == nil, style.kern == nil {
+                    for modifier in textModifiers {
+                        if case let .kerning(value) = modifier {
+                            style.kern = value
+                            break
+                        }
+                    }
+                }
+                var resolvedBaseline = style.baselineOffset != nil
+                var resolvedUnderline = style.underlineStyle != nil
+                var resolvedStrikethrough = style.strikethroughStyle != nil
+
+                for modifier in textModifiers {
+                    switch modifier {
+                    case let .baseline(value) where !resolvedBaseline:
+                        style.baselineOffset = value
+                        resolvedBaseline = true
+                    case let .anyTextModifier(value):
+                        if !resolvedUnderline,
+                           let value = value as? UnderlineTextModifier {
+                            resolvedUnderline = true
+                            if let lineStyle = value.lineStyle {
+                                style.underlineStyle = lineStyle
+                            }
+                        } else if !resolvedStrikethrough,
+                                  let value =
+                                    value as? StrikethroughTextModifier {
+                            resolvedStrikethrough = true
+                            if let lineStyle = value.lineStyle {
+                                style.strikethroughStyle = lineStyle
+                            }
+                        }
+                    default:
+                        break
+                    }
+                }
+
+                guard hadStyle || !style.isEmpty else {
+                    return self
+                }
+                return .styledText(faces, text, attributes, style)
+            }
         }
 
         final class Storage: AppLifetimeResource, @unchecked Sendable {
@@ -257,14 +343,19 @@ extension GraphicsContext {
             ceil(max(width, 0) * displayScale) / displayScale
         }
 
-        func layoutMetrics(in size: CGSize) -> LayoutMetrics {
+        func layoutMetrics(
+            in size: CGSize,
+            layoutProperties: TextLayoutProperties? = nil
+        ) -> LayoutMetrics {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(
                 maxWidth: maxWidth,
-                maxHeight: maxHeight
+                maxHeight: maxHeight,
+                lineLimit: layoutProperties?.lineLimit,
+                truncationMode: layoutProperties?.truncationMode ?? .tail
             )
             let pixelSize = lineGlyphs.reduce(CGSize.zero) { result, line in
                 CGSize(
@@ -356,7 +447,19 @@ extension GraphicsContext {
             var descender: CGFloat = .zero  // distance from the baseline to the lowest
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
             var attributes = _TextAttributeValues()
+            var style = _ResolvedTextRunAttributes()
+            var baselineOffset: CGFloat = .zero
             var foregroundColor: Color?
+            var characterIndex: Int = 0
+            var isTruncationToken: Bool = false
+
+            var lineAscender: CGFloat {
+                ascender + max(baselineOffset, 0)
+            }
+
+            var lineDescender: CGFloat {
+                descender + min(baselineOffset, 0)
+            }
 
             var contentOffset: CGPoint {
                 switch content {
@@ -375,6 +478,9 @@ extension GraphicsContext {
             var ascender: CGFloat
             var descender: CGFloat
             var width: CGFloat
+            var trailingBoundary: Glyph? = nil
+            var paragraphIndex: Int = 0
+            var isTruncated: Bool = false
             var height: CGFloat { ascender - descender }
         }
 
@@ -383,12 +489,20 @@ extension GraphicsContext {
             var bounds: CGRect
         }
 
-        func glyphAtoms(in size: CGSize) -> [GlyphAtom] {
+        func glyphAtoms(
+            in size: CGSize,
+            layoutProperties: TextLayoutProperties? = nil
+        ) -> [GlyphAtom] {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
-            let lines = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            let lines = makeGlyphs(
+                maxWidth: maxWidth,
+                maxHeight: maxHeight,
+                lineLimit: layoutProperties?.lineLimit,
+                truncationMode: layoutProperties?.truncationMode ?? .tail
+            )
             let scale = 1 / scaleFactor
             var atoms: [GlyphAtom] = []
             var lineOriginY: CGFloat = 0
@@ -398,10 +512,13 @@ extension GraphicsContext {
                     ? CGFloat.zero
                     : width / CGFloat(line.glyphs.count)
                 var glyphOriginX: CGFloat = 0
-                for glyph in line.glyphs {
+                for (index, glyph) in line.glyphs.enumerated() {
                     let advance = glyph.advance.width > 0
                         ? glyph.advance.width
                         : fallbackAdvance
+                    if index != 0 {
+                        glyphOriginX += glyph.kerning.x
+                    }
                     atoms.append(GlyphAtom(
                         scalar: glyph.scalar,
                         bounds: CGRect(
@@ -411,8 +528,7 @@ extension GraphicsContext {
                             height: line.height * scale
                         )
                     ))
-                    let kerning = glyphOriginX > 0 ? glyph.kerning.x : 0
-                    glyphOriginX += advance + kerning
+                    glyphOriginX += advance
                 }
                 lineOriginY += line.height
             }
@@ -438,21 +554,67 @@ extension GraphicsContext {
                 var textureFrame: CGRect
             }
 
+            struct Background {
+                var frame: CGRect
+                var color: Color
+            }
+
+            struct Decoration {
+                var start: CGPoint
+                var end: CGPoint
+                var lineWidth: CGFloat
+                var lineStyle: Text.LineStyle
+                var foregroundColor: Color?
+
+                func dashPattern(lineWidth: CGFloat) -> [CGFloat] {
+                    switch lineStyle.pattern {
+                    case .dot:
+                        [lineWidth * 3, lineWidth * 3]
+                    case .dash:
+                        [lineWidth * 10, lineWidth * 5]
+                    case .dashDot:
+                        [
+                            lineWidth * 10,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                        ]
+                    case .dashDotDot:
+                        [
+                            lineWidth * 10,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                            lineWidth * 3,
+                        ]
+                    default:
+                        []
+                    }
+                }
+            }
+
             fileprivate var source: ResolvedText
             fileprivate var lineGlyphs: [LineGlyphs]
             fileprivate var batches: [Batch]
             fileprivate var attachments: [Attachment]
+            var backgrounds: [Background]
+            var decorations: [Decoration]
 
             fileprivate init(
                 source: ResolvedText,
                 lineGlyphs: [LineGlyphs],
                 batches: [Batch],
-                attachments: [Attachment]
+                attachments: [Attachment],
+                backgrounds: [Background],
+                decorations: [Decoration]
             ) {
                 self.source = source
                 self.lineGlyphs = lineGlyphs
                 self.batches = batches
                 self.attachments = attachments
+                self.backgrounds = backgrounds
+                self.decorations = decorations
             }
 
             var isEmpty: Bool {
@@ -531,7 +693,12 @@ extension GraphicsContext {
             }
         }
 
-        func makeGlyphs(maxWidth: Int = .max, maxHeight: Int = .max) -> [LineGlyphs] {
+        func makeGlyphs(
+            maxWidth: Int = .max,
+            maxHeight: Int = .max,
+            lineLimit: Int? = nil,
+            truncationMode: Text.TruncationMode = .tail
+        ) -> [LineGlyphs] {
             let lineGlyphs = storage.lineGlyphs { runs in
                 Self._makeGlyphs(
                     runs: runs,
@@ -540,7 +707,13 @@ extension GraphicsContext {
                 )
             }
 
-            return _lineWrap(lineGlyphs, maxWidth: maxWidth, maxHeight: maxHeight)
+            return _lineWrap(
+                lineGlyphs,
+                maxWidth: maxWidth,
+                maxHeight: maxHeight,
+                lineLimit: lineLimit,
+                truncationMode: truncationMode
+            )
         }
 
         func prepareResources() {
@@ -552,12 +725,20 @@ extension GraphicsContext {
             }
         }
 
-        func makeDrawing(in size: CGSize) -> Drawing {
+        func makeDrawing(
+            in size: CGSize,
+            layoutProperties: TextLayoutProperties? = nil
+        ) -> Drawing {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
             let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
-            let lineGlyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            let lineGlyphs = makeGlyphs(
+                maxWidth: maxWidth,
+                maxHeight: maxHeight,
+                lineLimit: layoutProperties?.lineLimit,
+                truncationMode: layoutProperties?.truncationMode ?? .tail
+            )
             return makeDrawing(lineGlyphs: lineGlyphs)
         }
 
@@ -572,6 +753,8 @@ extension GraphicsContext {
 
             var quads: [Quad] = []
             var attachments: [Drawing.Attachment] = []
+            var backgrounds: [Drawing.Background] = []
+            var decorations: [Drawing.Decoration] = []
 
             func appendTexture(
                 texture: Texture?,
@@ -683,6 +866,116 @@ extension GraphicsContext {
                 }
             }
 
+            func appendBackground(_ frame: CGRect, color: Color) {
+                if let index = backgrounds.indices.last,
+                   backgrounds[index].color == color,
+                   abs(backgrounds[index].frame.maxX - frame.minX) <
+                    .ulpOfOne,
+                   abs(backgrounds[index].frame.minY - frame.minY) <
+                    .ulpOfOne,
+                   abs(backgrounds[index].frame.height - frame.height) <
+                    .ulpOfOne {
+                    backgrounds[index].frame.size.width =
+                        frame.maxX - backgrounds[index].frame.minX
+                } else {
+                    backgrounds.append(Drawing.Background(
+                        frame: frame,
+                        color: color
+                    ))
+                }
+            }
+
+            func appendDecoration(
+                start: CGPoint,
+                end: CGPoint,
+                lineWidth: CGFloat,
+                lineStyle: Text.LineStyle,
+                foregroundColor: Color?
+            ) {
+                if let index = decorations.lastIndex(where: {
+                    $0.lineStyle == lineStyle &&
+                        $0.foregroundColor == foregroundColor &&
+                        abs($0.lineWidth - lineWidth) < .ulpOfOne &&
+                        abs($0.end.x - start.x) < .ulpOfOne &&
+                        abs($0.end.y - start.y) < .ulpOfOne
+                }) {
+                    decorations[index].end = end
+                } else {
+                    decorations.append(Drawing.Decoration(
+                        start: start,
+                        end: end,
+                        lineWidth: lineWidth,
+                        lineStyle: lineStyle,
+                        foregroundColor: foregroundColor
+                    ))
+                }
+            }
+
+            var lineOriginY: CGFloat = 0
+            for line in lineGlyphs {
+                var cellOriginX: CGFloat = 0
+                for (index, glyph) in line.glyphs.enumerated() {
+                    let kerning = index == 0 ? 0 : glyph.kerning.x
+                    let cellWidth = kerning + glyph.advance.width
+                    let baseline = CGPoint(
+                        x: cellOriginX + kerning,
+                        y: lineOriginY + line.ascender -
+                            glyph.baselineOffset
+                    )
+
+                    if let color = glyph.style.backgroundColor {
+                        appendBackground(
+                            CGRect(
+                                x: cellOriginX,
+                                y: baseline.y - glyph.ascender,
+                                width: cellWidth,
+                                height: glyph.ascender - glyph.descender
+                            ),
+                            color: color
+                        )
+                    }
+
+                    if let metrics = glyph.face.decorationMetrics {
+                        let rawLogicalWidth =
+                            metrics.underlineThickness / scaleFactor
+                        let logicalWidth = ceil(
+                            rawLogicalWidth * displayScale
+                        ) / displayScale
+                        let lineWidth = logicalWidth * scaleFactor
+                        let endX = cellOriginX + cellWidth
+                        if let lineStyle = glyph.style.underlineStyle {
+                            let y = baseline.y -
+                                metrics.underlinePosition
+                            appendDecoration(
+                                start: CGPoint(x: cellOriginX, y: y),
+                                end: CGPoint(x: endX, y: y),
+                                lineWidth: lineWidth,
+                                lineStyle: lineStyle,
+                                foregroundColor:
+                                    lineStyle.color ??
+                                    glyph.foregroundColor
+                            )
+                        }
+                        if let lineStyle =
+                            glyph.style.strikethroughStyle,
+                           let xHeight = metrics.xHeight {
+                            let y = baseline.y - xHeight * 0.5
+                            appendDecoration(
+                                start: CGPoint(x: cellOriginX, y: y),
+                                end: CGPoint(x: endX, y: y),
+                                lineWidth: lineWidth,
+                                lineStyle: lineStyle,
+                                foregroundColor:
+                                    lineStyle.color ??
+                                    glyph.foregroundColor
+                            )
+                        }
+                    }
+                    cellOriginX += cellWidth
+                }
+                lineOriginY += line.height
+            }
+
             quads.sort { lhs, rhs in
                 if lhs.colorGlyphs != rhs.colorGlyphs {
                     return !lhs.colorGlyphs
@@ -711,7 +1004,9 @@ extension GraphicsContext {
                 source: self,
                 lineGlyphs: lineGlyphs,
                 batches: batches,
-                attachments: attachments
+                attachments: attachments,
+                backgrounds: backgrounds,
+                decorations: decorations
             )
         }
 
@@ -723,21 +1018,28 @@ extension GraphicsContext {
             for line in lineGlyphs {
                 offset.x = 0
                 for glyph in line.glyphs {
+                    let kerning: CGPoint = offset.x > 0
+                        ? glyph.kerning
+                        : .zero
+                    offset += kerning
                     let baseline = CGPoint(
                         x: glyph.contentOffset.x + offset.x,
-                        y: line.ascender + offset.y
+                        y: line.ascender + offset.y - glyph.baselineOffset
                     )
                     callback(glyph, baseline)
-                    let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
                     offset.x += glyph.advance.width
-                    offset += kerning
                 }
                 offset.y += line.height
             }
         }
 
-        private func _lineWrap(_ lines: [LineGlyphs], maxWidth: Int, maxHeight: Int) -> [LineGlyphs] {
-            var result: [LineGlyphs] = []
+        private func _lineWrap(
+            _ lines: [LineGlyphs],
+            maxWidth: Int,
+            maxHeight: Int,
+            lineLimit: Int?,
+            truncationMode: Text.TruncationMode
+        ) -> [LineGlyphs] {
             let breakables = CharacterSet.whitespaces.union(.init(charactersIn: "-/?!}|"))
             let decimalNumbers = CharacterSet.decimalDigits
             // No wrap if character is followed by a decimal number
@@ -745,13 +1047,13 @@ extension GraphicsContext {
             // No wrap if character is between decimal numbers
             let breakableNotBetweenDN = CharacterSet(charactersIn: "/")
 
-            let getGlyphsWidth = { (glyphs: Array<Glyph>.SubSequence) -> CGFloat in
+            let getGlyphsWidth = { (glyphs: [Glyph]) -> CGFloat in
                 glyphs.reduce(CGFloat.zero) { result, glyph in
                     result + glyph.advance.width + glyph.kerning.x
                 } - (glyphs.first?.kerning.x ?? 0) // ignore first kerning
             }
             // Returns the index of the character that matches the wrapable character condition.
-            let getBreakableIndex = { (glyphs: Array<Glyph>.SubSequence) -> Array<Glyph>.Index? in
+            let getBreakableIndex = { (glyphs: [Glyph]) -> Int? in
                 if glyphs.isEmpty { return nil }
                 var index = glyphs.endIndex
                 while index != glyphs.startIndex {
@@ -783,112 +1085,339 @@ extension GraphicsContext {
             }
             // Wrap long lines to satisfy line break conditions.
             let splitLineGlyphs = {
-                (glyphs: [Glyph], maxWidth: Int) -> (first: Array<Glyph>.SubSequence, second: Array<Glyph>.SubSequence) in
-                var first = glyphs[...]
+                (glyphs: [Glyph], maxWidth: Int) -> (first: [Glyph], second: [Glyph]) in
+                var first = glyphs
                 var second: [Glyph] = []
                 while first.count > 1 && Int(ceil(getGlyphsWidth(first))) > maxWidth {
                     if let index = getBreakableIndex(first),
-                       first.index(after:index) != first.endIndex {
+                       first.index(after: index) != first.endIndex {
                         let index2 = first.index(after: index)
-                        let s1 = first[...index]
-                        let s2 = first[index2...]
-                        second.insert(contentsOf: s2, at: second.startIndex)
-                        first = s1
+                        second.insert(
+                            contentsOf: first[index2...],
+                            at: second.startIndex
+                        )
+                        first.removeSubrange(index2...)
                     } else {
                         if let s2 = first.popLast() {
                             second.insert(s2, at: second.startIndex)
                         }
                     }
                 }
-                return (first: first, second: second[...])
+                return (first: first, second: second)
             }
 
-            var offset: CGPoint = .zero
-            var lines = lines
-            while lines.isEmpty == false {
-                var line = lines.removeFirst()
-                if result.isEmpty == false && Int(ceil(offset.y + line.height)) > maxHeight {
+            func updateMetrics(_ line: inout LineGlyphs) {
+                guard !line.glyphs.isEmpty else { return }
+                line.glyphs[0].kerning = .zero
+                line.ascender = line.glyphs.reduce(.zero) {
+                    max($0, $1.lineAscender)
+                }
+                line.descender = line.glyphs.reduce(.zero) {
+                    min($0, $1.lineDescender)
+                }
+                line.width = getGlyphsWidth(line.glyphs)
+            }
+
+            var wrappedLines: [LineGlyphs] = []
+            for sourceLine in lines {
+                var line = sourceLine
+                while line.glyphs.count > 1,
+                      Int(ceil(line.width)) > maxWidth {
+                    let split = splitLineGlyphs(line.glyphs, maxWidth)
+                    guard !split.second.isEmpty else { break }
+
+                    var first = line
+                    first.glyphs = split.first
+                    first.trailingBoundary = nil
+                    updateMetrics(&first)
+                    wrappedLines.append(first)
+
+                    line.glyphs = split.second
+                    updateMetrics(&line)
+                }
+                wrappedLines.append(line)
+            }
+
+            var visibleLines: [LineGlyphs] = []
+            var visibleHeight: CGFloat = 0
+            let maximumLineCount = lineLimit.map { max($0, 1) }
+            var nextLineIndex = 0
+            while nextLineIndex < wrappedLines.count {
+                if let maximumLineCount,
+                   visibleLines.count >= maximumLineCount {
                     break
                 }
-
-                if Int(ceil(line.width)) > maxWidth {
-                    assert(line.glyphs.isEmpty == false)
-                    // Do not wrap if there is not enough space to display the next line.
-                    let nextLineHeight = lines.first?.height ?? line.height
-                    if Int(ceil(offset.y + line.height + nextLineHeight)) <= maxHeight {
-                        // The line can be wrapped because there is enough space for the next line.
-                        let (first, second) = splitLineGlyphs(line.glyphs, maxWidth)
-                        if second.isEmpty == false {
-                            var glyphs: [Glyph] = .init(second)
-                            glyphs[0].kerning = .zero
-                            lines.insert(LineGlyphs(glyphs: glyphs,
-                                                    ascender: second.reduce(0) { max($0, $1.ascender) },
-                                                    descender: second.reduce(0) { min($0, $1.descender) },
-                                                    width: getGlyphsWidth(second)),
-                                         at: 0)
-                            line.glyphs = .init(first)
-                        }
-                        assert(line.glyphs.isEmpty == false)
-
-                        line.glyphs[0].kerning = .zero
-                        line.ascender = line.glyphs.reduce(.zero) {
-                            max($0, $1.ascender)
-                        }
-                        line.descender = line.glyphs.reduce(.zero) {
-                            min($0, $1.descender)
-                        }
-                        line.width = getGlyphsWidth(line.glyphs[...])
-                    }
+                let line = wrappedLines[nextLineIndex]
+                if !visibleLines.isEmpty,
+                   Int(ceil(visibleHeight + line.height)) > maxHeight {
+                    break
                 }
-
-                // Check if there is not enough space to display the next line,
-                // or if a line wrap failed because there was not enough space.
-                let nextLineExceedsHeight = lines.first.map {
-                    Int(ceil(offset.y + line.height + $0.height)) > maxHeight
-                } ?? false
-                if nextLineExceedsHeight || Int(ceil(line.width)) > maxWidth {
-                    // this is the last line, should ends with '...'
-                    var glyphs = line.glyphs[...]
-                    // Since a valid Typeface is required, at least one glyph must exist.
-                    if var face = glyphs.last?.face {
-                        while true {
-                            let prevFace = glyphs.last?.face
-                            let prevChar: UnicodeScalar = glyphs.last?.scalar ?? UnicodeScalar(0)
-                            let ellipsis = TextGlyphs.from(unicodeScalars: "...".unicodeScalars,
-                                                           with: [face],
-                                                           drawMissingGlyphs: false, prevFace: prevFace, prevChar: prevChar)
-
-                            let width = getGlyphsWidth(glyphs)
-                            if Int(ceil(width + ellipsis.width)) <= maxWidth {
-                                glyphs.append(contentsOf: ellipsis.glyphs)
-                                line.glyphs = .init(glyphs)
-                                line.glyphs[0].kerning = .zero
-                                line.ascender = line.glyphs.reduce(.zero) {
-                                    max($0, $1.ascender)
-                                }
-                                line.descender = line.glyphs.reduce(.zero) {
-                                    min($0, $1.descender)
-                                }
-                                line.width = getGlyphsWidth(line.glyphs[...])
-                                break
-                            }
-                            // Use the Typeface of the last removed glyph to generate the ellipsis glyphs.
-                            if let last = glyphs.last {
-                                face = last.face
-                            } else {
-                                // Stop here because there are no more glyphs to remove.
-                                break
-                            }
-                            glyphs = glyphs.dropLast(1)
-                        }
-                    }
-                }
-
-
-                result.append(line)
-                offset.y += line.height
+                visibleLines.append(line)
+                visibleHeight += line.height
+                nextLineIndex += 1
             }
-            return result
+
+            guard let lastVisibleIndex = visibleLines.indices.last else {
+                return []
+            }
+
+            let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex
+            var paragraphGlyphs = visibleLines[lastVisibleIndex].glyphs
+            var continuationIndex = nextLineIndex
+            while continuationIndex < wrappedLines.count,
+                  wrappedLines[continuationIndex].paragraphIndex ==
+                    lastParagraph {
+                paragraphGlyphs.append(
+                    contentsOf: wrappedLines[continuationIndex].glyphs
+                )
+                continuationIndex += 1
+            }
+
+            let hasParagraphOverflow =
+                paragraphGlyphs.count >
+                    visibleLines[lastVisibleIndex].glyphs.count ||
+                Int(ceil(visibleLines[lastVisibleIndex].width)) > maxWidth
+            let hasExplicitLineOverflow =
+                !hasParagraphOverflow &&
+                nextLineIndex < wrappedLines.count &&
+                visibleLines[lastVisibleIndex].trailingBoundary != nil
+
+            guard hasParagraphOverflow || hasExplicitLineOverflow else {
+                return visibleLines
+            }
+
+            func adjacencyKerning(
+                from lhs: Glyph?,
+                to rhs: Glyph
+            ) -> CGPoint {
+                guard let lhs, lhs.face.isEqual(to: rhs.face) else {
+                    return .zero
+                }
+                return lhs.face.kernAdvance(
+                    left: lhs.scalar,
+                    right: rhs.scalar
+                )
+            }
+
+            func makeEllipsis(
+                inheriting source: Glyph,
+                characterIndex: Int,
+                after previous: Glyph?
+            ) -> Glyph? {
+                let generated = TextGlyphs.from(
+                    unicodeScalars: "…".unicodeScalars,
+                    with: [source.face],
+                    drawMissingGlyphs: false,
+                    prevFace: previous?.face,
+                    prevChar: previous?.scalar ?? UnicodeScalar(UInt8(0))
+                )
+                guard var glyph = generated.glyphs.first else {
+                    return nil
+                }
+                glyph.attributes = source.attributes
+                glyph.style = source.style
+                glyph.baselineOffset = source.baselineOffset
+                glyph.foregroundColor = source.foregroundColor
+                glyph.characterIndex = characterIndex
+                glyph.isTruncationToken = true
+                glyph.advance.width += (
+                    source.style.tracking ??
+                    source.style.kern ??
+                    0
+                ) * scaleFactor
+                if previous == nil {
+                    glyph.kerning = .zero
+                }
+                return glyph
+            }
+
+            func tailTruncation(
+                _ glyphs: [Glyph],
+                explicitBoundary: Glyph?
+            ) -> [Glyph]? {
+                if let explicitBoundary,
+                   let source = glyphs.last {
+                    var prefix = glyphs
+                    while true {
+                        guard let ellipsis = makeEllipsis(
+                            inheriting: source,
+                            characterIndex: explicitBoundary.characterIndex,
+                            after: prefix.last
+                        ) else {
+                            return nil
+                        }
+                        var candidate = prefix + [ellipsis]
+                        if !candidate.isEmpty {
+                            candidate[0].kerning = .zero
+                        }
+                        if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                            return candidate
+                        }
+                        guard !prefix.isEmpty else { return nil }
+                        prefix.removeLast()
+                    }
+                }
+
+                guard glyphs.count > 1 else { return nil }
+                for prefixCount in stride(
+                    from: glyphs.count - 1,
+                    through: 0,
+                    by: -1
+                ) {
+                    let source = glyphs[prefixCount]
+                    var prefix = Array(glyphs[..<prefixCount])
+                    let previous = prefix.last
+                    guard let ellipsis = makeEllipsis(
+                        inheriting: source,
+                        characterIndex: source.characterIndex,
+                        after: previous
+                    ) else {
+                        return nil
+                    }
+                    prefix.append(ellipsis)
+                    prefix[0].kerning = .zero
+                    if Int(ceil(getGlyphsWidth(prefix))) <= maxWidth {
+                        return prefix
+                    }
+                }
+                return nil
+            }
+
+            func headTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
+                guard glyphs.count > 1,
+                      let source = glyphs.first,
+                      let ellipsis = makeEllipsis(
+                        inheriting: source,
+                        characterIndex: source.characterIndex,
+                        after: nil
+                      ) else {
+                    return nil
+                }
+                for suffixCount in stride(
+                    from: glyphs.count - 1,
+                    through: 0,
+                    by: -1
+                ) {
+                    var suffix = Array(glyphs.suffix(suffixCount))
+                    if !suffix.isEmpty {
+                        suffix[0].kerning = adjacencyKerning(
+                            from: ellipsis,
+                            to: suffix[0]
+                        )
+                    }
+                    let candidate = [ellipsis] + suffix
+                    if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                        return candidate
+                    }
+                }
+                return nil
+            }
+
+            func middleTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
+                guard glyphs.count > 1 else { return nil }
+
+                var selectedPrefixCount = 0
+                var selectedEllipsis: Glyph?
+                for prefixCount in 0..<glyphs.count {
+                    let source = glyphs[prefixCount]
+                    let prefix = Array(glyphs[..<prefixCount])
+                    guard let ellipsis = makeEllipsis(
+                        inheriting: source,
+                        characterIndex: source.characterIndex,
+                        after: prefix.last
+                    ) else {
+                        return nil
+                    }
+                    let retainedWidth = CGFloat(maxWidth) -
+                        getGlyphsWidth([ellipsis])
+                    guard retainedWidth >= 0 else { return nil }
+                    if getGlyphsWidth(prefix) <= retainedWidth * 0.5 {
+                        selectedPrefixCount = prefixCount
+                        selectedEllipsis = ellipsis
+                    } else {
+                        break
+                    }
+                }
+
+                guard selectedPrefixCount > 0,
+                      let ellipsis = selectedEllipsis else {
+                    guard let source = glyphs.first,
+                          let ellipsis = makeEllipsis(
+                            inheriting: source,
+                            characterIndex: source.characterIndex,
+                            after: nil
+                          ),
+                          Int(ceil(getGlyphsWidth([ellipsis]))) <= maxWidth else {
+                        return nil
+                    }
+                    return [ellipsis]
+                }
+
+                let maximumSuffixCount =
+                    glyphs.count - selectedPrefixCount - 1
+                let prefix = Array(glyphs[..<selectedPrefixCount])
+                for suffixCount in stride(
+                    from: maximumSuffixCount,
+                    through: 0,
+                    by: -1
+                ) {
+                    var suffix = Array(glyphs.suffix(suffixCount))
+                    if !suffix.isEmpty {
+                        suffix[0].kerning = adjacencyKerning(
+                            from: ellipsis,
+                            to: suffix[0]
+                        )
+                    }
+                    var candidate = prefix + [ellipsis] + suffix
+                    candidate[0].kerning = .zero
+                    if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                        return candidate
+                    }
+                }
+                return nil
+            }
+
+            let explicitBoundary = hasExplicitLineOverflow
+                ? visibleLines[lastVisibleIndex].trailingBoundary
+                : nil
+            let truncatedGlyphs: [Glyph]?
+            if explicitBoundary != nil, truncationMode != .tail {
+                return visibleLines
+            } else if explicitBoundary != nil {
+                truncatedGlyphs = tailTruncation(
+                    visibleLines[lastVisibleIndex].glyphs,
+                    explicitBoundary: explicitBoundary
+                )
+            } else {
+                switch truncationMode {
+                case .head:
+                    truncatedGlyphs = headTruncation(paragraphGlyphs)
+                case .middle:
+                    truncatedGlyphs = middleTruncation(paragraphGlyphs)
+                case .tail:
+                    truncatedGlyphs = tailTruncation(
+                        paragraphGlyphs,
+                        explicitBoundary: nil
+                    )
+                }
+            }
+
+            guard let truncatedGlyphs else {
+                if hasParagraphOverflow {
+                    visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
+                    updateMetrics(&visibleLines[lastVisibleIndex])
+                    if maxWidth != .max {
+                        visibleLines[lastVisibleIndex].width =
+                            CGFloat(maxWidth)
+                    }
+                }
+                return visibleLines
+            }
+            visibleLines[lastVisibleIndex].glyphs = truncatedGlyphs
+            visibleLines[lastVisibleIndex].trailingBoundary = nil
+            visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
+            updateMetrics(&visibleLines[lastVisibleIndex])
+            return visibleLines
         }
 
         private static func _makeGlyphs(
@@ -905,12 +1434,16 @@ extension GraphicsContext {
             var descender: CGFloat = .zero
             var char1: UnicodeScalar = UnicodeScalar(0) // previous char
             var face1: Typeface? = nil   // previous face
+            var characterIndex = 0
+            var paragraphIndex = 0
 
-            let addLine = {
+            let addLine = { (trailingBoundary: Glyph?) in
                 lines.append(LineGlyphs(glyphs: glyphs,
                                         ascender: ascender,
                                         descender: descender,
-                                        width: offset.x))
+                                        width: offset.x,
+                                        trailingBoundary: trailingBoundary,
+                                        paragraphIndex: paragraphIndex))
                 glyphs.removeAll(keepingCapacity: true)
                 let lineHeight = ascender - descender
                 assert(lineHeight > 0)
@@ -953,15 +1486,57 @@ extension GraphicsContext {
                         face1 = textGlyphs.lastFace
                         char1 = textGlyphs.lastCharacter
 
-                        glyphs.append(contentsOf: textGlyphs.glyphs.map { glyph in
+                        let resolvedStyle = style ??
+                            _ResolvedTextRunAttributes()
+                        let spacing = (
+                            resolvedStyle.tracking ??
+                            resolvedStyle.kern ??
+                            0
+                        ) * scaleFactor
+                        let baselineOffset =
+                            (resolvedStyle.baselineOffset ?? 0) * scaleFactor
+                        let runGlyphs = textGlyphs.glyphs.map { glyph in
                             var glyph = glyph
                             glyph.attributes = attributes
-                            glyph.foregroundColor = style?.foregroundColor
+                            glyph.style = resolvedStyle
+                            glyph.baselineOffset = baselineOffset
+                            glyph.foregroundColor =
+                                resolvedStyle.foregroundColor
+                            glyph.advance.width += spacing
                             return glyph
-                        })
-                        ascender = max(ascender, textGlyphs.ascender)
-                        descender = min(descender, textGlyphs.descender)
-                        offset.x += textGlyphs.width
+                        }
+                        let runStartIndex = characterIndex
+                        characterIndex += scalars.count
+                        if runGlyphs.isEmpty {
+                            ascender = max(
+                                ascender,
+                                textGlyphs.ascender + max(baselineOffset, 0)
+                            )
+                            descender = min(
+                                descender,
+                                textGlyphs.descender + min(baselineOffset, 0)
+                            )
+                        } else {
+                            for (index, var glyph) in runGlyphs.enumerated() {
+                                glyph.characterIndex = runStartIndex + index
+                                if glyphs.isEmpty {
+                                    glyph.kerning = .zero
+                                }
+                                let kerning = glyphs.isEmpty
+                                    ? CGFloat.zero
+                                    : glyph.kerning.x
+                                glyphs.append(glyph)
+                                offset.x += kerning + glyph.advance.width
+                                ascender = max(
+                                    ascender,
+                                    glyph.lineAscender
+                                )
+                                descender = min(
+                                    descender,
+                                    glyph.lineDescender
+                                )
+                            }
+                        }
 
                         if components.isEmpty {
                             // The last line can be combined with other text.
@@ -969,7 +1544,31 @@ extension GraphicsContext {
                             break
                         }
 
-                        addLine()
+                        var boundary = glyphs.last ?? {
+                            var glyph = Glyph(
+                                scalar: UnicodeScalar("\n"),
+                                face: faces[0]
+                            )
+                            glyph.ascender = textGlyphs.ascender
+                            glyph.descender = textGlyphs.descender
+                            glyph.attributes = attributes
+                            glyph.style = resolvedStyle
+                            glyph.baselineOffset = baselineOffset
+                            glyph.foregroundColor =
+                                resolvedStyle.foregroundColor
+                            return glyph
+                        }()
+                        boundary.scalar = UnicodeScalar("\n")
+                        boundary.content = .missing
+                        boundary.advance = .zero
+                        boundary.kerning = .zero
+                        boundary.characterIndex = characterIndex
+                        boundary.isTruncationToken = false
+                        addLine(boundary)
+                        characterIndex += 1
+                        paragraphIndex += 1
+                        face1 = nil
+                        char1 = UnicodeScalar(0)
                     }
                 }
                 let attachmentRun: ([Typeface], ResolvedImage, _TextAttributeValues)?
@@ -1002,10 +1601,13 @@ extension GraphicsContext {
                     glyph.advance.width = width
                     glyph.advance.height = height
                     glyph.attributes = attributes
+                    glyph.characterIndex = characterIndex
                     glyphs.append(glyph)
+                    characterIndex += 1
 
                     offset.x += glyph.advance.width
-                    ascender = max(ascender, glyph.ascender)
+                    ascender = max(ascender, glyph.lineAscender)
+                    descender = min(descender, glyph.lineDescender)
 
                     face1 = nil
                     char1 = UnicodeScalar(0)
@@ -1019,7 +1621,8 @@ extension GraphicsContext {
                 lines.append(LineGlyphs(glyphs: glyphs,
                                         ascender: ascender,
                                         descender: descender,
-                                        width: offset.x))
+                                        width: offset.x,
+                                        paragraphIndex: paragraphIndex))
             }
             return lines
         }
@@ -1029,13 +1632,21 @@ extension GraphicsContext {
         draw(text, in: rect, shading: text.shading)
     }
 
-    func draw(_ text: ResolvedText, in rect: CGRect, shading: Shading) {
+    func draw(
+        _ text: ResolvedText,
+        in rect: CGRect,
+        shading: Shading,
+        layoutProperties: TextLayoutProperties? = nil
+    ) {
         let rect = rect.standardized
         if rect.isEmpty || rect.isNull { return }
         if shading.properties.isEmpty {
             fatalError("Invalid shading property!")
         }
-        let drawing = text.makeDrawing(in: rect.size)
+        let drawing = text.makeDrawing(
+            in: rect.size,
+            layoutProperties: layoutProperties
+        )
         draw(drawing, in: rect, shading: shading)
     }
 
@@ -1102,6 +1713,13 @@ extension GraphicsContext {
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
 
+        for background in drawing.backgrounds {
+            self.fill(
+                Path(background.frame.applying(transform)),
+                with: .color(background.color)
+            )
+        }
+
         var foregroundColors: [Color?] = []
         for batch in drawing.batches where !batch.colorGlyphs {
             if !foregroundColors.contains(batch.foregroundColor) {
@@ -1155,6 +1773,25 @@ extension GraphicsContext {
             }
             renderPass.end()
             self.drawSource()
+        }
+
+        for decoration in drawing.decorations {
+            let start = decoration.start.applying(transform)
+            let end = decoration.end.applying(transform)
+            let lineWidth = decoration.lineWidth * scale
+            var path = Path()
+            path.move(to: start)
+            path.addLine(to: end)
+            self.stroke(
+                path,
+                with: decoration.foregroundColor.map(Shading.color) ??
+                    shading,
+                style: StrokeStyle(
+                    lineWidth: lineWidth,
+                    lineCap: .butt,
+                    dash: decoration.dashPattern(lineWidth: lineWidth)
+                )
+            )
         }
         self.recordContentBounds(rect)
     }
