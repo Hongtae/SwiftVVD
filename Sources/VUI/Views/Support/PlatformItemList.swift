@@ -246,5 +246,5 @@ func platformItemText(_ item: PlatformItemList.Item) -> Text {
     guard let attributedString = item.label ?? item.text else {
         return Text("")
     }
-    return Text(AttributedString(attributedString))
+    return Text(_attributedStringFromResolvedTextStorage(attributedString))
 }

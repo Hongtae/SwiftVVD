@@ -86,6 +86,29 @@ extension AttributedString {
     }
 }
 
+private extension NSAttributedString.Key {
+    static let coreFont = Self(AttributeScopes.CoreAttributes.FontAttribute.name)
+    static let coreForegroundColor = Self(
+        AttributeScopes.CoreAttributes.ForegroundColorAttribute.name
+    )
+    static let coreBackgroundColor = Self(
+        AttributeScopes.CoreAttributes.BackgroundColorAttribute.name
+    )
+    static let coreStrikethroughStyle = Self(
+        AttributeScopes.CoreAttributes.StrikethroughStyleAttribute.name
+    )
+    static let coreUnderlineStyle = Self(
+        AttributeScopes.CoreAttributes.UnderlineStyleAttribute.name
+    )
+    static let coreKern = Self(AttributeScopes.CoreAttributes.KerningAttribute.name)
+    static let coreTracking = Self(
+        AttributeScopes.CoreAttributes.TrackingAttribute.name
+    )
+    static let coreBaselineOffset = Self(
+        AttributeScopes.CoreAttributes.BaselineOffsetAttribute.name
+    )
+}
+
 struct _ResolvedTextRunAttributes: Equatable {
     var font: Font?
     var foregroundColor: Color?
@@ -124,26 +147,61 @@ struct _ResolvedTextRunAttributes: Equatable {
 
     var nsAttributes: [NSAttributedString.Key: Any] {
         var result: [NSAttributedString.Key: Any] = [:]
-        if let font { result[NSAttributedString.Key("VUI.Font")] = font }
+        if let font { result[.coreFont] = font }
         if let foregroundColor {
-            result[NSAttributedString.Key("VUI.ForegroundColor")] = foregroundColor
+            result[.coreForegroundColor] = foregroundColor
         }
         if let backgroundColor {
-            result[NSAttributedString.Key("VUI.BackgroundColor")] = backgroundColor
+            result[.coreBackgroundColor] = backgroundColor
         }
         if let strikethroughStyle {
-            result[NSAttributedString.Key("VUI.StrikethroughStyle")] = strikethroughStyle
+            result[.coreStrikethroughStyle] = strikethroughStyle
         }
         if let underlineStyle {
-            result[NSAttributedString.Key("VUI.UnderlineStyle")] = underlineStyle
+            result[.coreUnderlineStyle] = underlineStyle
         }
-        if let kern { result[NSAttributedString.Key("VUI.Kern")] = kern }
-        if let tracking { result[NSAttributedString.Key("VUI.Tracking")] = tracking }
+        if let kern { result[.coreKern] = kern }
+        if let tracking { result[.coreTracking] = tracking }
         if let baselineOffset {
-            result[NSAttributedString.Key("VUI.BaselineOffset")] = baselineOffset
+            result[.coreBaselineOffset] = baselineOffset
         }
         return result
     }
+
+    init(nsAttributes: [NSAttributedString.Key: Any]) {
+        font = nsAttributes[.coreFont] as? Font
+        foregroundColor = nsAttributes[.coreForegroundColor] as? Color
+        backgroundColor = nsAttributes[.coreBackgroundColor] as? Color
+        strikethroughStyle =
+            nsAttributes[.coreStrikethroughStyle] as? Text.LineStyle
+        underlineStyle = nsAttributes[.coreUnderlineStyle] as? Text.LineStyle
+        kern = nsAttributes[.coreKern] as? CGFloat
+        tracking = nsAttributes[.coreTracking] as? CGFloat
+        baselineOffset = nsAttributes[.coreBaselineOffset] as? CGFloat
+    }
+}
+
+func _attributedStringFromResolvedTextStorage(
+    _ value: NSAttributedString
+) -> AttributedString {
+    #if canImport(Darwin)
+    try! AttributedString(value, including: AttributeScopes.CoreAttributes.self)
+    #else
+    var result = AttributedString()
+    value.enumerateAttributes(
+        in: NSRange(location: 0, length: value.length),
+        options: []
+    ) { attributes, range, _ in
+        var segment = AttributedString(
+            value.attributedSubstring(from: range).string
+        )
+        segment._setCoreAttributes(
+            _ResolvedTextRunAttributes(nsAttributes: attributes)
+        )
+        result.append(segment)
+    }
+    return result
+    #endif
 }
 
 private func _resolvedAttributedRuns(
@@ -151,18 +209,10 @@ private func _resolvedAttributedRuns(
     defaultTypefaces: [Typeface],
     context: any TextResolutionContext
 ) -> [GraphicsContext.ResolvedText.Run] {
-    #if os(Windows)
-    // The Windows Foundation dynamic library does not currently expose the
-    // metadata implementation required by attributed-run enumeration. Keep
-    // arbitrary attributed values renderable as text; localized placeholders
-    // are decomposed before they reach this generic storage boundary.
-    let text = String(value.characters)
-    guard !text.isEmpty, !defaultTypefaces.isEmpty else { return [] }
-    return [.text(defaultTypefaces, text)]
-    #else
-    value.runs.compactMap { run -> GraphicsContext.ResolvedText.Run? in
+    var result: [GraphicsContext.ResolvedText.Run] = []
+    let resolveRun: (AttributedString.Runs.Run) -> Void = { run in
         let text = String(value.characters[run.range])
-        guard !text.isEmpty else { return nil }
+        guard !text.isEmpty else { return }
 
         var attributes = _ResolvedTextRunAttributes(
             font: run.font,
@@ -194,13 +244,24 @@ private func _resolvedAttributedRuns(
         } else {
             typefaces = defaultTypefaces
         }
-        guard !typefaces.isEmpty else { return nil }
+        guard !typefaces.isEmpty else { return }
         if attributes.isEmpty {
-            return .text(typefaces, text)
+            result.append(.text(typefaces, text))
+        } else {
+            result.append(
+                .styledText(typefaces, text, _TextAttributeValues(), attributes)
+            )
         }
-        return .styledText(typefaces, text, _TextAttributeValues(), attributes)
     }
+
+    #if os(Windows)
+    // Type erasure keeps the debug client from materializing an implementation
+    // index type that the Windows Foundation dynamic library does not export.
+    AnySequence(value.runs).forEach(resolveRun)
+    #else
+    value.runs.forEach(resolveRun)
     #endif
+    return result
 }
 
 final class AttributedStringTextStorage: AnyTextStorage {

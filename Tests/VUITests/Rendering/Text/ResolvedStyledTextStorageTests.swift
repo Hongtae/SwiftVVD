@@ -123,6 +123,71 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         )
     }
 
+    func testResolvedTextStorageRestoresCoreAttributedRuns() throws {
+        let face = ResolvedStorageTestTypeface()
+        let firstStyle = _ResolvedTextRunAttributes(
+            font: .system(size: 18, weight: .bold),
+            foregroundColor: .red,
+            backgroundColor: .blue,
+            strikethroughStyle: .single,
+            underlineStyle: Text.LineStyle(pattern: .dash, color: .green),
+            kern: 2,
+            tracking: 1,
+            baselineOffset: 3
+        )
+        let secondStyle = _ResolvedTextRunAttributes(
+            foregroundColor: .purple,
+            kern: 4
+        )
+        let storage = GraphicsContext.ResolvedText(
+            runs: [
+                .styledText([face], "A", _TextAttributeValues(), firstStyle),
+                .styledText([face], "😀B", _TextAttributeValues(), secondStyle)
+            ],
+            scaleFactor: 1
+        ).attributedStorage
+
+        let value = _attributedStringFromResolvedTextStorage(storage)
+        var text: [String] = []
+        var styles: [_ResolvedTextRunAttributes] = []
+        AnySequence(value.runs).forEach { run in
+            text.append(String(value.characters[run.range]))
+            styles.append(_ResolvedTextRunAttributes(
+                font: run[AttributeScopes.CoreAttributes.FontAttribute.self],
+                foregroundColor: run[
+                    AttributeScopes.CoreAttributes.ForegroundColorAttribute.self
+                ],
+                backgroundColor: run[
+                    AttributeScopes.CoreAttributes.BackgroundColorAttribute.self
+                ],
+                strikethroughStyle: run[
+                    AttributeScopes.CoreAttributes.StrikethroughStyleAttribute.self
+                ],
+                underlineStyle: run[
+                    AttributeScopes.CoreAttributes.UnderlineStyleAttribute.self
+                ],
+                kern: run[AttributeScopes.CoreAttributes.KerningAttribute.self],
+                tracking: run[
+                    AttributeScopes.CoreAttributes.TrackingAttribute.self
+                ],
+                baselineOffset: run[
+                    AttributeScopes.CoreAttributes.BaselineOffsetAttribute.self
+                ]
+            ))
+        }
+
+        XCTAssertEqual(text, ["A", "😀B"])
+        XCTAssertEqual(styles, [firstStyle, secondStyle])
+
+        var item = PlatformItemList.Item()
+        item.text = storage
+        guard case let .anyTextStorage(textStorage) = platformItemText(item).storage,
+              let attributedStorage = textStorage as? AttributedStringTextStorage else {
+            return XCTFail("platform text should retain attributed storage")
+        }
+        XCTAssertEqual(attributedStorage.str, value)
+    }
+
     func testResolvedStyledTextReusesExistingFontMetricsAndRunStorage() throws {
         XCTAssertEqual(MemoryLayout<ResolvedFontMetrics>.size, 64)
         XCTAssertEqual(MemoryLayout<ResolvedFontMetrics>.stride, 64)

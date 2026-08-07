@@ -457,7 +457,7 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
     }
 
     static func makeRepresentation(inputs: _ViewInputs, outputs: inout _ViewOutputs) {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("\(self).makeRepresentation called outside an active _AGGraph context.")
         }
 
