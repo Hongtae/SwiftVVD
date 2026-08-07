@@ -158,7 +158,7 @@ extension _AGGraph {
         if Value.self == String.self {
             return lhs.pointee as! String == rhs.pointee as! String
         }
-        if options.rawValue & 0xff <= 2 {
+        if options.comparisonMode.rawValue <= AGComparisonMode.layout.rawValue {
             return compareLayoutValues(
                 lhs,
                 rhs,

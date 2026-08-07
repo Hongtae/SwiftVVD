@@ -353,7 +353,7 @@ public struct _GraphInputs: GraphReusable {
         }
 
         let parent = parentAttribute.valueAndFlags(
-            options: AGValueOptions(rawValue: 0x4)
+            options: .withoutDependency
         ).value
         let child = Attribute(
             value: _DisplayList_StableIdentityScope(

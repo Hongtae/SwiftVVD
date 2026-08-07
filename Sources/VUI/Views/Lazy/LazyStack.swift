@@ -75,7 +75,7 @@ struct SizeAndSpacingContext {
             environment: _environment,
             keyPath: keyPath
         ).cachedValue(
-            options: AGCachedValueOptions(rawValue: 1),
+            options: .prefetchInput,
             owner: owner
         )
     }

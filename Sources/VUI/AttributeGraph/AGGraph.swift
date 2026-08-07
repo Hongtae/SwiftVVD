@@ -22,9 +22,9 @@ final class _AGUpdateContext {
 // The caller is responsible for ensuring that all operations on a given
 // _AGGraph instance occur on a single thread (or equivalent serial context).
 //
-// All methods on _AGGraph require that _AGGraph.current is already bound
-// to this instance (via _AGGraph.withCurrent(self) { ... }) before
-// they are called. Violating this precondition causes a runtime assertion failure.
+// Evaluation and mutation entry points require _AGGraph.current to be bound
+// to this instance. Read-only and cross-graph helpers document their exceptions.
+// DEBUG builds validate the binding precondition.
 // The unchecked Sendable conformance is not a thread-safety guarantee.
 
 final class _AGGraph: Equatable, @unchecked Sendable {
@@ -32,6 +32,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
 
     struct InputEdge {
         static let identityMask: UInt8 = 0x0d
+        static let deferredUpdate: UInt8 = 0x01
         static let permanent: UInt8 = 0x04
         static let changed: UInt8 = 0x10
         static let readThisEvaluation: UInt8 = 0x20
@@ -47,21 +48,9 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // Source-of-truth node. Value is written externally via setValue(_:).
         case input
 
-        // Computed node with a plain closure rule.
-        // isSideEffect = true -> re-evaluated eagerly inside markNeedsEvaluation
-        //   (i.e. synchronously when any input changes via setValue).
-        //   Used for gesture callbacks and other fire-and-forget side effects.
-        // isSideEffect = false -> pull-based, evaluated lazily on first .value read.
-        //
-        // Cascade example (gesture callbacks):
-        //   eventsAttr.setValue(events)
-        //     -> markNeedsEvaluation(eventRule)   [isSideEffect]
-        //       -> evaluateNode(eventRule)          immediately
-        //         -> recognizer.processEvents()
-        //         -> phaseAttr.setValue(.ended)
-        //           -> markNeedsEvaluation(callbackRule) [isSideEffect]
-        //             -> evaluateNode(callbackRule)       immediately
-        //               -> endedCallback() fires here, inside setValue call stack
+        // Computed node with a closure rule. Side-effect rules are scheduled for
+        // eager evaluation after invalidation traversal. If a graph update is
+        // already active, they join its pending work. Ordinary rules are pull-based.
         case rule(any _AnyRuleClosureBox)
 
         // A typed Rule body retained by the node. Unlike the closure form, the
@@ -76,7 +65,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // removal so they can release work associated with the node's lifetime.
         case stateful(any _AnyStatefulBox)
 
-        // Exact-name low-level Attribute(body:value:flags:update:) construction.
+        // Low-level Attribute(body:value:flags:update:) construction.
         // The box owns a stable Swift body allocation and invokes the supplied
         // update function when the node is evaluated.
         case lowLevelBody(any _AnyLowLevelAttributeBox)
@@ -102,8 +91,8 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // Cross-graph proxy node. It reads a cached value from a node in another graph.
         // Evaluated lazily via cachedValue(for:) on the source graph (no context switch needed).
         // Invalidated reactively: when the source node changes, the source graph enqueues a
-        // markNeedsEvaluation call into this graph's inbox. This graph drains the inbox at
-        // the start of each withCurrent block (e.g. GestureGraph.sendEvents).
+        // markNeedsEvaluation call into this graph's inbox. The owning graph drains the
+        // inbox before its next relevant update.
         case crossGraphRef(sourceAttr: AGAttribute, sourceGraph: WeakObject<_AGGraph>)
 
         // Indirect (pointer) node. It forwards reads to `target` when set and returns
@@ -128,10 +117,10 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         var needsEvaluation: Bool = true
         // Explicit invalidation bypasses input-version validation. Ordinary
         // propagation can clear needsEvaluation without running this node when
-        // every input retains the version observed during the previous run.
+        // every input retains the version recorded during the previous run.
         var forceEvaluation: Bool = false
         // Versions advance only when the cached output changes. Each input
-        // edge retains the version observed by this node's last completed
+        // edge retains the version recorded by this node's last completed
         // evaluation.
         var valueVersion: UInt64 = 0
         // Graph-local invalidation traversal marker. This avoids allocating a
@@ -248,7 +237,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     // Type/body metadata is kept beside the slot map so the hot Node record
     // does not grow merely to support infrequent raw metadata queries.
     var attributeInfos: [UInt32: AttributeInfo] = [:]
-    // Hashable Rule cache entries are graph-owned Swift storage. The key keeps
+    // Hashable Rule cache entries are graph-owned storage. The key keeps
     // the selected subgraph and concrete rule identity separate.
     var cachedRuleEntries: [CachedRuleKey: any CachedRuleEntry] = [:]
     // Cache for KeyPath-derived child nodes
@@ -274,8 +263,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     let inbox: AGInbox = AGInbox()
 
     // The graph carries one non-owning host context pointer. Keeping the
-    // unretained storage explicit avoids a graph-host retain cycle while the
-    // public facade preserves the runtime's single-context contract.
+    // unretained storage explicit avoids a graph-host retain cycle.
     var context: Unmanaged<AnyObject>?
 
     // Cross-graph observer registry.
@@ -289,8 +277,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     }
     var crossGraphObservers: [UInt32: [CrossGraphObserver]] = [:]
 
-    // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
-    // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
+    // Deferred action outbox for closures executed after node evaluation.
     var actionOutbox: [() -> Void] = []
 
     // Side effects created while the graph is already updating join the same

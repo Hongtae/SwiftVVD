@@ -144,13 +144,13 @@ struct ShapeStyleResolver<Style: ShapeStyle>:
     mutating func updateValue() {
         let isInitialValue = !context.hasValue
         let styleValue = _style.changedValue(
-            options: AGValueOptions(rawValue: 0)
+            options: []
         )
         let modeValue = _mode.changedValue(
-            options: AGValueOptions(rawValue: 0)
+            options: []
         )
         let environmentValue = _environment.changedValue(
-            options: AGValueOptions(rawValue: 0)
+            options: []
         )
         let environment = environmentValue.value
         let needsResolution = isInitialValue ||

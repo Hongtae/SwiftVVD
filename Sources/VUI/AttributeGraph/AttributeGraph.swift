@@ -10,25 +10,24 @@ import Synchronization
 typealias AGGraphRef = _AGGraph
 
 /// Comparison policy used when storing and comparing attribute values.
-struct AGComparisonMode: RawRepresentable, Equatable, Sendable {
-    var rawValue: UInt32
+struct AGComparisonMode: OptionSet, Sendable {
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    static let layout = AGComparisonMode(rawValue: 2)
+    static let storedRepresentation = AGComparisonMode(rawValue: 3)
 }
 
 /// Flags describing an attribute body type.
 struct AGAttributeTypeFlags: OptionSet, Sendable {
-    var rawValue: UInt32
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    static let mainThread = AGAttributeTypeFlags(rawValue: 1 << 3)
 }
 
-struct AGComparisonOptions: RawRepresentable, Equatable, Sendable {
-    var rawValue: UInt32
+struct AGComparisonOptions: OptionSet, Sendable {
+    let rawValue: UInt32
+
+    private static let comparisonModeMask: UInt32 = 0xff
 
     init(rawValue: UInt32) {
         self.rawValue = rawValue
@@ -37,64 +36,53 @@ struct AGComparisonOptions: RawRepresentable, Equatable, Sendable {
     init(mode: AGComparisonMode) {
         self.rawValue = mode.rawValue
     }
+
+    var comparisonMode: AGComparisonMode {
+        AGComparisonMode(rawValue: rawValue & Self.comparisonModeMask)
+    }
 }
 
 /// Options applied when reading an attribute value.
 struct AGValueOptions: OptionSet, Sendable {
-    var rawValue: UInt32
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    /// Reads the value without installing an input edge.
+    static let withoutDependency = AGValueOptions(rawValue: 1 << 2)
 }
 
-/// Raw options accepted by the Hashable Rule cached-value surface.
-///
-/// The native runtime interprets these bits while consulting its subgraph
-/// cache. The Swift graph keeps the raw value as part of its cache identity;
-/// no unobserved bit-specific behavior is assigned here.
+/// Options applied when reading a cached Rule value.
 struct AGCachedValueOptions: OptionSet, Sendable {
-    var rawValue: UInt32
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    /// Updates the cached input before its consumer so an unchanged cached
+    /// value can suppress the consumer's evaluation.
+    static let prefetchInput = AGCachedValueOptions(rawValue: 1 << 0)
 }
 
-/// Swift carrier for flags returned with an input value.
+/// Flags returned with an input value.
 struct AGChangedValueFlags: OptionSet, Sendable {
-    var rawValue: UInt32
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    static let changed = AGChangedValueFlags(rawValue: 1 << 0)
 }
 
-/// Swift carriers for the option and state values imported from the native
-/// attribute runtime. The graph engine interprets only the
-/// values whose behavior is implemented by its Swift storage layer.
+/// Options used when installing an explicit input edge.
 struct AGInputOptions: OptionSet, Sendable {
-    var rawValue: UInt32
-
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    let rawValue: UInt32
 }
 
 struct AGSearchOptions: OptionSet, Sendable {
-    var rawValue: UInt32
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    static let inputs = AGSearchOptions(rawValue: 1 << 0)
+    static let outputs = AGSearchOptions(rawValue: 1 << 1)
+
+    /// Includes adjacent attributes owned outside the start attribute's owner.
+    static let acrossOwners = AGSearchOptions(rawValue: 1 << 2)
 }
 
 struct AGAttributeFlags: OptionSet, Sendable {
-    var rawValue: UInt32
-
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    let rawValue: UInt32
 
     static let transactional = AGAttributeFlags(rawValue: 1)
     static let removable = AGAttributeFlags(rawValue: 2)
@@ -102,12 +90,16 @@ struct AGAttributeFlags: OptionSet, Sendable {
     static let scrapeable = AGAttributeFlags(rawValue: 8)
 }
 
-struct AGValueState: RawRepresentable, Equatable, Sendable {
-    var rawValue: UInt32
+struct AGValueState: OptionSet, Sendable {
+    let rawValue: UInt32
 
-    init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
+    static let needsEvaluation = AGValueState(rawValue: 1 << 0)
+    static let evaluating = AGValueState(rawValue: 1 << 1)
+    static let inputsChanged = AGValueState(rawValue: 1 << 2)
+    static let hasValue = AGValueState(rawValue: 1 << 3)
+    static let forcedEvaluation = AGValueState(rawValue: 1 << 4)
+    static let hasChangedInput = AGValueState(rawValue: 1 << 5)
+    static let hasTransaction = AGValueState(rawValue: 1 << 6)
 }
 
 struct _AGAttributeInfo {
@@ -198,7 +190,7 @@ func compareValues<Value>(_ lhs: Value, _ rhs: Value, mode: AGComparisonMode) ->
     _AGGraph.compareValues(
         lhs,
         rhs,
-        options: AGComparisonOptions(rawValue: mode.rawValue)
+        options: AGComparisonOptions(mode: mode)
     )
 }
 

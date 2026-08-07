@@ -594,11 +594,11 @@ final class TextVariantPreferenceTests: XCTestCase {
             let resource = Attribute<ResourceList>(resourceID)
 
             _ = resource.value
-            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(resource.valueState.contains(.needsEvaluation))
 
             inputs.base.time.setValue(Time(seconds: 1))
 
-            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(resource.valueState.contains(.needsEvaluation))
         }
     }
 
@@ -628,11 +628,11 @@ final class TextVariantPreferenceTests: XCTestCase {
             let resource = Attribute<ResourceList>(resourceID)
 
             _ = resource.value
-            XCTAssertFalse(resource.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(resource.valueState.contains(.needsEvaluation))
 
             inputs.base.time.setValue(Time(seconds: 1))
 
-            XCTAssertTrue(resource.valueState.rawValue & 1 != 0)
+            XCTAssertTrue(resource.valueState.contains(.needsEvaluation))
         }
     }
 

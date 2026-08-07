@@ -97,7 +97,7 @@ final class _DisplayList_StableIdentityRoot {
                 // Scope maps are bookkeeping values, not dependencies of the
                 // consumer that materializes the root cache.
                 let scope = attribute.valueAndFlags(
-                    options: AGValueOptions(rawValue: 0x4)
+                    options: .withoutDependency
                 ).value
                 merged.formUnion(scope.map)
                 index += 1
@@ -166,7 +166,7 @@ where Value == _DisplayList_StableIdentityScope {
     /// Accesses scope bookkeeping in place without publishing a copied input.
     subscript() -> _DisplayList_StableIdentityScope {
         get {
-            valueAndFlags(options: AGValueOptions(rawValue: 0x4)).value
+            valueAndFlags(options: .withoutDependency).value
         }
         _modify {
             guard let graph = _AGGraph.current else {

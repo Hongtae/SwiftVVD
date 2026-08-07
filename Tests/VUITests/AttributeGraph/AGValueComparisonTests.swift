@@ -21,8 +21,10 @@ final class AGValueComparisonTests: XCTestCase {
         XCTAssertEqual(ComparisonModeReads.rule, 1)
         XCTAssertEqual(ComparisonModeReads.statefulRule, 1)
         XCTAssertEqual(ComparisonModeReads.lowLevelBody, 1)
-        XCTAssertEqual(DefaultComparisonModeRule.comparisonMode.rawValue, 2)
-        XCTAssertEqual(_External.comparisonMode.rawValue, 3)
+        XCTAssertEqual(DefaultComparisonModeRule.comparisonMode, .layout)
+        XCTAssertEqual(_External.comparisonMode, .storedRepresentation)
+        XCTAssertEqual(AGComparisonMode.layout.rawValue, 2)
+        XCTAssertEqual(AGComparisonMode.storedRepresentation.rawValue, 3)
     }
 
     func testLayoutComparisonUsesStoredRepresentationAndReferenceIdentity() {

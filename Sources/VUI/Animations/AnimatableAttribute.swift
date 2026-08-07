@@ -71,7 +71,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>:
             fatalError("AnimatableAttribute.updateValue called outside an active _AGGraph context.")
         }
 
-        var value = _source.changedValue(options: AGValueOptions(rawValue: 0))
+        var value = _source.changedValue(options: [])
         helper.update(
             value: &value,
             defaultAnimation: nil,

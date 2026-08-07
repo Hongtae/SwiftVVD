@@ -22,10 +22,10 @@ final class AGGraphCounterTests: XCTestCase {
     }
 
     func testAttributeBodyProtocolDefaultsMatchObservedSurface() {
-        XCTAssertEqual(DefaultAttributeBody.comparisonMode.rawValue, 2)
-        XCTAssertEqual(DefaultAttributeBody.flags.rawValue, 8)
+        XCTAssertEqual(DefaultAttributeBody.comparisonMode, .layout)
+        XCTAssertEqual(DefaultAttributeBody.flags, .mainThread)
         XCTAssertFalse(DefaultAttributeBody._hasDestroySelf)
-        XCTAssertEqual(AsyncAttributeBody.flags.rawValue, 0)
+        XCTAssertTrue(AsyncAttributeBody.flags.isEmpty)
         XCTAssertTrue(ObservedStatefulRule._hasDestroySelf)
     }
 
@@ -154,17 +154,17 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(output.value, 42)
             XCTAssertEqual(recorder.evaluationCount, 1)
-            output.addInput(source, options: AGInputOptions(rawValue: 0), token: 17)
+            output.addInput(source, options: [], token: 17)
 
             source.value = 2
             XCTAssertTrue(
                 output.breadthFirstSearch(
-                    options: AGSearchOptions(rawValue: 1)
+                    options: .inputs
                 ) { $0 == source.identifier }
             )
             XCTAssertTrue(
                 source.identifier.breadthFirstSearch(
-                    options: AGSearchOptions(rawValue: 2)
+                    options: .outputs
                 ) { $0 == output.identifier }
             )
             XCTAssertEqual(output.value, 42)
@@ -275,12 +275,12 @@ final class AGGraphCounterTests: XCTestCase {
 
             output.addInput(
                 source,
-                options: AGInputOptions(rawValue: 0),
+                options: [],
                 token: 0
             )
             output.addInput(
                 source,
-                options: AGInputOptions(rawValue: 0),
+                options: [],
                 token: 1
             )
 
@@ -345,18 +345,18 @@ final class AGGraphCounterTests: XCTestCase {
             let first = Attribute(value: 1)
             let second = Attribute(value: 2)
             let third = Attribute(value: 3)
-            first.addInput(second, options: AGInputOptions(rawValue: 0), token: 0)
+            first.addInput(second, options: [], token: 0)
             second.identifier.addInput(
                 third.identifier,
-                options: AGInputOptions(rawValue: 0),
+                options: [],
                 token: 0
             )
-            third.addInput(first, options: AGInputOptions(rawValue: 0), token: 0)
+            third.addInput(first, options: [], token: 0)
 
             var visited: [AGAttribute] = []
             XCTAssertFalse(
                 first.breadthFirstSearch(
-                    options: AGSearchOptions(rawValue: 3)
+                    options: [.inputs, .outputs]
                 ) { attribute in
                     visited.append(attribute)
                     return false
@@ -372,7 +372,7 @@ final class AGGraphCounterTests: XCTestCase {
             var startVisits = 0
             XCTAssertTrue(
                 first.identifier.breadthFirstSearch(
-                    options: AGSearchOptions(rawValue: 0)
+                    options: []
                 ) { attribute in
                     startVisits += 1
                     return attribute == first.identifier
@@ -1166,7 +1166,7 @@ final class AGGraphCounterTests: XCTestCase {
         )
     }
 
-    func testWithoutTrackingSkipsDependencyAndRestoresRuleContext() {
+    func testValueWithoutDependencySkipsInputEdgeAndRestoresRuleContext() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
         let recorder = TrackingIsolationRecorder()
@@ -1251,7 +1251,7 @@ final class AGGraphCounterTests: XCTestCase {
         ref.withCurrent {
             let source = Attribute(value: 3)
             let rule = CachedDoublingRule(source: source)
-            let options = AGCachedValueOptions(rawValue: 0)
+            let options: AGCachedValueOptions = []
 
             XCTAssertNil(rule.cachedValueIfExists(options: options, owner: nil))
             XCTAssertEqual(rule.cachedValue(options: options, owner: nil), 6)
@@ -1261,7 +1261,7 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(
                 rule.cachedValue(
-                    options: AGCachedValueOptions(rawValue: 1),
+                    options: .prefetchInput,
                     owner: nil
                 ),
                 6
@@ -1271,6 +1271,66 @@ final class AGGraphCounterTests: XCTestCase {
             source.value = 4
             XCTAssertEqual(rule.cachedValueIfExists(options: options, owner: nil), 8)
             XCTAssertEqual(graph.cachedRuleEntries.count, 1)
+        }
+    }
+
+    func testCachedValuePrefetchesInputBeforeDecidingToEvaluateConsumer() {
+        // ASSERTIONS attributeGraphCachedRuleInputPrefetchObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let prefetchedRecorder = MutableRuleRecorder()
+        let deferredRecorder = MutableRuleRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let cachedRule = CachedParityRule(source: source)
+            let prefetched = graph.makeRule {
+                prefetchedRecorder.evaluationCount += 1
+                return cachedRule.cachedValue(
+                    options: .prefetchInput,
+                    owner: nil
+                )
+            }
+            let deferred = graph.makeRule {
+                deferredRecorder.evaluationCount += 1
+                return cachedRule.cachedValue(options: [], owner: nil)
+            }
+
+            XCTAssertEqual(prefetched.value, 1)
+            XCTAssertEqual(deferred.value, 1)
+            XCTAssertEqual(prefetchedRecorder.evaluationCount, 1)
+            XCTAssertEqual(deferredRecorder.evaluationCount, 1)
+
+            let prefetchedEdge = try! XCTUnwrap(
+                graph.slots[Int(prefetched.identifier.rawValue)].node?.inputs
+                    .first
+            )
+            let deferredEdge = try! XCTUnwrap(
+                graph.slots[Int(deferred.identifier.rawValue)].node?.inputs
+                    .first
+            )
+            XCTAssertEqual(
+                prefetchedEdge.flags & _AGGraph.InputEdge.deferredUpdate,
+                0
+            )
+            XCTAssertNotEqual(
+                deferredEdge.flags & _AGGraph.InputEdge.deferredUpdate,
+                0
+            )
+
+            source.setValue(3)
+            let cachedNodeIndex = Int(prefetchedEdge.attribute)
+            XCTAssertTrue(
+                graph.slots[cachedNodeIndex].node!.needsEvaluation
+            )
+
+            XCTAssertEqual(prefetched.value, 1)
+            XCTAssertEqual(prefetchedRecorder.evaluationCount, 1)
+            XCTAssertFalse(
+                graph.slots[cachedNodeIndex].node!.needsEvaluation
+            )
+            XCTAssertEqual(deferred.value, 1)
+            XCTAssertEqual(deferredRecorder.evaluationCount, 2)
         }
     }
 
@@ -1421,6 +1481,14 @@ private struct CachedDoublingRule: Rule, Hashable {
 
     var value: Int {
         source.value * 2
+    }
+}
+
+private struct CachedParityRule: Rule, Hashable {
+    var source: Attribute<Int>
+
+    var value: Int {
+        source.value & 1
     }
 }
 
@@ -1653,10 +1721,10 @@ private struct ChangedValueRule: StatefulRule {
     mutating func updateValue() {
         let firstResult = context.changedValue(
             of: first,
-            options: AGValueOptions(rawValue: 0)
+            options: []
         )
         let secondResult = second.changedValue(
-            options: AGValueOptions(rawValue: 0)
+            options: []
         )
         recorder.snapshots.append(
             KeyPathChangedInputSnapshot(
@@ -1723,9 +1791,8 @@ private struct TrackingIsolationRule: StatefulRule {
     var recorder: TrackingIsolationRecorder
 
     mutating func updateValue() {
-        let value = tracked.value + _AGGraph.withoutTracking {
-            isolated.value
-        }
+        let value = tracked.value
+            + isolated.valueAndFlags(options: .withoutDependency).value
         recorder.values.append(value)
         _AGGraph.setStatefulOutput(value)
     }

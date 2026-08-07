@@ -53,7 +53,7 @@ final class AnimatableAttributeHarness {
 
     func valueNeedsEvaluation() -> Bool {
         viewGraph.data.withCurrent {
-            animated.valueState.rawValue & 1 != 0
+            animated.valueState.contains(.needsEvaluation)
         }
     }
 
@@ -245,7 +245,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
 
     func valueNeedsEvaluation() -> Bool {
         viewGraph.data.withCurrent {
-            animated.valueState.rawValue & 1 != 0
+            animated.valueState.contains(.needsEvaluation)
         }
     }
 
@@ -542,7 +542,7 @@ final class AnimatableFrameAttributeHarness {
 
     func frameNeedsEvaluation() -> Bool {
         viewGraph.data.withCurrent {
-            animatedFrame.valueState.rawValue & 1 != 0
+            animatedFrame.valueState.contains(.needsEvaluation)
         }
     }
 

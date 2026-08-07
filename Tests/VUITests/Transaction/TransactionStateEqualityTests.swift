@@ -85,7 +85,7 @@ final class TransactionStateEqualityTests: XCTestCase {
     }
 
     func testAGGraphCompareValuesUsesStringAndStorageComparison() {
-        let options = AGComparisonOptions(rawValue: 3)
+        let options = AGComparisonOptions(mode: .storedRepresentation)
 
         XCTAssertTrue(_AGGraph.compareValues(7, 7, options: options))
         XCTAssertFalse(_AGGraph.compareValues(7, 8, options: options))

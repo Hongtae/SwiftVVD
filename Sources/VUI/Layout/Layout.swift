@@ -937,7 +937,7 @@ struct TransitionHelper<T: Transition> {
               let list = _list.attribute else {
             return changed
         }
-        let listValue = list.changedValue(options: AGValueOptions(rawValue: 0))
+        let listValue = list.changedValue(options: [])
         guard listValue.changed,
               let refreshed = listValue.value.traits[
                 TransitionTraitKey.self
@@ -1188,7 +1188,7 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
     }
 
     mutating func updatedItems() -> (any ViewList)? {
-        let result = _items.changedValue(options: AGValueOptions(rawValue: 0))
+        let result = _items.changedValue(options: [])
         // The pure-Swift graph reports a newly installed input edge as
         // unchanged. A new container still needs its initial item snapshot.
         let isInitialContainerEvaluation =

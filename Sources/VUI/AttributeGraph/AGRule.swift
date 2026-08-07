@@ -9,8 +9,8 @@
 
 /// Base protocol for all computed attribute bodies.
 ///
-/// These methods define the body-type hooks used by the attribute runtime.
-/// The graph dispatches them through Swift-owned rule boxes.
+/// These methods define the lifecycle and update hooks dispatched by graph-owned
+/// rule boxes.
 protocol _AttributeBody {
     static func _destroySelf(_ body: UnsafeMutableRawPointer)
     static func _updateDefault(_ body: UnsafeMutableRawPointer)
@@ -26,16 +26,13 @@ protocol AttributeBodyVisitor {
 extension _AttributeBody {
     static func _destroySelf(_ body: UnsafeMutableRawPointer) {}
     static func _updateDefault(_ body: UnsafeMutableRawPointer) {}
-    static var comparisonMode: AGComparisonMode { AGComparisonMode(rawValue: 2) }
+    static var comparisonMode: AGComparisonMode { .layout }
     static var _hasDestroySelf: Bool { false }
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 8) }
+    static var flags: AGAttributeTypeFlags { .mainThread }
     var updateWasCancelled: Bool { _AGGraphUpdateWasCancelled() }
 }
 
-/// A pure computed AG node: derives a single value from dependencies each evaluation.
-/// Unlike StatefulRule, a Rule is stateless and exposes its result through `value`.
-///
-/// Used for combiner nodes such as ExclusiveState, ExclusivePhase, SequenceEvents.
+/// A computed attribute body that exposes its result through `value`.
 protocol Rule: _AttributeBody {
     associatedtype Value
     static var initialValue: Value? { get }
@@ -119,13 +116,12 @@ extension Rule where Self: Hashable {
     }
 }
 
-/// Marker for graph bodies whose private runtime flags may permit asynchronous
-/// evaluation. The default flag set is empty, so conformance alone does not
-/// move evaluation to another executor.
+/// Marker for attribute bodies. Conformance alone does not move evaluation to
+/// another executor.
 protocol AsyncAttribute: _AttributeBody {}
 
 extension AsyncAttribute {
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 0) }
+    static var flags: AGAttributeTypeFlags { [] }
 }
 
 protocol _AnyAttributeBodyBox: AnyObject {
@@ -429,7 +425,7 @@ struct AnyRuleContext: Equatable {
         options: AGValueOptions
     ) -> (value: Value, changed: Bool) {
         let result = valueAndFlags(of: input, options: options)
-        return (result.value, result.flags.rawValue & 1 != 0)
+        return (result.value, result.flags.contains(.changed))
     }
 
     subscript<Value>(_ attribute: Attribute<Value>) -> Value {
@@ -549,16 +545,16 @@ extension StatefulRule {
 struct External<Value>: _AttributeBody, CustomStringConvertible {
     init() {}
 
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 0) }
-    static var comparisonMode: AGComparisonMode { AGComparisonMode(rawValue: 3) }
+    static var flags: AGAttributeTypeFlags { [] }
+    static var comparisonMode: AGComparisonMode { .storedRepresentation }
     static func _update(_ body: UnsafeMutableRawPointer, attribute: AGAttribute) {}
 
     var description: String { String(describing: Value.self) }
 }
 
 struct _External: _AttributeBody, CustomStringConvertible {
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 0) }
-    static var comparisonMode: AGComparisonMode { AGComparisonMode(rawValue: 3) }
+    static var flags: AGAttributeTypeFlags { [] }
+    static var comparisonMode: AGComparisonMode { .storedRepresentation }
 
     var description: String { "External value" }
 }
@@ -572,7 +568,7 @@ struct Focus<Root, Value>: Rule, CustomStringConvertible {
         self.keyPath = keyPath
     }
 
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 0) }
+    static var flags: AGAttributeTypeFlags { [] }
     var value: Value { root.value[keyPath: keyPath] }
     var description: String { "• \(String(describing: Value.self))" }
 }
@@ -586,7 +582,7 @@ struct Map<Input, Output>: Rule, CustomStringConvertible {
         self.body = body
     }
 
-    static var flags: AGAttributeTypeFlags { AGAttributeTypeFlags(rawValue: 0) }
+    static var flags: AGAttributeTypeFlags { [] }
     var value: Output { body(arg.value) }
     var description: String { "λ \(String(describing: Output.self))" }
 }

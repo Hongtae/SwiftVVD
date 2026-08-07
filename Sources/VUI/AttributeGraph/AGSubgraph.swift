@@ -19,9 +19,9 @@ import Synchronization
 /// automatically register every node created in that scope to this subgraph.
 /// Call `invalidate()` to batch-remove all registered nodes at once.
 ///
-/// Subgraphs form a parent/child tree: an AGSubgraph created while another is active
-/// automatically becomes its child. `invalidate()` visits the parent before its
-/// newest child and destroys each subgraph's newest node first.
+/// Subgraphs form a parent/child tree. An AGSubgraph created with the default
+/// parent while another is active becomes its child. `invalidate()` visits the
+/// parent before its newest child and destroys each subgraph's newest node first.
 ///
 /// Typical use: ForEach item lifecycle:
 /// ```swift

@@ -276,7 +276,7 @@ struct AGWeakAttribute: Hashable, CustomStringConvertible, Sendable {
 }
 
 /// A typed wrapper around an AGAttribute.
-/// Marked @unchecked Sendable: stores only AGAttribute (a Sendable raw index).
+/// Marked @unchecked Sendable because it stores only an AGAttribute handle.
 /// Value type parameter is used only in method signatures. No Value is retained here.
 @dynamicMemberLookup
 struct Attribute<Value>: Hashable, CustomStringConvertible, @unchecked Sendable {
@@ -438,7 +438,7 @@ struct Attribute<Value>: Hashable, CustomStringConvertible, @unchecked Sendable 
         get {
             _AGGraphGetValue(
                 self,
-                options: AGValueOptions(rawValue: 0)
+                options: []
             ).value
         }
         nonmutating set {
@@ -456,7 +456,7 @@ struct Attribute<Value>: Hashable, CustomStringConvertible, @unchecked Sendable 
         options: AGValueOptions
     ) -> (value: Value, changed: Bool) {
         let result = valueAndFlags(options: options)
-        return (result.value, result.flags.rawValue & 1 != 0)
+        return (result.value, result.flags.contains(.changed))
     }
 
     var wrappedValue: Value {
@@ -661,7 +661,7 @@ struct WeakAttribute<T>: Hashable, CustomStringConvertible, Sendable {
         guard let result = _AGGraphGetWeakValue(self, options: options) else {
             return nil
         }
-        return (result.value, result.flags.rawValue & 1 != 0)
+        return (result.value, result.flags.contains(.changed))
     }
 }
 

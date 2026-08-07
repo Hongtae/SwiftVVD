@@ -503,8 +503,8 @@ struct ResolvedTextFilter: StatefulRule, AsyncAttribute {
             fatalError("ResolvedTextFilter.updateValue requires an active ViewGraph.")
         }
 
-        let text = _text.changedValue(options: AGValueOptions(rawValue: 0))
-        let environment = _environment.changedValue(options: AGValueOptions(rawValue: 0))
+        let text = _text.changedValue(options: [])
+        let environment = _environment.changedValue(options: [])
         let hasOutput = _AGGraph.currentStatefulOutput(ResolvedStyledText.self) != nil
 
         var needsResolution = !hasOutput

@@ -50,7 +50,7 @@ extension _AGGraph {
 
     private static func valueComparator<Value>(
         for type: Value.Type,
-        mode: AGComparisonMode = AGComparisonMode(rawValue: 3)
+        mode: AGComparisonMode = .storedRepresentation
     ) -> (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool {
         let options = AGComparisonOptions(mode: mode)
         return { lhs, rhs in
@@ -125,19 +125,19 @@ extension _AGGraph {
             fatalError("valueState(for:) called on AGAttribute @\(id.rawValue) that does not exist.")
         }
 
-        var rawValue: UInt32 = 0
-        if node.needsEvaluation { rawValue |= 1 << 0 }
-        if node.isEvaluating { rawValue |= 1 << 1 }
-        if node.inputsChanged { rawValue |= 1 << 2 }
-        if node.value != nil { rawValue |= 1 << 3 }
-        if node.forceEvaluation { rawValue |= 1 << 4 }
+        var state: AGValueState = []
+        if node.needsEvaluation { state.insert(.needsEvaluation) }
+        if node.isEvaluating { state.insert(.evaluating) }
+        if node.inputsChanged { state.insert(.inputsChanged) }
+        if node.value != nil { state.insert(.hasValue) }
+        if node.forceEvaluation { state.insert(.forcedEvaluation) }
         if node.inputs.contains(where: {
             $0.flags & InputEdge.changed != 0
         }) {
-            rawValue |= 1 << 5
+            state.insert(.hasChangedInput)
         }
-        if node.transaction != nil { rawValue |= 1 << 6 }
-        return AGValueState(rawValue: rawValue)
+        if node.transaction != nil { state.insert(.hasTransaction) }
+        return state
     }
 
     func hasNode(_ id: AGAttribute) -> Bool {
@@ -286,9 +286,10 @@ extension _AGGraph {
 
     /// Reads the current cached output of the executing StatefulRule node.
     ///
-    /// Returns the value stored by the most recent setStatefulOutput call
-    /// (i.e. the output from the previous evaluation).
-    /// Returns nil if no output has been set yet (first evaluation).
+    /// Returns the currently cached output. Before the current evaluation
+    /// publishes a value, this is the output retained from an earlier evaluation
+    /// or the rule's initial value.
+    /// Returns nil if the node has no cached output.
     ///
     /// Must be called from within StatefulRule.updateValue(). Used by ResettableGestureRule
     /// to implement phaseValue.getter. This reads the previous phase without redundant storage.
@@ -326,14 +327,11 @@ extension _AGGraph {
     ) -> (value: Value, flags: AGChangedValueFlags) {
         assert(_AGGraph.current === self)
 
-        // Native option bit 2 routes a context read through the direct-value
-        // path instead of installing an input edge. The Swift graph uses the
-        // same boundary for dependency-isolated reads.
-        if options.rawValue & 0x4 != 0 {
+        if options.contains(.withoutDependency) {
             let value = _AGGraph.withoutTracking {
                 self.value(for: input.identifier) as! Value
             }
-            return (value, AGChangedValueFlags(rawValue: 0))
+            return (value, [])
         }
 
         let result: (Value, Bool)
@@ -358,7 +356,7 @@ extension _AGGraph {
         }
         return (
             result.0,
-            AGChangedValueFlags(rawValue: result.1 ? 1 : 0)
+            result.1 ? [.changed] : []
         )
     }
 
@@ -443,7 +441,7 @@ extension _AGGraph {
         return attr
     }
 
-    /// Creates a computed node backed by a Rule struct (pure, stateless).
+    /// Creates a computed node backed by a Rule value.
     func makeRule<R: Rule>(_ rule: R) -> Attribute<R.Value> {
         makeRule(rule, initialValue: R.initialValue)
     }
@@ -463,10 +461,9 @@ extension _AGGraph {
         createIfMissing: Bool
     ) -> UnsafePointer<R.Value>? {
         assert(_AGGraph.current === self)
-        _ = options
         // A supplied owner selects its subgraph. Otherwise the active update's
         // attribute subgraph wins, followed by the explicitly current subgraph.
-        // Options affect the read/input edge and are not part of cache identity.
+        // Options do not alter cache identity.
         let cacheSubgraph = owner.flatMap(subgraph(for:))
             ?? Self.currentlyEvaluatingNode.flatMap(subgraph(for:))
             ?? AGSubgraphRef.current
@@ -487,7 +484,9 @@ extension _AGGraph {
                 guard createIfMissing || hasCachedValue(for: attribute.identifier) else {
                     return nil
                 }
-                typedEntry.store(attribute.value)
+                typedEntry.store(
+                    readCachedRuleValue(from: attribute, options: options)
+                )
                 return typedEntry.pointer
             }
         }
@@ -496,13 +495,26 @@ extension _AGGraph {
         let attribute = AGSubgraphRef.withCurrent(cacheSubgraph) {
             makeRule(rule)
         }
-        let value = attribute.value
+        let value = readCachedRuleValue(from: attribute, options: options)
         let entry = TypedCachedRuleEntry(
             attribute: attribute.asWeak().base,
             value: value
         )
         cachedRuleEntries[key] = entry
         return entry.pointer
+    }
+
+    private func readCachedRuleValue<Value>(
+        from attribute: Attribute<Value>,
+        options: AGCachedValueOptions
+    ) -> Value {
+        let inputFlags: UInt8 = options.contains(.prefetchInput)
+            ? 0
+            : InputEdge.deferredUpdate
+        return value(
+            for: attribute.identifier,
+            dynamicInputFlags: inputFlags
+        ) as! Value
     }
 
     private func makeRule<R: Rule>(
@@ -690,8 +702,8 @@ extension _AGGraph {
     /// The rule is evaluated once upon creation to register its AG dependencies. If creation
     /// occurs during an active graph update, it joins that graph-local update work list.
     ///
-    /// The node is registered in the current AGSubgraph and removed when the AGSubgraph is
-    /// invalidated (e.g. when the owning view is removed from the tree).
+    /// When an AGSubgraph is current, the node is registered with it and removed
+    /// when that subgraph is invalidated.
     @discardableResult
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(_AGGraph.current === self)
@@ -778,19 +790,14 @@ extension _AGGraph {
 
     // MARK: - Cross-Graph Reference
     // Allows a node in one graph to reactively observe a node from another.
-    // Used by GestureGraph <- ViewGraph geometry nodes (GestureResponder hit-test)
-    // and sheet WindowController <- parent ViewGraph content rule (makeContent reactivity).
-    //
     // Flow: makeCrossGraphRef (target graph) -> addCrossGraphObserver (source graph)
     //       source setValue -> notifyCrossGraphObservers -> target inbox.enqueue(markNeedsEvaluation)
-    //       target withCurrent -> inbox.drain() -> crossGraphRef node re-evaluates via cachedValue
+    //       target update context -> inbox.drain() -> crossGraphRef node re-evaluates via cachedValue
 
     /// Returns the cached value of a node without requiring this graph to be current.
     ///
-    /// Used exclusively by crossGraphRef node evaluation: a node in graph B reads a cached
-    /// value from graph A while graph B is current. No evaluation is triggered. The source
-    /// graph must have already evaluated and cached the value. fatalError if the node has
-    /// never been evaluated (no cached value available yet).
+    /// No evaluation is triggered. The graph must already contain a cached value
+    /// for the node.
     func cachedValue(for id: AGAttribute) -> Any {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else {
@@ -876,7 +883,7 @@ extension _AGGraph {
     /// The returned attribute is evaluated lazily: on first read, `cachedValue(for:)` is
     /// called on `sourceGraph`. The node is automatically invalidated whenever the source
     /// node changes, `sourceGraph` enqueues a `markNeedsEvaluation` into this graph's inbox,
-    /// and the inbox is drained at the start of the next `withCurrent` block.
+    /// and the owning graph drains that inbox before a subsequent update.
     func makeCrossGraphRef<V>(source: Attribute<V>, in sourceGraph: _AGGraph) -> Attribute<V> {
         assert(_AGGraph.current === self,
                "makeCrossGraphRef: must be called within the target graph's context")
@@ -1009,12 +1016,20 @@ extension _AGGraph {
     // MARK: Value Access
 
     func value(for id: AGAttribute) -> Any {
+        value(for: id, dynamicInputFlags: 0)
+    }
+
+    private func value(
+        for id: AGAttribute,
+        dynamicInputFlags: UInt8
+    ) -> Any {
         assert(_AGGraph.current === self)
         let evaluator = _AGGraph.currentlyEvaluatingNode
         let preparedRead = prepareValueRead(
             id,
             evaluator: evaluator,
-            recordsDynamicInput: true
+            recordsDynamicInput: true,
+            dynamicInputFlags: dynamicInputFlags
         )
         if preparedRead.needsUpdate {
             updateValueForRead(id)
@@ -1037,11 +1052,10 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         attribute.identifier._debugValidate()
 
-        // Option 0x4 updates the value without installing an input edge.
         _ = valueAndFlags(
             for: attribute,
             relativeTo: nil,
-            options: AGValueOptions(rawValue: 0x4)
+            options: .withoutDependency
         )
 
         let index = Int(attribute.identifier.rawValue)
@@ -1063,7 +1077,8 @@ extension _AGGraph {
         let preparedRead = prepareValueRead(
             id,
             evaluator: evaluator,
-            recordsDynamicInput: false
+            recordsDynamicInput: false,
+            dynamicInputFlags: 0
         )
         if preparedRead.needsUpdate {
             updateValueForRead(id)
@@ -1080,7 +1095,8 @@ extension _AGGraph {
     private func prepareValueRead(
         _ id: AGAttribute,
         evaluator: AGAttribute?,
-        recordsDynamicInput: Bool
+        recordsDynamicInput: Bool,
+        dynamicInputFlags: UInt8
     ) -> (needsUpdate: Bool, edgeIndex: Int?) {
         let index = Int(id.rawValue)
         guard slots.indices.contains(index), slots[index].node != nil else {
@@ -1096,7 +1112,8 @@ extension _AGGraph {
             if recordsDynamicInput {
                 edgeIndex = markDynamicInputRead(
                     from: evaluator,
-                    dependsOn: id
+                    dependsOn: id,
+                    flags: dynamicInputFlags
                 )
             } else {
                 edgeIndex = matchingInputEdgeIndex(
@@ -1415,7 +1432,8 @@ extension _AGGraph {
         slots[index].node!.updateTraversal = traversal
         slots[index].node!.updateTraversalState = 1
         workList.append(frame.id, afterInputs: true)
-        for input in slots[index].node!.inputs {
+        for input in slots[index].node!.inputs
+        where input.flags & InputEdge.deferredUpdate == 0 {
             workList.append(input.attribute, afterInputs: false)
         }
         return .none
@@ -1428,6 +1446,9 @@ extension _AGGraph {
             return true
         }
         for input in slots[index].node!.inputs {
+            if input.flags & InputEdge.deferredUpdate != 0 {
+                return true
+            }
             guard let currentVersion =
                     slots[Int(input.attribute)].node?.valueVersion,
                   input.valueVersion == currentVersion else {
@@ -1785,10 +1806,10 @@ extension _AGGraph {
 
     /// Marks `startID` and all its transitive dependents as needing re-evaluation.
     ///
-    /// - Parameter evaluateSideEffects: When `true`, side-effect nodes are evaluated
-    ///   eagerly within this call so that callbacks fire synchronously. When `false`,
-    ///   side-effect nodes are only marked dirty for later graph evaluation. Node
-    ///   removal also uses the deferred form because an input may already be freed.
+    /// - Parameter evaluateSideEffects: When `true`, side-effect nodes are scheduled
+    ///   for eager evaluation after invalidation traversal. When `false`, they are
+    ///   only marked dirty for later graph evaluation. Node removal uses the deferred
+    ///   form because an input may already be freed.
     func markNeedsEvaluation(
         _ startID: AGAttribute,
         evaluateSideEffects: Bool = true,
@@ -2068,13 +2089,15 @@ extension _AGGraph {
     @discardableResult
     private func markDynamicInputRead(
         from parent: AGAttribute,
-        dependsOn child: AGAttribute
+        dependsOn child: AGAttribute,
+        flags: UInt8
     ) -> Int {
         let parentIndex = Int(parent.rawValue)
+        let identityFlags = flags & InputEdge.identityMask
         if let edgeIndex = matchingInputEdgeIndex(
             inNodeAt: parentIndex,
             attribute: child.rawValue,
-            identityFlags: 0
+            identityFlags: identityFlags
         ) {
             slots[parentIndex].node!.inputs[edgeIndex].flags |=
                 InputEdge.readThisEvaluation
@@ -2083,7 +2106,7 @@ extension _AGGraph {
         return insertInputEdge(
             from: parent,
             dependsOn: child,
-            flags: InputEdge.readThisEvaluation
+            flags: identityFlags | InputEdge.readThisEvaluation
         )
     }
 
@@ -2283,13 +2306,13 @@ extension _AGGraph {
             }
 
             let node = slots[Int(rawValue)].node!
-            if options.rawValue & 1 != 0 {
+            if options.contains(.inputs) {
                 for input in node.inputs
                 where visited.insert(input.attribute).inserted {
                     queue.append(input.attribute)
                 }
             }
-            if options.rawValue & 2 != 0 {
+            if options.contains(.outputs) {
                 for output in node.outputs.sorted() where visited.insert(output).inserted {
                     queue.append(output)
                 }
@@ -2357,10 +2380,7 @@ extension _AGGraph {
             valuesEqual: Self.valueComparator(for: V.self),
             kind: .indirect(target: source.identifier, defaultValue: nil)
         )
-        // The native flag controls invalidation callbacks only when an
-        // indirect edge crosses graph contexts that share one graph storage.
-        // This graph has one host context; cross-graph edges use crossGraphRef,
-        // so there is no graph-local flag to retain on the indirect node.
+        // Local indirect edges always use ordinary invalidation.
         _ = withoutInvalidation
         registerAttributeInfo(at: index, valueType: V.self)
         let attribute = Attribute<V>(AGAttribute(rawValue: index))
@@ -2386,8 +2406,7 @@ extension _AGGraph {
             target: concrete,
             defaultValue: defaultValue
         )
-        // Retargeting always invalidates the indirect value. The boolean has
-        // the same cross-context-only role described at creation time.
+        // Retargeting always invalidates the local indirect value.
         _ = withoutInvalidation
         markNeedsEvaluation(indirect)
     }

@@ -100,9 +100,9 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
     }
 
     mutating func updateValue() {
-        let position = _position.changedValue(options: AGValueOptions(rawValue: 0))
-        let size = _size.changedValue(options: AGValueOptions(rawValue: 0))
-        let pixelLength = _pixelLength.changedValue(options: AGValueOptions(rawValue: 0))
+        let position = _position.changedValue(options: [])
+        let size = _size.changedValue(options: [])
+        let pixelLength = _pixelLength.changedValue(options: [])
         var value = (
             value: roundedFrame(
                 position: position.value,
@@ -175,9 +175,9 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
     }
 
     mutating func updateValue() {
-        let position = _position.changedValue(options: AGValueOptions(rawValue: 0))
-        let size = _size.changedValue(options: AGValueOptions(rawValue: 0))
-        let pixelLength = _pixelLength.changedValue(options: AGValueOptions(rawValue: 0))
+        let position = _position.changedValue(options: [])
+        let size = _size.changedValue(options: [])
+        let pixelLength = _pixelLength.changedValue(options: [])
         var value = (
             value: roundedFrame(
                 position: position.value,

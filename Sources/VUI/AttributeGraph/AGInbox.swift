@@ -7,12 +7,11 @@
 
 import Synchronization
 
-/// A thread-safe queue of work items to be run on the AG thread.
+/// A thread-safe queue of work items for a graph's serialized execution context.
 ///
 /// Owned by `_AGGraph` — access via `_AGGraph.current!.inbox` or a
-/// pre-captured reference.  At the start of each render pass the host calls
-/// `drain()` inside the active AG context, which executes all pending closures
-/// with `_AGGraph.current` already bound.
+/// pre-captured reference. The owning graph drains it from an active graph
+/// context at the appropriate update boundary.
 ///
 /// Typical lifecycle:
 /// ```
@@ -23,9 +22,9 @@ import Synchronization
 ///     }
 /// }
 ///
-/// // Render pass start (AG thread):
+/// // Update boundary (serialized graph context):
 /// _AGGraph.withCurrent(graph) {
-///     graph.inbox.drain()   // _AGGraph.current is already bound; closures can use it freely
+///     graph.inbox.drain()
 ///     // … evaluate …
 /// }
 /// ```
@@ -53,16 +52,17 @@ final class AGInbox: @unchecked Sendable {
         }
     }
 
-    /// Enqueues a work item.  Safe to call from any thread.
-    /// The closure runs on the AG thread with `_AGGraph.current` already bound.
+    /// Enqueues a work item. Safe to call from any thread.
+    /// The closure runs when the owning graph drains this inbox.
     func enqueue(transaction: Transaction? = nil, _ work: @escaping @Sendable () -> Void) {
         pendingWork.withLock {
             $0.append(WorkItem(transaction: transaction.map(UnsafeBox.init), work: work))
         }
     }
 
-    /// Runs all pending work items.
-    /// Must be called on the AG thread inside an active `_AGGraph` context.
+    /// Runs the work items pending at the start of this call.
+    /// Items enqueued during execution remain pending for the next drain.
+    /// Must be called inside the owning graph's active `_AGGraph` context.
     @discardableResult
     func drain() -> Transaction? {
         guard _AGGraph.current != nil else {
@@ -84,7 +84,7 @@ final class AGInbox: @unchecked Sendable {
     }
 
     /// Runs a single pending work item.
-    /// Must be called on the AG thread inside an active `_AGGraph` context.
+    /// Must be called inside the owning graph's active `_AGGraph` context.
     @discardableResult
     func drainOne() -> Transaction? {
         guard _AGGraph.current != nil else {

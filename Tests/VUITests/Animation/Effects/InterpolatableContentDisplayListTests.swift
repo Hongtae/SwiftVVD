@@ -7278,11 +7278,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
             _ = output.value
-            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(output.valueState.contains(.needsEvaluation))
 
             inputs.base.time.setValue(Time(seconds: 1))
 
-            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(output.valueState.contains(.needsEvaluation))
             XCTAssertEqual(group.layer.removedCount, 0)
         }
     }
@@ -7336,21 +7336,21 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTAssertGreaterThan(group.layer.removedCount, 0)
 
             inputs.base.time.setValue(Time(seconds: 0.01))
-            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            XCTAssertTrue(output.valueState.contains(.needsEvaluation))
             _ = output.value
             inputs.base.time.setValue(Time(seconds: 0.02))
-            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            XCTAssertTrue(output.valueState.contains(.needsEvaluation))
             _ = output.value
             inputs.base.time.setValue(Time(seconds: 0.22))
-            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            XCTAssertTrue(output.valueState.contains(.needsEvaluation))
             _ = output.value
             XCTAssertEqual(group.layer.removedCount, 0)
 
             inputs.base.time.setValue(Time(seconds: 0.23))
-            XCTAssertTrue(output.valueState.rawValue & 1 != 0)
+            XCTAssertTrue(output.valueState.contains(.needsEvaluation))
             _ = output.value
             inputs.base.time.setValue(Time(seconds: 0.24))
-            XCTAssertFalse(output.valueState.rawValue & 1 != 0)
+            XCTAssertFalse(output.valueState.contains(.needsEvaluation))
         }
     }
 

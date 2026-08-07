@@ -53,7 +53,7 @@ private struct TupleStableScopeProbeView<Payload>: PrimitiveView {
         }
         view._attribute.value.recorder.hashes.append(
             scope.valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value.hash
         )
         return .unaryViewList(view: view, inputs: inputs)
@@ -607,7 +607,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let rootScope = try XCTUnwrap(
                 inputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value
             XCTAssertEqual(rootScope.hash, StrongHash(of: "root"))
 
@@ -615,7 +615,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let indexScope = try XCTUnwrap(
                 inputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value
             XCTAssertEqual(
                 indexScope.hash,
@@ -627,7 +627,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let explicitScope = try XCTUnwrap(
                 inputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value
             XCTAssertEqual(
                 explicitScope.hash,
@@ -641,7 +641,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let typeScope = try XCTUnwrap(
                 inputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value
             XCTAssertEqual(
                 typeScope.hash,
@@ -718,7 +718,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let rootHash = try XCTUnwrap(
                 viewInputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value.hash
 
             let recorder = TupleStableScopeRecorder()
@@ -779,7 +779,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             XCTAssertEqual(inputs.makeStableIdentity().serial, 1)
             XCTAssertEqual(
                 scope.valueAndFlags(
-                    options: AGValueOptions(rawValue: 0x4)
+                    options: .withoutDependency
                 ).value.serial,
                 1
             )
@@ -845,7 +845,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let rootHash = try XCTUnwrap(
                 inputs.base.stableIDScope?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value.hash
             let idViewValue = IDView(EmptyView(), id: "row")
             let idView = graph.makeInput(value: idViewValue)
@@ -860,7 +860,7 @@ final class DynamicLayoutStateTests: XCTestCase {
             let childScope = try XCTUnwrap(
                 root.scopes.last?.attribute
             ).valueAndFlags(
-                options: AGValueOptions(rawValue: 0x4)
+                options: .withoutDependency
             ).value
             XCTAssertEqual(
                 childScope.hash,
