@@ -1464,155 +1464,6 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         )
     }
 
-    func testRetainedRemovalTransactionResolverPreservesFilterOwnership() {
-        let plain = Transaction()
-        let outer = Transaction(animation: .linear(duration: 0.25))
-
-        XCTAssertEqual(
-            retainedRemovalDurations(AnyTransition.opacity, from: outer),
-            [0.25]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity.animation(.linear(duration: 0.8)),
-                from: plain
-            ),
-            [0.8]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(AnyTransition.opacity.animation(nil), from: outer),
-            [nil]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(.linear(duration: 0.8))
-                    .animation(nil),
-                from: outer
-            ),
-            [0.8]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(nil)
-                    .animation(.linear(duration: 0.8)),
-                from: outer
-            ),
-            [nil]
-        )
-
-        let combined = AnyTransition.opacity
-            .animation(nil)
-            .combined(with: .scale.animation(.linear(duration: 0.7)))
-        XCTAssertEqual(
-            retainedRemovalDurations(combined, from: outer),
-            [nil, 0.7]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(.linear(duration: 0.8))
-                    .combined(with: .offset(x: -80, y: 0).animation(.linear(duration: 0.8))),
-                from: plain
-            ),
-            [0.8]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(nil)
-                    .combined(with: .offset(x: -80, y: 0).animation(.linear(duration: 0.8))),
-                from: plain
-            ),
-            [nil]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.offset(x: -80, y: 0)
-                    .animation(.linear(duration: 0.8))
-                    .combined(with: .opacity.animation(nil)),
-                from: plain
-            ),
-            [nil]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(nil)
-                    .combined(with: .opacity.animation(.linear(duration: 0.8))),
-                from: plain
-            ),
-            [nil, 0.8]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                AnyTransition.opacity
-                    .animation(.linear(duration: 0.8))
-                    .combined(with: .opacity.animation(nil)),
-                from: plain
-            ),
-            [0.8, nil]
-        )
-    }
-
-    func testRetainedRemovalTransactionResolverKeepsOffsetOnlyFilteredAnimationException() {
-        let plain = Transaction()
-
-        XCTAssertTrue(
-            AnyTransition.offset(x: 12, y: -4)
-                .animation(.linear(duration: 0.8))
-                ._retainedRemovalTransactions(from: plain, phase: .didDisappear)
-                .isEmpty
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                .scale(scale: 0.5).animation(.linear(duration: 0.8)),
-                from: plain
-            ),
-            [0.8]
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(
-                .offset(x: 12, y: -4),
-                from: Transaction(animation: .linear(duration: 0.3))
-            ),
-            [0.3]
-        )
-    }
-
-    func testRetainedRemovalTransactionResolverUsesAsymmetricRemovalChildOnly() {
-        let plain = Transaction()
-
-        let insertingScaleRemovingNilOpacity = AnyTransition.asymmetric(
-            insertion: .scale.animation(.linear(duration: 0.8)),
-            removal: .opacity.animation(nil)
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(insertingScaleRemovingNilOpacity, from: plain),
-            [nil]
-        )
-
-        let insertingOffsetRemovingScale = AnyTransition.asymmetric(
-            insertion: .offset(x: 12, y: -4).animation(.linear(duration: 0.8)),
-            removal: .scale(scale: 0.5).animation(.linear(duration: 0.6))
-        )
-        XCTAssertEqual(
-            retainedRemovalDurations(insertingOffsetRemovingScale, from: plain),
-            [0.6]
-        )
-
-        let insertingScaleRemovingOffset = AnyTransition.asymmetric(
-            insertion: .scale.animation(.linear(duration: 0.8)),
-            removal: .offset(x: 12, y: -4).animation(.linear(duration: 0.6))
-        )
-        XCTAssertTrue(
-            insertingScaleRemovingOffset
-                ._retainedRemovalTransactions(from: plain, phase: .didDisappear)
-                .isEmpty
-        )
-    }
-
     private func transitionEffectResults(
         _ effects: [RBTransitionEffect],
         progress: Float,
@@ -1624,15 +1475,6 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             transition.addEffect(effect)
         }
         return transition.effectResults(at: progress, event: event, bounds: bounds)
-    }
-
-    private func retainedRemovalDurations(
-        _ transition: AnyTransition,
-        from transaction: Transaction
-    ) -> [TimeInterval?] {
-        transition
-            ._retainedRemovalTransactions(from: transaction, phase: .didDisappear)
-            .map { $0.effectiveAnimation?.box.duration }
     }
 
     private func makeDisplayList(debugItemCount: Int) -> DisplayList {
@@ -1651,7 +1493,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         let position = position ?? graph.makeInput(value: CGPoint.zero)
         let base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: environment,
             transaction: graph.makeInput(value: Transaction())
         )

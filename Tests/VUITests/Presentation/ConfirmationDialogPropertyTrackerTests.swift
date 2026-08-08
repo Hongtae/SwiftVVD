@@ -15,7 +15,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
                 value: confirmationDialogModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let positionAttr = graph.makeInput(value: CGPoint.zero)
             let sizeAttr = graph.makeInput(value: CGSize.zero)
             let transformAttr = graph.makeInput(value: ViewTransform())
@@ -59,7 +59,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
                 value: confirmationDialogModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let positionAttr = graph.makeInput(value: CGPoint.zero)
             let sizeAttr = graph.makeInput(value: CGSize.zero)
             let transformAttr = graph.makeInput(value: ViewTransform())
@@ -125,7 +125,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
                 value: confirmationDialogModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let positionAttr = graph.makeInput(value: CGPoint.zero)
             let sizeAttr = graph.makeInput(value: CGSize.zero)
             let transformAttr = graph.makeInput(value: ViewTransform())
@@ -186,7 +186,7 @@ final class ConfirmationDialogPropertyTrackerTests: XCTestCase {
         environment: Attribute<EnvironmentValues>,
         modifier: Attribute<ConfirmationDialogModifier<EmptyView, EmptyView>>,
         itemList: Attribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         position: Attribute<CGPoint>,
         size: Attribute<CGSize>,
         transform: Attribute<ViewTransform>,

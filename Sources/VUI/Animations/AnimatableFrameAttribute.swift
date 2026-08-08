@@ -82,7 +82,7 @@ private struct AnimatableFrameAttribute: StatefulRule, ObservedAttribute, AsyncA
         size: Attribute<ViewSize>,
         pixelLength: Attribute<CGFloat>,
         environment: Attribute<EnvironmentValues>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         time: Attribute<Time>,
         transaction: Attribute<Transaction>,
         animationsDisabled: Bool
@@ -157,7 +157,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule, ObservedAttribute, Asy
         size: Attribute<ViewSize>,
         pixelLength: Attribute<CGFloat>,
         environment: Attribute<EnvironmentValues>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         time: Attribute<Time>,
         transaction: Attribute<Transaction>,
         animationsDisabled: Bool

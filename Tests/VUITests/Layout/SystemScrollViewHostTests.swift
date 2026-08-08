@@ -737,7 +737,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                     size: ViewSize(width: 300, height: 400)
                 )),
                 _pixelLength: graph.makeInput(value: CGFloat(1)),
-                _phase: graph.makeInput(value: Phase()),
+                _phase: graph.makeInput(value: _GraphInputs.Phase()),
                 _transaction: graph.makeInput(value: Transaction()),
                 _layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
                 _positionBinding: binding
@@ -877,7 +877,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                     _phaseState: graph.makeInput(value: ScrollPhaseState()),
                     _contentFrame: frame,
                     _pixelLength: graph.makeInput(value: CGFloat(1)),
-                    _phase: graph.makeInput(value: Phase()),
+                    _phase: graph.makeInput(value: _GraphInputs.Phase()),
                     _transaction: transaction,
                     _layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight)
                 ))
@@ -921,7 +921,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 _phaseState: graph.makeInput(value: ScrollPhaseState()),
                 _contentFrame: frame,
                 _pixelLength: graph.makeInput(value: CGFloat(1)),
-                _phase: graph.makeInput(value: Phase()),
+                _phase: graph.makeInput(value: _GraphInputs.Phase()),
                 _transaction: transaction,
                 _layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight)
             ))
@@ -1248,7 +1248,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             let anchors = graph.makeInput(value: ScrollAnchorStorage())
             let phaseState = graph.makeInput(value: ScrollPhaseState())
             let pixelLength = graph.makeInput(value: CGFloat(1))
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let transaction = graph.makeInput(value: Transaction())
             let layoutDirection = graph.makeInput(value: LayoutDirection.leftToRight)
             let adjustedRule = ScrollViewAdjustedState(

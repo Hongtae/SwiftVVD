@@ -486,7 +486,7 @@ final class SVGTests: XCTestCase {
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: graph.makeInput(value: EnvironmentValues()),
             transaction: graph.makeInput(value: Transaction())
         )

@@ -1147,6 +1147,4 @@ class ViewGraph: ViewGraphHost {
         }
     }
 
-    // Pending parity: route input events through GestureGraph.
-    func sendEvents(_ events: [Any], rootNode: ResponderNode, at time: Time) {}
 }

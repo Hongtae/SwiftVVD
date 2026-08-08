@@ -121,12 +121,12 @@ private extension _AppearanceActionModifier {
         typealias Value = _AppearanceActionModifier
 
         var modifier: Attribute<_AppearanceActionModifier>
-        var phase: Attribute<Phase>
+        var phase: Attribute<_GraphInputs.Phase>
         var box: MergedBox?
 
         init(
             modifier: Attribute<_AppearanceActionModifier>,
-            phase: Attribute<Phase>,
+            phase: Attribute<_GraphInputs.Phase>,
             box: MergedBox? = nil
         ) {
             self.modifier = modifier
@@ -166,8 +166,8 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     typealias Value = Void
 
     var modifier: Attribute<_AppearanceActionModifier>
-    var phase: Attribute<Phase>
-    var lastPhase: Phase?
+    var phase: Attribute<_GraphInputs.Phase>
+    var lastPhase: _GraphInputs.Phase?
     var appear: (() -> Void)?
     var disappear: (() -> Void)?
     var isAppeared = false
@@ -176,8 +176,8 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
 
     init(
         modifier: Attribute<_AppearanceActionModifier>,
-        phase: Attribute<Phase>,
-        lastPhase: Phase? = nil,
+        phase: Attribute<_GraphInputs.Phase>,
+        lastPhase: _GraphInputs.Phase? = nil,
         appear: (() -> Void)? = nil,
         disappear: (() -> Void)? = nil,
         isAppeared: Bool = false,

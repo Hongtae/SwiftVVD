@@ -591,120 +591,6 @@ public struct AsymmetricTransition<Insertion, Removal>: Transition
     }
 }
 
-protocol _TransitionTransactionFiltering {
-    // A transition can alter the transaction used when its phase changes. The
-    // resolver variant exposes child-specific filtered transactions for
-    // retained-removal decisions before the phase setter runs.
-    func _filter(transaction: inout Transaction, phase: TransitionPhase)
-    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction]
-}
-
-private protocol _TransitionRemovalRetentionFiltering {
-    func _retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction]
-}
-
-private func _applyTransitionTransactionFilters<T: Transition>(
-    _ transition: T,
-    to transaction: inout Transaction,
-    phase: TransitionPhase
-) {
-    if let filtering = transition as? any _TransitionTransactionFiltering {
-        filtering._filter(transaction: &transaction, phase: phase)
-    }
-}
-
-private func _transitionFilteredTransactions<T: Transition>(
-    _ transition: T,
-    from transaction: Transaction,
-    phase: TransitionPhase
-) -> [Transaction] {
-    if let filtering = transition as? any _TransitionTransactionFiltering {
-        return filtering._filteredTransactions(from: transaction, phase: phase)
-    }
-    return [transaction]
-}
-
-private func _hasPositiveAnimation(_ transaction: Transaction) -> Bool {
-    guard let animation = transaction.effectiveAnimation else { return false }
-    return animation.box.duration > 0
-}
-
-private func _transitionRetainedRemovalTransactions<T: Transition>(
-    _ transition: T,
-    from transaction: Transaction,
-    phase: TransitionPhase,
-    original: Transaction
-) -> [Transaction] {
-    if let filtering = transition as? any _TransitionRemovalRetentionFiltering {
-        return filtering._retainedRemovalTransactions(
-            from: transaction,
-            phase: phase,
-            original: original
-        )
-    }
-    if transition is OffsetTransition,
-       !_hasPositiveAnimation(original),
-       _hasPositiveAnimation(transaction) {
-        return []
-    }
-    return [transaction]
-}
-
-extension AsymmetricTransition: _TransitionTransactionFiltering {
-    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
-        switch phase {
-        case .willAppear:
-            _applyTransitionTransactionFilters(insertion, to: &transaction, phase: phase)
-        case .identity:
-            break
-        case .didDisappear:
-            _applyTransitionTransactionFilters(removal, to: &transaction, phase: phase)
-        }
-    }
-
-    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        switch phase {
-        case .willAppear:
-            return _transitionFilteredTransactions(insertion, from: transaction, phase: phase)
-        case .identity:
-            return [transaction]
-        case .didDisappear:
-            return _transitionFilteredTransactions(removal, from: transaction, phase: phase)
-        }
-    }
-}
-
-extension AsymmetricTransition: _TransitionRemovalRetentionFiltering {
-    func _retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        switch phase {
-        case .willAppear:
-            return _transitionRetainedRemovalTransactions(
-                insertion,
-                from: transaction,
-                phase: phase,
-                original: original
-            )
-        case .identity:
-            return [transaction]
-        case .didDisappear:
-            return _transitionRetainedRemovalTransactions(
-                removal,
-                from: transaction,
-                phase: phase,
-                original: original
-            )
-        }
-    }
-}
-
 struct CombiningTransition<First, Second>: Transition where First: Transition, Second: Transition {
     var transition1: First
     var transition2: Second
@@ -730,39 +616,6 @@ struct CombiningTransition<First, Second>: Transition where First: Transition, S
     }
 }
 
-extension CombiningTransition: _TransitionTransactionFiltering {
-    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
-        _applyTransitionTransactionFilters(transition2, to: &transaction, phase: phase)
-        _applyTransitionTransactionFilters(transition1, to: &transaction, phase: phase)
-    }
-
-    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        _transitionFilteredTransactions(transition1, from: transaction, phase: phase) +
-        _transitionFilteredTransactions(transition2, from: transaction, phase: phase)
-    }
-}
-
-extension CombiningTransition: _TransitionRemovalRetentionFiltering {
-    func _retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        _transitionRetainedRemovalTransactions(
-            transition1,
-            from: transaction,
-            phase: phase,
-            original: original
-        ) +
-        _transitionRetainedRemovalTransactions(
-            transition2,
-            from: transaction,
-            phase: phase,
-            original: original
-        )
-    }
-}
-
 struct FilteredTransition<Base: Transition>: Transition {
     var transition: Base
     var filter: (inout Transaction, TransitionPhase) -> Void
@@ -782,36 +635,6 @@ struct FilteredTransition<Base: Transition>: Transition {
 
     func _makeContentTransition(transition: inout _Transition_ContentTransition) {
         self.transition._makeContentTransition(transition: &transition)
-    }
-}
-
-extension FilteredTransition: _TransitionTransactionFiltering {
-    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
-        filter(&transaction, phase)
-        _applyTransitionTransactionFilters(transition, to: &transaction, phase: phase)
-    }
-
-    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        var transaction = transaction
-        filter(&transaction, phase)
-        return _transitionFilteredTransactions(transition, from: transaction, phase: phase)
-    }
-}
-
-extension FilteredTransition: _TransitionRemovalRetentionFiltering {
-    func _retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        var transaction = transaction
-        filter(&transaction, phase)
-        return _transitionRetainedRemovalTransactions(
-            transition,
-            from: transaction,
-            phase: phase,
-            original: original
-        )
     }
 }
 
@@ -868,7 +691,6 @@ extension Edge {
 }
 
 typealias _TransitionPhaseSetter = (TransitionPhase, Transaction) -> Void
-typealias _TransitionTransactionResolver = (TransitionPhase, Transaction) -> [Transaction]
 
 /// Opens a type-erased transition value for code that must build a
 /// concrete-transition graph rule.
@@ -914,18 +736,6 @@ class AnyTransitionBox {
 
     func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> AnyTransitionBox {
         AnyFilteredTransitionBox(base: self, filter: filter)
-    }
-
-    func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        [transaction]
-    }
-
-    func retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        filteredTransactions(from: transaction, phase: phase)
     }
 
     func base<T: Transition>(as type: T.Type) -> T? {
@@ -995,23 +805,6 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
         )
     }
 
-    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        _transitionFilteredTransactions(base, from: transaction, phase: phase)
-    }
-
-    override func retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        _transitionRetainedRemovalTransactions(
-            base,
-            from: transaction,
-            phase: phase,
-            original: original
-        )
-    }
-
     override func base<T: Transition>(as type: T.Type) -> T? {
         base as? T
     }
@@ -1040,14 +833,10 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
         let attr: Attribute<ApplyTransitionModifier<Base>> = graph.makeInput(
             value: ApplyTransitionModifier(transition: base, phase: phase)
         )
-        // Retained items keep this setter so removal can flip the same transition
-        // subtree to didDisappear with the transaction selected for that phase.
         phaseSetters.append { [base] phase, transaction in
-            var filteredTransaction = transaction
-            _applyTransitionTransactionFilters(base, to: &filteredTransaction, phase: phase)
             attr.setValue(
                 ApplyTransitionModifier(transition: base, phase: phase),
-                transaction: filteredTransaction
+                transaction: transaction
             )
         }
         return ApplyTransitionModifier<Base>._makeView(
@@ -1068,27 +857,6 @@ private final class AnyCombinedTransitionBox: AnyTransitionBox {
         super.init()
     }
 
-    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        first.filteredTransactions(from: transaction, phase: phase) +
-        second.filteredTransactions(from: transaction, phase: phase)
-    }
-
-    override func retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        first.retainedRemovalTransactions(
-            from: transaction,
-            phase: phase,
-            original: original
-        ) +
-        second.retainedRemovalTransactions(
-            from: transaction,
-            phase: phase,
-            original: original
-        )
-    }
 }
 
 private final class AnyAsymmetricTransitionBox: AnyTransitionBox {
@@ -1101,39 +869,6 @@ private final class AnyAsymmetricTransitionBox: AnyTransitionBox {
         super.init()
     }
 
-    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        switch phase {
-        case .willAppear:
-            return insertion.filteredTransactions(from: transaction, phase: phase)
-        case .identity:
-            return [transaction]
-        case .didDisappear:
-            return removal.filteredTransactions(from: transaction, phase: phase)
-        }
-    }
-
-    override func retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        switch phase {
-        case .willAppear:
-            return insertion.retainedRemovalTransactions(
-                from: transaction,
-                phase: phase,
-                original: original
-            )
-        case .identity:
-            return [transaction]
-        case .didDisappear:
-            return removal.retainedRemovalTransactions(
-                from: transaction,
-                phase: phase,
-                original: original
-            )
-        }
-    }
 }
 
 private final class AnyFilteredTransitionBox: AnyTransitionBox {
@@ -1144,26 +879,6 @@ private final class AnyFilteredTransitionBox: AnyTransitionBox {
         self.base = base
         self.filter = filter
         super.init()
-    }
-
-    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        var filteredTransaction = transaction
-        filter(&filteredTransaction, phase)
-        return base.filteredTransactions(from: filteredTransaction, phase: phase)
-    }
-
-    override func retainedRemovalTransactions(
-        from transaction: Transaction,
-        phase: TransitionPhase,
-        original: Transaction
-    ) -> [Transaction] {
-        var filteredTransaction = transaction
-        filter(&filteredTransaction, phase)
-        return base.retainedRemovalTransactions(
-            from: filteredTransaction,
-            phase: phase,
-            original: original
-        )
     }
 
     override func _makeView(
@@ -1253,18 +968,6 @@ public struct AnyTransition {
 
     public func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> AnyTransition {
         AnyTransition(box: box.transaction(filter))
-    }
-
-    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        box.filteredTransactions(from: transaction, phase: phase)
-    }
-
-    func _retainedRemovalTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
-        box.retainedRemovalTransactions(
-            from: transaction,
-            phase: phase,
-            original: transaction
-        )
     }
 
     func base<T: Transition>(as type: T.Type) -> T? {

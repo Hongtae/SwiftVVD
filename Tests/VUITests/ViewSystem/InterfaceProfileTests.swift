@@ -50,7 +50,7 @@ final class InterfaceProfileTests: XCTestCase {
     private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
             time: graph.makeInput(value: Time()),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: graph.makeInput(value: EnvironmentValues.tracking()),
             transaction: graph.makeInput(value: Transaction())
         )

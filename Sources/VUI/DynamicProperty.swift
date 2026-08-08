@@ -9,7 +9,10 @@
 protocol DynamicPropertyBox {
     associatedtype Property: DynamicProperty
     mutating func reset()
-    mutating func update(property: inout Property, phase: Phase) -> Bool
+    mutating func update(
+        property: inout Property,
+        phase: _GraphInputs.Phase
+    ) -> Bool
     func getState<T>(type: T.Type) -> Binding<T>?
 }
 
@@ -53,7 +56,10 @@ public struct _DynamicPropertyBuffer {
         properties.append(.init(type: T.Property.self, offset: fieldOffset))
         contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
             var property = ptr.assumingMemoryBound(to: T.Property.self).pointee
-            _ = boxRef.value.update(property: &property, phase: Phase())
+            _ = boxRef.value.update(
+                property: &property,
+                phase: _GraphInputs.Phase()
+            )
             ptr.assumingMemoryBound(to: T.Property.self).pointee = property
         }
     }

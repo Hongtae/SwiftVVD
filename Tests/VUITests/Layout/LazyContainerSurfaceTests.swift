@@ -10,26 +10,13 @@ private func withCurrentTestSubgraph<R>(
     }
 }
 
-private final class LazyRootInputRecorder {
-    var willRemoveBeforeInvalidation = false
-    var retainCompletedUnusedRemovals = false
-    var maxUnusedItems = 0
-}
-
-private struct LazyRootInputCaptureView: View, TestPrimitiveView {
-    var recorder: LazyRootInputRecorder
-
+private struct LazyFixedItemView: View, TestPrimitiveView {
     typealias Body = Never
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("LazyRootInputCaptureView._makeView called outside an active _AGGraph context.")
+            fatalError("LazyFixedItemView._makeView called outside an active _AGGraph context.")
         }
-        let recorder = view._attribute.value.recorder
-        recorder.willRemoveBeforeInvalidation = inputs.base[DynamicContainerWillRemoveBeforeInvalidation.self]
-        recorder.retainCompletedUnusedRemovals = inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
-        recorder.maxUnusedItems = inputs[DynamicContainerMaxUnusedItems.self]
-
         let layout = graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 1, height: 1))
         }
@@ -106,27 +93,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertTrue(type(of: hStack.tree.content.root) == LazyHStackLayout.self)
         XCTAssertTrue(type(of: vGrid.tree.content.root) == LazyVGridLayout.self)
         XCTAssertTrue(type(of: hGrid.tree.content.root) == LazyHGridLayout.self)
-    }
-
-    func testResettableLazyLayoutRootInstallsRetainedUnusedOwnershipInputs() {
-        let host = GraphHost()
-        let graph = host.data.graph
-        let recorder = LazyRootInputRecorder()
-
-        withCurrentTestSubgraph(host) {
-            let root = ResettableLazyLayoutRoot {
-                LazyRootInputCaptureView(recorder: recorder)
-            }
-            let source = graph.makeInput(value: root)
-            _ = ResettableLazyLayoutRoot<LazyRootInputCaptureView>._makeView(
-                view: _GraphValue(_attribute: source),
-                inputs: makeViewInputs(graph: graph)
-            )
-
-            XCTAssertTrue(recorder.willRemoveBeforeInvalidation)
-            XCTAssertTrue(recorder.retainCompletedUnusedRemovals)
-            XCTAssertEqual(recorder.maxUnusedItems, 1)
-        }
     }
 
     func testLazyLayoutRoleHierarchyMatchesSampledSurface() {
@@ -6501,9 +6467,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
         host.data.withCurrent {
             let graph = host.data.graph
-            var basePhase = Phase()
+            var basePhase = _GraphInputs.Phase()
             basePhase.resetSeed = 3
-            var secondaryPhase = Phase()
+            var secondaryPhase = _GraphInputs.Phase()
             secondaryPhase.resetSeed = 4
             let base = graph.makeInput(value: basePhase)
             let secondary = graph.makeInput(value: secondaryPhase)
@@ -6538,7 +6504,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             cache.items.removeAll()
             cache.lru.invalidate()
 
-            var basePhase = Phase()
+            var basePhase = _GraphInputs.Phase()
             basePhase.resetSeed = 6
             cache.inputs.base.phase.setValue(basePhase)
 
@@ -6754,7 +6720,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
         host.data.withCurrent {
             let graph = host.data.graph
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let (cache, item, _) = makeLazyCache(host: host, implicitID: 1)
             let update = graph.makeStatefulRule(UpdateViewCache(_phase: phase, cache: cache))
 
@@ -6763,7 +6729,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             cache.commitSeed = 33
             cache.placementSeed = 34
 
-            var removalOnly = Phase()
+            var removalOnly = _GraphInputs.Phase()
             removalOnly.isBeingRemoved = true
             phase.setValue(removalOnly)
             _ = update.value
@@ -13193,15 +13159,13 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
     func testLazyStackMakeViewConstructsConcreteCacheAndPublishesLazyScrollable() throws {
         let host = GraphHost()
-        let firstRecorder = LazyRootInputRecorder()
-        let secondRecorder = LazyRootInputRecorder()
         var scrollablesID: AGAttribute!
 
         try host.data.withCurrent {
             let graph = host.data.graph
             let stack = LazyVStack(spacing: 0) {
-                LazyRootInputCaptureView(recorder: firstRecorder)
-                LazyRootInputCaptureView(recorder: secondRecorder)
+                LazyFixedItemView()
+                LazyFixedItemView()
             }
             let source = graph.makeInput(value: stack)
             var inputs = makeViewInputs(graph: graph)
@@ -13236,22 +13200,20 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(scrollable.visibleCollectionViewIDs.count, 2)
             XCTAssertEqual(cache.items.count, 2)
             XCTAssertEqual(LazyScrollable<LazyVStackLayout>.accessibilityRole, .stack)
-            XCTAssertTrue(firstRecorder.willRemoveBeforeInvalidation)
-            XCTAssertTrue(secondRecorder.willRemoveBeforeInvalidation)
         }
     }
 
     func testLazyStackMakeViewPhaseResetRefreshesConcreteCache() throws {
         let host = GraphHost()
         var scrollablesID: AGAttribute!
-        var phaseAttr: Attribute<Phase>!
+        var phaseAttr: Attribute<_GraphInputs.Phase>!
 
         try host.data.withCurrent {
             try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
                 let stack = LazyVStack(spacing: 0) {
-                    LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
-                    LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+                    LazyFixedItemView()
+                    LazyFixedItemView()
                 }
                 let source = graph.makeInput(value: stack)
                 var inputs = makeViewInputs(graph: graph)
@@ -13306,8 +13268,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
                 let graph = viewGraph.data.graph
                 let stack = LazyVStack(spacing: 0) {
-                    LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
-                    LazyRootInputCaptureView(recorder: LazyRootInputRecorder())
+                    LazyFixedItemView()
+                    LazyFixedItemView()
                 }
                 let source = graph.makeInput(value: stack)
                 var inputs = makeViewInputs(graph: graph)
@@ -13338,9 +13300,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             cache.commitSeed = 133
             cache.placementSeed = 134
 
-            var oldParentPhase = Phase()
+            var oldParentPhase = _GraphInputs.Phase()
             oldParentPhase.resetSeed = 1
-            var newParentPhase = Phase()
+            var newParentPhase = _GraphInputs.Phase()
             newParentPhase.resetSeed = 2
             viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
             viewGraph.data.rootSubgraph.update(flags: AGAttributeFlags.transactional.rawValue)
@@ -13443,7 +13405,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     private final class PhaseCapturingElements: _ViewList_Elements {
-        var capturedPhase: Attribute<Phase>?
+        var capturedPhase: Attribute<_GraphInputs.Phase>?
 
         var count: Int { 1 }
 
@@ -13675,7 +13637,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: environment,
             transaction: graph.makeInput(value: Transaction())
         )

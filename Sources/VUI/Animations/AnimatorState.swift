@@ -345,7 +345,7 @@ final class AnimatorState<Value: VectorArithmetic> {
 }
 
 struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
-    private var _phase: Attribute<Phase>
+    private var _phase: Attribute<_GraphInputs.Phase>
     private var _time: Attribute<Time>
     private var _transaction: Attribute<Transaction>
     private var previousModelData: AnimatedValue.AnimatableData?
@@ -353,7 +353,7 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     private var resetSeed: UInt32 = 0
 
     init(
-        _phase: Attribute<Phase>,
+        _phase: Attribute<_GraphInputs.Phase>,
         _time: Attribute<Time>,
         _transaction: Attribute<Transaction>
     ) {

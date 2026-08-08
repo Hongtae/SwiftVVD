@@ -37,7 +37,9 @@ struct ViewIdentity: Hashable, CustomStringConvertible {
 
         init() {}
 
-        mutating func update(for phase: Phase) -> ViewIdentity {
+        mutating func update(
+            for phase: _GraphInputs.Phase
+        ) -> ViewIdentity {
             let resetSeed = phase.resetSeed
             if current.rawValue == 0 || lastResetSeed != resetSeed {
                 current = ViewIdentity()
@@ -100,7 +102,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     let modifier:        Attribute<AlertModifier<Actions, Message>>
     let actionsItemList: WeakAttribute<PlatformItemList>
     let messageItemList: WeakAttribute<PlatformItemList>
-    let phase:           Attribute<Phase>
+    let phase:           Attribute<_GraphInputs.Phase>
     var identityTracker: ViewIdentity.Tracker
     var propertyTracker: _PropertyListTracker
 
@@ -120,7 +122,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         modifier: Attribute<AlertModifier<Actions, Message>>,
         actionsItemList: WeakAttribute<PlatformItemList>,
         messageItemList: WeakAttribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         identityTracker: ViewIdentity.Tracker,
         lastTitle: Optional<String>,
         lastColorScheme: Optional<ColorScheme>,
@@ -155,7 +157,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         modifier: Attribute<AlertModifier<Actions, Message>>,
         actionsItemList: WeakAttribute<PlatformItemList>,
         messageItemList: WeakAttribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         identityTracker: ViewIdentity.Tracker,
         propertyTracker: _PropertyListTracker,
         lastTitle: Optional<String>,

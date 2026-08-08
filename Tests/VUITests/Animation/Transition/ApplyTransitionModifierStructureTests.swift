@@ -122,7 +122,7 @@ final class ApplyTransitionModifierStructureTests: XCTestCase {
     private func makeGraphInputs(graph: _AGGraph) -> _GraphInputs {
         _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: graph.makeInput(value: EnvironmentValues()),
             transaction: graph.makeInput(value: Transaction())
         )

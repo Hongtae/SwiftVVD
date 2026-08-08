@@ -75,7 +75,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     let modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>
     let actionsItemList: WeakAttribute<PlatformItemList>
     let messageItemList: WeakAttribute<PlatformItemList>
-    let phase: Attribute<Phase>
+    let phase: Attribute<_GraphInputs.Phase>
     // Pass-through attributes from _ViewInputs for anchor-aware presentation.
     let position: Attribute<CGPoint>
     // Extracted from Attribute<ViewSize>.value (ViewSize.value = CGSize).
@@ -99,7 +99,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
         modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>,
         actionsItemList: WeakAttribute<PlatformItemList>,
         messageItemList: WeakAttribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         position: Attribute<CGPoint>,
         size: Attribute<CGSize>,
         transform: Attribute<ViewTransform>,
@@ -140,7 +140,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
         modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>,
         actionsItemList: WeakAttribute<PlatformItemList>,
         messageItemList: WeakAttribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         position: Attribute<CGPoint>,
         size: Attribute<CGSize>,
         transform: Attribute<ViewTransform>,

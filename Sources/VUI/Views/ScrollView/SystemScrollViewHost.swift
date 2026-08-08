@@ -1241,7 +1241,7 @@ struct ScrollViewAdjustedState: StatefulRule {
     var _phaseState: Attribute<ScrollPhaseState>
     var _contentFrame: Attribute<ViewFrame>
     var _pixelLength: Attribute<CGFloat>
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var _transaction: Attribute<Transaction>
     var _layoutDirection: Attribute<LayoutDirection>
     var _positionBinding: Binding<ScrollPosition>?
@@ -1261,7 +1261,7 @@ struct ScrollViewAdjustedState: StatefulRule {
         _phaseState: Attribute<ScrollPhaseState>,
         _contentFrame: Attribute<ViewFrame>,
         _pixelLength: Attribute<CGFloat>,
-        _phase: Attribute<Phase>,
+        _phase: Attribute<_GraphInputs.Phase>,
         _transaction: Attribute<Transaction>,
         _layoutDirection: Attribute<LayoutDirection>,
         _positionBinding: Binding<ScrollPosition>? = nil,

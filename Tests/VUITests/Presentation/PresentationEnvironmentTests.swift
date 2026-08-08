@@ -126,7 +126,7 @@ final class PresentationEnvironmentTests: XCTestCase {
 
         var updated = initial
         updated.presentationEnvironmentProbeValue = "nested-updated"
-        var sourcePhase = Phase()
+        var sourcePhase = _GraphInputs.Phase()
         sourcePhase.resetSeed = 4
         root.setPresentationEnvironment(
             updated,

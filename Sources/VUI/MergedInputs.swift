@@ -48,16 +48,16 @@ struct MergedTransaction: Rule, AsyncAttribute {
 
 // Merges two Phases while preserving the receiver removal bit.
 struct MergedPhase: Rule, AsyncAttribute {
-    typealias Value = Phase
+    typealias Value = _GraphInputs.Phase
     let selfWeak: AGWeakAttribute
     let otherRaw: UInt32
 
-    var value: Phase {
+    var value: _GraphInputs.Phase {
         let graph = _AGGraph.current!
-        let otherAttr = Attribute<Phase>(AGAttribute(rawValue: otherRaw))
+        let otherAttr = Attribute<_GraphInputs.Phase>(AGAttribute(rawValue: otherRaw))
         let otherPhase = otherAttr.value
         guard selfWeak.isValid(in: graph) else { return otherPhase }
-        var result = Attribute<Phase>(selfWeak.toStrong()).value
+        var result = Attribute<_GraphInputs.Phase>(selfWeak.toStrong()).value
         result.merge(otherPhase)
         return result
     }

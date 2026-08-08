@@ -297,7 +297,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
 
     let itemList: Attribute<PlatformItemList>
     let environment: Attribute<EnvironmentValues>
-    let phase: Attribute<Phase>
+    let phase: Attribute<_GraphInputs.Phase>
     let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
@@ -318,7 +318,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
 
     init(itemList: Attribute<PlatformItemList>,
          environment: Attribute<EnvironmentValues>,
-         phase: Attribute<Phase>,
+         phase: Attribute<_GraphInputs.Phase>,
          transform: Attribute<ViewTransform>,
          size: Attribute<ViewSize>,
          onHoverChanged: ((Bool) -> Void)?,

@@ -202,7 +202,7 @@ final class WindowContentScaleTests: XCTestCase {
 
         var sourceEnvironment = EnvironmentValues()
         sourceEnvironment.displayScale = 1
-        var sourcePhase = Phase()
+        var sourcePhase = _GraphInputs.Phase()
         sourcePhase.resetSeed = 5
         let content = AnyView(EmptyView())
         let child = root.viewGraph.data.withCurrent {

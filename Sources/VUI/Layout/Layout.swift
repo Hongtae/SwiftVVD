@@ -135,82 +135,6 @@ private struct DynamicLayoutViewChildGeometry: StatefulRule, AsyncAttribute {
     }
 }
 
-/// Type-erased construction bridge used while a dynamic container materializes
-/// a child owned by a concrete scrollable layout.
-///
-/// The factory itself does not calculate geometry. It preserves the generic
-/// `Data.Index` and layout-state types inside the concrete rule created by the
-/// scrollable layout adaptor.
-final class ScrollableLayoutItemGeometryContext {
-    /// Locally erases construction while preserving the concrete collection
-    /// index and layout-state types inside the scroll adaptor.
-    ///
-    /// This alias owns no measurement or placement algorithm. Revisit it only
-    /// if this context becomes generic or geometry construction moves entirely
-    /// into the concrete adaptor.
-    typealias GeometryFactory = (
-        _ context: ScrollableLayoutItemGeometryContext,
-        _ uniqueId: UInt32,
-        _ parentPosition: Attribute<CGPoint>,
-        _ parentSize: Attribute<ViewSize>,
-        _ childLayoutComputer: OptionalAttribute<LayoutComputer>
-    ) -> Attribute<ViewGeometry>
-
-    var containerInfo: Attribute<DynamicContainer.Info>?
-    private var geometryFactory: GeometryFactory
-
-    init(makeGeometry: @escaping GeometryFactory) {
-        self.geometryFactory = makeGeometry
-    }
-
-    func makeGeometry(
-        uniqueId: UInt32,
-        parentPosition: Attribute<CGPoint>,
-        parentSize: Attribute<ViewSize>,
-        childLayoutComputer: OptionalAttribute<LayoutComputer>
-    ) -> Attribute<ViewGeometry> {
-        geometryFactory(
-            self,
-            uniqueId,
-            parentPosition,
-            parentSize,
-            childLayoutComputer
-        )
-    }
-
-    func identifier(for uniqueId: UInt32) -> AnyHashable? {
-        guard let containerInfo else { return nil }
-        let info = containerInfo.value
-        guard let item = info.item(for: uniqueId) else { return nil }
-        return item.for(DynamicLayoutViewAdaptor.self).item.id.primaryExplicitID
-    }
-}
-
-/// Carries the scroll item geometry bridge through child view input rewriting.
-struct ScrollableLayoutItemGeometryContextKey: ViewInput {
-    static var defaultValue: ScrollableLayoutItemGeometryContext? { nil }
-
-    static func valuesEqual(
-        _ lhs: ScrollableLayoutItemGeometryContext?,
-        _ rhs: ScrollableLayoutItemGeometryContext?
-    ) -> Bool {
-        lhs === rhs
-    }
-}
-
-/// Resolves a dynamic-container identity to the concrete collection index used
-/// as the key in a scrollable layout's placement state.
-struct ScrollableItemIdentifier<Index: Hashable>: Rule {
-    typealias Value = Index?
-
-    var uniqueId: UInt32
-    var context: ScrollableLayoutItemGeometryContext
-
-    var value: Index? {
-        context.identifier(for: uniqueId)?.base as? Index
-    }
-}
-
 /// Stable key for one flattened view produced by a dynamic container item.
 ///
 /// `uniqueId` identifies the retained item across reconciliation passes, while
@@ -277,6 +201,215 @@ extension DynamicContainerItem {
     var viewID: _ViewList_ID? { nil }
 }
 
+class DynamicStorage {
+    var contentType: Any.Type {
+        fatalError("abstract")
+    }
+
+    var identifier: AnyHashable {
+        fatalError("abstract")
+    }
+
+    var needsTransitions: Bool {
+        fatalError("abstract")
+    }
+
+    func matchesIdentity(of other: DynamicStorage) -> Bool {
+        fatalError("abstract")
+    }
+
+    func makeView<A>(
+        uniqueId: UInt32,
+        container: Attribute<DynamicContainer.Info>,
+        inputs: _ViewInputs,
+        adaptor: A.Type
+    ) -> _ViewOutputs where A: DynamicContainerAdaptor,
+        A.Item == AnyDynamicItem {
+        fatalError("abstract")
+    }
+
+    func visitContent<Visitor>(
+        _ visitor: inout Visitor,
+        phase: TransitionPhase
+    ) where Visitor: ViewVisitor {
+        fatalError("abstract")
+    }
+}
+
+private final class IdentifiedItemStorage<Content, Identifier>: DynamicStorage
+    where Content: View, Identifier: Hashable {
+    var content: Content
+    var _identifier: Identifier
+
+    init(content: Content, identifier: Identifier) {
+        self.content = content
+        self._identifier = identifier
+    }
+
+    override var contentType: Any.Type {
+        Content.self
+    }
+
+    override var identifier: AnyHashable {
+        AnyHashable(_identifier)
+    }
+
+    override var needsTransitions: Bool {
+        false
+    }
+
+    override func matchesIdentity(of other: DynamicStorage) -> Bool {
+        guard let other = other as? IdentifiedItemStorage else {
+            return false
+        }
+        return _identifier == other._identifier
+    }
+
+    override func makeView<A>(
+        uniqueId: UInt32,
+        container: Attribute<DynamicContainer.Info>,
+        inputs: _ViewInputs,
+        adaptor: A.Type
+    ) -> _ViewOutputs where A: DynamicContainerAdaptor,
+        A.Item == AnyDynamicItem {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "IdentifiedItemStorage.makeView called outside an active AG context."
+            )
+        }
+        let child: Attribute<Content> = graph.makeStatefulRule(
+            AnyDynamicChild<A, Content>(
+                _info: container,
+                uniqueId: uniqueId,
+                item: nil
+            )
+        )
+        return Content._makeView(
+            view: _GraphValue(_attribute: child),
+            inputs: inputs
+        )
+    }
+
+    override func visitContent<Visitor>(
+        _ visitor: inout Visitor,
+        phase: TransitionPhase
+    ) where Visitor: ViewVisitor {
+        visitor.visit(content)
+    }
+}
+
+private struct MakeStorageVisitor1<Identifier>: ViewVisitor
+    where Identifier: Hashable {
+    var identifier: Identifier
+    var storage: DynamicStorage?
+
+    mutating func visit<Content>(_ view: Content) where Content: View {
+        storage = makeStorage(content: view, identifier: identifier)
+    }
+}
+
+private func makeStorage<Content, Identifier>(
+    content: Content,
+    identifier: Identifier
+) -> DynamicStorage where Content: View, Identifier: Hashable {
+    guard let anyView = content as? AnyView else {
+        return IdentifiedItemStorage(
+            content: content,
+            identifier: identifier
+        )
+    }
+    var visitor = MakeStorageVisitor1<Identifier>(
+        identifier: identifier,
+        storage: nil
+    )
+    anyView.visitContent(&visitor)
+    guard let storage = visitor.storage else {
+        preconditionFailure("AnyView must contain one concrete View value.")
+    }
+    return storage
+}
+
+struct AnyDynamicItem: DynamicContainerItem {
+    var storage: DynamicStorage
+    var layoutPriority: Double?
+    var zIndex: Double
+
+    init<Content, Identifier>(_ content: Content, id: Identifier)
+        where Content: View, Identifier: Hashable {
+        storage = makeStorage(content: content, identifier: id)
+        layoutPriority = nil
+        zIndex = 0
+    }
+
+    var count: Int { 1 }
+    var needsTransitions: Bool { storage.needsTransitions }
+
+    func matchesIdentity(of other: AnyDynamicItem) -> Bool {
+        if storage === other.storage || storage.matchesIdentity(of: other.storage) {
+            return true
+        }
+        return storage.contentType == other.storage.contentType &&
+            storage.identifier == other.storage.identifier
+    }
+
+    static var supportsReuse: Bool { true }
+
+    func canBeReused(by other: AnyDynamicItem) -> Bool {
+        storage.contentType == other.storage.contentType
+    }
+
+    func makeView<A>(
+        uniqueId: UInt32,
+        container: Attribute<DynamicContainer.Info>,
+        inputs: _ViewInputs,
+        adaptor: A.Type
+    ) -> _ViewOutputs where A: DynamicContainerAdaptor,
+        A.Item == AnyDynamicItem {
+        storage.makeView(
+            uniqueId: uniqueId,
+            container: container,
+            inputs: inputs,
+            adaptor: adaptor
+        )
+    }
+}
+
+private struct AnyDynamicChild<A, Content>: StatefulRule
+    where A: DynamicContainerAdaptor,
+          A.Item == AnyDynamicItem,
+          Content: View {
+    typealias Value = Content
+
+    var _info: Attribute<DynamicContainer.Info>
+    var uniqueId: UInt32
+    var item: AnyDynamicItem?
+
+    private struct UpdateVisitor: ViewVisitor {
+        var context: RuleContext<Content>
+
+        mutating func visit<V>(_ view: V) where V: View {
+            guard let content = view as? Content else {
+                preconditionFailure(
+                    "A reusable dynamic item changed its concrete content type."
+                )
+            }
+            context.value = content
+        }
+    }
+
+    mutating func updateValue() {
+        let info = _info.value
+        guard let itemInfo = info.item(for: uniqueId),
+              let phase = itemInfo.phase else {
+            return
+        }
+        let currentItem = itemInfo.for(A.self).item
+        item = currentItem
+        var visitor = UpdateVisitor(context: context)
+        currentItem.storage.visitContent(&visitor, phase: phase)
+    }
+}
+
 /// Separates item enumeration and item-layout lifetime from generic container
 /// reconciliation.
 protocol DynamicContainerAdaptor {
@@ -324,114 +457,58 @@ extension DynamicContainerAdaptor where Items: Collection, Items.Element == Item
     }
 }
 
-/// Dynamic container storage used by DynamicContainerInfo.
-enum DynamicContainer {
-    /// Counts the removal baseline and registered animations for one retained item.
-    ///
-    /// Registration, baseline release, and completion are serialized by the
-    /// owning graph/update lane. Keep the counter and completion flags as plain
-    /// state so the zero-count transition stays ordered with graph invalidation.
-    final class TransitionRemovalListener: AnimationListener, @unchecked Sendable {
-        private weak var host: GraphHost?
-        private let invalidationTarget: AGWeakAttribute?
-        private let seed: Attribute<UInt32>?
-        private let inbox: AGInbox?
-        private var seedValue: UInt32 = 0
-        private var animationCount = 0
-        private var completionInstalled = false
-        private var completed = false
-        private var completionPublished = false
+/// Invalidates the owning dynamic-container rule after every registered
+/// removal animation releases the listener.
+final class DynamicAnimationListener: AnimationListener, @unchecked Sendable {
+    private weak var viewGraph: ViewGraph?
+    private var asyncSignal: AGWeakAttribute
+    private var count: Int
 
-        init(host: GraphHost, invalidationTarget: AGWeakAttribute) {
-            self.host = host
-            self.invalidationTarget = invalidationTarget
-            self.seed = nil
-            self.inbox = nil
+    override init() {
+        guard let graph = _AGGraph.current,
+              let currentAttribute = _AGGraph.currentRuleContextAttribute,
+              let asyncSignal = graph.weakAttributeIfValid(
+                  for: currentAttribute
+              ) else {
+            fatalError(
+                "DynamicAnimationListener requires a live dynamic-container rule."
+            )
         }
+        self.viewGraph = GraphHost.currentHost as? ViewGraph
+        self.asyncSignal = asyncSignal
+        self.count = 0
+    }
 
-        /// Test-only adapter for exercising no-registration completion
-        /// scheduling without a graph host. Production dynamic-container
-        /// removal uses the weak-host/weak-target initializer above.
-        init(seed: Attribute<UInt32>, inbox: AGInbox) {
-            self.host = nil
-            self.invalidationTarget = nil
-            self.seed = seed
-            self.inbox = inbox
-        }
+    var isComplete: Bool {
+        count == 0
+    }
 
-        var isComplete: Bool {
-            completed
-        }
-
-        var isCompletionPublished: Bool {
-            completionPublished
-        }
-
-        func readSeed() {
-            _ = seed?.value
-        }
-
-        func detachFromHost() {
-            host = nil
-        }
-
-        override func animationWasAdded() {
-            animationCount += 1
-        }
-
-        override func animationWasRemoved() {
-            guard animationCount > 0 else {
-                return
-            }
-            animationCount -= 1
-            guard animationCount == 0, !completed else {
-                return
-            }
-            complete()
-        }
-
-        func beginTrackingAnimations() {
-            animationWasAdded()
-            Update.enqueueAction { [weak self] in
-                self?.animationWasRemoved()
-            }
-        }
-
-        func installCompletion(into transaction: inout Transaction) -> AnimationListener? {
-            guard !completionInstalled else {
-                return transaction.animationListener
-            }
-            completionInstalled = true
-
-            transaction.addAnimationCompletion(criteria: .removed) { [weak self] in
-                self?.complete()
-            }
-            return transaction.animationListener
-        }
-
-        private func complete() {
-            guard !completed else {
-                return
-            }
-            completed = true
-
-            if let host, let invalidationTarget {
-                host.continueTransaction(invalidating: invalidationTarget)
-                return
-            }
-
-            guard let seed, let inbox else {
-                return
-            }
-            seedValue &+= 1
-            let nextSeed = seedValue
-            inbox.enqueue { [weak self] in
-                self?.completionPublished = true
-                seed.setValue(nextSeed)
-            }
+    func beginTrackingAnimations() {
+        animationWasAdded()
+        Update.enqueueAction { [weak self] in
+            self?.animationWasRemoved()
         }
     }
 
+    func detachFromViewGraph() {
+        viewGraph = nil
+    }
+
+    override func animationWasAdded() {
+        count += 1
+    }
+
+    override func animationWasRemoved() {
+        count -= 1
+        guard count == 0, let viewGraph else {
+            return
+        }
+        viewGraph.continueTransaction(invalidating: asyncSignal)
+    }
+}
+
+/// Dynamic container storage used by DynamicContainerInfo.
+enum DynamicContainer {
     /// Retained item state shared by every dynamic-container adaptor. A nil
     /// phase denotes an unused item outside the active and removed prefixes.
     class ItemInfo {
@@ -440,19 +517,12 @@ enum DynamicContainer {
         var viewCount: Int32
         var outputs: _ViewOutputs
         var needsTransitions: Bool
-        var listener: TransitionRemovalListener?
+        var listener: DynamicAnimationListener?
         var zIndex: Double
         var removalOrder: UInt32
         var precedingViewCount: Int32
         var resetSeed: UInt32
         var phase: TransitionPhase?
-
-        // These fields preserve the existing retained-removal policy while the
-        // listener lifecycle is probed independently from adaptor ownership.
-        var transitionTransactions: _TransitionTransactionResolver?
-        var removalLifecycleStarted: Bool
-        var ignoredRetainedUnusedRemovalListener: ObjectIdentifier?
-        var retainAfterRemovalCompletion: Bool
 
         init(
             subgraph: AGSubgraph,
@@ -460,16 +530,12 @@ enum DynamicContainer {
             viewCount: Int32,
             outputs: _ViewOutputs,
             needsTransitions: Bool = false,
-            listener: TransitionRemovalListener? = nil,
+            listener: DynamicAnimationListener? = nil,
             zIndex: Double = 0,
             removalOrder: UInt32 = 0,
             precedingViewCount: Int32 = 0,
             resetSeed: UInt32 = 0,
-            phase: TransitionPhase? = .identity,
-            transitionTransactions: _TransitionTransactionResolver? = nil,
-            removalLifecycleStarted: Bool = false,
-            ignoredRetainedUnusedRemovalListener: ObjectIdentifier? = nil,
-            retainAfterRemovalCompletion: Bool = false
+            phase: TransitionPhase? = .identity
         ) {
             self.subgraph = subgraph
             self.uniqueId = uniqueId
@@ -482,10 +548,6 @@ enum DynamicContainer {
             self.precedingViewCount = precedingViewCount
             self.resetSeed = resetSeed
             self.phase = phase
-            self.transitionTransactions = transitionTransactions
-            self.removalLifecycleStarted = removalLifecycleStarted
-            self.ignoredRetainedUnusedRemovalListener = ignoredRetainedUnusedRemovalListener
-            self.retainAfterRemovalCompletion = retainAfterRemovalCompletion
         }
 
         func `for`<A: DynamicContainerAdaptor>(_ type: A.Type) -> _ItemInfo<A> {
@@ -524,8 +586,7 @@ enum DynamicContainer {
             viewCount: Int32,
             phase: TransitionPhase,
             needsTransitions: Bool,
-            outputs: _ViewOutputs,
-            transitionTransactions: _TransitionTransactionResolver? = nil
+            outputs: _ViewOutputs
         ) {
             self.item = item
             self.itemLayout = itemLayout
@@ -535,8 +596,7 @@ enum DynamicContainer {
                 viewCount: viewCount,
                 outputs: outputs,
                 needsTransitions: needsTransitions,
-                phase: phase,
-                transitionTransactions: transitionTransactions
+                phase: phase
             )
         }
     }
@@ -703,13 +763,10 @@ enum DynamicContainer {
             var uniqueId: UInt32
             var viewCount: Int32
             var phase: TransitionPhase?
-            var removalLifecycleStarted: Bool
-
             init(item: ItemInfo) {
                 self.uniqueId = item.uniqueId
                 self.viewCount = item.viewCount
                 self.phase = item.phase
-                self.removalLifecycleStarted = item.removalLifecycleStarted
             }
         }
     }
@@ -780,20 +837,6 @@ private struct DynamicTransaction: StatefulRule, AsyncAttribute {
         }
         _AGGraph.setStatefulOutput(value)
     }
-}
-
-/// Controls retained-removal lifecycle ordering for layout-owned dynamic items.
-/// Lazy layout hosts send removal lifecycle callbacks before final invalidation
-/// so retained animation listeners can drain after disappearance.
-struct DynamicContainerWillRemoveBeforeInvalidation: GraphInput {
-    static var defaultValue: Bool { false }
-}
-
-/// Keeps a phase-3 retained-unused item cached after its later animated removal
-/// listener completes. Cache-owned lazy hosts use this to preserve source state
-/// across same-identity removal/reinsertion windows.
-struct DynamicContainerRetainCompletedUnusedRemovals: ViewInput {
-    static var defaultValue: Bool { false }
 }
 
 /// Stores one flat, identity-sorted layout-attribute entry per dynamic child
@@ -1189,15 +1232,7 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
 
     mutating func updatedItems() -> (any ViewList)? {
         let result = _items.changedValue(options: [])
-        // The pure-Swift graph reports a newly installed input edge as
-        // unchanged. A new container still needs its initial item snapshot.
-        let isInitialContainerEvaluation =
-            _AGGraph.currentStatefulOutput(
-                DynamicContainer.Info.self
-            )?.items.isEmpty ?? true
-        return result.changed || isInitialContainerEvaluation
-            ? result.value
-            : nil
+        return result.changed ? result.value : nil
     }
 
     func foreachItem(items: any ViewList, _ body: (DynamicViewListItem) -> Void) {
@@ -1267,7 +1302,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
         let parentTransform = inputs.transform
         let traitsList = item.list.map(OptionalAttribute.init) ??
             OptionalAttribute<any ViewList>()
-        let scrollContext = inputs[ScrollableLayoutItemGeometryContextKey.self]
 
         let finalOutputs = item.elements.makeAllElements(inputs: inputs) {
             elementInputs,
@@ -1278,11 +1312,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
 
             let fallbackPosition = inputs.position
             let fallbackSize = inputs.size
-            let scrollLayoutComputer = scrollContext.map { _ in
-                graph.makeIndirectAttribute(
-                    defaultValue: LayoutComputer.defaultValue
-                )
-            }
 
             let geometry: Attribute<ViewGeometry>?
             if let childGeometries = _childGeometries.attribute {
@@ -1300,23 +1329,8 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
                 geometry = nil
             }
 
-            var childPosition = geometry?.origin() ?? fallbackPosition
-            var childSize = geometry?.size() ?? fallbackSize
-            if let scrollContext, let scrollLayoutComputer {
-                let scrollGeometry = scrollContext.makeGeometry(
-                    uniqueId: uniqueId,
-                    parentPosition: fallbackPosition,
-                    parentSize: fallbackSize,
-                    childLayoutComputer: OptionalAttribute(
-                        scrollLayoutComputer
-                    )
-                )
-                if childInputs.needsGeometry {
-                    childPosition = scrollGeometry.origin()
-                    childSize = scrollGeometry.size()
-                    childInputs.requestsLayoutComputer = true
-                }
-            }
+            let childPosition = geometry?.origin() ?? fallbackPosition
+            let childSize = geometry?.size() ?? fallbackSize
 
             childInputs.position = childPosition
             childInputs.size = childSize
@@ -1355,12 +1369,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
             }
 
             if let layoutComputer = outputs._layoutComputer.attribute {
-                if let scrollLayoutComputer {
-                    graph.setIndirectTarget(
-                        scrollLayoutComputer,
-                        to: layoutComputer
-                    )
-                }
                 layoutAttributes.append(
                     LayoutProxyAttributes(
                         layoutComputer: layoutComputer,
@@ -1368,9 +1376,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
                     )
                 )
             } else {
-                if let scrollLayoutComputer {
-                    graph.setIndirectTarget(scrollLayoutComputer, to: nil)
-                }
                 layoutAttributes.append(LayoutProxyAttributes())
             }
             childIndex &+= 1
@@ -1576,7 +1581,6 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             inactiveItems,
             disableTransitions: disableTransitions,
             allowNewRemovals: updated != nil,
-            graph: graph,
             changed: &stateChanged
         )
         info.replaceItems(
@@ -1589,10 +1593,8 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
     }
 
     mutating func destroy() {
-        // Listener callbacks retain only weak graph ownership, but clearing the
-        // host here prevents a removed rule from scheduling another pass.
         for item in info.items {
-            item.listener?.detachFromHost()
+            item.listener?.detachFromViewGraph()
         }
     }
 
@@ -1711,11 +1713,9 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         graph: _AGGraph
     ) {
         let oldPhase = item.phase
-        item.listener?.detachFromHost()
+        item.listener?.detachFromViewGraph()
         item.listener = nil
         item.removalOrder = 0
-        item.removalLifecycleStarted = false
-        item.retainAfterRemovalCompletion = false
 
         if oldPhase == nil {
             item.subgraph.didReinsert()
@@ -1738,7 +1738,6 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         _ candidates: [DynamicContainer.ItemInfo],
         disableTransitions: Bool,
         allowNewRemovals: Bool,
-        graph: _AGGraph,
         changed: inout Bool
     ) -> (
         removed: [DynamicContainer.ItemInfo],
@@ -1746,39 +1745,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
     ) {
         var removed: [DynamicContainer.ItemInfo] = []
         var unused: [DynamicContainer.ItemInfo] = []
-        let maxUnusedItems = max(
-            A.maxUnusedItems,
-            inputs[DynamicContainerMaxUnusedItems.self],
-            0
-        )
-        let retainCompletedUnusedRemovals =
-            inputs[DynamicContainerRetainCompletedUnusedRemovals.self]
-        let transaction: Transaction
-        if let layoutAdaptor = adaptor as? DynamicLayoutViewAdaptor {
-            transaction =
-                graph.transaction(for: layoutAdaptor._items.identifier) ??
-                Transaction.current
-        } else {
-            transaction = Transaction.current
-        }
-
-        func positiveRemovalTransaction(
-            for item: DynamicContainer.ItemInfo
-        ) -> Transaction? {
-            guard !disableTransitions else {
-                return nil
-            }
-            return item.transitionTransactions?(
-                .didDisappear,
-                transaction
-            ).first { candidate in
-                guard !candidate.disablesAnimations,
-                      let animation = candidate.effectiveAnimation else {
-                    return false
-                }
-                return animation.box.duration > 0
-            }
-        }
+        let maxUnusedItems = max(A.maxUnusedItems, 0)
 
         for item in candidates {
             if item.phase == .didDisappear {
@@ -1791,67 +1758,13 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                     removed.append(item)
                     continue
                 }
-
-                if item.retainAfterRemovalCompletion,
-                   unused.count < maxUnusedItems {
-                    item.listener = nil
-                    item.retainAfterRemovalCompletion = false
-                    item.phase = nil
-                    item.removalOrder = 0
-                    unused.append(item)
-                    changed = true
-                    continue
-                }
-                if inputs.base[
-                    DynamicContainerWillRemoveBeforeInvalidation.self
-                ], !item.removalLifecycleStarted {
-                    item.removalLifecycleStarted = true
-                    item.subgraph.willRemove()
-                    if let currentAttribute =
-                        _AGGraph.currentRuleContextAttribute {
-                        graph.inbox.enqueue {
-                            graph.invalidateAttribute(currentAttribute)
-                        }
-                    }
-                    removed.append(item)
-                    changed = true
-                    continue
-                }
-
                 eraseItem(item)
                 changed = true
                 continue
             }
 
             if item.phase == nil {
-                let removalTransaction =
-                    positiveRemovalTransaction(for: item)
-                let listenerID = removalTransaction?
-                    .animationListener
-                    .map(ObjectIdentifier.init)
-                let ignoredListener = listenerID != nil &&
-                    item.ignoredRetainedUnusedRemovalListener == listenerID
-                if removed.isEmpty,
-                   !ignoredListener,
-                   removalTransaction != nil {
-                    let listener = makeTransitionRemovalListener(
-                        graph: graph
-                    )
-                    item.listener = listener
-                    item.ignoredRetainedUnusedRemovalListener = nil
-                    item.retainAfterRemovalCompletion =
-                        retainCompletedUnusedRemovals
-                    item.removalLifecycleStarted = true
-                    item.removalOrder = nextRemovalOrder()
-                    item.phase = .didDisappear
-                    listener.beginTrackingAnimations()
-                    removed.append(item)
-                    changed = true
-                } else if unused.count < maxUnusedItems {
-                    if !removed.isEmpty, let listenerID {
-                        item.ignoredRetainedUnusedRemovalListener =
-                            listenerID
-                    }
+                if unused.count < maxUnusedItems {
                     unused.append(item)
                 } else {
                     eraseItem(item)
@@ -1860,11 +1773,9 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 continue
             }
 
-            guard allowNewRemovals else {
-                continue
-            }
-            guard item.needsTransitions,
-                  positiveRemovalTransaction(for: item) != nil else {
+            guard allowNewRemovals,
+                  item.needsTransitions,
+                  !disableTransitions else {
                 cacheOrErase(
                     item,
                     maxUnusedItems: maxUnusedItems,
@@ -1874,11 +1785,8 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 continue
             }
 
-            let listener = makeTransitionRemovalListener(graph: graph)
+            let listener = DynamicAnimationListener()
             item.listener = listener
-            item.retainAfterRemovalCompletion =
-                retainCompletedUnusedRemovals
-            item.removalLifecycleStarted = false
             item.removalOrder = nextRemovalOrder()
             item.phase = .didDisappear
             listener.beginTrackingAnimations()
@@ -1897,30 +1805,13 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             eraseItem(item)
             return
         }
-        item.listener?.detachFromHost()
+        item.listener?.detachFromViewGraph()
         item.listener = nil
         item.subgraph.willRemove()
         item.phase = nil
         item.removalOrder = 0
         item.resetSeed &+= 1
         unused.append(item)
-    }
-
-    private func makeTransitionRemovalListener(
-        graph: _AGGraph
-    ) -> DynamicContainer.TransitionRemovalListener {
-        guard let currentAttribute = _AGGraph.currentRuleContextAttribute,
-              let invalidationTarget = graph.weakAttributeIfValid(
-                  for: currentAttribute
-              ) else {
-            fatalError(
-                "DynamicContainerInfo retained removal requires a live rule attribute."
-            )
-        }
-        return DynamicContainer.TransitionRemovalListener(
-            host: GraphHost.currentHost,
-            invalidationTarget: invalidationTarget
-        )
     }
 
     private mutating func makeItem(
@@ -1984,9 +1875,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 viewCount: viewCount,
                 phase: phase,
                 needsTransitions: item.needsTransitions,
-                outputs: result.0,
-                transitionTransactions:
-                    transitionResolver(for: item)
+                outputs: result.0
             )
             resultItem.zIndex = item.zIndex
             return resultItem
@@ -2001,25 +1890,9 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             uniqueId: item.uniqueId,
             itemLayout: typed.itemLayout
         )
-        item.listener?.detachFromHost()
+        item.listener?.detachFromViewGraph()
         item.listener = nil
         item.invalidate()
-    }
-
-    private func transitionResolver(
-        for item: A.Item
-    ) -> _TransitionTransactionResolver? {
-        guard let item = item as? DynamicViewListItem,
-              item.needsTransitions else {
-            return nil
-        }
-        let transition = item.traits[TransitionTraitKey.self]
-        return { phase, transaction in
-            transition._retainedRemovalTransactions(
-                from: transaction,
-                phase: phase
-            )
-        }
     }
 
     private mutating func nextUniqueId() -> UInt32 {
@@ -2296,14 +2169,27 @@ extension Layout {
             fatalError("\(self)._makeLayoutView called outside an active _AGGraph context.")
         }
 
-        // Clear static stack-orientation bits for layout body inputs and expose the
-        // live orientation through DynamicStackOrientation.
-        let dynamicStackOrientationAttr: Attribute<Axis?> = graph.makeRule(
-            DynamicStackOrientationRule(layout: root._attribute)
-        )
         var layoutInputs = inputs
-        layoutInputs.stackOrientation = nil
-        layoutInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
+        if ObjectIdentifier(Self.self) == ObjectIdentifier(AnyLayout.self) {
+            let layout = Attribute<AnyLayout>(
+                identifier: root._attribute.identifier
+            )
+            let properties: Attribute<Axis?> = graph.makeRule(
+                AnyLayoutProperties(_layout: layout)
+            )
+            layoutInputs.stackOrientation = nil
+            layoutInputs[DynamicStackOrientation.self] = OptionalAttribute(
+                properties
+            )
+        } else {
+            let stackOrientation = Self.layoutProperties.stackOrientation
+            layoutInputs.stackOrientation = stackOrientation
+            if stackOrientation == nil {
+                layoutInputs[DynamicStackOrientation.self] = OptionalAttribute()
+            }
+        }
+        let dynamicStackOrientation =
+            layoutInputs[DynamicStackOrientation.self]
 
         let childListOutputs = body(_Graph(), layoutInputs)
 
@@ -2384,7 +2270,8 @@ extension Layout {
                 // channels; descendants keep the inherited position and size.
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
                 childInputs.stackOrientation = layoutInputs.stackOrientation
-                childInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
+                childInputs[DynamicStackOrientation.self] =
+                    dynamicStackOrientation
 
                 let childOutputs = makeView(childInputs)
                 if let layoutComputer = childOutputs._layoutComputer.attribute {
@@ -2440,7 +2327,8 @@ extension Layout {
             }
             var dynamicInputs = layoutInputs
             dynamicInputs.stackOrientation = layoutInputs.stackOrientation
-            dynamicInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
+            dynamicInputs[DynamicStackOrientation.self] =
+                dynamicStackOrientation
             let (
                 containerInfoAttr,
                 containerOutputs
@@ -2605,8 +2493,13 @@ extension EnvironmentValues {
 
 public struct LayoutProperties: Sendable {
     public var stackOrientation: Axis?
-    public init(stackOrientation: Axis? = nil) {
-        self.stackOrientation = stackOrientation
+    var isDefaultEmptyLayout: Bool
+    var isIdentityUnaryLayout: Bool
+
+    public init() {
+        stackOrientation = nil
+        isDefaultEmptyLayout = false
+        isIdentityUnaryLayout = false
     }
 }
 
@@ -2620,140 +2513,250 @@ struct DynamicStackOrientation: ViewInput {
     }
 }
 
-private struct DynamicStackOrientationRule<L: Layout>: Rule {
-    var layout: Attribute<L>
+struct AnyLayoutProperties: Rule, AsyncAttribute {
+    var _layout: Attribute<AnyLayout>
 
     var value: Axis? {
-        layout.value._vuiDynamicLayoutProperties.stackOrientation
+        _layout.value.storage.layoutProperties.stackOrientation
     }
 }
 
-private extension Layout {
-    var _vuiDynamicLayoutProperties: LayoutProperties {
-        if let anyLayout = self as? AnyLayout {
-            return anyLayout.layout._vuiDynamicLayoutProperties
+class AnyLayoutBox: @unchecked Sendable {
+    var layoutProperties: LayoutProperties {
+        fatalError("abstract")
+    }
+
+    func makeCache(subviews: LayoutSubviews) -> AnyLayout.Cache {
+        fatalError("abstract")
+    }
+
+    func updateCache(
+        _ cache: inout AnyLayout.Cache,
+        subviews: LayoutSubviews
+    ) {
+        fatalError("abstract")
+    }
+
+    func spacing(
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> ViewSpacing {
+        fatalError("abstract")
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGSize {
+        fatalError("abstract")
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) {
+        fatalError("abstract")
+    }
+
+    func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGFloat? {
+        fatalError("abstract")
+    }
+
+    func explicitAlignment(
+        of guide: VerticalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGFloat? {
+        fatalError("abstract")
+    }
+
+    var animatableData: _AnyAnimatableData {
+        get { fatalError("abstract") }
+        set { fatalError("abstract") }
+    }
+
+    func withAnimatableData(_ data: _AnyAnimatableData) -> AnyLayoutBox {
+        fatalError("abstract")
+    }
+}
+
+private final class _AnyLayoutBox<L: Layout>: AnyLayoutBox,
+    @unchecked Sendable {
+    var layout: L
+
+    init(_ layout: L) {
+        self.layout = layout
+    }
+
+    override var layoutProperties: LayoutProperties {
+        L.layoutProperties
+    }
+
+    override func makeCache(subviews: LayoutSubviews) -> AnyLayout.Cache {
+        AnyLayout.Cache(
+            type: L.self,
+            value: layout.makeCache(subviews: subviews)
+        )
+    }
+
+    override func updateCache(
+        _ cache: inout AnyLayout.Cache,
+        subviews: LayoutSubviews
+    ) {
+        guard cache.type == L.self else {
+            cache = makeCache(subviews: subviews)
+            return
         }
-        return Self.layoutProperties
-    }
-}
-
-
-
-private extension Layout {
-    @inline(__always)
-    func _makeAnyAnimatableData() -> AnyLayout.AnimatableData {
-        AnyLayout.AnimatableData(self)
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        layout.updateCache(&value, subviews: subviews)
     }
 
-    @inline(__always)
-    mutating func _setAnimatableData(_ data: AnyLayout.AnimatableData) {
-        data.update(&self)
+    override func spacing(
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> ViewSpacing {
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        return layout.spacing(subviews: subviews, cache: &value)
     }
 
-    @inline(__always)
-    func _updateCache(_ cache: inout AnyLayout.Cache,
-                      subviews: AnyLayout.Subviews) {
-        var c = cache.cache as! Self.Cache
-        self.updateCache(&c, subviews: subviews)
-        cache.cache = c
+    override func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGSize {
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        return layout.sizeThatFits(
+            proposal: proposal,
+            subviews: subviews,
+            cache: &value
+        )
     }
-    @inline(__always)
-    func _spacing(subviews: AnyLayout.Subviews,
-                  cache: inout AnyLayout.Cache) -> ViewSpacing {
-        var c = cache.cache as! Self.Cache
-        let result = self.spacing(subviews: subviews, cache: &c)
-        cache.cache = c
-        return result
+
+    override func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) {
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        layout.placeSubviews(
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &value
+        )
     }
-    @inline(__always)
-    func _sizeThatFits(proposal: ProposedViewSize,
-                       subviews: AnyLayout.Subviews,
-                       cache: inout AnyLayout.Cache) -> CGSize {
-        var c = cache.cache as! Self.Cache
-        let result = self.sizeThatFits(proposal: proposal,
-                                       subviews: subviews,
-                                       cache: &c)
-        cache.cache = c
-        return result
+
+    override func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGFloat? {
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        return layout.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &value
+        )
     }
-    @inline(__always)
-    func _placeSubviews(in bounds: CGRect,
-                        proposal: ProposedViewSize,
-                        subviews: AnyLayout.Subviews,
-                        cache: inout AnyLayout.Cache) {
-        var c = cache.cache as! Self.Cache
-        self.placeSubviews(in: bounds,
-                           proposal: proposal,
-                           subviews: subviews,
-                           cache: &c)
-        cache.cache = c
+
+    override func explicitAlignment(
+        of guide: VerticalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: LayoutSubviews,
+        cache: inout AnyLayout.Cache
+    ) -> CGFloat? {
+        var value = cache.value as! L.Cache
+        defer { cache.value = value }
+        return layout.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &value
+        )
     }
-    @inline(__always)
-    func _explicitAlignment(of guide: HorizontalAlignment,
-                            in bounds: CGRect,
-                            proposal: ProposedViewSize,
-                            subviews: AnyLayout.Subviews,
-                            cache: inout AnyLayout.Cache) -> CGFloat? {
-        var c = cache.cache as! Self.Cache
-        let result = self.explicitAlignment(of: guide,
-                                            in: bounds,
-                                            proposal: proposal,
-                                            subviews: subviews,
-                                            cache: &c)
-        cache.cache = c
-        return result
+
+    override var animatableData: _AnyAnimatableData {
+        get { _AnyAnimatableData(layout) }
+        set { newValue.update(&layout) }
     }
-    @inline(__always)
-    func _explicitAlignment(of guide: VerticalAlignment,
-                            in bounds: CGRect,
-                            proposal: ProposedViewSize,
-                            subviews: AnyLayout.Subviews,
-                            cache: inout AnyLayout.Cache) -> CGFloat? {
-        var c = cache.cache as! Self.Cache
-        let result = self.explicitAlignment(of: guide,
-                                            in: bounds,
-                                            proposal: proposal,
-                                            subviews: subviews,
-                                            cache: &c)
-        cache.cache = c
-        return result
+
+    override func withAnimatableData(
+        _ data: _AnyAnimatableData
+    ) -> AnyLayoutBox {
+        var layout = layout
+        data.update(&layout)
+        return _AnyLayoutBox(layout)
     }
 }
 
 public struct AnyLayout: Layout {
-    var layout: any Layout
+    var storage: AnyLayoutBox
 
-    public struct Cache {
-        var cache: Any
+    public struct Cache: @unchecked Sendable {
+        var type: Any.Type
+        var value: Any
     }
 
     public typealias AnimatableData = _AnyAnimatableData
 
     public init<L>(_ layout: L) where L: Layout {
-        self.layout = layout
+        storage = _AnyLayoutBox(layout)
     }
 
     public var animatableData: AnimatableData {
-        get { self.layout._makeAnyAnimatableData() }
-        set { self.layout._setAnimatableData(newValue) }
+        get { storage.animatableData }
+        set {
+            if isKnownUniquelyReferenced(&storage) {
+                storage.animatableData = newValue
+            } else {
+                storage = storage.withAnimatableData(newValue)
+            }
+        }
     }
 
     public func placeSubviews(in bounds: CGRect,
                               proposal: ProposedViewSize,
                               subviews: Subviews,
                               cache: inout Cache) {
-        self.layout._placeSubviews(in: bounds,
-                                   proposal: proposal,
-                                   subviews: subviews,
-                                   cache: &cache)
+        storage.placeSubviews(
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
     }
 
     public func sizeThatFits(proposal: ProposedViewSize,
                              subviews: Subviews,
                              cache: inout Cache) -> CGSize {
-        self.layout._sizeThatFits(proposal: proposal,
-                                  subviews: subviews,
-                                  cache: &cache)
+        storage.sizeThatFits(
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
     }
 
     public func explicitAlignment(of guide: HorizontalAlignment,
@@ -2761,11 +2764,13 @@ public struct AnyLayout: Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Subviews,
                                   cache: inout Cache) -> CGFloat? {
-        self.layout._explicitAlignment(of: guide,
-                                       in: bounds,
-                                       proposal: proposal,
-                                       subviews: subviews,
-                                       cache: &cache)
+        storage.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
     }
 
     public func explicitAlignment(of guide: VerticalAlignment,
@@ -2773,23 +2778,25 @@ public struct AnyLayout: Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Subviews,
                                   cache: inout Cache) -> CGFloat? {
-        self.layout._explicitAlignment(of: guide,
-                                       in: bounds,
-                                       proposal: proposal,
-                                       subviews: subviews,
-                                       cache: &cache)
+        storage.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
     }
 
     public func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
-        self.layout._spacing(subviews: subviews, cache: &cache)
+        storage.spacing(subviews: subviews, cache: &cache)
     }
 
     public func makeCache(subviews: Subviews) -> Cache {
-        Cache(cache: self.layout.makeCache(subviews: subviews))
+        storage.makeCache(subviews: subviews)
     }
 
     public func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        self.layout._updateCache(&cache, subviews: subviews)
+        storage.updateCache(&cache, subviews: subviews)
     }
 }
 

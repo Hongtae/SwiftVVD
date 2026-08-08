@@ -60,7 +60,10 @@ extension Namespace {
         mutating func reset() { id = 0 }
 
         // Allocates on first update and ignores phase.
-        mutating func update(property: inout Namespace, phase: Phase) -> Bool {
+        mutating func update(
+            property: inout Namespace,
+            phase: _GraphInputs.Phase
+        ) -> Bool {
             let changed = (id == 0)
             if changed { id = Namespace._allocateID() }
             property.id = id

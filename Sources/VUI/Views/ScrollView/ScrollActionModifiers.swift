@@ -264,7 +264,7 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
 
     var provider: Provider
     var inputs: Attribute<[Provider.Input]>
-    var viewPhase: Attribute<Phase>
+    var viewPhase: Attribute<_GraphInputs.Phase>
     var prefersLast: OptionalAttribute<Bool>
     var cycleDetector: UpdateCycleDetector
     var oldResetSeed: UInt32?
@@ -274,7 +274,7 @@ struct ScrollActionDispatcher<Provider: ScrollActionProvider>: StatefulRule {
     init(
         provider: Provider,
         inputs: Attribute<[Provider.Input]>,
-        viewPhase: Attribute<Phase>,
+        viewPhase: Attribute<_GraphInputs.Phase>,
         prefersLast: OptionalAttribute<Bool>,
         cycleDetector: UpdateCycleDetector = UpdateCycleDetector(),
         viewGraph: ViewGraph? = _AGGraphContext.current?.context as? ViewGraph

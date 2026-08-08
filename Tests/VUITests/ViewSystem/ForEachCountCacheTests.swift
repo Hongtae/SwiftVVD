@@ -909,7 +909,7 @@ final class ForEachCountCacheTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         var base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: environment,
             transaction: graph.makeInput(value: Transaction())
         )

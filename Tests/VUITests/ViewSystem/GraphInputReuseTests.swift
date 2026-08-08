@@ -385,7 +385,7 @@ final class GraphInputReuseTests: XCTestCase {
     ) -> _GraphInputs {
         _GraphInputs(
             time: graph.makeInput(value: Time(seconds: time)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: graph.makeInput(value: EnvironmentValues()),
             transaction: graph.makeInput(value: Transaction())
         )

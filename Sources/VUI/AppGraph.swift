@@ -35,7 +35,7 @@ class AppGraph<A: App>: @unchecked Sendable {
             // Root input nodes seed the graph inputs used while constructing
             // the app's scene tree.
             let timeAttr        = graph.makeInput(value: time)
-            let phaseAttr       = graph.makeInput(value: Phase())
+            let phaseAttr       = graph.makeInput(value: _GraphInputs.Phase())
             let transactionAttr = graph.makeInput(value: Transaction())
             let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
 

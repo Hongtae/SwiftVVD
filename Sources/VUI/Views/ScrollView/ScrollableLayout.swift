@@ -1649,7 +1649,7 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
     var _environment: Attribute<EnvironmentValues>
     var _time: Attribute<Time>
     var _transaction: Attribute<Transaction>
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var bindingWarned: Bool
     var bindingValue: CGPoint
     var bindingHadObservation: Bool
@@ -1661,7 +1661,7 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
         _environment: Attribute<EnvironmentValues>,
         _time: Attribute<Time>,
         _transaction: Attribute<Transaction>,
-        _phase: Attribute<Phase>
+        _phase: Attribute<_GraphInputs.Phase>
     ) {
         self._node = _node
         self._view = _view
@@ -2356,150 +2356,25 @@ public struct _ScrollableLayoutView<Data, Layout>: View
                 inputs: inputs
             )
         )
-        let scrollableTransaction: Attribute<Transaction> = graph.makeRule {
-            let inherited = inputs.base.transaction.value
-            _ = view._attribute.value
-            _ = layoutState.value.stateSeed
-            if _AGGraph.currentStatefulInputChanged(view._attribute.identifier),
-               let sourceTransaction = graph.transaction(for: view._attribute.identifier) {
-                return sourceTransaction
-            }
-            return inherited
-        }
-        var listInputs = _ViewListInputs(from: inputs)
-        listInputs.base.transaction = scrollableTransaction
-        if listInputs.base.options.contains(.viewNeedsGeometry) {
-            // Item generators merge their captured base as the receiver, so keep
-            // the scroll layout-computer request on that receiver-side lane.
-            listInputs.base.options.insert(.viewRequestsLayoutComputer)
-        }
-        let listState = ScrollableLayoutViewListState<Data, Layout>(
-            view: view._attribute,
-            layoutState: layoutState,
-            inputs: listInputs
-        )
-        let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-            guard let graph = _AGGraph.current else {
-                fatalError("ScrollableLayoutView view-list rule evaluated outside an active _AGGraph context.")
-            }
-            let state = layoutState.value
-            let current = view._attribute.value
-            listState.update(view: current, state: state, graph: graph)
-            return ScrollableLayoutViewList(state: listState, seed: listState.seed)
-        }
-
-        var dynamicInputs = inputs
-        dynamicInputs.base.transaction = scrollableTransaction
-        dynamicInputs[DynamicContainerMaxUnusedItems.self] = 1
-        let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
-            inputs.base.cachedEnvironment.value.environment.value.layoutDirection
-        }
-        dynamicInputs[ScrollableLayoutItemGeometryContextKey.self] =
-            ScrollableLayoutItemGeometryContext { context, uniqueId, parentPosition,
-                parentSize, childLayoutComputer in
-                let identifier: Attribute<Data.Index?> = graph.makeRule(
-                    ScrollableItemIdentifier<Data.Index>(
-                        uniqueId: uniqueId,
-                        context: context
-                    )
-                )
-                return graph.makeRule(
-                    ScrollableItemGeometry<Data, Layout>(
-                        _identifier: identifier,
-                        _state: layoutState,
-                        _layoutDirection: layoutDirection,
-                        _parentPosition: parentPosition,
-                        _parentSize: parentSize,
-                        _childLayoutComputer: childLayoutComputer
-                    )
-                )
-        }
-        let geometryContext = dynamicInputs[ScrollableLayoutItemGeometryContextKey.self]
-        let (
-            containerInfo,
-            containerOutputs
-        ) = DynamicContainer.makeContainer(
-            adaptor: DynamicLayoutViewAdaptor(_items: viewListAttr),
-            inputs: dynamicInputs
-        )
-        geometryContext?.containerInfo = containerInfo
-
-        // This pre-specialized scroll surface currently shares the dynamic
-        // view-list adaptor; its item geometry context supplies scroll placement.
-        var preferences = containerOutputs.preferences
-        let childScrollables = preferences
-            .value(for: ScrollablePreferenceKey.self)
-            .map {
-                Attribute<ScrollablePreferenceKey.Value>(
-                    identifier: $0
-                )
-            }
-
-        let parentScrollable = inputs.weakScrollable
         let data = view[\.data]._attribute
-        let collection: Attribute<any ScrollableCollection> = graph.makeRule {
-            ScrollableLayoutCollection(
-                data: data,
-                layoutState: layoutState,
-                containerInfo: containerInfo,
-                transform: inputs.transform,
-                parentScrollable: parentScrollable,
-                childScrollables: childScrollables
-            ) as any ScrollableCollection
+        let dataAndCount: Attribute<(Data, Int)> = graph.makeRule {
+            let data = data.value
+            return (data, data.count)
         }
-        if inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self),
-           let role = inputs.scrollTargetRole.attribute {
-            let transform: Attribute<(inout ScrollTargetRole.ContentKey.Value) -> Void> = graph.makeRule(
-                ScrollTargetRole.SetLayout(role: role, collection: collection)
-            )
-            preferences.makePreferenceTransformer(
-                inputs: inputs.preferences,
-                key: ScrollTargetRole.ContentKey.self,
-                transform: transform
-            )
-        }
-        if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
-           let role = inputs.scrollTargetRole.attribute {
-            let transform: Attribute<(inout ScrollTargetRole.Key.Value) -> Void> = graph.makeRule(
-                ScrollTargetRole.SetLayout(role: role, collection: collection)
-            )
-            preferences.makePreferenceTransformer(
-                inputs: inputs.preferences,
-                key: ScrollTargetRole.Key.self,
-                transform: transform
-            )
-        }
-        if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
-            let transform: Attribute<(inout ScrollablePreferenceKey.Value) -> Void> = graph.makeRule {
-                let scrollable = collection.value as any Scrollable
-                return { value in
-                    ScrollablePreferenceKey.reduce(value: &value) { [scrollable] }
-                }
-            }
-            preferences.makePreferenceTransformer(
-                inputs: inputs.preferences,
-                key: ScrollablePreferenceKey.self,
-                transform: transform
-            )
-        }
-        if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
-            let requests: Attribute<UpdateScrollStateRequestKey.Value> = graph.makeStatefulRule(
-                ScrollStateRequestTransform(collection: collection, inputs: inputs)
-            )
-            let transform: Attribute<(inout UpdateScrollStateRequestKey.Value) -> Void> = graph.makeRule {
-                let requests = requests.value
-                return { value in
-                    UpdateScrollStateRequestKey.reduce(value: &value) { requests }
-                }
-            }
-            preferences.makePreferenceTransformer(
-                inputs: inputs.preferences,
-                key: UpdateScrollStateRequestKey.self,
-                transform: transform
-            )
-        }
+        let adaptor = ScrollableLayoutViewAdaptor<Data, Layout>(
+            _dataAndCount: dataAndCount,
+            _layout: view[\.layout]._attribute,
+            _state: layoutState,
+            items: [],
+            itemsSeed: 0,
+            lastContentOffset: .zero
+        )
+        let (_, containerOutputs) = DynamicContainer.makeContainer(
+            adaptor: adaptor,
+            inputs: inputs
+        )
 
-        let outputLayoutComputer: OptionalAttribute<LayoutComputer>
+        var outputs = containerOutputs
         if inputs.requestsLayoutComputer {
             let contentSize = graph.subscriptNode(
                 parent: layoutState,
@@ -2508,15 +2383,9 @@ public struct _ScrollableLayoutView<Data, Layout>: View
             let layoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
                 ScrollableItemLayoutComputer(_contentSize: contentSize)
             )
-            outputLayoutComputer = OptionalAttribute(layoutComputer)
-        } else {
-            outputLayoutComputer = OptionalAttribute()
+            outputs._layoutComputer = OptionalAttribute(layoutComputer)
         }
-
-        return _ViewOutputs(
-            preferences: preferences,
-            layoutComputer: outputLayoutComputer
-        )
+        return outputs
     }
 }
 
@@ -2543,11 +2412,6 @@ extension _ScrollableLayoutView: _ScrollableContentProvider {
     }
 }
 
-/// Maximum retained-unused dynamic items a scrollable layout may keep alive.
-struct DynamicContainerMaxUnusedItems: ViewInput {
-    static var defaultValue: Int { 0 }
-}
-
 /// Carries the scroll-view proxy into scrollable layout construction.
 private struct ScrollableLayoutScrollViewProxyKey: ViewInput {
     static var defaultValue: OptionalAttribute<_ScrollViewProxy> { OptionalAttribute() }
@@ -2566,25 +2430,177 @@ private struct ScrollableLayoutStateValue<Data, Layout>
           Layout: _ScrollableLayout,
           Data.Index: Hashable {
 
-    var layoutState: Layout.StateType
+    var state: Layout.StateType
     var stateSeed: UInt32
     var contentSeed: UInt32
     var scrollLayout: _ScrollLayout
     var identifiers: [Data.Index]
     var placements: [Data.Index: _Placement]
-    var contentSize: CGSize
     var validRect: CGRect
+    var contentSize: CGSize
 
-    var visibleItems: [_ScrollableLayoutItem] {
-        identifiers.compactMap { index in
-            guard let placement = placements[index] else { return nil }
-            return _ScrollableLayoutItem(id: AnyHashable(index), placement: placement)
+}
+
+private struct ScrollableLayoutViewAdaptor<Data, Layout>:
+    DynamicContainerAdaptor
+    where Data: RandomAccessCollection,
+          Layout: _ScrollableLayout,
+          Data.Element: View,
+          Data.Index: Hashable {
+    typealias Item = AnyDynamicItem
+    typealias Items = [AnyDynamicItem]
+    typealias ItemLayout = Attribute<ViewGeometry>
+
+    var _dataAndCount: Attribute<(Data, Int)>
+    var _layout: Attribute<Layout>
+    var _state: Attribute<ScrollableLayoutStateValue<Data, Layout>>
+    var items: [(Data.Index, Data.Element)]
+    var itemsSeed: UInt32
+    var lastContentOffset: CGPoint
+
+    static var maxUnusedItems: Int { 1 }
+
+    mutating func updatedItems() -> [AnyDynamicItem]? {
+        let stateResult = _state.changedValue(options: [])
+        let state = stateResult.value
+        if stateResult.changed, state.stateSeed != itemsSeed {
+            return rebuildItems(state: state)
         }
+
+        guard Layout.ItemModifier.self != EmptyModifier.self else {
+            return nil
+        }
+        let layoutResult = _layout.changedValue(options: [])
+        guard layoutResult.changed ||
+                state.scrollLayout.contentOffset != lastContentOffset else {
+            return nil
+        }
+        return rebuildItems(state: state, layout: layoutResult.value)
     }
 
-    func placement(for identifier: AnyHashable) -> _Placement? {
-        guard let index = identifier.base as? Data.Index else { return nil }
-        return placements[index]
+    func makeItemLayout(
+        item: AnyDynamicItem,
+        uniqueId: UInt32,
+        inputs: _ViewInputs,
+        containerInfo: Attribute<DynamicContainer.Info>,
+        containerInputs: (inout _ViewInputs) -> Void
+    ) -> (_ViewOutputs, Attribute<ViewGeometry>) {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "ScrollableLayoutViewAdaptor.makeItemLayout called outside an active AG context."
+            )
+        }
+
+        let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
+            inputs.base.cachedEnvironment.value.environment.value.layoutDirection
+        }
+        let identifier: Attribute<Data.Index?> = graph.makeRule(
+            ScrollableItemIdentifier<Data, Layout>(
+                _info: containerInfo,
+                uniqueId: uniqueId
+            )
+        )
+        var childInputs = inputs
+        childInputs.copyCaches()
+        containerInputs(&childInputs)
+        let geometry: Attribute<ViewGeometry> = graph.makeRule(
+            ScrollableItemGeometry<Data, Layout>(
+                _identifier: identifier,
+                _state: _state,
+                _layoutDirection: layoutDirection,
+                _parentPosition: inputs.position,
+                _parentSize: inputs.size,
+                _childLayoutComputer: OptionalAttribute()
+            )
+        )
+        if childInputs.needsGeometry {
+            childInputs.size = geometry.size()
+            childInputs.position = geometry.origin()
+            childInputs.requestsLayoutComputer = true
+        }
+
+        let outputs = item.makeView(
+            uniqueId: uniqueId,
+            container: containerInfo,
+            inputs: childInputs,
+            adaptor: Self.self
+        )
+        graph.mutateRule(
+            geometry.identifier,
+            as: ScrollableItemGeometry<Data, Layout>.self,
+            invalidating: true
+        ) { rule in
+            rule._childLayoutComputer = outputs._layoutComputer
+        }
+        return (outputs, geometry)
+    }
+
+    func removeItemLayout(
+        uniqueId: UInt32,
+        itemLayout: Attribute<ViewGeometry>
+    ) {
+    }
+
+    private mutating func rebuildItems(
+        state: ScrollableLayoutStateValue<Data, Layout>,
+        layout suppliedLayout: Layout? = nil
+    ) -> [AnyDynamicItem] {
+        let (data, count) = _dataAndCount.value
+        let layout = suppliedLayout ?? _layout.value
+        items.removeAll(keepingCapacity: true)
+        items.reserveCapacity(min(count, state.identifiers.count))
+        for index in state.identifiers {
+            items.append((index, data[index]))
+        }
+        itemsSeed = state.stateSeed
+        lastContentOffset = state.scrollLayout.contentOffset
+
+        return items.map { index, content in
+            if Layout.ItemModifier.self == EmptyModifier.self {
+                return AnyDynamicItem(content, id: index)
+            }
+            let placement = state.placements[index] ?? _Placement(
+                proposedSize: CGSize.zero,
+                anchoring: .topLeading,
+                at: CGPoint.zero
+            )
+            let item = _ScrollableLayoutItem(
+                id: AnyHashable(index),
+                placement: placement
+            )
+            let modifier = layout.modifier(
+                for: item,
+                layout: state.scrollLayout,
+                state: state.state
+            )
+            return AnyDynamicItem(
+                ModifiedContent(content: content, modifier: modifier),
+                id: index
+            )
+        }
+    }
+}
+
+private struct ScrollableItemIdentifier<Data, Layout>: Rule
+    where Data: RandomAccessCollection,
+          Layout: _ScrollableLayout,
+          Data.Element: View,
+          Data.Index: Hashable {
+    typealias Value = Data.Index?
+
+    var _info: Attribute<DynamicContainer.Info>
+    var uniqueId: UInt32
+
+    var value: Data.Index? {
+        guard let item = _info.value.item(for: uniqueId) else {
+            return nil
+        }
+        return item
+            .for(ScrollableLayoutViewAdaptor<Data, Layout>.self)
+            .item
+            .storage
+            .identifier
+            .base as? Data.Index
     }
 }
 
@@ -2651,171 +2667,6 @@ private struct ScrollableItemGeometry<Data, Layout>: Rule, AsyncAttribute
         geometry.origin.x += parentPosition.x
         geometry.origin.y += parentPosition.y
         return geometry
-    }
-}
-
-/// Exposes resolved dynamic layout items and nested scrollables to the scroll host.
-private struct ScrollableLayoutCollection<Data, Layout>: ScrollableCollection, ScrollableContainer
-    where Data: RandomAccessCollection,
-          Layout: _ScrollableLayout,
-          Data.Index: Hashable {
-
-    var data: Attribute<Data>
-    var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
-    var containerInfo: Attribute<DynamicContainer.Info>
-    var transform: Attribute<ViewTransform>
-    var parentScrollable: WeakAttribute<any Scrollable>
-    var childScrollables: Attribute<[any Scrollable]>?
-
-    var visibleCollectionViewIDs: [_ViewList_ID.Canonical] {
-        layoutState.value.identifiers.map { canonicalID(for: $0) }
-    }
-
-    func forEachVisibleSubview(_ body: (ScrollableCollectionSubview, inout Bool) -> Void) {
-        let state = layoutState.value
-        let transform = transform.value
-        for index in state.identifiers {
-            guard let placement = state.placements[index] else { continue }
-            var stop = false
-            let frame = frame(for: placement)
-            body(
-                ScrollableCollectionSubview(
-                    id: _ViewList_ID(explicitID: AnyHashable(index)),
-                    frame: frame,
-                    frameInContent: frame,
-                    transform: transform
-                ),
-                &stop
-            )
-            if stop { break }
-        }
-    }
-
-    func subviewClosestTo(rect: CGRect) -> ScrollableCollectionSubview? {
-        var closest: (subview: ScrollableCollectionSubview, distance: CGFloat)?
-        forEachVisibleSubview { subview, stop in
-            let distance = subview.frame.midpointDistance(to: rect)
-            if closest == nil || distance < closest!.distance {
-                closest = (subview, distance)
-            }
-            stop = false
-        }
-        return closest?.subview
-    }
-
-    func nextVisibleCollectionViewID(
-        towards point: UnitPoint,
-        from id: _ViewList_ID.Canonical,
-        border: CGSize,
-        ignoring pinnedViews: PinnedScrollableViews
-    ) -> _ViewList_ID.Canonical? {
-        nil
-    }
-
-    static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
-        false
-    }
-
-    func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
-        allCollectionViewIDs.firstIndex(of: id)
-    }
-
-    func applyCollectionViewIDs(
-        from index: inout Int,
-        to body: (_ViewList_ID.Canonical, inout Bool) -> Void
-    ) -> Bool {
-        let ids = allCollectionViewIDs
-        guard index < ids.count else { return false }
-
-        while index < ids.count {
-            var stop = false
-            body(ids[index], &stop)
-            index += 1
-            if stop { return false }
-        }
-        return true
-    }
-
-    func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
-        containerInfo.value
-            .item(for: subgraph)?
-            .for(DynamicLayoutViewAdaptor.self)
-            .item
-            .id
-            .canonicalID
-    }
-
-    func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {
-        let state = layoutState.value
-        guard let index = state.identifiers.first(where: { canonicalID(for: $0) == id }),
-              let placement = state.placements[index] else {
-            return false
-        }
-        let rect = frame(for: placement).converted(to: .content, using: transform.value)
-        return setParentTarget { _, _ in
-            ScrollTarget(rect: rect, anchor: anchor)
-        }
-    }
-
-    var parent: (any Scrollable)? {
-        resolvedParentScrollable
-    }
-
-    var children: [any Scrollable]? {
-        childScrollables?.value
-    }
-
-    func makeTarget<ID: Hashable>(
-        for id: ID
-    ) -> ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)? {
-        let canonical = _ViewList_ID(explicitID: AnyHashable(id)).canonicalID
-        guard let index = layoutState.value.identifiers.first(
-            where: { canonicalID(for: $0) == canonical }
-        ), let placement = layoutState.value.placements[index] else {
-            return nil
-        }
-        let anchor = Transaction.current.scrollTargetAnchor
-        return { _, _ in
-            let rect = frame(for: placement).converted(
-                to: .content,
-                using: transform.value
-            )
-            return ScrollTarget(rect: rect, anchor: anchor)
-        }
-    }
-
-    private func canonicalID(for index: Data.Index) -> _ViewList_ID.Canonical {
-        _ViewList_ID(explicitID: AnyHashable(index)).canonicalID
-    }
-
-    private var allCollectionViewIDs: [_ViewList_ID.Canonical] {
-        data.value.indices.map { canonicalID(for: $0) }
-    }
-
-    private func frame(for placement: _Placement) -> CGRect {
-        let size = placement.proposedSize
-        return CGRect(
-            x: placement.anchorPosition.x - size.width * placement.anchor.x,
-            y: placement.anchorPosition.y - size.height * placement.anchor.y,
-            width: size.width,
-            height: size.height
-        )
-    }
-
-    private var resolvedParentScrollable: (any Scrollable)? {
-        guard let graph = _AGGraph.current,
-              parentScrollable.isValid(in: graph) else {
-            return nil
-        }
-        return parentScrollable.toStrong().value
-    }
-}
-
-private extension CGRect {
-    func midpointDistance(to other: CGRect) -> CGFloat {
-        let dx = midX - other.midX
-        let dy = midY - other.midY
-        return (dx * dx + dy * dy).squareRoot()
     }
 }
 
@@ -2921,14 +2772,14 @@ private struct ScrollableLayoutStateRule<Data, Layout>: StatefulRule
         stateSeed &+= 1
         _AGGraph.setStatefulOutput(
             ScrollableLayoutStateValue<Data, Layout>(
-                layoutState: layoutState,
+                state: layoutState,
                 stateSeed: stateSeed,
                 contentSeed: contentSeed,
                 scrollLayout: scrollLayout,
                 identifiers: identifiers,
                 placements: placements,
-                contentSize: proxy.contentSize,
-                validRect: proxy.validRect
+                validRect: proxy.validRect,
+                contentSize: proxy.contentSize
             )
         )
     }
@@ -2991,205 +2842,5 @@ private final class ScrollableLayoutMeasurementTemplate<Data>
         content.setValue(newContent)
         let layoutComputer = outputs._layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
         return layoutComputer.sizeThatFits(_ProposedSize(proposal))
-    }
-}
-
-/// Owns per-visible-item subgraphs and retains a small unused tail for scroll reuse.
-private final class ScrollableLayoutViewListState<Data, Layout>
-    where Data: RandomAccessCollection,
-          Layout: _ScrollableLayout,
-          Data.Element: View,
-          Data.Index: Hashable {
-
-    typealias RowContent = ModifiedContent<Data.Element, Layout.ItemModifier>
-
-    struct Item {
-        var content: Attribute<RowContent>
-        var elements: _ViewList_SubgraphElements
-        var subgraphOwner: _ViewList_Subgraph
-        var traitListAttr: OptionalAttribute<ViewTraitCollection>
-
-        var traits: ViewTraitCollection {
-            traitListAttr.attribute?.value ?? ViewTraitCollection()
-        }
-
-        func invalidate() {
-            // Release the source-list ownership without bypassing retain tokens
-            // held by a materialized dynamic item.
-            subgraphOwner.release()
-        }
-    }
-
-    var view: Attribute<_ScrollableLayoutView<Data, Layout>>
-    var layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>
-    var inputs: _ViewListInputs
-    var items: [AnyHashable: Item] = [:]
-    var order: [AnyHashable] = []
-    var retainedOrder: [AnyHashable] = []
-    var seed: UInt32 = 0
-
-    init(
-        view: Attribute<_ScrollableLayoutView<Data, Layout>>,
-        layoutState: Attribute<ScrollableLayoutStateValue<Data, Layout>>,
-        inputs: _ViewListInputs
-    ) {
-        self.view = view
-        self.layoutState = layoutState
-        self.inputs = inputs
-    }
-
-    func update(
-        view current: _ScrollableLayoutView<Data, Layout>,
-        state: ScrollableLayoutStateValue<Data, Layout>,
-        graph: _AGGraph
-    ) {
-        let listTransaction = graph.transaction(for: view.identifier) ?? inputs.base.transaction.value
-        var nextOrder: [AnyHashable] = []
-        var liveIDs = Set<AnyHashable>()
-
-        func makeContent(
-            index: Data.Index,
-            id: AnyHashable,
-            visibleItem: _ScrollableLayoutItem
-        ) -> RowContent {
-            let item = state.visibleItems.first { $0.id == id } ?? visibleItem
-            let modifier = current.layout.modifier(
-                for: item,
-                layout: state.scrollLayout,
-                state: state.layoutState
-            )
-            return ModifiedContent(content: current.data[index], modifier: modifier)
-        }
-
-        for visibleItem in state.visibleItems {
-            guard let index = visibleItem.id.base as? Data.Index,
-                  current.data.indices.contains(index) else {
-                continue
-            }
-
-            let id = visibleItem.id
-            nextOrder.append(id)
-            liveIDs.insert(id)
-            let content = makeContent(index: index, id: id, visibleItem: visibleItem)
-
-            if let item = items[id] {
-                item.content.setValue(content, transaction: listTransaction)
-            } else {
-                let subgraph = AGSubgraph()
-                let contentAttr = AGSubgraph.withCurrent(subgraph) {
-                    graph.makeInput(value: content)
-                }
-                let contentView = _GraphValue<RowContent>(_attribute: contentAttr)
-                let traitListAttr = AGSubgraph.withCurrent(subgraph) {
-                    makeContentTraitListAttr(
-                        view: contentView,
-                        graph: graph
-                    )
-                }
-                let generator = TypedUnaryViewGenerator(
-                    contentView,
-                    inputs: inputs
-                )
-                var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
-                let subgraphOwner = _ViewList_Subgraph(subgraph: subgraph)
-                elements.wrap(subgraph: subgraphOwner)
-                items[id] = Item(
-                    content: contentAttr,
-                    elements: elements,
-                    subgraphOwner: subgraphOwner,
-                    traitListAttr: traitListAttr
-                )
-            }
-        }
-
-        let sourceIDs = Set(current.data.indices.map(AnyHashable.init))
-        var retainedUnused: [AnyHashable] = []
-        for id in order + retainedOrder
-            where !liveIDs.contains(id) &&
-                sourceIDs.contains(id) &&
-                !retainedUnused.contains(id) &&
-                retainedUnused.count < 1 {
-            retainedUnused.append(id)
-        }
-        let retainedUnusedSet = Set(retainedUnused)
-        for id in Array(items.keys)
-            where !liveIDs.contains(id) && !retainedUnusedSet.contains(id) {
-            items[id]?.invalidate()
-            items.removeValue(forKey: id)
-        }
-        retainedOrder = retainedUnused
-
-        if nextOrder != order {
-            seed &+= 1
-            order = nextOrder
-        }
-    }
-
-    private func makeContentTraitListAttr(
-        view: _GraphValue<RowContent>,
-        graph: _AGGraph
-    ) -> OptionalAttribute<ViewTraitCollection> {
-        let outputs = RowContent._makeViewList(view: view, inputs: inputs)
-        guard case .dynamicList(let listAttr, _) = outputs.views else {
-            return inputs._traits
-        }
-
-        let traitsAttr: Attribute<ViewTraitCollection> = graph.makeRule {
-            let list = listAttr.value
-            var traits = list.traits
-            _ = _forEachSublist(in: list, listAttribute: listAttr) { sublist in
-                traits = sublist.traits
-                return false
-            }
-            return traits
-        }
-        return OptionalAttribute(traitsAttr)
-    }
-}
-
-/// ViewList facade over the visible item subgraphs owned by ScrollableLayoutViewListState.
-private struct ScrollableLayoutViewList<Data, Layout>: ViewList
-    where Data: RandomAccessCollection,
-          Layout: _ScrollableLayout,
-          Data.Element: View,
-          Data.Index: Hashable {
-
-    var state: ScrollableLayoutViewListState<Data, Layout>
-    var seed: UInt32
-
-    func count(style: _ViewList_IteratorStyle) -> Int {
-        state.order.count
-    }
-
-    func estimatedCount(style: _ViewList_IteratorStyle) -> Int {
-        state.order.count
-    }
-
-    func applyNodes(
-        from: inout Int,
-        style: _ViewList_IteratorStyle,
-        list: Attribute<any ViewList>?,
-        transform: _ViewList_TemporarySublistTransform,
-        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
-    ) -> Bool {
-        for id in state.order {
-            guard let item = state.items[id] else { continue }
-            if from > 0 {
-                from -= 1
-                continue
-            }
-            let sublist = _ViewList_Sublist(
-                start: 0,
-                count: 1,
-                id: _ViewList_ID(explicitID: id),
-                elements: item.elements,
-                traits: item.traits,
-                list: list
-            )
-            let shouldContinue = to(&from, style, .sublist(sublist), transform)
-            from = 0
-            if !shouldContinue { return false }
-        }
-        return true
     }
 }

@@ -941,7 +941,7 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
     var _animatedPosition: Attribute<CGPoint>
     var _containerPosition: Attribute<CGPoint>
     var _size: Attribute<CGSize>
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var _time: Attribute<Time>
     var _transaction: Attribute<Transaction>
     var _environment: Attribute<EnvironmentValues>

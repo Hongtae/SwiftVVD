@@ -891,7 +891,9 @@ extension HVStack {
     }
 
     public static var layoutProperties: LayoutProperties {
-        LayoutProperties(stackOrientation: Self.majorAxis)
+        var properties = LayoutProperties()
+        properties.stackOrientation = Self.majorAxis
+        return properties
     }
 
     public static func _makeView(root: _GraphValue<Self>,

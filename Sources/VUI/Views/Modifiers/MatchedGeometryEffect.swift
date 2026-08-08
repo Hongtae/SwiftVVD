@@ -41,7 +41,7 @@ final class MatchedGeometryScope: PropertyKey {
         var attribute: AGAttribute
         var args: Attribute<MatchedGeometryArguments>
         var transaction: Attribute<Transaction>
-        var phase: Attribute<Phase>
+        var phase: Attribute<_GraphInputs.Phase>
         var size: Attribute<ViewSize>
         var position: Attribute<CGPoint>
         var transform: Attribute<ViewTransform>
@@ -215,7 +215,7 @@ final class MatchedGeometryScope: PropertyKey {
 
 struct MatchedGeometrySourceInfo {
     var frame: ViewFrame
-    var phase: Phase
+    var phase: _GraphInputs.Phase
     var transaction: Transaction
     var sourceAttribute: AGAttribute
 }
@@ -410,7 +410,7 @@ private struct MatchedGeometryRegistration<ID: Hashable>: StatefulRule, Observed
     var modifier: Attribute<_MatchedGeometryEffect<ID>>
     var args: Attribute<MatchedGeometryArguments>
     var transaction: Attribute<Transaction>
-    var phase: Attribute<Phase>
+    var phase: Attribute<_GraphInputs.Phase>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
     var transform: Attribute<ViewTransform>

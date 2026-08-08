@@ -119,6 +119,10 @@ private struct ScrollableProxyInputRecord: Equatable {
     var visibleRect: CGRect
 }
 
+private final class ScrollableRowObservation {
+    var recordedMaterialization = false
+}
+
 private final class ScrollableLayoutRecorder {
     var makeViewIDs: [Int] = []
     var measuredSizes: [CGSize] = []
@@ -202,16 +206,24 @@ private struct ScrollableRecordingRow: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("ScrollableRecordingRow._makeView called outside an active _AGGraph context.")
         }
-        let row = view._attribute.value
-        row.recorder.makeViewIDs.append(row.id)
-        if let subgraph = AGSubgraph.current {
-            row.recorder.itemSubgraphs[row.id] = subgraph
+        let subgraph = AGSubgraph.current
+        let observation = ScrollableRowObservation()
+        graph.makeSideEffectRule {
+            let row = view._attribute.value
+            if !observation.recordedMaterialization {
+                observation.recordedMaterialization = true
+                row.recorder.makeViewIDs.append(row.id)
+            }
+            if let subgraph {
+                row.recorder.itemSubgraphs[row.id] = subgraph
+            }
+            row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+                position: inputs.position,
+                size: inputs.size,
+                requestsLayoutComputer: inputs.requestsLayoutComputer
+            )
+            return ()
         }
-        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
-            position: inputs.position,
-            size: inputs.size,
-            requestsLayoutComputer: inputs.requestsLayoutComputer
-        )
         let layout = graph.makeRule {
             testLayoutComputer(
                 sizeThatFits: { proposal in
@@ -233,16 +245,24 @@ private struct ScrollableLifecycleRow: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("ScrollableLifecycleRow._makeView called outside an active _AGGraph context.")
         }
-        let row = view._attribute.value
-        row.recorder.makeViewIDs.append(row.id)
-        if let subgraph = AGSubgraph.current {
-            row.recorder.itemSubgraphs[row.id] = subgraph
+        let subgraph = AGSubgraph.current
+        let observation = ScrollableRowObservation()
+        graph.makeSideEffectRule {
+            let row = view._attribute.value
+            if !observation.recordedMaterialization {
+                observation.recordedMaterialization = true
+                row.recorder.makeViewIDs.append(row.id)
+            }
+            if let subgraph {
+                row.recorder.itemSubgraphs[row.id] = subgraph
+            }
+            row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+                position: inputs.position,
+                size: inputs.size,
+                requestsLayoutComputer: inputs.requestsLayoutComputer
+            )
+            return ()
         }
-        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
-            position: inputs.position,
-            size: inputs.size,
-            requestsLayoutComputer: inputs.requestsLayoutComputer
-        )
         let modifier = graph.makeRule {
             let value = view._attribute.value
             return _AppearanceActionModifier(
@@ -266,91 +286,6 @@ private struct ScrollableLifecycleRow: View, TestPrimitiveView {
         }
         return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
     }
-}
-
-private final class ScrollableForkRetargetCapture {
-    var animated: Attribute<_OpacityEffect>?
-}
-
-private struct ScrollableForkRetargetRow: View, TestPrimitiveView {
-    var id: Int
-    var effect: _OpacityEffect
-    var recorder: AnimationCompletionRecorder
-    var capture: ScrollableForkRetargetCapture
-
-    typealias Body = Never
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("ScrollableForkRetargetRow._makeView called outside an active _AGGraph context.")
-        }
-        let modifier = graph.makeRule {
-            let value = view._attribute.value
-            return _AppearanceActionModifier(
-                appear: {
-                    if value.id == 1 {
-                        value.recorder.record("row appear")
-                    }
-                },
-                disappear: {
-                    if value.id == 1 {
-                        value.recorder.record("row disappear")
-                    }
-                }
-            )
-        }
-        let appearance = graph.makeStatefulRule(
-            AppearanceEffect(modifier: modifier, phase: inputs.base.phase)
-        )
-        graph.makeSideEffectRule {
-            _ = appearance.value
-            return ()
-        }
-
-        var graphValue = view[\.effect]
-        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
-        let animatedAttr = graphValue._attribute
-        let captureAttr = view[\.capture]._attribute
-        graph.makeSideEffectRule {
-            let value = view._attribute.value
-            if value.id == 1 {
-                captureAttr.value.animated = animatedAttr
-            }
-            return ()
-        }
-
-        let layout = graph.makeRule {
-            _ = animatedAttr.value
-            return LayoutComputer.fixed(CGSize(width: 30, height: 20))
-        }
-        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
-    }
-}
-
-private typealias ScrollableTransitionForkRetargetRow = ModifiedContent<
-    ModifiedContent<ScrollableForkRetargetRow, _TraitWritingModifier<TransitionTraitKey>>,
-    _TraitWritingModifier<CanTransitionTraitKey>
->
-
-private func scrollableTransitionForkRetargetRow(
-    id: Int,
-    target: Double,
-    recorder: AnimationCompletionRecorder,
-    capture: ScrollableForkRetargetCapture
-) -> ScrollableTransitionForkRetargetRow {
-    let row = ScrollableForkRetargetRow(
-        id: id,
-        effect: _OpacityEffect(opacity: id == 1 ? target : 0),
-        recorder: recorder,
-        capture: capture
-    )
-    return ModifiedContent(
-        content: ModifiedContent(
-            content: row,
-            modifier: _TraitWritingModifier<TransitionTraitKey>(value: .opacity)
-        ),
-        modifier: _TraitWritingModifier<CanTransitionTraitKey>(value: true)
-    )
 }
 
 private struct ScrollableOrdinaryPreferenceKey: PreferenceKey {
@@ -379,8 +314,15 @@ private struct ScrollableOrdinaryPreferenceRow: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("ScrollableOrdinaryPreferenceRow._makeView called outside an active _AGGraph context.")
         }
-        let row = view._attribute.value
-        row.recorder.makeViewIDs.append(row.id)
+        let observation = ScrollableRowObservation()
+        graph.makeSideEffectRule {
+            let row = view._attribute.value
+            if !observation.recordedMaterialization {
+                observation.recordedMaterialization = true
+                row.recorder.makeViewIDs.append(row.id)
+            }
+            return ()
+        }
         let layout = graph.makeRule {
             testLayoutComputer(
                 sizeThatFits: { proposal in
@@ -651,14 +593,18 @@ private struct FixedSizeRecordingRow: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("FixedSizeRecordingRow._makeView called outside an active _AGGraph context.")
         }
-        let row = view._attribute.value
-        row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
-            position: inputs.position,
-            size: inputs.size,
-            requestsLayoutComputer: inputs.requestsLayoutComputer
-        )
+        graph.makeSideEffectRule {
+            let row = view._attribute.value
+            row.recorder.geometryProbes[row.id] = ScrollableGeometryProbe(
+                position: inputs.position,
+                size: inputs.size,
+                requestsLayoutComputer: inputs.requestsLayoutComputer
+            )
+            return ()
+        }
         let layout = graph.makeRule {
-            testLayoutComputer(
+            let row = view._attribute.value
+            return testLayoutComputer(
                 sizeThatFits: { _ in row.size }
             )
         }
@@ -785,15 +731,13 @@ private struct ScrollablePreferenceRow: View, TestPrimitiveView {
             )
         }
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layout))
-        if view._attribute.value.child != nil {
-            let child: Attribute<any Scrollable> = graph.makeRule {
-                view._attribute.value.child! as any Scrollable
+        let scrollables: Attribute<[any Scrollable]> = graph.makeRule {
+            guard let child = view._attribute.value.child else {
+                return []
             }
-            let scrollables: Attribute<[any Scrollable]> = graph.makeRule(
-                UnaryScrollablePreferenceProvider(scrollable: child)
-            )
-            outputs.preferences.append(ScrollablePreferenceKey.self, node: scrollables.identifier)
+            return [child]
         }
+        outputs.preferences.append(ScrollablePreferenceKey.self, node: scrollables.identifier)
         return outputs
     }
 }
@@ -909,32 +853,6 @@ private struct ProxyRecordingScrollableLayout: _ScrollableLayout {
         ]
         proxy.contentSize = CGSize(width: 200, height: 220)
         proxy.validRect = CGRect(x: -50, y: -50, width: 300, height: 320)
-    }
-}
-
-private struct TargetRecordingScrollableLayout: _ScrollableLayout {
-    var recorder: ScrollableLayoutRecorder
-
-    func update(state: inout Void, proxy: inout _ScrollableLayoutProxy) {
-        recorder.proxyInputs.append(
-            ScrollableProxyInputRecord(
-                size: proxy.size,
-                visibleRect: proxy.visibleRect
-            )
-        )
-        proxy.visibleItems = (0..<proxy.count).map { index in
-            _ScrollableLayoutItem(
-                id: proxy[index],
-                proposedSize: CGSize(width: 40, height: 20),
-                anchoring: .topLeading,
-                at: CGPoint(x: 0, y: CGFloat(index * 100))
-            )
-        }
-        proxy.contentSize = CGSize(
-            width: max(proxy.size.width, 40),
-            height: proxy.count > 0 ? CGFloat((proxy.count - 1) * 100 + 20) : 0
-        )
-        proxy.validRect = proxy.visibleRect
     }
 }
 
@@ -3095,196 +3013,9 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testScrollableLayoutViewPublishesCollectionScrollableAndUpdateRequests() throws {
-        let host = GraphHost()
-        let child = ScrollableLayoutChildScrollable()
-        var scrollablesID: AGAttribute!
-        var requestsID: AGAttribute!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: child),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-                ScrollablePreferenceRow(id: 3, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var stored = ScrollPosition(id: 1)
-            let binding = Binding<ScrollPosition>(
-                get: { stored },
-                set: { value, _ in stored = value }
-            )
-            let bindingAttr = graph.makeInput(value: binding)
-            let anchorAttr = graph.makeInput(value: Optional<UnitPoint>.some(.bottom))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.preferences.keys.add(UpdateScrollStateRequestKey.self)
-            inputs.base.setScrollPosition(storage: .binding(bindingAttr), kind: .scrollContent)
-            inputs.base.setScrollPositionAnchor(OptionalAttribute(anchorAttr), kind: .scrollContent)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-            let requestsAttr = try XCTUnwrap(outputs.preferences.value(for: UpdateScrollStateRequestKey.self))
-            requestsID = requestsAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(Attribute<UpdateScrollStateRequestKey.Value>(requestsAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            XCTAssertEqual(scrollables.count, 2)
-            XCTAssertTrue(scrollables.contains { ($0 as? ScrollableLayoutChildScrollable) === child })
-
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            let visibleIDs = collection.visibleCollectionViewIDs
-            XCTAssertEqual(
-                visibleIDs,
-                [0, 1, 2].map { _ViewList_ID(explicitID: AnyHashable($0)).canonicalID }
-            )
-            let allIDs = [0, 1, 2, 3].map {
-                _ViewList_ID(explicitID: AnyHashable($0)).canonicalID
-            }
-            XCTAssertEqual(
-                collection.firstCollectionViewIndex(of: _ViewList_ID(explicitID: AnyHashable(1)).canonicalID),
-                1
-            )
-            XCTAssertEqual(
-                collection.firstCollectionViewIndex(of: _ViewList_ID(explicitID: AnyHashable(3)).canonicalID),
-                3
-            )
-
-            var index = 1
-            var appliedIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(collection.applyCollectionViewIDs(from: &index) { id, stop in
-                appliedIDs.append(id)
-                stop = false
-            })
-            XCTAssertEqual(appliedIDs, Array(allIDs.dropFirst()))
-            XCTAssertEqual(index, allIDs.count)
-
-            var stoppedIndex = 0
-            var stoppedIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertFalse(collection.applyCollectionViewIDs(from: &stoppedIndex) { id, stop in
-                stoppedIDs.append(id)
-                stop = id == _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
-            })
-            XCTAssertEqual(stoppedIDs, Array(allIDs.prefix(2)))
-            XCTAssertEqual(stoppedIndex, 2)
-
-            let closest = try XCTUnwrap(
-                collection.subviewClosestTo(rect: CGRect(x: 0, y: 48, width: 40, height: 20))
-            )
-            XCTAssertEqual(closest.id.canonicalID, _ViewList_ID(explicitID: AnyHashable(2)).canonicalID)
-            XCTAssertEqual(closest.frame, CGRect(x: 0, y: 48, width: 40, height: 20))
-            XCTAssertEqual(closest.frameInContent, closest.frame)
-
-            let requests = Attribute<UpdateScrollStateRequestKey.Value>(requestsID).value
-            XCTAssertEqual(requests.count, 1)
-            let request = try XCTUnwrap(requests.first as? UpdateScrollStateRequest)
-            XCTAssertEqual(request.newPosition._anyViewID, AnyHashable(1))
-            XCTAssertEqual(request.newPosition, ScrollPosition(_scrollPositionID: AnyHashable(1), anchor: .bottom))
-            XCTAssertTrue(request.hasUpdate)
-        }
-    }
-
-    func testScrollableLayoutCollectionRecoversCollectionIDFromItemSubgraph() throws {
-        let host = GraphHost()
-        let recorder = ScrollableLayoutRecorder()
-        var scrollablesID: AGAttribute!
-        var subgraph: AGSubgraph!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = (0..<3).map { ScrollableRecordingRow(id: $0, recorder: recorder) }
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-
-            let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-            subgraph = try XCTUnwrap(recorder.itemSubgraphs[1])
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-
-            XCTAssertEqual(
-                collection.collectionViewID(for: subgraph),
-                _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
-            )
-            XCTAssertNil(collection.collectionViewID(for: AGSubgraph()))
-        }
-    }
-
-    func testScrollableLayoutCollectionNavigationReturnsNilForVisibleFacade() throws {
-        let host = GraphHost()
-        var scrollablesID: AGAttribute!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = (0..<3).map { ScrollableRecordingRow(id: $0, recorder: ScrollableLayoutRecorder()) }
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-
-            let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            let id = _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
-
-            XCTAssertNil(
-                collection.nextVisibleCollectionViewID(
-                    towards: .bottom,
-                    from: id,
-                    border: .zero,
-                    ignoring: [.sectionHeaders, .sectionFooters]
-                )
-            )
-            XCTAssertFalse(collection.isLazy)
-        }
-    }
-
     func testScrollableLayoutComputerPublishesContentSizeWhileItemsOwnGeometry() throws {
         let host = GraphHost()
         let recorder = ScrollableLayoutRecorder()
-        var scrollablesID: AGAttribute!
-        var geometryFrames: [CGRect] = []
 
         try host.data.withCurrent {
             let graph = host.data.graph
@@ -3297,10 +3028,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             inputs.position = graph.makeInput(value: CGPoint(x: 5, y: 7))
             inputs.needsGeometry = true
             inputs.requestsLayoutComputer = true
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
 
             let outputs = _ScrollableLayoutView<[ScrollableRecordingRow], VisibleCountScrollableLayout>
                 ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
+            _ = try materializeDynamicItems(in: outputs)
             let layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
             XCTAssertEqual(
                 layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80))),
@@ -3311,11 +3043,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 origin: CGPoint(x: 5, y: 7)
             ).isEmpty)
 
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
             recorder.sampleGeometry(for: [0, 1, 2])
-            geometryFrames = recorder.geometryInputs.map {
+            let geometryFrames = recorder.geometryInputs.map {
                 CGRect(origin: $0.position, size: $0.size)
             }
             XCTAssertEqual(geometryFrames, [
@@ -3323,309 +3052,9 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 CGRect(x: 5, y: 31, width: 40, height: 20),
                 CGRect(x: 5, y: 55, width: 40, height: 20),
             ])
-            XCTAssertTrue(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            XCTAssertEqual(collection.visibleSubviews.map(\.frame), [
-                CGRect(x: 0, y: 0, width: 40, height: 20),
-                CGRect(x: 0, y: 24, width: 40, height: 20),
-                CGRect(x: 0, y: 48, width: 40, height: 20),
-            ])
-        }
-    }
-
-    func testScrollableLayoutCollectionRoutesVisibleIDTargetToParentScrollable() throws {
-        let host = GraphHost()
-        let parent = ScrollableLayoutParentScrollable()
-        var scrollablesID: AGAttribute!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: nil),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.scrollable = OptionalAttribute(parentAttr)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-
-            let targetID = _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
-            XCTAssertTrue(collection.scroll(toCollectionViewID: targetID, anchor: .bottom))
-            XCTAssertEqual(parent.contentTargets.count, 1)
-
-            let geometry = ScrollGeometry(
-                contentOffset: .zero,
-                contentSize: CGSize(width: 100, height: 120),
-                containerSize: CGSize(width: 100, height: 80)
-            )
-            let target = try XCTUnwrap(parent.contentTargets[0](geometry, .leftToRight))
-            XCTAssertEqual(target.rect, CGRect(x: 0, y: 24, width: 40, height: 20))
-            XCTAssertEqual(target.anchor, .bottom)
-
-            let missingID = _ViewList_ID(explicitID: AnyHashable(99)).canonicalID
-            XCTAssertFalse(collection.scroll(toCollectionViewID: missingID, anchor: .center))
-            XCTAssertEqual(parent.contentTargets.count, 1)
-        }
-    }
-
-    func testScrollableLayoutCollectionDoesNotRealizeNonVisibleSourceIDTarget() throws {
-        let host = GraphHost()
-        let parent = ScrollableLayoutParentScrollable()
-        var scrollablesID: AGAttribute!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: nil),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 40))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.scrollable = OptionalAttribute(parentAttr)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-            let nonVisibleID = _ViewList_ID(explicitID: AnyHashable(2)).canonicalID
-
-            XCTAssertEqual(collection.visibleCollectionViewIDs, [
-                _ViewList_ID(explicitID: AnyHashable(0)).canonicalID,
-            ])
-            XCTAssertEqual(collection.firstCollectionViewIndex(of: nonVisibleID), 2)
-            XCTAssertFalse(collection.scroll(toCollectionViewID: nonVisibleID, anchor: .top))
-            XCTAssertTrue(parent.contentTargets.isEmpty)
-        }
-    }
-
-    func testScrollableLayoutCollectionConvertsVisibleTargetThroughContentCoordinateSpace() throws {
-        let host = GraphHost()
-        let parent = ScrollableLayoutParentScrollable()
-        var scrollablesID: AGAttribute!
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: nil),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var contentTransform = ViewTransform.identity
-            contentTransform.appendTranslation(CGSize(width: 400, height: 400))
-            contentTransform.appendSizedSpace(
-                id: ScrollCoordinateSpace.content.id,
-                size: CGSize(width: 100, height: 120)
-            )
-            contentTransform.appendTranslation(CGSize(width: -12, height: -18))
-            let transformAttr = graph.makeInput(value: contentTransform)
-            var inputs = makeViewInputs(
-                graph: graph,
-                size: sizeAttr,
-                transform: transformAttr
-            )
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.scrollable = OptionalAttribute(parentAttr)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-
-            let targetID = _ViewList_ID(explicitID: AnyHashable(1)).canonicalID
-            XCTAssertTrue(collection.scroll(toCollectionViewID: targetID, anchor: .center))
-            XCTAssertEqual(parent.contentTargets.count, 1)
-
-            let geometry = ScrollGeometry(
-                contentOffset: .zero,
-                contentSize: CGSize(width: 100, height: 120),
-                containerSize: CGSize(width: 100, height: 80)
-            )
-            let target = try XCTUnwrap(parent.contentTargets[0](geometry, .leftToRight))
-            XCTAssertEqual(target.rect, CGRect(x: -12, y: 6, width: 40, height: 20))
-            XCTAssertEqual(target.anchor, .center)
-            XCTAssertTrue(collection.visibleSubviews[0].transform.scrollCoordinateSpaces.contains(.content))
-        }
-    }
-
-    func testScrollableLayoutCollectionFallsBackToChildContentTarget() throws {
-        let host = GraphHost()
-        let parent = ScrollableLayoutParentScrollable()
-        let child = ScrollableLayoutChildScrollable()
-        var scrollablesID: AGAttribute!
-
-        parent.shouldSetContentTarget = false
-        child.shouldSetContentTarget = true
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: child),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.scrollable = OptionalAttribute(parentAttr)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-
-            XCTAssertTrue(collection.setContentTarget { geometry, _ in
-                ScrollTarget(rect: CGRect(origin: geometry.contentOffset, size: geometry.containerSize))
-            })
-            XCTAssertEqual(parent.contentTargets.count, 1)
-            XCTAssertEqual(child.contentTargets.count, 1)
-
-            parent.shouldSetContentTarget = true
-            XCTAssertTrue(collection.setContentTarget { geometry, _ in
-                ScrollTarget(rect: CGRect(origin: geometry.contentOffset, size: geometry.containerSize))
-            })
-            XCTAssertEqual(parent.contentTargets.count, 2)
-            XCTAssertEqual(child.contentTargets.count, 1)
-        }
-    }
-
-    func testScrollableLayoutCollectionMapsFirstChildThroughParentThenChildren() throws {
-        let host = GraphHost()
-        let parent = ScrollableLayoutParentScrollable()
-        let child = ScrollableLayoutChildScrollable()
-        var scrollablesID: AGAttribute!
-
-        parent.firstChildMarker = ScrollableLayoutLookupMarker(11)
-        child.firstChildMarker = ScrollableLayoutLookupMarker(22)
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = [
-                ScrollablePreferenceRow(id: 0, child: child),
-                ScrollablePreferenceRow(id: 1, child: nil),
-                ScrollablePreferenceRow(id: 2, child: nil),
-            ]
-            let viewAttr = graph.makeInput(
-                value: _ScrollableLayoutView(data: rows, layout: VisibleCountScrollableLayout())
-            )
-            let parentAttr: Attribute<any Scrollable> = graph.makeInput(value: parent as any Scrollable)
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-            inputs.scrollable = OptionalAttribute(parentAttr)
-
-            let outputs = _ScrollableLayoutView<[ScrollablePreferenceRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: viewAttr), inputs: inputs)
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        try host.data.withCurrent {
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value
-            let collection = try XCTUnwrap(scrollables.compactMap { $0 as? any ScrollableCollection }.first)
-
-            let parentResult = collection.mapFirstChild(ofType: ScrollableLayoutLookupMarker.self) { $0.value }
-            XCTAssertEqual(parentResult, 11)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
-            XCTAssertEqual(child.mapFirstChildCallCount, 0)
-
-            parent.firstChildMarker = nil
-            parent.mapFirstChildCallCount = 0
-            child.mapFirstChildCallCount = 0
-
-            let childResult = collection.mapFirstChild(ofType: ScrollableLayoutLookupMarker.self) { $0.value }
-            XCTAssertEqual(childResult, 22)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
-            XCTAssertEqual(child.mapFirstChildCallCount, 1)
-
-            parent.mapFirstChildCallCount = 0
-            child.mapFirstChildCallCount = 0
-
-            let directChild = try XCTUnwrap(
-                collection.mapFirstChild(ofType: ScrollableLayoutChildScrollable.self) { $0 }
-            )
-            XCTAssertTrue(directChild === child)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
-            XCTAssertEqual(child.mapFirstChildCallCount, 0)
-
-            let missing: Int? = collection.mapFirstChild(ofType: String.self) { _ in 1 }
-            XCTAssertNil(missing)
-        }
     }
 
     func testScrollableLayoutProxyIndexesAndCachesSizesByIdentifier() {
@@ -3782,80 +3211,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 visibleRect: CGRect(x: 23, y: 35, width: 80, height: 64)
             ),
         ])
-    }
-
-    func testScrollViewMainScrollableShellRoutesCollectionTargetThroughProxyOffset() throws {
-        let host = GraphHost()
-        let recorder = ScrollableLayoutRecorder()
-        var layoutAttr: Attribute<LayoutComputer>!
-        var scrollablesID: AGAttribute!
-        var stored = ScrollPosition(idType: Int.self)
-        let target = ScrollPosition(id: 2)
-
-        try host.data.withCurrent {
-            let graph = host.data.graph
-            let rows = (0..<3).map { ScrollableRecordingRow(id: $0, recorder: recorder) }
-            typealias LayoutView = _ScrollableLayoutView<[ScrollableRecordingRow], TargetRecordingScrollableLayout>
-            typealias Scroll = _ScrollView<LayoutView>
-
-            let provider = LayoutView(
-                data: rows,
-                layout: TargetRecordingScrollableLayout(recorder: recorder)
-            )
-            let mainAttr = graph.makeInput(
-                value: Scroll.Main(contentProvider: provider, config: _ScrollViewConfig())
-            )
-            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
-
-            let outputs = Scroll.Main._makeView(
-                view: _GraphValue(_attribute: mainAttr),
-                inputs: inputs
-            )
-            layoutAttr = try XCTUnwrap(outputs._layoutComputer.attribute)
-            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
-
-            let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
-            scrollablesID = scrollablesAttr
-            let scrollables = Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value
-            XCTAssertEqual(scrollables.count, 1)
-            XCTAssertFalse(scrollables[0] is any ScrollableCollection)
-            XCTAssertTrue(host.hasPendingTransactions)
-        }
-
-        host.flushTransactions()
-
-        host.data.withCurrent {
-            let graph = host.data.graph
-            let scrollableAttr: Attribute<any Scrollable> = graph.makeRule {
-                Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value[0]
-            }
-            let binding = Binding<ScrollPosition>(
-                get: { stored },
-                set: { value, _ in stored = value }
-            )
-            var request = ScrollToScrollStateRequest(
-                binding: binding,
-                anchor: .bottomLeading,
-                id: ObjectIdentifier(graph),
-                value: target,
-                baseTransaction: Transaction()
-            )
-            request.updateScrollable(scrollableAttr)
-
-            XCTAssertTrue(request.update())
-            XCTAssertEqual(stored, target)
-
-            _ = layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80)))
-            XCTAssertEqual(
-                recorder.proxyInputs.last,
-                ScrollableProxyInputRecord(
-                    size: CGSize(width: 100, height: 80),
-                    visibleRect: CGRect(x: 0, y: 140, width: 100, height: 80)
-                )
-            )
-        }
     }
 
     func testScrollableLayoutViewOffsetInsideValidRectReusesVisibleItems() throws {
@@ -4090,156 +3445,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testScrollableLayoutViewOffscreenRetainedUnusedRemovalDrainsRemovalCompletionBeforeForkedListeners() throws {
-        let rendererHost = TestViewRendererHost()
-        let viewGraph = ViewGraph(
-            rootViewType: EmptyView.self,
-            content: EmptyView(),
-            rendererHost: rendererHost
-        )
-        rendererHost.storage = viewGraph
-        let graph = viewGraph.data.graph
-        let recorder = AnimationCompletionRecorder()
-        let sampleRecorder = CustomRetargetSampleRecorder()
-        let capture = ScrollableForkRetargetCapture()
-        var graphInputs: _GraphInputs!
-        var source: Attribute<_ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>>!
-        var sizeAttr: Attribute<ViewSize>!
-        var materialization: Attribute<ScrollableMaterializationPreferenceKey.Value>!
-        var animatedValue: Attribute<_OpacityEffect>!
-
-        func rows(count: Int, target: Double) -> [ScrollableTransitionForkRetargetRow] {
-            (0..<count).map { id in
-                scrollableTransitionForkRetargetRow(
-                    id: id,
-                    target: target,
-                    recorder: recorder,
-                    capture: capture
-                )
-            }
-        }
-
-        func view(count: Int, target: Double) -> _ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout> {
-            _ScrollableLayoutView(data: rows(count: count, target: target), layout: VisibleCountScrollableLayout())
-        }
-
-        func place(height: CGFloat) {
-            sizeAttr.setValue(ViewSize(width: 100, height: height))
-            _ = materialization.value
-        }
-
-        try viewGraph.data.withCurrent {
-            sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
-            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
-            graphInputs = inputs.base
-            inputs.needsGeometry = true
-            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
-            source = graph.makeInput(value: view(count: 2, target: 0))
-
-            let outputs = _ScrollableLayoutView<[ScrollableTransitionForkRetargetRow], VisibleCountScrollableLayout>
-                ._makeView(view: _GraphValue(_attribute: source), inputs: inputs)
-            materialization = try materializeDynamicItems(in: outputs)
-            place(height: 80)
-
-            animatedValue = try XCTUnwrap(capture.animated)
-            XCTAssertEqual(animatedValue.value.opacity, 0, accuracy: 0.000_001)
-            XCTAssertEqual(recorder.events, ["row appear"])
-        }
-
-        func transaction(label: String) -> Transaction {
-            completionTransaction(
-                animation: Animation(
-                    RetargetBoundaryRecordingAnimation(
-                        label: label,
-                        logicalAt: 20,
-                        nilAt: 20,
-                        recorder: sampleRecorder
-                    )
-                ),
-                label: label,
-                recorder: recorder
-            )
-        }
-
-        func retarget(_ label: String, target: Double, firstSample: Double, secondSample: Double) {
-            viewGraph.data.withCurrent {
-                let nextTransaction = transaction(label: label)
-                source.setValue(
-                    view(count: 2, target: target),
-                    transaction: nextTransaction
-                )
-                place(height: 80)
-                _ = animatedValue.value
-                Transaction.dispatchPendingListeners()
-                graphInputs.time.setValue(Time(seconds: firstSample))
-                place(height: 80)
-                _ = animatedValue.value
-                graphInputs.time.setValue(Time(seconds: secondSample))
-                place(height: 80)
-                _ = animatedValue.value
-                Self.flushGraphActions(graph)
-            }
-        }
-
-        retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
-        retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
-        retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
-        XCTAssertEqual(recorder.events, ["row appear"])
-
-        viewGraph.data.withCurrent {
-            place(height: 40)
-            Self.flushGraphActions(graph)
-            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
-        }
-
-        viewGraph.data.withCurrent {
-            var removal = completionTransaction(
-                animation: .linear(duration: 0.02),
-                label: "removal",
-                recorder: recorder
-            )
-            removal.animationFrameInterval = 1.0 / 120.0
-            source.setValue(view(count: 1, target: 3), transaction: removal)
-            place(height: 40)
-            Transaction.dispatchPendingListeners()
-            XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
-        }
-
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
-        Self.flushGraphActions(graph)
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "row appear",
-                "row disappear",
-                "removal removed",
-                "removal logical",
-            ]
-        )
-        viewGraph.flushTransactions()
-
-        viewGraph.data.withCurrent {
-            graph.inbox.drain()
-            place(height: 40)
-            Self.flushGraphActions(graph)
-        }
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "row appear",
-                "row disappear",
-                "removal removed",
-                "removal logical",
-                "old removed",
-                "middle removed",
-                "active removed",
-                "active logical",
-                "old logical",
-                "middle logical",
-            ]
-        )
-    }
-
     func testScrollableLayoutViewFiltersRetainedUnusedOrdinaryPreferences() throws {
         let graph = _AGGraph()
         let recorder = ScrollableLayoutRecorder()
@@ -4333,57 +3538,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         }
     }
 
-    func testScrollableIdentifierContextUsesDynamicContainerInfo() {
-        let graph = _AGGraph()
-        _AGGraph.withCurrent(graph) {
-            let context = ScrollableLayoutItemGeometryContext { _, _, _, _, _ in
-                fatalError("Geometry construction is outside this identity-only test.")
-            }
-            let uniqueId: UInt32 = 1
-            let recoveredIndex = AnyHashable(3)
-
-            XCTAssertNil(context.identifier(for: uniqueId))
-
-            let item = DynamicContainer._ItemInfo<DynamicLayoutViewAdaptor>(
-                item: DynamicViewListItem(
-                    id: _ViewList_ID(explicitID: recoveredIndex),
-                    elements: _ViewList_SubgraphElements(
-                        base: EmptyViewListElements()
-                    ),
-                    traits: ViewTraitCollection(),
-                    list: nil
-                ),
-                itemLayout: DynamicLayoutViewAdaptor.ItemLayout(
-                    release: nil
-                ),
-                subgraph: AGSubgraph(),
-                uniqueId: uniqueId,
-                viewCount: 1,
-                phase: .identity,
-                needsTransitions: false,
-                outputs: _ViewOutputs()
-            )
-            var info = DynamicContainer.Info()
-            info.replaceItems(active: [item])
-            context.containerInfo = graph.makeInput(value: info)
-
-            XCTAssertEqual(context.identifier(for: uniqueId), recoveredIndex)
-            XCTAssertNil(context.identifier(for: uniqueId + 1))
-        }
-    }
-
-    @discardableResult
-    private func materializeScrollableItems(
-        in outputs: _ViewOutputs
-    ) throws -> Attribute<ScrollablePreferenceKey.Value> {
-        let identifier = try XCTUnwrap(
-            outputs.preferences.value(for: ScrollablePreferenceKey.self)
-        )
-        let scrollables = Attribute<ScrollablePreferenceKey.Value>(identifier)
-        _ = scrollables.value
-        return scrollables
-    }
-
     @discardableResult
     private func materializeDynamicItems(
         in outputs: _ViewOutputs
@@ -4405,7 +3559,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         _ViewInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time()),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking()),
                 transaction: graph.makeInput(value: Transaction())
             ),

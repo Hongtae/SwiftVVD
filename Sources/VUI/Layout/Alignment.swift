@@ -32,6 +32,10 @@ struct AlignmentKey: Hashable, Comparable {
         AlignmentKeyTypeCache.id(for: self)
     }
 
+    var alignmentCacheKey: CGFloat {
+        AlignmentKeyTypeCache.alignmentCacheKey(for: self)
+    }
+
     init(id: AlignmentID.Type, axis: Axis) {
         self.bits = AlignmentKeyTypeCache.bits(for: id, axis: axis)
     }
@@ -110,6 +114,27 @@ private enum AlignmentKeyTypeCache {
                 fatalError("Unknown AlignmentKey bits: \(key.bits)")
             }
             return state.ids[index]
+        }
+    }
+
+    static func alignmentCacheKey(for key: AlignmentKey) -> CGFloat {
+        guard key.bits >= 2 else {
+            fatalError("Invalid AlignmentKey bits: \(key.bits)")
+        }
+        let index = Int((key.bits - 2) >> 1)
+
+        return state.withLock { state in
+            guard state.ids.indices.contains(index) else {
+                fatalError("Unknown AlignmentKey bits: \(key.bits)")
+            }
+            return state.ids.withUnsafeBufferPointer { ids in
+                let entry = UnsafeRawPointer(ids.baseAddress!.advanced(by: index))
+                let witness = entry.load(
+                    fromByteOffset: MemoryLayout<UInt>.size,
+                    as: UInt.self
+                )
+                return CGFloat(bitPattern: witness)
+            }
         }
     }
 }

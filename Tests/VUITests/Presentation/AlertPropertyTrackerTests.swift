@@ -14,7 +14,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr: Attribute<MakeAlertStorage<EmptyView, EmptyView>.Value> =
                 graph.makeStatefulRule(
@@ -62,7 +62,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr = alertStorageAttribute(
                 graph: graph,
@@ -98,7 +98,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr = alertStorageAttribute(
                 graph: graph,
@@ -134,7 +134,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr = alertStorageAttribute(
                 graph: graph,
@@ -195,7 +195,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr = alertStorageAttribute(
                 graph: graph,
@@ -231,7 +231,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
                 value: alertModifier(isPresented: binding(to: presentation))
             )
             let itemListAttr = graph.makeInput(value: PlatformItemList())
-            let phaseAttr = graph.makeInput(value: Phase())
+            let phaseAttr = graph.makeInput(value: _GraphInputs.Phase())
             let tracker = _PropertyListTracker()
             let storageAttr = alertStorageAttribute(
                 graph: graph,
@@ -286,7 +286,7 @@ final class AlertPropertyTrackerTests: XCTestCase {
         environment: Attribute<EnvironmentValues>,
         modifier: Attribute<AlertModifier<EmptyView, EmptyView>>,
         itemList: Attribute<PlatformItemList>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         tracker: _PropertyListTracker
     ) -> Attribute<MakeAlertStorage<EmptyView, EmptyView>.Value> {
         graph.makeStatefulRule(

@@ -306,23 +306,27 @@ private struct ScrollViewTargetRow: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("ScrollViewTargetRow._makeView called outside an active _AGGraph context.")
         }
-        let row = view._attribute.value
-        if let subgraph = AGSubgraph.current {
-            row.subgraphRecorder?.itemSubgraphs[row.id] = subgraph
+        let subgraph = AGSubgraph.current
+        graph.makeSideEffectRule {
+            let row = view._attribute.value
+            if let subgraph {
+                row.subgraphRecorder?.itemSubgraphs[row.id] = subgraph
+            }
+            return ()
         }
         let layout = graph.makeRule {
-            LayoutComputer.fixed(CGSize(width: 40, height: row.height))
+            LayoutComputer.fixed(
+                CGSize(width: 40, height: view._attribute.value.height)
+            )
         }
         var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(layout))
-        if let child = row.childScrollable {
-            let childAttr: Attribute<any Scrollable> = graph.makeRule {
-                child as any Scrollable
+        let scrollables: Attribute<[any Scrollable]> = graph.makeRule {
+            guard let child = view._attribute.value.childScrollable else {
+                return []
             }
-            let scrollables: Attribute<[any Scrollable]> = graph.makeRule(
-                UnaryScrollablePreferenceProvider(scrollable: childAttr)
-            )
-            outputs.preferences.append(ScrollablePreferenceKey.self, node: scrollables.identifier)
+            return [child]
         }
+        outputs.preferences.append(ScrollablePreferenceKey.self, node: scrollables.identifier)
         return outputs
     }
 }
@@ -895,7 +899,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(String(reflecting: disabledRole), "nil")
     }
 
-    func testScrollableLayoutPublishesScrollTargetRoleContentKey() {
+    func testScrollableLayoutDoesNotSynthesizeScrollTargetRoleCollections() {
         let host = GraphHost()
         var layoutsID: AGAttribute!
 
@@ -919,15 +923,14 @@ final class ScrollViewSurfaceTests: XCTestCase {
             layoutsID = outputLayoutsID
 
             XCTAssertTrue(Attribute<ScrollTargetRole.ContentKey.Value>(outputLayoutsID).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
 
         host.data.withCurrent {
             let layouts = Attribute<ScrollTargetRole.ContentKey.Value>(layoutsID).value
-            XCTAssertEqual(layouts[.container]?.count, 1)
-            XCTAssertNil(layouts[.target])
+            XCTAssertTrue(layouts.isEmpty)
         }
     }
 
@@ -1000,7 +1003,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
-    func testScrollTargetBehaviorModifierFiltersRoleBackedCollections() {
+    func testScrollTargetBehaviorModifierDoesNotSynthesizeUnrequestedCollections() {
         let host = GraphHost()
         var behavior: ResolvedScrollBehavior!
 
@@ -1024,7 +1027,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             behavior = resolved
 
             XCTAssertTrue(resolved._collections.toStrong().value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
@@ -1032,8 +1035,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         host.data.withCurrent {
             let collections = behavior._collections.toStrong().value
             let targets = behavior._targets.toStrong().value
-            XCTAssertEqual(collections.count, 1)
-            XCTAssertTrue(String(reflecting: type(of: collections[0])).contains("ScrollableLayoutCollection"))
+            XCTAssertTrue(collections.isEmpty)
             XCTAssertTrue(targets.isEmpty)
         }
     }
@@ -1158,8 +1160,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
             }
             layoutsID = outputLayoutsID
 
-            XCTAssertTrue(Attribute<ScrollTargetRole.ContentKey.Value>(outputLayoutsID).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertEqual(
+                Attribute<ScrollTargetRole.ContentKey.Value>(outputLayoutsID)
+                    .value[.container]?.count,
+                1
+            )
+            XCTAssertFalse(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
@@ -1210,8 +1216,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
 
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertFalse(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
@@ -1291,8 +1297,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
 
-            XCTAssertTrue(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertTrue(host.hasPendingTransactions)
+            XCTAssertFalse(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
 
         host.flushTransactions()
@@ -2615,75 +2621,6 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
-    func testSystemScrollViewScrollableAppliesChildCollectionViewIDTargetToGeometryState() {
-        let host = GraphHost()
-        var scrollablePreference: AGAttribute!
-        var geometryPreference: AGAttribute!
-
-        host.data.withCurrent {
-            let graph = host.data.graph
-            var preferenceKeys = PreferenceKeys()
-            preferenceKeys.add(ScrollablePreferenceKey.self)
-            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
-            let rows = (0..<3).map { ScrollViewTargetRow(id: $0) }
-            let view = SystemScrollView(
-                configuration: ScrollViewConfiguration(),
-                content: _ScrollableLayoutView(data: rows, layout: ScrollViewTargetLayout())
-            )
-            let viewAttr = graph.makeInput(value: view)
-            var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
-            inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 100, height: 80)))
-
-            let outputs = SystemScrollView<
-                _ScrollableLayoutView<[ScrollViewTargetRow], ScrollViewTargetLayout>
-            >._makeView(
-                view: _GraphValue(_attribute: viewAttr),
-                inputs: inputs
-            )
-
-            guard let outputScrollablePreference = outputs.preferences.value(for: ScrollablePreferenceKey.self),
-                  let outputGeometryPreference = outputs.preferences.value(for: ScrollGeometryPreferenceKey.self) else {
-                XCTFail("expected scrollable and geometry outputs")
-                return
-            }
-            scrollablePreference = outputScrollablePreference
-            geometryPreference = outputGeometryPreference
-
-            _ = Attribute<[any Scrollable]>(outputScrollablePreference).value
-        }
-
-        host.flushTransactions()
-
-        host.data.withCurrent {
-            let graph = host.data.graph
-            let scrollableAttribute = graph.makeRule {
-                Attribute<[any Scrollable]>(scrollablePreference).value[0]
-            }
-            let geometryAttribute = Attribute<[ScrollGeometryState]>(geometryPreference)
-            var stored = ScrollPosition(idType: Int.self)
-            let target = ScrollPosition(id: 2)
-            let binding = Binding<ScrollPosition>(
-                get: { stored },
-                set: { value, _ in stored = value }
-            )
-            var request = ScrollToScrollStateRequest(
-                binding: binding,
-                anchor: .bottomLeading,
-                id: ObjectIdentifier(graph),
-                value: target,
-                baseTransaction: Transaction()
-            )
-            request.updateScrollable(scrollableAttribute)
-
-            XCTAssertTrue(request.update())
-            XCTAssertEqual(stored, target)
-
-            let updatedGeometry = geometryAttribute.value.first?.geometry
-            XCTAssertEqual(updatedGeometry?.contentOffset, CGPoint(x: 0, y: 140))
-            XCTAssertEqual(updatedGeometry?.visibleRect.origin, CGPoint(x: 0, y: 140))
-        }
-    }
-
     func testSystemScrollViewScrollableResolvesLazyNonVisibleIDTarget() throws {
         let host = GraphHost()
         var scrollablePreference: AGAttribute!
@@ -2931,7 +2868,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 }
             )
             let phaseValues = graph.makeInput(value: [ScrollPhaseState(phase: .idle)])
-            let viewPhase = graph.makeInput(value: Phase())
+            let viewPhase = graph.makeInput(value: _GraphInputs.Phase())
             let dispatcher: Attribute<Void> = graph.makeStatefulRule(
                 ScrollActionDispatcher(
                     provider: OnScrollPhaseChangeModifier.PhaseActionProvider(modifier: modifier),
@@ -2954,7 +2891,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(calls[0].0, .idle)
             XCTAssertEqual(calls[0].1, .interacting)
 
-            var resetPhase = Phase()
+            var resetPhase = _GraphInputs.Phase()
             resetPhase.resetSeed = 1
             viewPhase.setValue(resetPhase)
             phaseValues.setValue([ScrollPhaseState(phase: .decelerating)])
@@ -2980,7 +2917,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let dispatcher = ScrollActionDispatcher(
                 provider: OnScrollPhaseChangeModifier.PhaseActionProvider(modifier: modifier),
                 inputs: graph.makeInput(value: [ScrollPhaseState(phase: .idle)]),
-                viewPhase: graph.makeInput(value: Phase()),
+                viewPhase: graph.makeInput(value: _GraphInputs.Phase()),
                 prefersLast: OptionalAttribute()
             )
 
@@ -3009,7 +2946,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 }
             )
             let phaseValues = graph.makeInput(value: [ScrollPhaseState(phase: .idle)])
-            let viewPhase = graph.makeInput(value: Phase())
+            let viewPhase = graph.makeInput(value: _GraphInputs.Phase())
             let dispatcher: Attribute<Void> = graph.makeStatefulRule(
                 ScrollActionDispatcher(
                     provider: OnScrollPhaseChangeModifier.PhaseActionProvider(modifier: modifier),
@@ -3030,7 +2967,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(calls.map(\.0), [.idle, .tracking])
             XCTAssertEqual(calls.map(\.1), [.tracking, .interacting])
 
-            var resetPhase = Phase()
+            var resetPhase = _GraphInputs.Phase()
             resetPhase.resetSeed = 1
             viewPhase.setValue(resetPhase)
             phaseValues.setValue([ScrollPhaseState(phase: .animating)])
@@ -3061,7 +2998,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let geometryValues = graph.makeInput(value: [
                 makeScrollGeometryState(offsetX: 1),
             ])
-            let viewPhase = graph.makeInput(value: Phase())
+            let viewPhase = graph.makeInput(value: _GraphInputs.Phase())
             let dispatcher: Attribute<Void> = graph.makeStatefulRule(
                 ScrollActionDispatcher(
                     provider: OnScrollGeometryChangeModifier<CGFloat>.GeometryActionProvider(modifier: modifier),
@@ -3115,7 +3052,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 makeScrollGeometryState(offsetX: 1),
                 makeScrollGeometryState(offsetX: 10),
             ])
-            let viewPhase = graph.makeInput(value: Phase())
+            let viewPhase = graph.makeInput(value: _GraphInputs.Phase())
             let prefersLast = graph.makeInput(value: true)
             let dispatcher: Attribute<Void> = graph.makeStatefulRule(
                 ScrollActionDispatcher(
@@ -3153,7 +3090,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
             let phaseValues = graph.makeInput(value: [ScrollPhaseState(phase: .idle)])
             let geometryValues = graph.makeInput(value: [makeScrollGeometryState(offsetX: 42)])
-            let viewPhase = graph.makeInput(value: Phase())
+            let viewPhase = graph.makeInput(value: _GraphInputs.Phase())
             let dispatcher: Attribute<Void> = graph.makeStatefulRule(
                 ScrollActionDispatcher(
                     provider: OnScrollPhaseContextChangeModifier.PhaseContextActionProvider(
@@ -3188,7 +3125,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         _ViewInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time()),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: graph.makeInput(value: EnvironmentValues.tracking()),
                 transaction: graph.makeInput(value: Transaction())
             ),

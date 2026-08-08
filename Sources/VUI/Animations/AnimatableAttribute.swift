@@ -52,7 +52,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>:
 
     init(
         source: Attribute<AnimatedValue>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         time: Attribute<Time>,
         transaction: Attribute<Transaction>,
         environment: Attribute<EnvironmentValues>

@@ -27,7 +27,7 @@ struct CachedEnvironment {
         var pixelLength:       Attribute<CGFloat>
         var time:              Attribute<Time>
         var transaction:       Attribute<Transaction>
-        var viewPhase:         Attribute<Phase>
+        var viewPhase:         Attribute<_GraphInputs.Phase>
         var animatedFrame:     Attribute<ViewFrame>
         var _animatedPosition: Attribute<CGPoint>?
         var _animatedSize:     Attribute<ViewSize>?

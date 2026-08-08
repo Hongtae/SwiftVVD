@@ -5,8 +5,6 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-typealias GraphInputsPhase = Phase
-
 public struct PhaseAnimator<Phase, Content>: View where Phase: Equatable, Content: View {
     var phases: [Phase]
     var content: (Phase) -> Content
@@ -260,7 +258,7 @@ extension PhaseAnimator.StateTransitioningContainer {
         var _view: Attribute<PhaseAnimator<Phase, Content>.StateTransitioningContainer>
         var _transaction: Attribute<Transaction>
         var _transactionSeed: Attribute<UInt32>
-        var _phase: Attribute<GraphInputsPhase>
+        var _phase: Attribute<_GraphInputs.Phase>
         var _animationCompletion: WeakAttribute<AnimationCompletion?>
         var _isVisible: WeakAttribute<Bool>
         var currentIndex = 0
@@ -275,7 +273,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             view: Attribute<PhaseAnimator<Phase, Content>.StateTransitioningContainer>,
             transaction: Attribute<Transaction>,
             transactionSeed: Attribute<UInt32>,
-            phase: Attribute<GraphInputsPhase>,
+            phase: Attribute<_GraphInputs.Phase>,
             animationCompletion: WeakAttribute<AnimationCompletion?>,
             isVisible: WeakAttribute<Bool>
         ) {

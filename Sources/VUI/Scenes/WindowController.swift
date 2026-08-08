@@ -446,8 +446,6 @@ class WindowController: WindowDelegate,
             windowContext?.sceneConfiguration = newValue
         }
     }
-    var filterGestureTypes: Bool = true
-    var allowedGestureTypes: _PrimitiveGestureTypes = .all
     var endSessionOnWindowClosed: Bool { true }
 
     var isValid: Bool { viewGraph.isValid }

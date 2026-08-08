@@ -237,7 +237,7 @@ final class TimelineViewTests: XCTestCase {
             XCTAssertEqual(viewGraph.nextUpdate.views.time.seconds, 7, accuracy: 0.000_001)
 
             referenceDate.setValue(Date(timeIntervalSinceReferenceDate: 2_010))
-            var reset = Phase()
+            var reset = _GraphInputs.Phase()
             reset.resetSeed = 1
             phase.setValue(reset)
             time.setValue(Time(seconds: 10))
@@ -260,11 +260,11 @@ final class TimelineViewTests: XCTestCase {
     ) -> (
         inputs: _ViewInputs,
         time: Attribute<Time>,
-        phase: Attribute<Phase>
+        phase: Attribute<_GraphInputs.Phase>
     ) {
         let environment = graph.makeInput(value: EnvironmentValues())
         let time = graph.makeInput(value: Time(seconds: 0))
-        let phase = graph.makeInput(value: Phase())
+        let phase = graph.makeInput(value: _GraphInputs.Phase())
         let base = _GraphInputs(
             time: time,
             phase: phase,

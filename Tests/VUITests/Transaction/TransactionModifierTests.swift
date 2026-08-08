@@ -692,7 +692,7 @@ final class TransactionModifierTests: XCTestCase {
         let parent = graph.makeInput(value: transaction)
         let inputs = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: graph.makeInput(value: EnvironmentValues()),
             transaction: parent
         )

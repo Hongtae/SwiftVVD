@@ -12,7 +12,7 @@ final class AppearanceActionModifierTests: XCTestCase {
 
         ref.withCurrent {
             let modifier = graph.makeInput(value: _AppearanceActionModifier())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = AppearanceEffect(modifier: modifier, phase: phase)
 
             XCTAssertEqual(
@@ -128,7 +128,7 @@ final class AppearanceActionModifierTests: XCTestCase {
 
         ref.withCurrent {
             let modifier = graph.makeInput(value: _AppearanceActionModifier())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = graph.makeStatefulRule(
                 AppearanceEffect(modifier: modifier, phase: phase)
             )
@@ -155,7 +155,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                     disappear: { events.append("disappear") }
                 )
             )
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = graph.makeStatefulRule(
                 AppearanceEffect(modifier: modifier, phase: phase)
             )
@@ -190,7 +190,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                     disappear: { events.append("disappear") }
                 )
             )
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = graph.makeStatefulRule(
                 AppearanceEffect(modifier: modifier, phase: phase)
             )
@@ -227,7 +227,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                     disappear: { events.append("disappear") }
                 )
             )
-            var initialPhase = Phase()
+            var initialPhase = _GraphInputs.Phase()
             initialPhase.isBeingRemoved = true
             let phase = graph.makeInput(value: initialPhase)
             let effect = graph.makeStatefulRule(
@@ -267,7 +267,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                     disappear: { events.append("first-disappear") }
                 )
             )
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = graph.makeStatefulRule(
                 AppearanceEffect(modifier: modifier, phase: phase)
             )
@@ -308,7 +308,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                     disappear: { events.append("disappear") }
                 )
             )
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let effect = graph.makeStatefulRule(
                 AppearanceEffect(modifier: modifier, phase: phase)
             )
@@ -340,7 +340,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -369,7 +369,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -404,7 +404,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -431,7 +431,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -468,7 +468,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -500,7 +500,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -531,7 +531,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -559,7 +559,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -584,7 +584,7 @@ final class AppearanceActionModifierTests: XCTestCase {
         host.data.withCurrent {
             AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let modifier = host.data.graph.makeInput(value: _AppearanceActionModifier())
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -608,7 +608,7 @@ final class AppearanceActionModifierTests: XCTestCase {
                         disappear: { events.append("disappear") }
                     )
                 )
-                let phase = host.data.graph.makeInput(value: Phase())
+                let phase = host.data.graph.makeInput(value: _GraphInputs.Phase())
                 let effect = host.data.graph.makeStatefulRule(
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
@@ -636,7 +636,7 @@ private func makeAppearanceViewInputs(graph: _AGGraph) -> _ViewInputs {
     let environment = graph.makeInput(value: EnvironmentValues())
     let base = _GraphInputs(
         time: graph.makeInput(value: Time(seconds: 0)),
-        phase: graph.makeInput(value: Phase()),
+        phase: graph.makeInput(value: _GraphInputs.Phase()),
         environment: environment,
         transaction: graph.makeInput(value: Transaction())
     )

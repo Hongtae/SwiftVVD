@@ -1288,7 +1288,7 @@ where
 
     var _view: Attribute<Animator>
     var _playback: Attribute<PlaybackMode>
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var _time: Attribute<Time>
     var resetSeed: UInt32
     var currentState: KeyframeTrackState<AnimatorValue, Path>

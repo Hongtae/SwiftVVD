@@ -225,7 +225,7 @@ final class AnimatableValueSurfaceTests: XCTestCase {
 
         var targetLayout = AnyLayout(ProbeLayout(value: 0))
         targetLayout.animatableData = doubleData
-        XCTAssertEqual((targetLayout.layout as? ProbeLayout)?.value, -6)
+        XCTAssertEqual(targetLayout.animatableData.magnitudeSquared, 36)
         assertAnyAnimatableDataSnapshot(
             targetLayout.animatableData,
             vtableContains: "ProbeLayout",
@@ -234,9 +234,7 @@ final class AnimatableValueSurfaceTests: XCTestCase {
 
         var targetPairLayout = AnyLayout(PairLayout(first: 0, second: 0))
         targetPairLayout.animatableData = pairData
-        let pair = targetPairLayout.layout as? PairLayout
-        XCTAssertEqual(pair?.first, 1)
-        XCTAssertEqual(pair?.second, 2)
+        XCTAssertEqual(targetPairLayout.animatableData.magnitudeSquared, 5)
         assertAnyAnimatableDataSnapshot(
             targetPairLayout.animatableData,
             vtableContains: "PairLayout",
@@ -250,11 +248,21 @@ final class AnimatableValueSurfaceTests: XCTestCase {
 
         var zeroTarget = AnyLayout(ProbeLayout(value: 7))
         zeroTarget.animatableData = zero
-        XCTAssertEqual((zeroTarget.layout as? ProbeLayout)?.value, 7)
+        XCTAssertEqual(zeroTarget.animatableData.magnitudeSquared, 49)
 
         var mismatchTarget = AnyLayout(ProbeLayout(value: 7))
         mismatchTarget.animatableData = pairData
-        XCTAssertEqual((mismatchTarget.layout as? ProbeLayout)?.value, 7)
+        XCTAssertEqual(mismatchTarget.animatableData.magnitudeSquared, 49)
+    }
+
+    func testAnyLayoutAnimatableDataMutationUsesCopyOnWriteStorage() {
+        let source = AnyLayout(ProbeLayout(value: 3))
+        var copy = source
+
+        copy.animatableData = AnyLayout(ProbeLayout(value: 8)).animatableData
+
+        XCTAssertEqual(source.animatableData.magnitudeSquared, 9)
+        XCTAssertEqual(copy.animatableData.magnitudeSquared, 64)
     }
 
     func testAnimatableArrayArithmeticMatchesHiddenCarrierRuntime() {

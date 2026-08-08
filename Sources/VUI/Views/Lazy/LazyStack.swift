@@ -7,7 +7,6 @@
 
 import Foundation
 
-/// Installs the retained-removal inputs required by a resettable lazy root.
 struct ResettableLazyLayoutRoot<Content>: View where Content: View {
     var content: Content
 
@@ -16,11 +15,7 @@ struct ResettableLazyLayoutRoot<Content>: View where Content: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        var lazyInputs = inputs
-        lazyInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
-        lazyInputs[DynamicContainerRetainCompletedUnusedRemovals.self] = true
-        lazyInputs[DynamicContainerMaxUnusedItems.self] = 1
-        return Content._makeView(view: view[\.content], inputs: lazyInputs)
+        Content._makeView(view: view[\.content], inputs: inputs)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -227,11 +222,11 @@ private struct LazyDynamicStackOrientationRule<L: LazyLayout>: Rule {
 struct UpdateViewCache: StatefulRule, ObservedAttribute {
     typealias Value = LazyLayoutViewCache
 
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var cache: LazyLayoutViewCache?
     var lastResetSeed: UInt32
 
-    init(_phase: Attribute<Phase>, cache: LazyLayoutViewCache?) {
+    init(_phase: Attribute<_GraphInputs.Phase>, cache: LazyLayoutViewCache?) {
         self._phase = _phase
         self.cache = cache
         self.lastResetSeed = 0
@@ -1958,7 +1953,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     struct SubviewOutputs {
         var state: Attribute<LazyLayoutCacheItem.State>?
         var geometry: Attribute<ViewGeometry>?
-        var phase: Attribute<Phase>?
+        var phase: Attribute<_GraphInputs.Phase>?
         var displayListWrapper: Attribute<HiddenForReuseEffect>?
         var transaction: Attribute<Transaction>?
         var transition: AGAttribute?
@@ -1968,7 +1963,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         init(
             state: Attribute<LazyLayoutCacheItem.State>? = nil,
             geometry: Attribute<ViewGeometry>? = nil,
-            phase: Attribute<Phase>? = nil,
+            phase: Attribute<_GraphInputs.Phase>? = nil,
             displayListWrapper: Attribute<HiddenForReuseEffect>? = nil,
             transaction: Attribute<Transaction>? = nil,
             transition: AGAttribute? = nil,
@@ -2375,11 +2370,11 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     }
 
     private func lazyViewPhase(
-        basePhase: Attribute<Phase>,
-        elementPhase: Attribute<Phase>,
+        basePhase: Attribute<_GraphInputs.Phase>,
+        elementPhase: Attribute<_GraphInputs.Phase>,
         state: Attribute<LazyLayoutCacheItem.State>,
         in graph: _AGGraph
-    ) -> Attribute<Phase> {
+    ) -> Attribute<_GraphInputs.Phase> {
         return graph.makeRule(
             LazyViewPhase(
                 _phase1: basePhase,
@@ -5460,13 +5455,13 @@ struct LazyViewGeometry: Rule, AsyncAttribute {
 /// Merges the parent and element phases with the retained lazy item's
 /// transition state.
 struct LazyViewPhase: Rule, AsyncAttribute {
-    typealias Value = Phase
+    typealias Value = _GraphInputs.Phase
 
-    var _phase1: Attribute<Phase>
-    var _phase2: Attribute<Phase>
+    var _phase1: Attribute<_GraphInputs.Phase>
+    var _phase2: Attribute<_GraphInputs.Phase>
     var _state: Attribute<LazyLayoutCacheItem.State>
 
-    var value: Phase {
+    var value: _GraphInputs.Phase {
         var phase = _phase1.value
         phase.merge(_phase2.value)
 
@@ -6565,7 +6560,6 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
             LazyDynamicStackOrientationRule(layout: root._attribute)
         )
         var lazyInputs = inputs
-        lazyInputs.base[DynamicContainerWillRemoveBeforeInvalidation.self] = true
         lazyInputs.stackOrientation = nil
         lazyInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
 

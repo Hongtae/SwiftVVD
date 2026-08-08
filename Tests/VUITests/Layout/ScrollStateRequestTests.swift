@@ -1986,7 +1986,7 @@ final class ScrollStateRequestTests: XCTestCase {
     ) -> _GraphInputs {
         _GraphInputs(
             time: graph.makeInput(value: Time()),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: environment ?? graph.makeInput(value: EnvironmentValues.tracking()),
             transaction: graph.makeInput(value: Transaction())
         )

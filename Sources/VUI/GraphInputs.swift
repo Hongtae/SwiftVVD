@@ -205,7 +205,7 @@ public struct _GraphInputs: GraphReusable {
     var cachedEnvironment: MutableBox<CachedEnvironment>
 
     /// Current render phase (referenced as `viewPhase` inside AnimatedFrame).
-    var phase: Attribute<Phase>
+    var phase: Attribute<_GraphInputs.Phase>
 
     /// Current transaction (animation parameters, etc.).
     var transaction: Attribute<Transaction>
@@ -221,7 +221,7 @@ public struct _GraphInputs: GraphReusable {
 
     init(
         time: Attribute<Time>,
-        phase: Attribute<Phase>,
+        phase: Attribute<_GraphInputs.Phase>,
         environment: Attribute<EnvironmentValues>,
         transaction: Attribute<Transaction>
     ) {
@@ -619,11 +619,6 @@ public struct _GraphInputs: GraphReusable {
         )
     }
 }
-
-// Source compatibility for implementation files that have not yet moved to
-// the nested spelling. This is an alias, so the nominal runtime type remains
-// `_GraphInputs.Phase`.
-typealias Phase = _GraphInputs.Phase
 
 extension _ViewInputs {
     var savedTransactions: [Attribute<Transaction>] {

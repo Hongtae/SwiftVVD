@@ -205,9 +205,8 @@ struct EnvironmentalBodyAccessor<E: EnvironmentalModifier>: BodyAccessor {
 }
 
 // ViewBodyAccessor
-// BodyAccessor conformance for View.body.
-// View._makeView currently uses withObservationTracking directly.
-// ViewBodyAccessor is kept for the alternate body access path.
+// BodyAccessor conformance for View.body. The common View._makeView route
+// currently selects its observation-backed body construction directly.
 struct ViewBodyAccessor<V: View>: DSLBodyAccessor {
     typealias Container = V
     typealias Body = V.Body

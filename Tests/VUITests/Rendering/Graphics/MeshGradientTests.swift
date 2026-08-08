@@ -270,7 +270,7 @@ final class MeshGradientTests: XCTestCase {
         let context = _AGGraphContext(graph: graph)
 
         try context.withCurrent {
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let time = graph.makeInput(value: Time.zero)
             let transaction = graph.makeInput(value: Transaction())
             let base = VUI.Color.red.resolve(in: EnvironmentValues())
@@ -360,7 +360,7 @@ final class MeshGradientTests: XCTestCase {
         try host.data.withCurrent {
             try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let graph = host.data.graph
-                let phase = graph.makeInput(value: Phase())
+                let phase = graph.makeInput(value: _GraphInputs.Phase())
                 let time = graph.makeInput(value: Time.zero)
                 let transaction = graph.makeInput(value: Transaction())
                 let mesh = graph.makeInput(value: makeShiftedMesh(offset: 0))

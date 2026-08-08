@@ -108,7 +108,7 @@ final class ContextMenuResponder: ViewResponder {
     private var isPresented: Binding<Bool>?
     private var activeSession: ContextMenuPresentationSession?
     let environment: Attribute<EnvironmentValues>
-    let phase: Attribute<Phase>
+    let phase: Attribute<_GraphInputs.Phase>
     let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
@@ -118,7 +118,7 @@ final class ContextMenuResponder: ViewResponder {
     init(itemList: Attribute<PlatformItemList>,
          isPresented: Binding<Bool>?,
          environment: Attribute<EnvironmentValues>,
-         phase: Attribute<Phase>,
+         phase: Attribute<_GraphInputs.Phase>,
          transform: Attribute<ViewTransform>,
          size: Attribute<ViewSize>) {
         self.hitTestKey = _contextMenuResponderNextKey.withLock { key in

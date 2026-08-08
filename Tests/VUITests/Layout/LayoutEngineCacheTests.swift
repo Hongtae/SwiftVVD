@@ -20,9 +20,26 @@ private final class LayoutCacheProbeState: @unchecked Sendable {
 private final class LayoutCacheProbeStorage {
     var sizeCount = 0
     var placementCount = 0
+    var alignmentCount = 0
     var proposals: [ProposedViewSize] = []
     var placementProposals: [ProposedViewSize] = []
     var placementBounds: [CGRect] = []
+}
+
+private enum LayoutCacheAlignmentA: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { 0 }
+}
+
+private enum LayoutCacheAlignmentB: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { 0 }
+}
+
+private enum LayoutCacheAlignmentC: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { 0 }
+}
+
+private enum LayoutCacheNilAlignment: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { 0 }
 }
 
 private final class PlacementDataBox: @unchecked Sendable {
@@ -71,6 +88,58 @@ private struct LayoutCacheProbe: Layout {
         cache.placementProposals.append(proposal)
         cache.placementBounds.append(bounds)
     }
+
+    func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout LayoutCacheProbeStorage
+    ) -> CGFloat? {
+        cache.alignmentCount += 1
+        if ObjectIdentifier(guide.key.id) ==
+            ObjectIdentifier(LayoutCacheNilAlignment.self) {
+            return nil
+        }
+        return bounds.width
+    }
+}
+
+private final class AlternateLayoutCacheProbeState: @unchecked Sendable {
+    var makeCacheCount = 0
+    var updateCacheCount = 0
+    var sizeCount = 0
+}
+
+private struct AlternateLayoutCacheProbe: Layout {
+    var state: AlternateLayoutCacheProbeState
+    var reportedSize: CGSize
+
+    func makeCache(subviews: Subviews) -> Int {
+        state.makeCacheCount += 1
+        return 0
+    }
+
+    func updateCache(_ cache: inout Int, subviews: Subviews) {
+        state.updateCacheCount += 1
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Int
+    ) -> CGSize {
+        cache += 1
+        state.sizeCount += 1
+        return reportedSize
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Int
+    ) {}
 }
 
 private struct StatefulLayoutComputerEngine: LayoutEngine, Equatable {
@@ -114,6 +183,15 @@ private func makeLayoutContext(
 }
 
 final class LayoutEngineCacheTests: XCTestCase {
+    func testLayoutPropertiesMatchCurrentStoredDefaults() {
+        let properties = LayoutProperties()
+
+        XCTAssertNil(properties.stackOrientation)
+        XCTAssertFalse(properties.isDefaultEmptyLayout)
+        XCTAssertFalse(properties.isIdentityUnaryLayout)
+        XCTAssertEqual(MemoryLayout<LayoutProperties>.size, 3)
+    }
+
     func testClosureLayoutComputerPlacementCanReadItsOwnSize() {
         withGraph {
             var computer: LayoutComputer!
@@ -268,7 +346,7 @@ final class LayoutEngineCacheTests: XCTestCase {
             let viewSize = ViewSize(CGSize(width: 10, height: 12))
             XCTAssertEqual(engine.childGeometries(at: viewSize, origin: .zero), [])
             XCTAssertEqual(engine.childGeometries(at: viewSize, origin: .zero), [])
-            XCTAssertEqual(storage.placementCount, 1)
+            XCTAssertEqual(storage.placementCount, 2)
 
             let updatedInputs = makeLayoutContext(
                 children: [],
@@ -290,7 +368,79 @@ final class LayoutEngineCacheTests: XCTestCase {
 
             let updatedSize = ViewSize(CGSize(width: 20, height: 24))
             XCTAssertEqual(engine.childGeometries(at: updatedSize, origin: .zero), [])
-            XCTAssertEqual(storage.placementCount, 2)
+            XCTAssertEqual(storage.placementCount, 3)
+        }
+    }
+
+    func testAnyLayoutRebuildsCacheWhenConcreteLayoutTypeChanges() {
+        withGraph {
+            let initialState = LayoutCacheProbeState()
+            let alternateState = AlternateLayoutCacheProbeState()
+            let inputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            var engine = ViewLayoutEngine(
+                layout: AnyLayout(
+                    LayoutCacheProbe(
+                        state: initialState,
+                        reportedSize: CGSize(width: 10, height: 12)
+                    )
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+
+            XCTAssertEqual(initialState.makeCacheCount, 1)
+            XCTAssertEqual(
+                engine.sizeThatFits(.unspecified),
+                CGSize(width: 10, height: 12)
+            )
+
+            let updatedInputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            engine.update(
+                layout: AnyLayout(
+                    AlternateLayoutCacheProbe(
+                        state: alternateState,
+                        reportedSize: CGSize(width: 20, height: 24)
+                    )
+                ),
+                context: updatedInputs.0,
+                children: updatedInputs.1
+            )
+
+            XCTAssertEqual(alternateState.makeCacheCount, 1)
+            XCTAssertEqual(alternateState.updateCacheCount, 0)
+            XCTAssertEqual(
+                engine.sizeThatFits(.unspecified),
+                CGSize(width: 20, height: 24)
+            )
+            XCTAssertEqual(alternateState.sizeCount, 1)
+
+            let sameTypeInputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            engine.update(
+                layout: AnyLayout(
+                    AlternateLayoutCacheProbe(
+                        state: alternateState,
+                        reportedSize: CGSize(width: 30, height: 36)
+                    )
+                ),
+                context: sameTypeInputs.0,
+                children: sameTypeInputs.1
+            )
+
+            XCTAssertEqual(alternateState.makeCacheCount, 1)
+            XCTAssertEqual(alternateState.updateCacheCount, 1)
+            XCTAssertEqual(
+                engine.sizeThatFits(.unspecified),
+                CGSize(width: 30, height: 36)
+            )
         }
     }
 
@@ -326,6 +476,48 @@ final class LayoutEngineCacheTests: XCTestCase {
                 storage.placementBounds,
                 [CGRect(origin: .zero, size: size)]
             )
+        }
+    }
+
+    func testViewLayoutEngineCachesThreeExplicitAlignmentsAndInvalidatesForSize() {
+        withGraph {
+            let state = LayoutCacheProbeState()
+            let inputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            var engine = ViewLayoutEngine(
+                layout: LayoutCacheProbe(
+                    state: state,
+                    reportedSize: CGSize(width: 10, height: 12)
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+            let storage = try! XCTUnwrap(state.storage)
+            let size = ViewSize(CGSize(width: 10, height: 12))
+            let keyA = HorizontalAlignment(LayoutCacheAlignmentA.self).key
+            let keyB = HorizontalAlignment(LayoutCacheAlignmentB.self).key
+            let keyC = HorizontalAlignment(LayoutCacheAlignmentC.self).key
+            let nilKey = HorizontalAlignment(LayoutCacheNilAlignment.self).key
+
+            XCTAssertEqual(engine.explicitAlignment(keyA, at: size), 10)
+            XCTAssertEqual(engine.explicitAlignment(keyA, at: size), 10)
+            XCTAssertEqual(storage.alignmentCount, 1)
+
+            XCTAssertNil(engine.explicitAlignment(nilKey, at: size))
+            XCTAssertNil(engine.explicitAlignment(nilKey, at: size))
+            XCTAssertEqual(storage.alignmentCount, 2)
+
+            XCTAssertEqual(engine.explicitAlignment(keyB, at: size), 10)
+            XCTAssertEqual(engine.explicitAlignment(keyC, at: size), 10)
+            XCTAssertEqual(engine.explicitAlignment(keyA, at: size), 10)
+            XCTAssertEqual(storage.alignmentCount, 5)
+
+            let resized = ViewSize(CGSize(width: 20, height: 24))
+            XCTAssertEqual(engine.childGeometries(at: resized, origin: .zero), [])
+            XCTAssertEqual(engine.explicitAlignment(keyA, at: resized), 20)
+            XCTAssertEqual(storage.alignmentCount, 6)
         }
     }
 

@@ -112,7 +112,7 @@ final class KeyframeAnimatorTests: XCTestCase {
             XCTAssertEqual(try sample(1.2), 5, accuracy: 0.000_001)
             XCTAssertEqual(try sample(1.4), 7, accuracy: 0.000_001)
 
-            var resetPhase = Phase()
+            var resetPhase = _GraphInputs.Phase()
             resetPhase.resetSeed = 1
             phase.setValue(resetPhase)
             XCTAssertEqual(try sample(1.4), 0, accuracy: 0.000_001)
@@ -245,11 +245,11 @@ final class KeyframeAnimatorTests: XCTestCase {
     ) -> (
         inputs: _ViewInputs,
         time: Attribute<Time>,
-        phase: Attribute<Phase>
+        phase: Attribute<_GraphInputs.Phase>
     ) {
         let environment = graph.makeInput(value: EnvironmentValues())
         let time = graph.makeInput(value: Time(seconds: 0))
-        let phase = graph.makeInput(value: Phase())
+        let phase = graph.makeInput(value: _GraphInputs.Phase())
         let base = _GraphInputs(
             time: time,
             phase: phase,

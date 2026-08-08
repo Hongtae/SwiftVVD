@@ -917,21 +917,3 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
         )
     }
 }
-
-// _PrimitiveGestureTypes (compatibility shim, now maps to GestureMask internally)
-
-/// Bitmask of primitive gesture recognizer types.
-/// Used internally by recognizers to filter which events they handle.
-struct _PrimitiveGestureTypes: OptionSet {
-    let rawValue: UInt
-    static let tap              = Self(rawValue: 1 << 0)
-    static let longPress        = Self(rawValue: 1 << 1)
-    static let drag             = Self(rawValue: 1 << 2)
-    static let magnification    = Self(rawValue: 1 << 3)
-    static let rotation         = Self(rawValue: 1 << 4)
-    static let rotation3D       = Self(rawValue: 1 << 5)
-    static let button           = Self(rawValue: 1 << 6)
-
-    static let all = Self(rawValue: .max)
-    static let none: Self = []
-}

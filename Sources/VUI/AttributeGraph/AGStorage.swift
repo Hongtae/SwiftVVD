@@ -2106,7 +2106,8 @@ extension _AGGraph {
         return insertInputEdge(
             from: parent,
             dependsOn: child,
-            flags: identityFlags | InputEdge.readThisEvaluation
+            flags: identityFlags | InputEdge.changed |
+                InputEdge.readThisEvaluation
         )
     }
 

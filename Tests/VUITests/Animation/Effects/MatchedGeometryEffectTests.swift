@@ -399,7 +399,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 id: "hero",
                 namespace: namespace
             ))
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             var frameIndex: Int?
             _ = scope.frame(
                 index: &frameIndex,
@@ -414,7 +414,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 )
             )
 
-            var removed = Phase()
+            var removed = _GraphInputs.Phase()
             removed.isBeingRemoved = true
             phase.setValue(removed)
 
@@ -437,8 +437,8 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
             let namespace = Namespace().wrappedValue
             let key = AnyHashable(MatchedGeometryKeyForTest(id: "hero", namespace: namespace))
-            let firstPhase = graph.makeInput(value: Phase())
-            let secondPhase = graph.makeInput(value: Phase())
+            let firstPhase = graph.makeInput(value: _GraphInputs.Phase())
+            let secondPhase = graph.makeInput(value: _GraphInputs.Phase())
 
             var firstIndex: Int?
             _ = scope.frame(
@@ -470,7 +470,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             XCTAssertEqual(scope.sourceInfo(frameIndex: frameIndex)?.frame.origin,
                            CGPoint(x: 100, y: 50))
 
-            var removed = Phase()
+            var removed = _GraphInputs.Phase()
             removed.isBeingRemoved = true
             firstPhase.setValue(removed)
             XCTAssertEqual(scope.sourceInfo(frameIndex: frameIndex)?.frame.origin,
@@ -1885,7 +1885,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             func makeRegistration(
                 owner: AGAttribute,
                 args: Attribute<MatchedGeometryArguments>,
-                phase: Attribute<Phase>,
+                phase: Attribute<_GraphInputs.Phase>,
                 transaction: Attribute<Transaction>,
                 position: CGPoint,
                 size: CGSize
@@ -1909,7 +1909,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 anchor: .center,
                 isSource: true
             ))
-            let firstPhase = graph.makeInput(value: Phase())
+            let firstPhase = graph.makeInput(value: _GraphInputs.Phase())
             let firstTransaction = graph.makeInput(value: Transaction())
             var firstIndex: Int?
             _ = scope.frame(
@@ -1928,7 +1928,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             let sharedFrame = try XCTUnwrap(scope.frames[frameIndex].sharedFrame)
             XCTAssertNotNil(sharedFrame.value.frame)
 
-            var removed = Phase()
+            var removed = _GraphInputs.Phase()
             removed.isBeingRemoved = true
             firstPhase.setValue(removed)
 
@@ -1938,7 +1938,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 anchor: .center,
                 isSource: true
             ))
-            let secondPhase = graph.makeInput(value: Phase())
+            let secondPhase = graph.makeInput(value: _GraphInputs.Phase())
             let secondTransaction = graph.makeInput(
                 value: Transaction(animation: .spring(duration: 2.0, bounce: 0.25))
             )
@@ -1968,7 +1968,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
             )
 
             firstArgs.setValue((properties: .frame, anchor: .center, isSource: false))
-            firstPhase.setValue(Phase())
+            firstPhase.setValue(_GraphInputs.Phase())
             secondPhase.setValue(removed)
             XCTAssertNil(
                 sharedFrame.value.frame,
@@ -2035,7 +2035,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                             origin: Attribute<CGPoint>(position.toStrong()).value,
                             size: Attribute<ViewSize>(size.toStrong()).value
                         ),
-                        isBeingRemoved: Attribute<Phase>(phase.toStrong()).value.isBeingRemoved
+                        isBeingRemoved: Attribute<_GraphInputs.Phase>(phase.toStrong()).value.isBeingRemoved
                     )
                 }
             }
@@ -2383,7 +2383,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         isSource: Bool,
         position: CGPoint,
         size: CGSize,
-        phase: Attribute<Phase>? = nil
+        phase: Attribute<_GraphInputs.Phase>? = nil
     ) -> MatchedGeometryScope.ViewRegistration {
         var transform = ViewTransform()
         transform.appendPosition(position)
@@ -2395,7 +2395,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 isSource: isSource
             )),
             transaction: graph.makeInput(value: Transaction()),
-            phase: phase ?? graph.makeInput(value: Phase()),
+            phase: phase ?? graph.makeInput(value: _GraphInputs.Phase()),
             size: graph.makeInput(value: ViewSize(size)),
             position: graph.makeInput(value: position),
             transform: graph.makeInput(value: transform)
@@ -2407,7 +2407,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         return _ViewInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: environment,
                 transaction: graph.makeInput(value: Transaction())
             ),

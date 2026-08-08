@@ -145,7 +145,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
     func testSetPhaseWritesHostPhaseAttributeWithoutDelegateChange() {
         let recorder = GraphDelegateEventRecorder()
         let host = DelegateGraphHost(recorder: recorder)
-        var phase = Phase()
+        var phase = _GraphInputs.Phase()
         phase.resetSeed = 4
         phase.isBeingRemoved = true
 
@@ -160,7 +160,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
     func testIncrementPhaseAdvancesResetSeedAndNotifiesDelegate() {
         let recorder = GraphDelegateEventRecorder()
         let host = DelegateGraphHost(recorder: recorder)
-        var phase = Phase()
+        var phase = _GraphInputs.Phase()
         phase.resetSeed = 3
         phase.isBeingRemoved = true
         host.setPhase(phase)
@@ -179,7 +179,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
         rendererHost.storage = viewGraph
-        var phase = Phase()
+        var phase = _GraphInputs.Phase()
         phase.resetSeed = 9
         phase.isBeingRemoved = true
 
@@ -196,7 +196,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
         rendererHost.storage = viewGraph
-        var newParentPhase = Phase()
+        var newParentPhase = _GraphInputs.Phase()
         newParentPhase.resetSeed = 5
         newParentPhase.isBeingRemoved = true
 
@@ -215,13 +215,13 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         let recorder = GraphDelegateEventRecorder()
         recorder.host = viewGraph
         viewGraph.graphDelegate = recorder
-        var currentPhase = Phase()
+        var currentPhase = _GraphInputs.Phase()
         currentPhase.resetSeed = 10
         currentPhase.isBeingRemoved = true
         viewGraph.setPhase(currentPhase)
-        var oldParentPhase = Phase()
+        var oldParentPhase = _GraphInputs.Phase()
         oldParentPhase.resetSeed = 2
-        var newParentPhase = Phase()
+        var newParentPhase = _GraphInputs.Phase()
         newParentPhase.resetSeed = 3
 
         viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
@@ -242,12 +242,12 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         let recorder = GraphDelegateEventRecorder()
         recorder.host = viewGraph
         viewGraph.graphDelegate = recorder
-        var currentPhase = Phase()
+        var currentPhase = _GraphInputs.Phase()
         currentPhase.resetSeed = 10
         viewGraph.setPhase(currentPhase)
-        var oldParentPhase = Phase()
+        var oldParentPhase = _GraphInputs.Phase()
         oldParentPhase.resetSeed = 7
-        var newParentPhase = Phase()
+        var newParentPhase = _GraphInputs.Phase()
         newParentPhase.resetSeed = 7
         newParentPhase.isBeingRemoved = true
 
@@ -276,16 +276,16 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         XCTAssertTrue(child.viewGraph.parentHost === parent.viewGraph)
 
-        var childPhase = Phase()
+        var childPhase = _GraphInputs.Phase()
         childPhase.resetSeed = 7
         childPhase.isBeingRemoved = true
         child.viewGraph.setPhase(childPhase)
 
-        var oldParentPhase = Phase()
+        var oldParentPhase = _GraphInputs.Phase()
         oldParentPhase.resetSeed = 2
         child.viewGraph.parentPhase = oldParentPhase
 
-        var newParentPhase = Phase()
+        var newParentPhase = _GraphInputs.Phase()
         newParentPhase.resetSeed = 3
         parent.viewGraph.setPhase(newParentPhase)
         child.environmentWrapper.phase = ViewGraphHost.Phase(

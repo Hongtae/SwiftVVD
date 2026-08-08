@@ -684,6 +684,17 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
     }
 
     mutating func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
+        if cachedAlignmentSize != size {
+            cachedAlignmentSize = size
+            cachedAlignmentGeometry = []
+            cachedAlignment = Cache3()
+        }
+
+        let cacheKey = key.alignmentCacheKey
+        if let cached = cachedAlignment.find(cacheKey) {
+            return cached
+        }
+
         let subviews = makeSubviews()
         let bounds = CGRect(origin: .zero, size: size.value)
 
@@ -704,6 +715,7 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
                                                   cache: &cache)
             }
         }
+        cachedAlignment.put(cacheKey, value: result)
         return result
     }
 
@@ -737,10 +749,6 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
                 children: proxies.attributes,
                 proposal: ProposedViewSize(size.proposal)
             )
-            if origin == .zero {
-                cachedAlignmentSize = size
-                cachedAlignmentGeometry = geometries
-            }
             return geometries
         }
     }

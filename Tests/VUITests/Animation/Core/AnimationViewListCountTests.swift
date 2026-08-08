@@ -93,7 +93,7 @@ final class AnimationViewListCountTests: XCTestCase {
         ref.withCurrent {
             let inputs = _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: graph.makeInput(value: EnvironmentValues()),
                 transaction: graph.makeInput(value: Transaction())
             )
@@ -934,7 +934,7 @@ final class AnimationViewListCountTests: XCTestCase {
         _ViewInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: graph.makeInput(value: EnvironmentValues()),
                 transaction: graph.makeInput(value: transaction)
             ),
@@ -960,7 +960,7 @@ final class AnimationViewListCountTests: XCTestCase {
         _ViewListInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: graph.makeInput(value: EnvironmentValues()),
                 transaction: graph.makeInput(value: transaction)
             ),

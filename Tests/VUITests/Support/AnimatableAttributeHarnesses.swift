@@ -7,7 +7,7 @@ final class AnimatableAttributeHarness {
     private var animatableSubgraph: AGSubgraph!
     private var source: Attribute<_OpacityEffect>!
     private var time: Attribute<Time>!
-    private var phase: Attribute<Phase>!
+    private var phase: Attribute<_GraphInputs.Phase>!
     private var transaction: Attribute<Transaction>!
     private var animated: Attribute<_OpacityEffect>!
     private var currentTimeSeconds: Double = 0
@@ -26,7 +26,7 @@ final class AnimatableAttributeHarness {
             let graph = viewGraph.data.graph
             source = graph.makeInput(value: initialValue)
             time = graph.makeInput(value: Time(seconds: 0))
-            phase = graph.makeInput(value: Phase())
+            phase = graph.makeInput(value: _GraphInputs.Phase())
             transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
@@ -199,7 +199,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
     private var animatableSubgraph: AGSubgraph!
     private var source: Attribute<Value>!
     private var time: Attribute<Time>!
-    private var phase: Attribute<Phase>!
+    private var phase: Attribute<_GraphInputs.Phase>!
     private var transaction: Attribute<Transaction>!
     private var animated: Attribute<Value>!
     private var currentTimeSeconds: Double = 0
@@ -218,7 +218,7 @@ final class GenericAnimatableAttributeHarness<Value: Animatable> {
             let graph = viewGraph.data.graph
             source = graph.makeInput(value: initialValue)
             time = graph.makeInput(value: Time(seconds: 0))
-            phase = graph.makeInput(value: Phase())
+            phase = graph.makeInput(value: _GraphInputs.Phase())
             transaction = graph.makeInput(value: Transaction())
             let environment = graph.makeInput(value: EnvironmentValues())
             let inputs = _GraphInputs(
@@ -339,7 +339,7 @@ final class DualAnimatableAttributeHarness {
                 time: Attribute<Time>,
                 transaction: inout Attribute<Transaction>!
             ) -> _GraphInputs {
-                let phase = graph.makeInput(value: Phase())
+                let phase = graph.makeInput(value: _GraphInputs.Phase())
                 transaction = graph.makeInput(value: Transaction())
                 let environment = graph.makeInput(value: EnvironmentValues())
                 return _GraphInputs(
@@ -461,7 +461,7 @@ final class AnimatableFrameAttributeHarness {
     private var rawPosition: Attribute<CGPoint>!
     private var rawSize: Attribute<ViewSize>!
     private var time: Attribute<Time>!
-    private var phase: Attribute<Phase>!
+    private var phase: Attribute<_GraphInputs.Phase>!
     private var transaction: Attribute<Transaction>!
     private var animatedPosition: Attribute<CGPoint>!
     private var animatedSize: Attribute<ViewSize>!
@@ -490,7 +490,7 @@ final class AnimatableFrameAttributeHarness {
             rawPosition = graph.makeInput(value: initialPosition)
             rawSize = graph.makeInput(value: initialSize)
             time = graph.makeInput(value: Time(seconds: 0))
-            phase = graph.makeInput(value: Phase())
+            phase = graph.makeInput(value: _GraphInputs.Phase())
             transaction = graph.makeInput(value: initialTransaction)
             let environment = graph.makeInput(value: EnvironmentValues())
             var inputs = _GraphInputs(

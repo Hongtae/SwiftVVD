@@ -7,6 +7,10 @@
 
 import Foundation
 
+protocol ViewVisitor {
+    mutating func visit<V>(_ view: V) where V: View
+}
+
 class AnyViewBox {
     let view: any View
     init(_ view: any View) {
@@ -53,6 +57,14 @@ public struct AnyView: View {
 
 extension AnyView {
     var _view: any View { storage.view }
+
+    func visitContent<Visitor>(_ visitor: inout Visitor)
+        where Visitor: ViewVisitor {
+        func visit<V>(_ view: V) where V: View {
+            visitor.visit(view)
+        }
+        visit(_view)
+    }
 }
 
 extension AnyView: PrimitiveView {

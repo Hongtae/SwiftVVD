@@ -283,7 +283,7 @@ where Schedule: TimelineSchedule, Content: View {
 
     var _view: Attribute<ViewType>
     var _schedule: Attribute<Schedule>
-    var _phase: Attribute<Phase>
+    var _phase: Attribute<_GraphInputs.Phase>
     var _time: Attribute<Time>
     var _referenceDate: WeakAttribute<Date?>
     var resetSeed: UInt32

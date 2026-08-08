@@ -164,7 +164,7 @@ final class PreferredColorSchemeModifierTests: XCTestCase {
         _ViewListInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
-                phase: graph.makeInput(value: Phase()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
                 environment: graph.makeInput(value: EnvironmentValues.tracking()),
                 transaction: graph.makeInput(value: Transaction())
             ),

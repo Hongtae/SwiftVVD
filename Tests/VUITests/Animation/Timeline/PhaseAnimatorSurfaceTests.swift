@@ -988,7 +988,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var baseTransaction = Transaction()
             baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 64
             let transaction = graph.makeInput(value: baseTransaction)
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1234,7 +1234,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var baseTransaction = Transaction()
             baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 64
             let transaction = graph.makeInput(value: baseTransaction)
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1288,7 +1288,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             var baseTransaction = Transaction()
             baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 72
             let transaction = graph.makeInput(value: baseTransaction)
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1332,7 +1332,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1373,7 +1373,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1419,7 +1419,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1569,7 +1569,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1607,7 +1607,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1649,7 +1649,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             storedPhaseTransaction[PhaseAnimatorTransactionWidthKey.self] = 911
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: baseTransaction)
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1688,7 +1688,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             storedPhaseTransaction[PhaseAnimatorTransactionWidthKey.self] = 911
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: baseTransaction)
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1724,7 +1724,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1759,7 +1759,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1810,7 +1810,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -1848,7 +1848,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 5, didAnimate: false)
@@ -1896,7 +1896,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 5, didAnimate: false)
@@ -1957,7 +1957,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 1, didAnimate: true)
@@ -1997,7 +1997,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2046,7 +2046,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2086,7 +2086,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2127,7 +2127,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2186,7 +2186,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             }
             let source = graph.makeInput(value: container(trigger: 1))
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2244,7 +2244,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2286,7 +2286,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2367,7 +2367,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 79
@@ -2446,7 +2446,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 83
@@ -2525,7 +2525,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 87
@@ -2604,7 +2604,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 89
@@ -2685,7 +2685,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 89
@@ -2764,7 +2764,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             viewGraph.data.transactionSeed = 91
@@ -2844,7 +2844,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let weakCompletion = completion.asWeak()
             let isVisible = graph.makeInput(value: true)
@@ -2919,7 +2919,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -2965,7 +2965,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -3006,7 +3006,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 7, didAnimate: true)
@@ -3051,7 +3051,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 5, didAnimate: true)
@@ -3101,7 +3101,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -3165,7 +3165,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3241,7 +3241,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3317,7 +3317,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3393,7 +3393,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(value: Optional<Container.AnimationCompletion>.none)
             let isVisible = graph.makeInput(value: true)
             var child = Container.Child(
@@ -3466,7 +3466,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3548,7 +3548,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -3614,7 +3614,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3693,7 +3693,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                     )
                 )
                 let transaction = graph.makeInput(value: Transaction())
-                let phase = graph.makeInput(value: Phase())
+                let phase = graph.makeInput(value: _GraphInputs.Phase())
                 let completion = graph.makeInput(
                     value: Optional<Container.AnimationCompletion>.some(
                         Container.AnimationCompletion(seed: 4, didAnimate: didAnimate)
@@ -3777,7 +3777,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -3847,7 +3847,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -3925,7 +3925,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 3, didAnimate: true)
@@ -4002,7 +4002,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4082,7 +4082,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4149,7 +4149,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4203,7 +4203,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4257,7 +4257,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4313,7 +4313,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4369,7 +4369,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4425,7 +4425,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 )
             )
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4477,7 +4477,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -4514,7 +4514,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 3, didAnimate: true)
@@ -4563,7 +4563,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: original)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 3, didAnimate: true)
@@ -4614,7 +4614,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 7
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -4676,7 +4676,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 8
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -4751,7 +4751,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 3, didAnimate: true)
@@ -4799,7 +4799,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 6
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -4875,7 +4875,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 12
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -4944,7 +4944,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .eventDriven(trigger: AnyEquatable(1))
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 1
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5002,7 +5002,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5073,7 +5073,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5159,7 +5159,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5245,7 +5245,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5326,7 +5326,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5408,7 +5408,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5491,7 +5491,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5577,7 +5577,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -5657,7 +5657,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5724,7 +5724,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5791,7 +5791,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5859,7 +5859,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5926,7 +5926,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -5997,7 +5997,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -6082,7 +6082,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6178,7 +6178,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6269,7 +6269,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6366,7 +6366,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6463,7 +6463,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6560,7 +6560,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6657,7 +6657,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: changedBehavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: initial)
             let transaction = graph.makeInput(value: Transaction())
@@ -6742,7 +6742,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -6812,7 +6812,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -6887,7 +6887,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -6962,7 +6962,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 },
                 behavior: behavior
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 3
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -7032,7 +7032,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 4, didAnimate: true)
@@ -7080,7 +7080,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.none
             )
@@ -7132,7 +7132,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
-            let phase = graph.makeInput(value: Phase())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
             let completion = graph.makeInput(
                 value: Optional<Container.AnimationCompletion>.some(
                     Container.AnimationCompletion(seed: 5, didAnimate: true)
@@ -7190,7 +7190,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .eventDriven(trigger: AnyEquatable(2))
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 9
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -7253,7 +7253,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 animation: { _ in nil },
                 behavior: .repeating
             )
-            var graphPhase = Phase()
+            var graphPhase = _GraphInputs.Phase()
             graphPhase.resetSeed = 9
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -7573,7 +7573,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
             time: time ?? graph.makeInput(value: Time(seconds: 0)),
-            phase: graph.makeInput(value: Phase()),
+            phase: graph.makeInput(value: _GraphInputs.Phase()),
             environment: environment,
             transaction: graph.makeInput(value: transaction)
         )
@@ -7617,7 +7617,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
     ) -> PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer.Child {
         let source = graph.makeInput(value: container)
         let transaction = graph.makeInput(value: Transaction())
-        let phase = graph.makeInput(value: Phase())
+        let phase = graph.makeInput(value: _GraphInputs.Phase())
         let completion = graph.makeInput(
             value: Optional<PhaseAnimator<Int, PhaseSizedView>
                 .StateTransitioningContainer

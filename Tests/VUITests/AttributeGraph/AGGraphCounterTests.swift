@@ -1152,6 +1152,8 @@ final class AGGraphCounterTests: XCTestCase {
             )
 
             XCTAssertEqual(output.value, 11)
+            output.invalidateValue()
+            XCTAssertEqual(output.value, 11)
 
             first.setValue(2)
             XCTAssertEqual(output.value, 12)
@@ -1160,6 +1162,7 @@ final class AGGraphCounterTests: XCTestCase {
         XCTAssertEqual(
             recorder.snapshots,
             [
+                KeyPathChangedInputSnapshot(firstChanged: true, secondChanged: true),
                 KeyPathChangedInputSnapshot(firstChanged: false, secondChanged: false),
                 KeyPathChangedInputSnapshot(firstChanged: true, secondChanged: false),
             ]
