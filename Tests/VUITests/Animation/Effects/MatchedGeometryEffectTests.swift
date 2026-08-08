@@ -42,6 +42,8 @@ private final class MatchedGeometryAnimatedFrameCapture: @unchecked Sendable {
 private final class SecondaryLayerPlacementCapture: @unchecked Sendable {
     var position: Attribute<CGPoint>?
     var size: Attribute<ViewSize>?
+    var containerPosition: Attribute<CGPoint>?
+    var containerSize: Attribute<ViewSize>?
 }
 
 private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
@@ -59,6 +61,8 @@ private struct SecondaryLayerPlacementProbe: View, TestPrimitiveView {
         let capture = view._attribute.value.capture
         capture.position = inputs.position
         capture.size = inputs.size
+        capture.containerPosition = inputs.containerPosition
+        capture.containerSize = inputs.containerSize.attribute
         return _ViewOutputs(
             layoutComputer: OptionalAttribute(
                 graph.makeInput(value: LayoutComputer.fixed(
@@ -238,6 +242,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS secondaryLayerContainerInputPropagationObserved
     func testOverlaySecondaryGeometryComesFromDedicatedQuery() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -245,6 +250,14 @@ final class MatchedGeometryEffectTests: XCTestCase {
             var inputs = makeViewInputs(graph: graph)
             inputs.position = graph.makeInput(value: CGPoint(x: 50, y: 50))
             inputs.size = graph.makeInput(value: ViewSize(width: 100, height: 60))
+            let containerPosition = graph.makeInput(
+                value: CGPoint(x: 15, y: 25)
+            )
+            let containerSize = graph.makeInput(
+                value: ViewSize(width: 240, height: 180)
+            )
+            inputs.containerPosition = containerPosition
+            inputs.containerSize = OptionalAttribute(containerSize)
             let modifier = graph.makeInput(value: _OverlayModifier(
                 overlay: SecondaryLayerPlacementProbe(capture: capture),
                 alignment: .center
@@ -275,6 +288,14 @@ final class MatchedGeometryEffectTests: XCTestCase {
             XCTAssertEqual(
                 secondarySize.proposal,
                 _ProposedSize(width: 100, height: 60)
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.containerPosition).identifier,
+                containerPosition.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(capture.containerSize).identifier,
+                containerSize.identifier
             )
         }
     }

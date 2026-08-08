@@ -136,40 +136,51 @@ public struct _GraphInputs: GraphReusable {
     /// Render phase passed through the graph.
     /// Stored as one UInt32: bit 0 is the removal flag, bits 1...31 are resetSeed.
     struct Phase: Equatable {
-        var rawValue: UInt32 = 0
+        private var removalMask: UInt32 { 1 << 0 }
+        private var resetSeedShift: UInt32 { 1 }
+        private var resetSeedMask: UInt32 { ~removalMask }
+        private var invalidValue: UInt32 {
+            UInt32(bitPattern: Int32(-16))
+        }
+
+        var value: UInt32 = 0
 
         var isBeingRemoved: Bool {
-            get { (rawValue & 0x1) != 0 }
+            get { (value & removalMask) != 0 }
             set {
                 if newValue {
-                    rawValue |= 0x1
+                    value |= removalMask
                 } else {
-                    rawValue &= ~UInt32(0x1)
+                    value &= resetSeedMask
                 }
             }
         }
 
         var resetSeed: UInt32 {
-            get { rawValue >> 1 }
-            set { rawValue = (rawValue & 0x1) | (newValue &<< 1) }
+            get { value >> resetSeedShift }
+            set {
+                value = (value & removalMask) |
+                    (newValue &<< resetSeedShift)
+            }
         }
 
         var isInserted: Bool { !isBeingRemoved }
 
         static var invalid: Phase {
-            Phase(value: UInt32(bitPattern: Int32(-16)))
+            let phase = Phase()
+            return Phase(value: phase.invalidValue)
         }
 
         init() {}
 
         init(value: UInt32) {
-            rawValue = value
+            self.value = value
         }
 
         mutating func merge(_ other: Phase) {
-            let preservedRemoval = rawValue & 0x1
-            let seedBits = rawValue & ~UInt32(0x1)
-            rawValue = (seedBits &+ other.rawValue) | preservedRemoval
+            let preservedRemoval = value & removalMask
+            let seedBits = value & resetSeedMask
+            value = (seedBits &+ other.value) | preservedRemoval
         }
     }
 

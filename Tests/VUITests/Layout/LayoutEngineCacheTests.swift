@@ -24,6 +24,11 @@ private final class LayoutCacheProbeStorage {
     var proposals: [ProposedViewSize] = []
     var placementProposals: [ProposedViewSize] = []
     var placementBounds: [CGRect] = []
+    var placementTransactionValues: [Int] = []
+}
+
+private struct LayoutPlacementTransactionKey: TransactionKey {
+    static let defaultValue = 0
 }
 
 private enum LayoutCacheAlignmentA: AlignmentID {
@@ -47,6 +52,68 @@ private final class PlacementDataBox: @unchecked Sendable {
 
     init(_ value: PlacementData) {
         self.value = value
+    }
+}
+
+private final class DefaultAlignmentProbeState: @unchecked Sendable {
+    var placementCount = 0
+}
+
+private final class ExplicitAlignmentProbeEngine: LayoutEngine {
+    var size: CGSize
+    var horizontal: CGFloat?
+    var vertical: CGFloat?
+
+    init(size: CGSize, horizontal: CGFloat?, vertical: CGFloat?) {
+        self.size = size
+        self.horizontal = horizontal
+        self.vertical = vertical
+    }
+
+    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        size
+    }
+
+    func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        switch key.axis {
+        case .horizontal: horizontal
+        case .vertical: vertical
+        }
+    }
+}
+
+private struct DefaultAlignmentProbeLayout: Layout {
+    var state: DefaultAlignmentProbeState
+    var size: CGSize
+    var origins: [CGPoint]
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        state.placementCount += 1
+        for (subview, origin) in zip(subviews, origins) {
+            subview.place(
+                at: CGPoint(
+                    x: bounds.minX + origin.x,
+                    y: bounds.minY + origin.y
+                ),
+                dimensions: subview.dimensions(in: .unspecified)
+            )
+        }
     }
 }
 
@@ -87,6 +154,9 @@ private struct LayoutCacheProbe: Layout {
         cache.placementCount += 1
         cache.placementProposals.append(proposal)
         cache.placementBounds.append(bounds)
+        cache.placementTransactionValues.append(
+            Transaction.current[LayoutPlacementTransactionKey.self]
+        )
     }
 
     func explicitAlignment(
@@ -167,7 +237,7 @@ private func makeLayoutContext(
     guard let graph = _AGGraph.current else {
         fatalError("A current graph is required by layout tests.")
     }
-    let owner = graph.makeInput(value: ())
+    let owner = graph.makeInput(value: 0)
     var environment = EnvironmentValues()
     environment.layoutDirection = layoutDirection
     let environmentAttribute = graph.makeInput(value: environment)
@@ -268,6 +338,115 @@ final class LayoutEngineCacheTests: XCTestCase {
             release.signal()
             XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
             XCTAssertFalse(acceptedForeignPlacement)
+        }
+    }
+
+    func testPlacementDataMirrorsAcrossNonzeroBoundsOrigin() {
+        withGraph {
+            let bounds = CGRect(x: 100, y: 50, width: 200, height: 80)
+            var data = PlacementData(
+                count: 1,
+                bounds: bounds,
+                layoutDirection: .leftToRight
+            )
+            let geometry = ViewGeometry(
+                origin: CGPoint(x: 130, y: 60),
+                dimensions: ViewDimensions(
+                    guideComputer: .defaultValue,
+                    size: ViewSize.fixed(CGSize(width: 20, height: 10))
+                )
+            )
+
+            data.setGeometry(
+                geometry,
+                at: 0,
+                layoutDirection: .rightToLeft
+            )
+
+            XCTAssertEqual(data.geometries[0].origin, CGPoint(x: 250, y: 60))
+            XCTAssertEqual(data.geometries[0].dimensions, geometry.dimensions)
+        }
+    }
+
+    func testPlacementDataUsesOriginXNaNAsOnlyEmptySlotSentinel() {
+        withGraph {
+            var data = PlacementData(
+                count: 2,
+                bounds: CGRect(x: 100, y: 50, width: 200, height: 80),
+                layoutDirection: .leftToRight
+            )
+            let geometry = ViewGeometry(
+                origin: CGPoint(x: 17, y: CGFloat.nan),
+                dimensions: ViewDimensions(
+                    guideComputer: .defaultValue,
+                    size: ViewSize.fixed(CGSize(width: 20, height: 10))
+                )
+            )
+
+            data.setGeometry(
+                geometry,
+                at: 0,
+                layoutDirection: .leftToRight
+            )
+
+            XCTAssertEqual(data.placedCount, 1)
+            let resolved = data.resolvedGeometries(
+                children: [LayoutProxyAttributes(), LayoutProxyAttributes()],
+                proposal: .unspecified
+            )
+            XCTAssertEqual(resolved[0].origin.x, 17)
+            XCTAssertTrue(resolved[0].origin.y.isNaN)
+            XCTAssertEqual(resolved[0].dimensions, geometry.dimensions)
+            XCTAssertEqual(data.placedCount, 2)
+        }
+    }
+
+    func testLayoutSubviewPlacementPreservesZeroAnchorAndInfiniteOrigins() {
+        withGraph {
+            let inputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            let proxy = LayoutProxy(
+                context: inputs.1.context,
+                attributes: LayoutProxyAttributes()
+            )
+            let finiteOriginSubview = LayoutSubview(proxy: proxy, index: 0)
+            let infiniteOriginSubview = LayoutSubview(proxy: proxy, index: 1)
+            var data = PlacementData(
+                count: 2,
+                bounds: .zero,
+                layoutDirection: .leftToRight
+            )
+
+            withUnsafeMutablePointer(to: &data) { pointer in
+                ThreadLayoutData.withPlacementData(pointer) {
+                    finiteOriginSubview.place(
+                        at: CGPoint(x: 12, y: 14),
+                        anchor: .topLeading,
+                        dimensions: ViewDimensions(
+                            guideComputer: .defaultValue,
+                            size: ViewSize.fixed(
+                                CGSize(width: CGFloat.infinity, height: 10)
+                            )
+                        )
+                    )
+                    infiniteOriginSubview.place(
+                        at: CGPoint(x: CGFloat.infinity, y: 18),
+                        anchor: .topLeading,
+                        dimensions: ViewDimensions(
+                            guideComputer: .defaultValue,
+                            size: ViewSize.fixed(CGSize(width: 20, height: 10))
+                        )
+                    )
+                }
+            }
+
+            XCTAssertEqual(data.geometries[0].origin, CGPoint(x: 12, y: 14))
+            XCTAssertTrue(data.geometries[0].dimensions.width.isInfinite)
+            XCTAssertTrue(data.geometries[1].origin.x.isInfinite)
+            XCTAssertEqual(data.geometries[1].origin.y, 18)
+            XCTAssertEqual(data.placedCount, 2)
         }
     }
 
@@ -479,6 +658,48 @@ final class LayoutEngineCacheTests: XCTestCase {
         }
     }
 
+    func testViewLayoutEnginePlacementDoesNotInstallNodeTransaction() {
+        withGraph {
+            let state = LayoutCacheProbeState()
+            let inputs = makeLayoutContext(
+                children: [],
+                layoutDirection: .leftToRight
+            )
+            var engine = ViewLayoutEngine(
+                layout: LayoutCacheProbe(
+                    state: state,
+                    reportedSize: CGSize(width: 80, height: 30)
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+
+            var nodeTransaction = Transaction()
+            nodeTransaction[LayoutPlacementTransactionKey.self] = 73
+            Attribute<Int>(inputs.1.context.attribute).setValue(
+                1,
+                transaction: nodeTransaction
+            )
+
+            var ambientTransaction = Transaction()
+            ambientTransaction[LayoutPlacementTransactionKey.self] = 11
+            Transaction.withScopedThreadTransaction(ambientTransaction) {
+                _ = engine.childGeometries(
+                    at: ViewSize(
+                        CGSize(width: 80, height: 30),
+                        proposal: .unspecified
+                    ),
+                    origin: .zero
+                )
+            }
+
+            XCTAssertEqual(
+                state.storage?.placementTransactionValues,
+                [11]
+            )
+        }
+    }
+
     func testViewLayoutEngineCachesThreeExplicitAlignmentsAndInvalidatesForSize() {
         withGraph {
             let state = LayoutCacheProbeState()
@@ -518,6 +739,109 @@ final class LayoutEngineCacheTests: XCTestCase {
             XCTAssertEqual(engine.childGeometries(at: resized, origin: .zero), [])
             XCTAssertEqual(engine.explicitAlignment(keyA, at: resized), 20)
             XCTAssertEqual(storage.alignmentCount, 6)
+        }
+    }
+
+    func testViewLayoutEngineDefaultAlignmentUsesPlacedChildGeometry() {
+        withGraph {
+            let graph = try! XCTUnwrap(_AGGraph.current)
+            let state = DefaultAlignmentProbeState()
+            let children = [
+                ExplicitAlignmentProbeEngine(
+                    size: CGSize(width: 10, height: 20),
+                    horizontal: 2,
+                    vertical: 3
+                ),
+                ExplicitAlignmentProbeEngine(
+                    size: CGSize(width: 20, height: 10),
+                    horizontal: 6,
+                    vertical: 4
+                ),
+            ].map {
+                LayoutProxyAttributes(
+                    layoutComputer: graph.makeInput(
+                        value: LayoutComputer($0)
+                    )
+                )
+            }
+            let inputs = makeLayoutContext(
+                children: children,
+                layoutDirection: .leftToRight
+            )
+            var engine = ViewLayoutEngine(
+                layout: DefaultAlignmentProbeLayout(
+                    state: state,
+                    size: CGSize(width: 100, height: 80),
+                    origins: [
+                        CGPoint(x: 10, y: 5),
+                        CGPoint(x: 40, y: 25),
+                    ]
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+            let size = ViewSize(CGSize(width: 100, height: 80))
+            let horizontal = HorizontalAlignment(
+                LayoutCacheAlignmentA.self
+            ).key
+            let vertical = VerticalAlignment(
+                LayoutCacheAlignmentB.self
+            ).key
+
+            XCTAssertEqual(engine.explicitAlignment(horizontal, at: size), 29)
+            XCTAssertEqual(engine.explicitAlignment(vertical, at: size), 18.5)
+            XCTAssertEqual(state.placementCount, 1)
+        }
+    }
+
+    func testViewLayoutEngineDefaultAlignmentUsesLogicalRTLOrigins() {
+        withGraph {
+            let graph = try! XCTUnwrap(_AGGraph.current)
+            let state = DefaultAlignmentProbeState()
+            let children = [
+                ExplicitAlignmentProbeEngine(
+                    size: CGSize(width: 10, height: 20),
+                    horizontal: 2,
+                    vertical: nil
+                ),
+                ExplicitAlignmentProbeEngine(
+                    size: CGSize(width: 20, height: 10),
+                    horizontal: 6,
+                    vertical: nil
+                ),
+            ].map {
+                LayoutProxyAttributes(
+                    layoutComputer: graph.makeInput(
+                        value: LayoutComputer($0)
+                    )
+                )
+            }
+            let inputs = makeLayoutContext(
+                children: children,
+                layoutDirection: .rightToLeft
+            )
+            var engine = ViewLayoutEngine(
+                layout: DefaultAlignmentProbeLayout(
+                    state: state,
+                    size: CGSize(width: 100, height: 80),
+                    origins: [
+                        CGPoint(x: 10, y: 5),
+                        CGPoint(x: 40, y: 25),
+                    ]
+                ),
+                context: inputs.0,
+                children: inputs.1
+            )
+            let key = HorizontalAlignment(LayoutCacheAlignmentA.self).key
+
+            XCTAssertEqual(
+                engine.explicitAlignment(
+                    key,
+                    at: ViewSize(CGSize(width: 100, height: 80))
+                ),
+                29
+            )
+            XCTAssertEqual(state.placementCount, 1)
         }
     }
 

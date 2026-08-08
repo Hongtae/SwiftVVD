@@ -37,12 +37,10 @@ extension _FixedSizeLayout: UnaryLayout {
     }
 
     func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
-        let proposal = childProposal(for: context.proposedSize)
-        let childSize = child.dimensions(in: proposal).size.value
         return _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
-            anchoring: .topLeading,
-            at: .zero
+            proposedSize: childProposal(for: context.proposedSize),
+            aligning: .center,
+            in: context.size
         )
     }
 }

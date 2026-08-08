@@ -485,16 +485,19 @@ public struct ViewSpacing: @unchecked Sendable {
     }
 
     public mutating func formUnion(_ other: ViewSpacing, edges: Edge.Set = .all) {
-        self = self.union(other, edges: edges)
-    }
-
-    public func union(_ other: ViewSpacing, edges: Edge.Set = .all) -> ViewSpacing {
-        var result = self
+        if layoutDirection == nil {
+            layoutDirection = other.layoutDirection
+        }
         let absoluteEdges = AbsoluteEdge.Set(
             edges,
             layoutDirection: layoutDirection ?? .leftToRight
         )
-        result.spacing.incorporate(absoluteEdges, of: other.spacing)
+        spacing.incorporate(absoluteEdges, of: other.spacing)
+    }
+
+    public func union(_ other: ViewSpacing, edges: Edge.Set = .all) -> ViewSpacing {
+        var result = self
+        result.formUnion(other, edges: edges)
         return result
     }
 

@@ -585,7 +585,7 @@ class GraphHost: CustomReflectable {
     func incrementPhase() {
         data.withCurrent {
             var phase = data._phase.value
-            phase.rawValue &+= 0x2
+            phase.resetSeed &+= 1
             data._phase.setValue(phase)
         }
         graphDelegate?.graphDidChange()

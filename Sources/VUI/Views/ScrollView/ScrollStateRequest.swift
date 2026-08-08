@@ -548,9 +548,9 @@ struct ScrollStateRequestTransform: StatefulRule {
 
     mutating func updateValue() {
         let currentPhase = inputs.base.phase.value
-        if phaseRawValue != currentPhase.rawValue {
+        if phaseRawValue != currentPhase.value {
             request = nil
-            phaseRawValue = currentPhase.rawValue
+            phaseRawValue = currentPhase.value
         }
 
         guard let binding = inputs.base.scrollPositionBinding(kind: .scrollContent).attribute?.value else {

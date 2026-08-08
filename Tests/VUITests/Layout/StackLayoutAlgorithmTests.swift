@@ -411,7 +411,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 alignment: verticalGuide,
                 spacing: 5
             )
-            var hCache = _StackLayoutImplementation.makeCache(
+            var hCache = StackLayoutOperations.makeCache(
                 axis: .horizontal,
                 uniformSpacing: 5,
                 minorAxisAlignment: verticalGuide.key,
@@ -462,7 +462,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 alignment: horizontalGuide,
                 spacing: 5
             )
-            var vCache = _StackLayoutImplementation.makeCache(
+            var vCache = StackLayoutOperations.makeCache(
                 axis: .vertical,
                 uniformSpacing: 5,
                 minorAxisAlignment: horizontalGuide.key,
@@ -514,7 +514,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 layoutDirection: .leftToRight
             )
             let layout = HStackLayout(alignment: guide, spacing: 5)
-            var disabledCache = _StackLayoutImplementation.makeCache(
+            var disabledCache = StackLayoutOperations.makeCache(
                 axis: .horizontal,
                 uniformSpacing: 5,
                 minorAxisAlignment: guide.key,
@@ -556,7 +556,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 engines: [spanningA, spanningB],
                 layoutDirection: .leftToRight
             )
-            var spanningCache = _StackLayoutImplementation.makeCache(
+            var spanningCache = StackLayoutOperations.makeCache(
                 axis: .horizontal,
                 uniformSpacing: 5,
                 minorAxisAlignment: VerticalAlignment.center.key,
@@ -607,7 +607,7 @@ final class StackLayoutAlgorithmTests: XCTestCase {
                 layoutDirection: .leftToRight
             )
             let layout = HStackLayout(alignment: guide, spacing: 5)
-            var cache = _StackLayoutImplementation.makeCache(
+            var cache = StackLayoutOperations.makeCache(
                 axis: .horizontal,
                 uniformSpacing: 5,
                 minorAxisAlignment: guide.key,
@@ -987,6 +987,38 @@ final class StackLayoutAlgorithmTests: XCTestCase {
             )
             XCTAssertEqual(spacingValue(rtl, edge: .left), 3)
             XCTAssertEqual(spacingValue(rtl, edge: .right), 2)
+        }
+    }
+
+    func testEmptyStackSpacingUsesZeroAndPreservesLayoutDirection() {
+        withGraph { graph in
+            let subviews = LayoutSubviews(
+                context: AnyRuleContext(
+                    attribute: graph.makeInput(value: ()).identifier
+                ),
+                attributes: [],
+                layoutDirection: .rightToLeft
+            )
+
+            var horizontalCache = HStackLayout().makeCache(
+                subviews: subviews
+            )
+            let horizontal = HStackLayout().spacing(
+                subviews: subviews,
+                cache: &horizontalCache
+            )
+            XCTAssertEqual(horizontal.spacing, .zero)
+            XCTAssertEqual(horizontal.layoutDirection, .rightToLeft)
+
+            var verticalCache = VStackLayout().makeCache(
+                subviews: subviews
+            )
+            let vertical = VStackLayout().spacing(
+                subviews: subviews,
+                cache: &verticalCache
+            )
+            XCTAssertEqual(vertical.spacing, .zero)
+            XCTAssertEqual(vertical.layoutDirection, .rightToLeft)
         }
     }
 

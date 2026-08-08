@@ -148,15 +148,18 @@ extension LayoutEngine {
         let s = sizeThatFits(proposal)
         return axis == .horizontal ? s.width : s.height
     }
-    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] { [] }
+    func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
+        fatalError("LayoutEngine.childGeometries(at:origin:) must be implemented")
+    }
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? { nil }
     mutating func childPlacement(at size: ViewSize) -> _Placement {
-        _Placement(proposedSize: CGSize(width: size.width, height: size.height),
-                   anchoring: .topLeading, at: .zero)
+        fatalError("LayoutEngine.childPlacement(at:) must be implemented")
     }
     mutating func childPlacement(at size: ViewSize,
                                  placementContext: _PositionAwarePlacementContext) -> _Placement {
-        childPlacement(at: size)
+        fatalError(
+            "LayoutEngine.childPlacement(at:placementContext:) must be implemented"
+        )
     }
 }
 
@@ -568,7 +571,7 @@ final class TracingLayoutEngineBox<E: LayoutEngine>: LayoutEngineBox<E> {
 /// Bridges Layout protocol methods to the LayoutEngine dispatch surface.
 /// childGeometries creates PlacementData, exposes it through the thread layout data slot,
 /// and lets LayoutSubview.place write child geometries into that buffer.
-struct ViewLayoutEngine<L: Layout>: LayoutEngine {
+struct ViewLayoutEngine<L: Layout>: LayoutEngine, DefaultAlignmentFunction {
     var layout: L
     var cache: L.Cache
     var proxies: LayoutProxyCollection
@@ -634,25 +637,6 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
         preferredSpacing = nil
     }
 
-    private func placementTransaction() -> Transaction {
-        guard let graph = _AGGraph.current else {
-            return Transaction.current
-        }
-        if let transaction = graph.transaction(for: proxies.context.attribute),
-           !transaction.isEmpty {
-            return transaction
-        }
-        for child in proxies.attributes {
-            guard let attr = child.layoutComputer.attribute,
-                  let transaction = graph.transaction(for: attr.identifier),
-                  !transaction.isEmpty else {
-                continue
-            }
-            return transaction
-        }
-        return Transaction.current
-    }
-
     mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
         let layout = layout
         let subviews = makeSubviews()
@@ -697,26 +681,104 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
 
         let subviews = makeSubviews()
         let bounds = CGRect(origin: .zero, size: size.value)
+        let context = proxies.context
+        let layout = layout
 
         var result: CGFloat?
-        proxies.context.update {
-            switch key.axis {
-            case .horizontal:
-                result = layout.explicitAlignment(of: HorizontalAlignment(alignmentKey: key.bits),
-                                                  in: bounds,
-                                                  proposal: ProposedViewSize(size.proposal),
-                                                  subviews: subviews,
-                                                  cache: &cache)
-            case .vertical:
-                result = layout.explicitAlignment(of: VerticalAlignment(alignmentKey: key.bits),
-                                                  in: bounds,
-                                                  proposal: ProposedViewSize(size.proposal),
-                                                  subviews: subviews,
-                                                  cache: &cache)
+        withUnsafeMutablePointer(to: &self) { engine in
+            var alignmentData = AlignmentData(
+                function: Self.self,
+                data: UnsafeMutableRawPointer(engine),
+                size: size
+            )
+            withUnsafeMutablePointer(to: &alignmentData) { data in
+                ThreadLayoutData.withAlignmentData(data) {
+                    context.update {
+                        switch key.axis {
+                        case .horizontal:
+                            result = layout.explicitAlignment(
+                                of: HorizontalAlignment(
+                                    alignmentKey: key.bits
+                                ),
+                                in: bounds,
+                                proposal: ProposedViewSize(size.proposal),
+                                subviews: subviews,
+                                cache: &engine.pointee.cache
+                            )
+                        case .vertical:
+                            result = layout.explicitAlignment(
+                                of: VerticalAlignment(
+                                    alignmentKey: key.bits
+                                ),
+                                in: bounds,
+                                proposal: ProposedViewSize(size.proposal),
+                                subviews: subviews,
+                                cache: &engine.pointee.cache
+                            )
+                        }
+                    }
+                }
             }
         }
         cachedAlignment.put(cacheKey, value: result)
         return result
+    }
+
+    static func defaultAlignment(
+        _ key: AlignmentKey,
+        size: ViewSize,
+        data: UnsafeMutableRawPointer
+    ) -> CGFloat? {
+        guard size.width.isFinite, size.height.isFinite else {
+            return nil
+        }
+
+        let engine = data.assumingMemoryBound(to: Self.self)
+        if engine.pointee.cachedAlignmentGeometry.count !=
+            engine.pointee.proxies.count {
+            let geometries = engine.pointee.childGeometries(
+                at: size,
+                origin: .zero
+            )
+            engine.pointee.cachedAlignmentGeometry = geometries
+        }
+
+        let geometries = engine.pointee.cachedAlignmentGeometry
+        let proxies = engine.pointee.proxies
+        let layoutDirection = engine.pointee.layoutDirection
+        var parentValue: CGFloat?
+        var explicitCount = 0
+
+        for index in geometries.indices {
+            let geometry = geometries[index]
+            guard var childValue = proxies[index].explicitAlignment(
+                key,
+                at: geometry.dimensions.size
+            ) else {
+                continue
+            }
+
+            switch key.axis {
+            case .horizontal:
+                if layoutDirection == .rightToLeft {
+                    childValue += size.width - (
+                        geometry.origin.x + geometry.dimensions.width
+                    )
+                } else {
+                    childValue += geometry.origin.x
+                }
+            case .vertical:
+                childValue += geometry.origin.y
+            }
+
+            key.id._combineExplicit(
+                childValue: childValue,
+                explicitCount,
+                into: &parentValue
+            )
+            explicitCount += 1
+        }
+        return parentValue
     }
 
     mutating func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {
@@ -734,15 +796,13 @@ struct ViewLayoutEngine<L: Layout>: LayoutEngine {
         )
         return withUnsafeMutablePointer(to: &placementData) { pointer in
             ThreadLayoutData.withPlacementData(pointer) {
-                Transaction.withScopedThreadTransaction(placementTransaction()) {
-                    proxies.context.update {
-                        layout.placeSubviews(
-                            in: CGRect(origin: origin, size: size.value),
-                            proposal: ProposedViewSize(size.proposal),
-                            subviews: subviews,
-                            cache: &cache
-                        )
-                    }
+                proxies.context.update {
+                    layout.placeSubviews(
+                        in: CGRect(origin: origin, size: size.value),
+                        proposal: ProposedViewSize(size.proposal),
+                        subviews: subviews,
+                        cache: &cache
+                    )
                 }
             }
             let geometries = pointer.pointee.resolvedGeometries(

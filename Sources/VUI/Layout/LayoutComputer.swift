@@ -109,7 +109,7 @@ struct LayoutComputer: Defaultable {
         seed = 0
     }
 
-    /// Supplies proposal-derived fallback sizing when no concrete engine is connected.
+    /// Supplies the framework default sizing computer.
     struct DefaultEngine: LayoutEngine {
         mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             proposal.fixingUnspecifiedDimensions()

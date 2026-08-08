@@ -49,6 +49,24 @@ private struct TestFixedLayoutEngine: LayoutEngine {
     }
 }
 
+/// Identifies production engines whose public test driver can traverse a
+/// multi-child geometry result. Unary engines publish child geometry through
+/// their dedicated graph rule instead of this dispatch lane.
+private protocol TestChildGeometryProvidingEngine: LayoutEngine {}
+
+extension ViewLayoutEngine: TestChildGeometryProvidingEngine {}
+
+private protocol TestChildGeometryProvidingBox {
+    func driveChildGeometries(at size: ViewSize, origin: CGPoint)
+}
+
+extension LayoutEngineBox: TestChildGeometryProvidingBox
+where E: TestChildGeometryProvidingEngine {
+    func driveChildGeometries(at size: ViewSize, origin: CGPoint) {
+        _ = engine.childGeometries(at: size, origin: origin)
+    }
+}
+
 func testLayoutComputer(
     sizeThatFits: @escaping (_ProposedSize) -> CGSize,
     spacing: Spacing = Spacing(),
@@ -95,7 +113,7 @@ extension LayoutComputer {
             x: position.x - measuredSize.width * anchor.x,
             y: position.y - measuredSize.height * anchor.y
         )
-        _ = childGeometries(
+        (box as? any TestChildGeometryProvidingBox)?.driveChildGeometries(
             at: ViewSize(measuredSize, proposal: proposedSize),
             origin: origin
         )

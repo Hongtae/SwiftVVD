@@ -152,7 +152,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         host.setPhase(phase)
 
         host.data.withCurrent {
-            XCTAssertEqual(host.data._phase.value.rawValue, phase.rawValue)
+            XCTAssertEqual(host.data._phase.value.value, phase.value)
         }
         XCTAssertTrue(recorder.events.isEmpty)
     }
@@ -188,7 +188,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
         viewGraph.setPhase(phase)
 
         viewGraph.data.withCurrent {
-            XCTAssertEqual(viewGraph.phaseAttr?.value.rawValue, phase.rawValue)
+            XCTAssertEqual(viewGraph.phaseAttr?.value.value, phase.value)
         }
     }
 
@@ -202,9 +202,9 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         viewGraph.updateGraphPhase(oldParentPhase: nil, newParentPhase: newParentPhase)
 
-        XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
+        XCTAssertEqual(viewGraph.parentPhase?.value, newParentPhase.value)
         viewGraph.data.withCurrent {
-            XCTAssertEqual(viewGraph.data._phase.value.rawValue, newParentPhase.rawValue)
+            XCTAssertEqual(viewGraph.data._phase.value.value, newParentPhase.value)
         }
     }
 
@@ -226,7 +226,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
 
-        XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
+        XCTAssertEqual(viewGraph.parentPhase?.value, newParentPhase.value)
         viewGraph.data.withCurrent {
             let next = viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 11)
@@ -253,7 +253,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
 
         viewGraph.updateGraphPhase(oldParentPhase: oldParentPhase, newParentPhase: newParentPhase)
 
-        XCTAssertEqual(viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
+        XCTAssertEqual(viewGraph.parentPhase?.value, newParentPhase.value)
         viewGraph.data.withCurrent {
             let next = viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 10)
@@ -320,7 +320,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
             parentGraphExited.wait(timeout: .now() + 2),
             .success
         )
-        XCTAssertEqual(child.viewGraph.parentPhase?.rawValue, newParentPhase.rawValue)
+        XCTAssertEqual(child.viewGraph.parentPhase?.value, newParentPhase.value)
         child.viewGraph.data.withCurrent {
             let next = child.viewGraph.data._phase.value
             XCTAssertEqual(next.resetSeed, 8)
@@ -351,7 +351,7 @@ final class GraphHostGraphDelegateTests: XCTestCase {
                     [],
                     viewPhase: viewPhase
                 )
-                observedPhases.append(viewPhase.base.rawValue)
+                observedPhases.append(viewPhase.base.value)
             }
         }
 

@@ -31,12 +31,10 @@ struct LayoutPriorityLayout: UnaryLayout {
     }
 
     func placement(of child: LayoutProxy, in context: PlacementContext) -> _Placement {
-        let proposal = context.proposedSize
-        let childSize = child.dimensions(in: proposal).size.value
         return _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(at: childSize),
-            anchoring: .topLeading,
-            at: .zero
+            proposedSize: context.proposedSize,
+            aligning: .center,
+            in: context.size
         )
     }
 

@@ -2,6 +2,49 @@ import XCTest
 @testable import VUI
 
 final class ViewSpacingTests: XCTestCase {
+    func testUnionAdoptsOtherDirectionBeforeResolvingLogicalEdges() {
+        let other = ViewSpacing(
+            Spacing(minima: [
+                .init(category: .default, edge: .left): .distance(3),
+                .init(category: .default, edge: .right): .distance(9),
+            ]),
+            layoutDirection: .rightToLeft
+        )
+
+        let result = ViewSpacing().union(other, edges: .leading)
+
+        XCTAssertEqual(result.layoutDirection, .rightToLeft)
+        XCTAssertNil(scalar(result.spacing, category: .default, edge: .left))
+        XCTAssertEqual(
+            scalar(result.spacing, category: .default, edge: .right),
+            9
+        )
+    }
+
+    func testUnionKeepsExistingDirectionInsteadOfTakingOtherDirection() {
+        let initial = ViewSpacing(
+            Spacing(),
+            layoutDirection: .leftToRight
+        )
+        let other = ViewSpacing(
+            Spacing(minima: [
+                .init(category: .default, edge: .left): .distance(3),
+                .init(category: .default, edge: .right): .distance(9),
+            ]),
+            layoutDirection: .rightToLeft
+        )
+
+        var result = initial
+        result.formUnion(other, edges: .leading)
+
+        XCTAssertEqual(result.layoutDirection, .leftToRight)
+        XCTAssertEqual(
+            scalar(result.spacing, category: .default, edge: .left),
+            3
+        )
+        XCTAssertNil(scalar(result.spacing, category: .default, edge: .right))
+    }
+
     func testDistancePrefersExactNonDefaultCategoryOverDefaults() {
         let category = Spacing.Category.edgeBelowText
         let predecessor = Spacing(minima: [

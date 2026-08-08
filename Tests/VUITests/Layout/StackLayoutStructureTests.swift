@@ -60,7 +60,89 @@ private struct OpaqueValueCacheLayout: Layout {
     }
 }
 
+private enum StackNaNAlignmentID: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        CGFloat.nan
+    }
+}
+
+private enum StackPositiveInfinityAlignmentID: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        CGFloat.infinity
+    }
+}
+
+private enum StackNegativeInfinityAlignmentID: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat {
+        -CGFloat.infinity
+    }
+}
+
+private enum StackExplicitAlignmentID: AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat { 0 }
+}
+
+private struct StackEdgeLayoutEngine: LayoutEngine {
+    var size: CGSize
+    var explicitValue: CGFloat?
+
+    mutating func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        size
+    }
+
+    mutating func explicitAlignment(
+        _ key: AlignmentKey,
+        at size: ViewSize
+    ) -> CGFloat? {
+        guard key == HorizontalAlignment(StackExplicitAlignmentID.self).key else {
+            return nil
+        }
+        return explicitValue
+    }
+}
+
+private func isUnaryViewRoot<T>(_ value: T) -> Bool {
+    value is any _VariadicView_UnaryViewRoot
+}
+
 final class StackLayoutStructureTests: XCTestCase {
+    func testPublicStackLayoutsAreDistinctDerivedShells() {
+        let publicH = HStackLayout(alignment: .bottom, spacing: 7)
+        let internalH = _HStackLayout(alignment: .bottom, spacing: 7)
+        let publicV = VStackLayout(alignment: .trailing, spacing: 9)
+        let internalV = _VStackLayout(alignment: .trailing, spacing: 9)
+
+        XCTAssertNotEqual(
+            ObjectIdentifier(HStackLayout.self),
+            ObjectIdentifier(_HStackLayout.self)
+        )
+        XCTAssertNotEqual(
+            ObjectIdentifier(VStackLayout.self),
+            ObjectIdentifier(_VStackLayout.self)
+        )
+        XCTAssertEqual(MemoryLayout<HStackLayout>.size, MemoryLayout<_HStackLayout>.size)
+        XCTAssertEqual(MemoryLayout<HStackLayout>.stride, MemoryLayout<_HStackLayout>.stride)
+        XCTAssertEqual(MemoryLayout<VStackLayout>.size, MemoryLayout<_VStackLayout>.size)
+        XCTAssertEqual(MemoryLayout<VStackLayout>.stride, MemoryLayout<_VStackLayout>.stride)
+        XCTAssertTrue(HStackLayout.Cache.self == _HStackLayout.Cache.self)
+        XCTAssertTrue(VStackLayout.Cache.self == _VStackLayout.Cache.self)
+
+        XCTAssertEqual(publicH.base.alignment, internalH.alignment)
+        XCTAssertEqual(publicH.base.spacing, internalH.spacing)
+        XCTAssertEqual(publicV.base.alignment, internalV.alignment)
+        XCTAssertEqual(publicV.base.spacing, internalV.spacing)
+
+        XCTAssertFalse(isUnaryViewRoot(publicH))
+        XCTAssertFalse(isUnaryViewRoot(publicV))
+        XCTAssertTrue(isUnaryViewRoot(internalH))
+        XCTAssertTrue(isUnaryViewRoot(internalV))
+
+        XCTAssertEqual(HStackLayout.layoutProperties.stackOrientation, .horizontal)
+        XCTAssertTrue(HStackLayout.layoutProperties.isIdentityUnaryLayout)
+        XCTAssertEqual(VStackLayout.layoutProperties.stackOrientation, .vertical)
+        XCTAssertTrue(VStackLayout.layoutProperties.isIdentityUnaryLayout)
+    }
+
     func testLayoutSubviewsUsesObservedDirectAndIndirectStorageShapes() {
         withGraph { graph in
             let context = AnyRuleContext(
@@ -242,7 +324,7 @@ final class StackLayoutStructureTests: XCTestCase {
             )
             XCTAssertTrue(
                 (reflectedField(fresh.children[0], named: "geometry") as! ViewGeometry)
-                    .isInvalid
+                    .origin.x.isNaN
             )
 
             let proposal = ProposedViewSize(width: 100, height: 50)
@@ -262,7 +344,7 @@ final class StackLayoutStructureTests: XCTestCase {
             )
             XCTAssertFalse(
                 (reflectedField(resolved.children[0], named: "geometry") as! ViewGeometry)
-                    .isInvalid
+                    .origin.x.isNaN
             )
 
 #if !DEBUG
@@ -270,6 +352,170 @@ final class StackLayoutStructureTests: XCTestCase {
             XCTAssertEqual(MemoryLayout<_StackLayoutCache>.stride, 112)
             XCTAssertEqual(MemoryLayout<_StackLayoutCache>.alignment, 8)
 #endif
+        }
+    }
+
+    func testStackAlignmentEdgesMatchNaNAndInfinityGeometrySemantics() {
+        withGraph { graph in
+            let subviews = makeStackSubviews(
+                graph: graph,
+                computer: LayoutComputer(
+                    StackEdgeLayoutEngine(
+                        size: CGSize(width: 20, height: 10),
+                        explicitValue: nil
+                    )
+                )
+            )
+            let proposal = ProposedViewSize(width: 40, height: 20)
+
+            let hNaN = resolveStack(
+                HStackLayout(
+                    alignment: VerticalAlignment(StackNaNAlignmentID.self),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(hNaN.geometry.origin, CGPoint(x: 0, y: -CGFloat.infinity))
+            XCTAssertEqual(hNaN.size, CGSize(width: 20, height: CGFloat.infinity))
+
+            let hPositive = resolveStack(
+                HStackLayout(
+                    alignment: VerticalAlignment(
+                        StackPositiveInfinityAlignmentID.self
+                    ),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(
+                hPositive.geometry.origin,
+                CGPoint(x: 0, y: -CGFloat.infinity)
+            )
+            XCTAssertEqual(
+                hPositive.size,
+                CGSize(width: 20, height: CGFloat.infinity)
+            )
+
+            let hNegative = resolveStack(
+                HStackLayout(
+                    alignment: VerticalAlignment(
+                        StackNegativeInfinityAlignmentID.self
+                    ),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(
+                hNegative.geometry.origin,
+                CGPoint(x: 0, y: CGFloat.infinity)
+            )
+            XCTAssertEqual(hNegative.size, CGSize(width: 20, height: 0))
+
+            let vNaN = resolveStack(
+                VStackLayout(
+                    alignment: HorizontalAlignment(StackNaNAlignmentID.self),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(vNaN.geometry.origin, CGPoint(x: -CGFloat.infinity, y: 0))
+            XCTAssertEqual(vNaN.size, CGSize(width: CGFloat.infinity, height: 10))
+
+            let vPositive = resolveStack(
+                VStackLayout(
+                    alignment: HorizontalAlignment(
+                        StackPositiveInfinityAlignmentID.self
+                    ),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(
+                vPositive.geometry.origin,
+                CGPoint(x: -CGFloat.infinity, y: 0)
+            )
+            XCTAssertEqual(
+                vPositive.size,
+                CGSize(width: CGFloat.infinity, height: 10)
+            )
+
+            let vNegative = resolveStack(
+                VStackLayout(
+                    alignment: HorizontalAlignment(
+                        StackNegativeInfinityAlignmentID.self
+                    ),
+                    spacing: 0
+                ),
+                proposal: proposal,
+                subviews: subviews
+            )
+            XCTAssertEqual(
+                vNegative.geometry.origin,
+                CGPoint(x: CGFloat.infinity, y: 0)
+            )
+            XCTAssertEqual(vNegative.size, CGSize(width: 0, height: 10))
+        }
+    }
+
+    func testStackCommitsAndPropagatesExplicitAlignmentForNullGeometry() {
+        withGraph { graph in
+            let subviews = makeStackSubviews(
+                graph: graph,
+                computer: LayoutComputer(
+                    StackEdgeLayoutEngine(
+                        size: CGSize(width: 20, height: 10),
+                        explicitValue: 3
+                    )
+                )
+            )
+            let layout = HStackLayout(
+                alignment: VerticalAlignment(
+                    StackNegativeInfinityAlignmentID.self
+                ),
+                spacing: 0
+            )
+            let proposal = ProposedViewSize(width: 40, height: 20)
+            var cache = layout.makeCache(subviews: subviews)
+            _ = layout.sizeThatFits(
+                proposal: proposal,
+                subviews: subviews,
+                cache: &cache
+            )
+
+            let explicit = layout.explicitAlignment(
+                of: HorizontalAlignment(StackExplicitAlignmentID.self),
+                in: CGRect(x: 0, y: 0, width: 40, height: 20),
+                proposal: proposal,
+                subviews: subviews,
+                cache: &cache
+            )
+            XCTAssertEqual(explicit, 3)
+
+            var placement = PlacementData(
+                count: 1,
+                bounds: CGRect(x: 0, y: 0, width: 40, height: 20),
+                layoutDirection: .leftToRight
+            )
+            withUnsafeMutablePointer(to: &placement) { pointer in
+                ThreadLayoutData.withPlacementData(pointer) {
+                    layout.placeSubviews(
+                        in: CGRect(x: 0, y: 0, width: 40, height: 20),
+                        proposal: proposal,
+                        subviews: subviews,
+                        cache: &cache
+                    )
+                }
+            }
+            XCTAssertEqual(placement.placedCount, 1)
+            XCTAssertEqual(
+                placement.geometries[0].origin,
+                CGPoint(x: 0, y: CGFloat.infinity)
+            )
         }
     }
 
@@ -336,6 +582,42 @@ final class StackLayoutStructureTests: XCTestCase {
             reflecting: reflectedField(stack, named: "children")!
         ).children.map(\.value)
         return (header, children)
+    }
+
+    private func makeStackSubviews(
+        graph: _AGGraph,
+        computer: LayoutComputer
+    ) -> LayoutSubviews {
+        let owner = graph.makeInput(value: ())
+        return LayoutSubviews(
+            context: AnyRuleContext(attribute: owner.identifier),
+            attributes: [
+                LayoutProxyAttributes(
+                    layoutComputer: graph.makeInput(value: computer)
+                ),
+            ],
+            layoutDirection: .leftToRight
+        )
+    }
+
+    private func resolveStack<L: Layout>(
+        _ layout: L,
+        proposal: ProposedViewSize,
+        subviews: L.Subviews
+    ) -> (size: CGSize, geometry: ViewGeometry)
+    where L.Cache == _StackLayoutCache {
+        var cache = layout.makeCache(subviews: subviews)
+        let size = layout.sizeThatFits(
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+        let stack = reflectedStack(cache)
+        let geometry = reflectedField(
+            stack.children[0],
+            named: "geometry"
+        ) as! ViewGeometry
+        return (size, geometry)
     }
 
     private func reflectedField(_ value: Any, named name: String) -> Any? {

@@ -439,7 +439,7 @@ final class PreferenceBridgeTests: XCTestCase {
         }
     }
 
-    func testPreferenceBridgeUpdateHostValuesInvalidatesHostKeys() {
+    func testPreferenceBridgeUpdateHostValuesDoesNotSynthesizeEmptyTransaction() {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
             rootViewType: EmptyView.self,
@@ -474,7 +474,7 @@ final class PreferenceBridgeTests: XCTestCase {
             bridge.updateHostValues(bridgeHostKeys)
         }
 
-        XCTAssertTrue(viewGraph.hasPendingTransactions)
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
     }
 
     func testPreferenceBridgeInvalidateClearsLocalBridgeState() {

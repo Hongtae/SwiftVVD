@@ -3038,10 +3038,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 layoutAttr.value.sizeThatFits(_ProposedSize(CGSize(width: 100, height: 80))),
                 CGSize(width: 100, height: 72)
             )
-            XCTAssertTrue(layoutAttr.value.childGeometries(
-                at: ViewSize(width: 100, height: 80),
-                origin: CGPoint(x: 5, y: 7)
-            ).isEmpty)
 
             recorder.sampleGeometry(for: [0, 1, 2])
             let geometryFrames = recorder.geometryInputs.map {

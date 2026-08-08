@@ -782,7 +782,7 @@ private struct DynamicViewPhase: Rule, AsyncAttribute {
         guard let item = containerInfo.value.item(for: uniqueId) else {
             return value
         }
-        value.rawValue &+= item.resetSeed &<< 1
+        value.resetSeed &+= item.resetSeed
         if item.phase == .didDisappear {
             value.isBeingRemoved = true
         }
@@ -1310,8 +1310,8 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
             childInputs.copyCaches()
             containerInputs(&childInputs)
 
-            let fallbackPosition = inputs.position
-            let fallbackSize = inputs.size
+            let inheritedPosition = inputs.position
+            let inheritedSize = inputs.size
 
             let geometry: Attribute<ViewGeometry>?
             if let childGeometries = _childGeometries.attribute {
@@ -1329,8 +1329,8 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
                 geometry = nil
             }
 
-            let childPosition = geometry?.origin() ?? fallbackPosition
-            let childSize = geometry?.size() ?? fallbackSize
+            let childPosition = geometry?.origin() ?? inheritedPosition
+            let childSize = geometry?.size() ?? inheritedSize
 
             childInputs.position = childPosition
             childInputs.size = childSize
@@ -2444,7 +2444,7 @@ extension Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Self.Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        return nil
+        ThreadLayoutData.defaultAlignment(guide.key)
     }
 
     public func explicitAlignment(of guide: VerticalAlignment,
@@ -2452,20 +2452,117 @@ extension Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Self.Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        return nil
+        ThreadLayoutData.defaultAlignment(guide.key)
     }
 
     public func spacing(subviews: Self.Subviews,
                         cache: inout Self.Cache) -> ViewSpacing {
-        subviews.reduce(ViewSpacing()) { spacing, subview in
-            spacing.union(subview.spacing, edges: .all)
+        guard !subviews.isEmpty else {
+            return .zero
         }
+
+        var spacing = Spacing()
+        for subview in subviews {
+            spacing.incorporate(.all, of: subview.proxy.spacing())
+        }
+        return ViewSpacing(
+            spacing,
+            layoutDirection: subviews.layoutDirection
+        )
     }
 }
 
 extension Layout where Self.Cache == () {
     public func makeCache(subviews: Self.Subviews) -> Self.Cache {
         ()
+    }
+}
+
+protocol DerivedLayout: Layout where Cache == Base.Cache {
+    associatedtype Base: Layout
+
+    var base: Base { get }
+}
+
+extension DerivedLayout {
+    public static var layoutProperties: LayoutProperties {
+        Base.layoutProperties
+    }
+
+    public func makeCache(subviews: Self.Subviews) -> Self.Cache {
+        base.makeCache(subviews: subviews)
+    }
+
+    public func updateCache(
+        _ cache: inout Self.Cache,
+        subviews: Self.Subviews
+    ) {
+        base.updateCache(&cache, subviews: subviews)
+    }
+
+    public func spacing(
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> ViewSpacing {
+        base.spacing(subviews: subviews, cache: &cache)
+    }
+
+    public func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGSize {
+        base.sizeThatFits(
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
+
+    public func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) {
+        base.placeSubviews(
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
+
+    public func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGFloat? {
+        base.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
+    }
+
+    public func explicitAlignment(
+        of guide: VerticalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGFloat? {
+        base.explicitAlignment(
+            of: guide,
+            in: bounds,
+            proposal: proposal,
+            subviews: subviews,
+            cache: &cache
+        )
     }
 }
 

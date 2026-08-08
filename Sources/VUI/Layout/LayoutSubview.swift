@@ -202,14 +202,15 @@ struct PlacementData {
         precondition(index >= 0 && index < geometries.count)
 
         let old = geometries[index]
-        if old.isInvalid && !geometry.isInvalid {
+        if old.origin.x.isNaN {
             placedCount += 1
         }
 
         var stored = geometry
         if layoutDirection != self.layoutDirection {
-            let maxX = bounds.maxX
-            stored.origin.x = maxX - (geometry.origin.x + geometry.dimensions.width)
+            stored.origin.x = bounds.minX + bounds.maxX - (
+                geometry.origin.x + geometry.dimensions.width
+            )
         }
         geometries[index] = stored
     }
@@ -217,7 +218,7 @@ struct PlacementData {
     mutating func resolvedGeometries(children: [LayoutProxyAttributes],
                                      proposal: ProposedViewSize) -> [ViewGeometry] {
         guard placedCount != geometries.count else { return geometries }
-        for index in geometries.indices where geometries[index].isInvalid {
+        for index in geometries.indices where geometries[index].origin.x.isNaN {
             let computer = children[index].layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
             let dimensions = computer.dimensions(in: _ProposedSize(proposal))
             let origin = CGPoint(
@@ -225,8 +226,8 @@ struct PlacementData {
                 y: bounds.midY - dimensions.height * 0.5
             )
             geometries[index] = ViewGeometry(origin: origin, dimensions: dimensions)
+            placedCount += 1
         }
-        placedCount = geometries.count
         return geometries
     }
 }
@@ -249,31 +250,74 @@ extension ViewGeometry {
         )
     }
 
-    var isInvalid: Bool {
-        !origin.x.isFinite || !origin.y.isFinite
+}
+
+protocol DefaultAlignmentFunction {
+    static func defaultAlignment(
+        _ key: AlignmentKey,
+        size: ViewSize,
+        data: UnsafeMutableRawPointer
+    ) -> CGFloat?
+}
+
+struct AlignmentData {
+    var isAlignmentData = true
+    var function: any DefaultAlignmentFunction.Type
+    var data: UnsafeMutableRawPointer
+    var size: ViewSize
+
+    func defaultAlignment(_ key: AlignmentKey) -> CGFloat? {
+        function.defaultAlignment(key, size: size, data: data)
     }
 }
 
-/// Locally scopes the placement buffer installed for one layout pass.
+/// Locally scopes the tagged data installed for one layout operation.
 ///
-/// The thread-local slot prevents concurrent passes from sharing a pointer,
-/// while `setGeometry` centralizes bounds, lock, and direction checks.
+/// Placement and default-alignment evaluation share one thread-local pointer.
+/// Nesting restores the previous operation so alignment evaluation can place
+/// children while it derives the propagated guide value.
 enum ThreadLayoutData {
-    private static let placementData = _AGThreadLocal<UnsafeMutablePointer<PlacementData>?>(nil)
+    private static let data = _AGThreadLocal<UnsafeMutableRawPointer?>(nil)
 
     static func withPlacementData<R>(
         _ pointer: UnsafeMutablePointer<PlacementData>,
         _ body: () -> R
     ) -> R {
-        placementData.withValue(pointer, operation: body)
+        data.withValue(UnsafeMutableRawPointer(pointer), operation: body)
+    }
+
+    static func withAlignmentData<R>(
+        _ pointer: UnsafeMutablePointer<AlignmentData>,
+        _ body: () -> R
+    ) -> R {
+        data.withValue(UnsafeMutableRawPointer(pointer), operation: body)
     }
 
     static func setGeometry(_ geometry: ViewGeometry,
                             at index: Int,
                             layoutDirection: LayoutDirection) -> Bool {
-        guard let pointer = placementData.value else { return false }
-        pointer.pointee.setGeometry(geometry, at: index, layoutDirection: layoutDirection)
+        guard let data = data.value,
+              !data.load(as: Bool.self) else {
+            return false
+        }
+        let pointer = data.assumingMemoryBound(to: PlacementData.self)
+        pointer.pointee.setGeometry(
+            geometry,
+            at: index,
+            layoutDirection: layoutDirection
+        )
         return true
+    }
+
+    static func defaultAlignment(_ key: AlignmentKey) -> CGFloat? {
+        guard let data = data.value,
+              data.load(as: Bool.self) else {
+            return nil
+        }
+        return data
+            .assumingMemoryBound(to: AlignmentData.self)
+            .pointee
+            .defaultAlignment(key)
     }
 }
 
@@ -340,10 +384,14 @@ public struct LayoutSubview: Equatable {
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, dimensions: ViewDimensions) {
         let origin = CGPoint(
-            x: position.x - dimensions.width * anchor.x,
-            y: position.y - dimensions.height * anchor.y
+            x: anchor.x == 0
+                ? position.x
+                : position.x - dimensions.width * anchor.x,
+            y: anchor.y == 0
+                ? position.y
+                : position.y - dimensions.height * anchor.y
         )
-        guard origin.x.isFinite && origin.y.isFinite else {
+        guard !origin.x.isNaN && !origin.y.isNaN else {
             fatalError("view origin is invalid: \(position), \(anchor), \(CGSize(width: dimensions.width, height: dimensions.height))")
         }
         place(in: ViewGeometry(origin: origin, dimensions: dimensions), layoutDirection: .leftToRight)

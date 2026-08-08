@@ -316,15 +316,17 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let resized = sample()
 
         XCTAssertEqual(constructed, .zero)
+        // Default explicit-alignment propagation owns a zero-origin placement
+        // pass. Translated child geometry is resolved by the ordinary pass.
         XCTAssertEqual(
             cold - constructed,
             LayoutMeasurementCounts(
                 makeCache: 1,
                 updateCache: 0,
                 sizeThatFits: 1,
-                placeSubviews: 1,
+                placeSubviews: 2,
                 leafSizeThatFits: 4,
-                leafPlaceSubviews: 2
+                leafPlaceSubviews: 3
             )
         )
         XCTAssertEqual(warm - cold, .zero)
@@ -334,7 +336,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 makeCache: 0,
                 updateCache: 1,
                 sizeThatFits: 1,
-                placeSubviews: 1,
+                placeSubviews: 2,
                 leafSizeThatFits: 0,
                 leafPlaceSubviews: 0
             )
@@ -346,7 +348,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 makeCache: 0,
                 updateCache: 0,
                 sizeThatFits: 0,
-                placeSubviews: 1,
+                placeSubviews: 2,
                 leafSizeThatFits: 0,
                 leafPlaceSubviews: 2
             )

@@ -787,10 +787,9 @@ class ViewGraph: ViewGraphHost {
             return
         }
 
-        let delta = oldParentPhase.rawValue ^ newParentPhase.rawValue
-        if delta >= 0x2 {
+        if oldParentPhase.resetSeed != newParentPhase.resetSeed {
             incrementPhase()
-        } else if (delta & 0x1) != 0 {
+        } else if oldParentPhase.isBeingRemoved != newParentPhase.isBeingRemoved {
             data.withCurrent {
                 var phase = data._phase.value
                 phase.isBeingRemoved = newParentPhase.isBeingRemoved

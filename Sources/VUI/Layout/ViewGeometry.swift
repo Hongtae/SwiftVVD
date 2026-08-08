@@ -104,7 +104,10 @@ extension ViewSize: Animatable {
 
     var animatableData: AnimatableData {
         get { value.animatableData }
-        set { value.animatableData = newValue }
+        set {
+            value.animatableData = newValue
+            proposal = _ProposedSize(value)
+        }
     }
 }
 

@@ -385,7 +385,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertEqual(recorder.events, [])
     }
 
-    func testAnimatableAttributeViewSizeAnimatesPayloadButKeepsTargetProposal() {
+    func testAnimatableAttributeViewSizeWritesAnimatedSizeIntoProposal() {
         let initialProposal = _ProposedSize(width: 80, height: 34)
         let targetProposal = _ProposedSize(width: 160, height: 34)
         let harness = GenericAnimatableAttributeHarness(
@@ -401,7 +401,10 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         let activationSize = harness.currentValue()
         XCTAssertEqual(activationSize.width, 80, accuracy: 0.000_001)
         XCTAssertEqual(activationSize.height, 34, accuracy: 0.000_001)
-        XCTAssertEqual(activationSize.proposal, targetProposal)
+        XCTAssertEqual(
+            activationSize.proposal,
+            _ProposedSize(activationSize.value)
+        )
 
         harness.setTime(0.5)
         _ = harness.currentValue()
@@ -410,7 +413,7 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertGreaterThan(midSize.width, 80)
         XCTAssertLessThan(midSize.width, 160)
         XCTAssertEqual(midSize.height, 34, accuracy: 0.000_001)
-        XCTAssertEqual(midSize.proposal, targetProposal)
+        XCTAssertEqual(midSize.proposal, _ProposedSize(midSize.value))
 
         harness.setTime(2.0)
         let finalSize = harness.currentValue()
@@ -697,19 +700,19 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         )
     }
 
-    func testAnimatableFrameAttributeAnimatesSizePayloadButKeepsTargetProposal() {
-        assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
+    func testAnimatableFrameAttributeWritesAnimatedSizeIntoProposal() {
+        assertFrameAttributeWritesAnimatedSizeIntoProposal(
             supportsVFD: false
         )
     }
 
-    func testAnimatableFrameAttributeVFDAnimatesSizePayloadButKeepsTargetProposal() {
-        assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
+    func testAnimatableFrameAttributeVFDWritesAnimatedSizeIntoProposal() {
+        assertFrameAttributeWritesAnimatedSizeIntoProposal(
             supportsVFD: true
         )
     }
 
-    private func assertFrameAttributeAnimatesSizePayloadButKeepsTargetProposal(
+    private func assertFrameAttributeWritesAnimatedSizeIntoProposal(
         supportsVFD: Bool,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -732,7 +735,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         let activationSize = harness.currentSize()
         XCTAssertEqual(activationSize.width, 80, accuracy: 0.000_001, file: file, line: line)
         XCTAssertEqual(activationSize.height, 34, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(activationSize.proposal, targetProposal, file: file, line: line)
+        XCTAssertEqual(
+            activationSize.proposal,
+            _ProposedSize(activationSize.value),
+            file: file,
+            line: line
+        )
 
         harness.setTime(0.5)
         _ = harness.currentFrame()
@@ -741,7 +749,12 @@ final class AnimatableAGGraphSmokeTests: XCTestCase {
         XCTAssertGreaterThan(midSize.width, 80, file: file, line: line)
         XCTAssertLessThan(midSize.width, 160, file: file, line: line)
         XCTAssertEqual(midSize.height, 34, accuracy: 0.000_001, file: file, line: line)
-        XCTAssertEqual(midSize.proposal, targetProposal, file: file, line: line)
+        XCTAssertEqual(
+            midSize.proposal,
+            _ProposedSize(midSize.value),
+            file: file,
+            line: line
+        )
 
         harness.setTime(2.0)
         let finalSize = harness.currentSize()

@@ -256,8 +256,8 @@ final class WindowContentScaleTests: XCTestCase {
             3
         )
         XCTAssertEqual(
-            child.viewGraph.parentPhase?.rawValue,
-            sourcePhase.rawValue
+            child.viewGraph.parentPhase?.value,
+            sourcePhase.value
         )
 
         root.contentScaleFactor = 1

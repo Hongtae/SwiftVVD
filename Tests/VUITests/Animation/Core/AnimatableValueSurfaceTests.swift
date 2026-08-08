@@ -123,7 +123,7 @@ final class AnimatableValueSurfaceTests: XCTestCase {
         XCTAssertEqual(root.reference.scalar, 11.0)
     }
 
-    func testViewSizeAnimatableDataPreservesProposalMetadata() {
+    func testViewSizeAnimatableDataWritesResolvedSizeBackToProposal() {
         let proposal = _ProposedSize(width: 160, height: 34)
         var size = ViewSize(width: 80, height: 20, proposal: proposal)
 
@@ -131,7 +131,10 @@ final class AnimatableValueSurfaceTests: XCTestCase {
 
         XCTAssertEqual(size.width, 120)
         XCTAssertEqual(size.height, 30)
-        XCTAssertEqual(size.proposal, proposal)
+        XCTAssertEqual(
+            size.proposal,
+            _ProposedSize(width: 120, height: 30)
+        )
     }
 
     func testAnimatableValuesPackOperationsMatchElementWiseSurface() {

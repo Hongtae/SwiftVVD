@@ -5466,7 +5466,7 @@ struct LazyViewPhase: Rule, AsyncAttribute {
         phase.merge(_phase2.value)
 
         let state = _state.value
-        phase.rawValue &+= state.resetDelta &<< 1
+        phase.resetSeed &+= state.resetDelta
         if state.phase == .didDisappear {
             phase.isBeingRemoved = true
         }

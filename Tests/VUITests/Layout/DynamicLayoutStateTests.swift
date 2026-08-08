@@ -419,8 +419,9 @@ final class DynamicLayoutStateTests: XCTestCase {
 
     func testDynamicContainerGeneralReuseSkipsTransitionOwnedStorage() {
         // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
-        let graph = _AGGraph()
-        _AGGraph.withCurrent(graph) {
+        let host = GraphHost()
+        host.data.withCurrent {
+            let graph = host.data.graph
             let source = graph.makeInput(value: [
                 reusableItem(
                     id: 1,

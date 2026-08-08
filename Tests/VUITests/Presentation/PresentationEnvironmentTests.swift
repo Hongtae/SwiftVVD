@@ -139,12 +139,12 @@ final class PresentationEnvironmentTests: XCTestCase {
             "nested-updated"
         )
         XCTAssertEqual(
-            root.viewGraph.parentPhase?.rawValue,
-            sourcePhase.rawValue
+            root.viewGraph.parentPhase?.value,
+            sourcePhase.value
         )
         XCTAssertEqual(
-            child.viewGraph.parentPhase?.rawValue,
-            sourcePhase.rawValue
+            child.viewGraph.parentPhase?.value,
+            sourcePhase.value
         )
     }
 

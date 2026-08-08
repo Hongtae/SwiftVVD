@@ -2,6 +2,47 @@ import XCTest
 @testable import VUI
 
 final class GraphInputsMergeTests: XCTestCase {
+    func testGraphPhaseUsesObservedValueStorageAndBitRoles() {
+        var phase = _GraphInputs.Phase()
+
+        XCTAssertEqual(MemoryLayout<_GraphInputs.Phase>.size, 4)
+        XCTAssertEqual(phase.value, 0)
+        XCTAssertEqual(phase.resetSeed, 0)
+        XCTAssertTrue(phase.isInserted)
+        XCTAssertFalse(phase.isBeingRemoved)
+
+        phase.resetSeed = 7
+        XCTAssertEqual(phase.value, 14)
+
+        phase.isBeingRemoved = true
+        XCTAssertEqual(phase.value, 15)
+        XCTAssertFalse(phase.isInserted)
+
+        phase.isBeingRemoved = false
+        XCTAssertEqual(phase.value, 14)
+        XCTAssertTrue(phase.isInserted)
+
+        XCTAssertEqual(
+            _GraphInputs.Phase.invalid.value,
+            UInt32(bitPattern: Int32(-16))
+        )
+    }
+
+    func testGraphPhaseMergeAddsResetSeedAndPreservesRemovalState() {
+        var phase = _GraphInputs.Phase()
+        phase.resetSeed = 3
+        phase.isBeingRemoved = true
+
+        var other = _GraphInputs.Phase()
+        other.resetSeed = 2
+
+        phase.merge(other)
+
+        XCTAssertEqual(phase.resetSeed, 5)
+        XCTAssertTrue(phase.isBeingRemoved)
+        XCTAssertEqual(phase.value, 11)
+    }
+
     func testUsingGraphicsRendererUsesSharedGraphInputChannel() {
         assertBoolViewInput(UsingGraphicsRenderer.self)
 

@@ -201,8 +201,9 @@ final class SVGTests: XCTestCase {
         XCTAssertEqual(provider.capInsets, EdgeInsets())
         XCTAssertEqual(provider.resizingMode, .stretch)
 
-        let graph = _AGGraph()
-        try _AGGraph.withCurrent(graph) {
+        let host = GraphHost()
+        let graph = host.data.graph
+        try host.data.withCurrent {
             var inputs = makeViewInputs(graph: graph)
             inputs.requestsLayoutComputer = true
 
@@ -516,7 +517,15 @@ final class SVGTests: XCTestCase {
             return record.bounds
         }
         for effect in displayList.effects {
-            bounds.append(contentsOf: displayBounds(of: kind, in: effect.contents))
+            bounds.append(contentsOf: displayBounds(
+                of: kind,
+                in: effect.contents
+            ).map {
+                $0.offsetBy(
+                    dx: effect.frame.minX,
+                    dy: effect.frame.minY
+                )
+            })
         }
         return bounds
     }

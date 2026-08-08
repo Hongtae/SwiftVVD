@@ -40,7 +40,7 @@ public struct _StackLayoutCache {
     fileprivate var stack: StackLayout
 }
 
-enum _StackLayoutImplementation {
+enum StackLayoutOperations {
     private struct ChildIndexProjection: MutableCollection, RandomAccessCollection {
         typealias Index = Int
         typealias Element = Int
@@ -173,7 +173,7 @@ enum _StackLayoutImplementation {
         let axis = cache.stack.header.majorAxis
         let subviews = cache.stack.header.proxies
         var spacing = ViewSpacing(
-            Spacing(),
+            subviews.isEmpty ? .zero : Spacing(),
             layoutDirection: subviews.layoutDirection
         )
         for index in subviews.indices {
@@ -213,9 +213,6 @@ enum _StackLayoutImplementation {
 
         for index in subviews.indices {
             var geometry = cache.stack.children[index].geometry
-            guard !geometry.isInvalid else {
-                continue
-            }
             geometry.origin.x += bounds.minX
             geometry.origin.y += bounds.minY
             subviews[index].place(in: geometry, layoutDirection: .leftToRight)
@@ -252,10 +249,6 @@ enum _StackLayoutImplementation {
 
         for index in subviews.indices {
             let geometry = cache.stack.children[index].geometry
-            guard !geometry.isInvalid else {
-                explicitValues.append(nil)
-                continue
-            }
             let dimensions = geometry.dimensions
             let childOffset = guide.axis == .horizontal
                 ? geometry.origin.x
@@ -516,20 +509,16 @@ enum _StackLayoutImplementation {
         let fallbackOverflow = nonNegative(-proposedCross)
         var trailingOverflow = fallbackOverflow
 
-        if !child.geometry.isInvalid {
-            let start = cross(child.geometry.origin, axis: axis)
-            let end = start + cross(
-                child.geometry.dimensions,
-                axis: axis
-            )
+        let start = cross(child.geometry.origin, axis: axis)
+        let end = start + cross(
+            child.geometry.dimensions,
+            axis: axis
+        )
 
-            // Select the ordered endpoints explicitly so unordered values keep
-            // the same fallback behavior as the geometry validity path.
-            let lower = end < start ? end : start
-            let upper = start <= end ? end : start
-            if lower <= upper {
-                trailingOverflow = nonNegative(upper - proposedCross)
-            }
+        let lower = end < start ? end : start
+        let upper = start <= end ? end : start
+        if lower <= upper {
+            trailingOverflow = nonNegative(upper - proposedCross)
         }
         return proposedCross - trailingOverflow
     }
@@ -696,8 +685,10 @@ enum _StackLayoutImplementation {
         cache: inout _StackLayoutCache
     ) {
         let dimensions = subviews[index].dimensions(in: proposal)
+        let axis = cache.stack.header.majorAxis
+        let guide = alignmentGuide(dimensions: dimensions, cache: cache)
         cache.stack.children[index].geometry = ViewGeometry(
-            origin: .zero,
+            origin: origin(axis: axis, major: 0, cross: -guide),
             dimensions: dimensions
         )
     }
@@ -710,22 +701,25 @@ enum _StackLayoutImplementation {
         var majorOffset: CGFloat = 0
         for index in cache.stack.children.indices {
             var geometry = cache.stack.children[index].geometry
-            guard !geometry.isInvalid else {
-                continue
-            }
             let dimensions = geometry.dimensions
-            majorOffset += cache.stack.children[index].distanceToPrevious
-            let minorOffset = -crossRange.min - alignmentGuide(
-                dimensions: dimensions,
-                cache: cache
-            )
-            geometry.origin = origin(
-                axis: axis,
-                major: majorOffset,
-                cross: minorOffset
-            )
+            let childMajor = majorOffset +
+                cache.stack.children[index].distanceToPrevious
+            if !childMajor.isNaN {
+                switch axis {
+                case .horizontal: geometry.origin.x = childMajor
+                case .vertical: geometry.origin.y = childMajor
+                }
+            }
+            let childCross = cross(geometry.origin, axis: axis) -
+                crossRange.min
+            if !childCross.isNaN {
+                switch axis {
+                case .horizontal: geometry.origin.y = childCross
+                case .vertical: geometry.origin.x = childCross
+                }
+            }
             cache.stack.children[index].geometry = geometry
-            majorOffset += major(dimensions, axis: axis)
+            majorOffset = childMajor + major(dimensions, axis: axis)
         }
         cache.stack.header.stackSize = size(
             axis: axis,
@@ -745,16 +739,26 @@ enum _StackLayoutImplementation {
         var minValue: CGFloat = 0
         var maxValue: CGFloat = 0
         for child in cache.stack.children {
-            guard !child.geometry.isInvalid else {
+            let dimensions = child.geometry.dimensions
+            let frame = CGRect(
+                origin: child.geometry.origin,
+                size: CGSize(
+                    width: dimensions.width,
+                    height: dimensions.height
+                )
+            )
+            guard !frame.isNull else {
                 continue
             }
-            let dimensions = child.geometry.dimensions
-            let guide = alignmentGuide(dimensions: dimensions, cache: cache)
+            let start = cross(child.geometry.origin, axis: axis)
             let crossLength = cross(dimensions, axis: axis)
-            let start = -guide
             let end = start + crossLength
-            minValue = Swift.min(minValue, start, end)
-            maxValue = Swift.max(maxValue, start, end)
+            let lower = end < start ? end : start
+            let upper = start <= end ? end : start
+            if lower <= upper {
+                minValue = Swift.min(minValue, lower)
+                maxValue = Swift.max(maxValue, upper)
+            }
         }
         return (minValue, maxValue)
     }
@@ -763,7 +767,8 @@ enum _StackLayoutImplementation {
         dimensions: ViewDimensions,
         cache: _StackLayoutCache
     ) -> CGFloat {
-        dimensions[cache.stack.header.minorAxisAlignment]
+        let guide = dimensions[cache.stack.header.minorAxisAlignment]
+        return guide.isNaN ? .infinity : guide
     }
 
     private static func proposalFor(axis: Axis,
@@ -875,7 +880,8 @@ enum _StackLayoutImplementation {
 }
 
 /// Marks stack layouts that dispatch variadic view construction through layout view generation.
-protocol HVStack: Layout, _VariadicView_UnaryViewRoot {
+protocol HVStack: Layout, _VariadicView_UnaryViewRoot
+where Cache == _StackLayoutCache {
     associatedtype MinorAxisAlignment: AlignmentGuide
 
     var alignment: MinorAxisAlignment { get }
@@ -893,7 +899,95 @@ extension HVStack {
     public static var layoutProperties: LayoutProperties {
         var properties = LayoutProperties()
         properties.stackOrientation = Self.majorAxis
+        properties.isIdentityUnaryLayout = true
         return properties
+    }
+
+    public func makeCache(subviews: Self.Subviews) -> Self.Cache {
+        StackLayoutOperations.makeCache(
+            axis: Self.majorAxis,
+            uniformSpacing: spacing,
+            minorAxisAlignment: alignment.key,
+            subviews: subviews,
+            resizeChildrenWithTrailingOverflow:
+                Self.resizeChildrenWithTrailingOverflow
+        )
+    }
+
+    public func updateCache(
+        _ cache: inout Self.Cache,
+        subviews: Self.Subviews
+    ) {
+        StackLayoutOperations.updateCache(
+            &cache,
+            axis: Self.majorAxis,
+            uniformSpacing: spacing,
+            minorAxisAlignment: alignment.key,
+            subviews: subviews,
+            resizeChildrenWithTrailingOverflow:
+                Self.resizeChildrenWithTrailingOverflow
+        )
+    }
+
+    public func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGSize {
+        StackLayoutOperations.sizeThatFits(
+            proposal: proposal,
+            cache: &cache
+        )
+    }
+
+    public func spacing(
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> ViewSpacing {
+        StackLayoutOperations.spacing(cache: cache)
+    }
+
+    public func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) {
+        StackLayoutOperations.placeSubviews(
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
+    }
+
+    public func explicitAlignment(
+        of guide: HorizontalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGFloat? {
+        StackLayoutOperations.explicitAlignment(
+            guide: guide.key,
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
+    }
+
+    public func explicitAlignment(
+        of guide: VerticalAlignment,
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Self.Subviews,
+        cache: inout Self.Cache
+    ) -> CGFloat? {
+        StackLayoutOperations.explicitAlignment(
+            guide: guide.key,
+            in: bounds,
+            proposal: proposal,
+            cache: &cache
+        )
     }
 
     public static func _makeView(root: _GraphValue<Self>,
