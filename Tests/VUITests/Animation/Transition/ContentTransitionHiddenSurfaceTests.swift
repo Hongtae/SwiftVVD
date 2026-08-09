@@ -72,6 +72,82 @@ private struct CountingRendererEffect: _RendererEffect, MultiViewModifier {
     }
 }
 
+private struct ScrapeableRendererEffect: _RendererEffect, MultiViewModifier {
+    static var isScrapeable: Bool { true }
+
+    func effectValue(size: CGSize) -> DisplayList.Effect {
+        .geometryGroup
+    }
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _RendererEffectSupport.makeView(
+            effect: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        _RendererEffectSupport.makeViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
+private struct GeometryProxyReadingRendererEffect: _RendererEffect, MultiViewModifier {
+    nonisolated(unsafe) static var proxySizes: [CGSize] = []
+    nonisolated(unsafe) static var proxySeeds: [UInt32] = []
+    nonisolated(unsafe) static var sawThreadContext = false
+
+    func effectValue(size: CGSize) -> DisplayList.Effect {
+        guard let proxy = ThreadGeometryProxyData.current else {
+            return .geometryGroup
+        }
+        Self.sawThreadContext = true
+        Self.proxySizes.append(proxy.size)
+        Self.proxySeeds.append(proxy._seed)
+        return .geometryGroup
+    }
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        _RendererEffectSupport.makeView(
+            effect: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        _RendererEffectSupport.makeViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
 final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     func testContentTransitionHiddenOptionsAndMethodConstants() {
         XCTAssertEqual(ContentTransition.Options.addsDrawingGroup.rawValue, 1)
@@ -344,15 +420,24 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         try _AGGraph.withCurrent(graph) {
             let state = ContentTransition.State(transition: .opacity)
             let modifier = graph.makeInput(value: CountingRendererEffect(state: state))
-            let sourceList = graph.makeInput(value: makeDisplayList(debugItemCount: 1))
+            var source = makeDisplayList(debugItemCount: 1)
+            source.appendItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) {
+                _ in
+            }
+            let sourceList = graph.makeInput(value: source)
             let normalPosition = graph.makeInput(value: CGPoint.zero)
             let animatedPosition = graph.makeInput(value: CGPoint(x: 2, y: 3))
             var inputs = makeViewInputs(graph: graph, position: normalPosition)
+            inputs.needsGeometry = true
             var cachedEnvironment = inputs.base.cachedEnvironment.value
+            let pixelLength = cachedEnvironment.attribute(
+                id: .pixelLength,
+                \.animationPixelLength
+            )
             cachedEnvironment.animatedFrame = CachedEnvironment.AnimatedFrame(
                 position: normalPosition,
                 size: inputs.size,
-                pixelLength: graph.makeInput(value: CGFloat(1)),
+                pixelLength: pixelLength,
                 time: inputs.base.time,
                 transaction: inputs.base.transaction,
                 viewPhase: inputs.base.phase,
@@ -365,10 +450,12 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             )
             inputs.base.cachedEnvironment = MutableBox(cachedEnvironment)
 
+            var childContainerPosition: AGAttribute?
             let outputs = _RendererEffectSupport.makeView(
                 effect: _GraphValue(_attribute: modifier),
                 inputs: inputs
-            ) { _, _ in
+            ) { _, childInputs in
+                childContainerPosition = childInputs.containerPosition.identifier
                 var outputs = _ViewOutputs()
                 outputs.preferences.append(DisplayList.Key.self, node: sourceList.identifier)
                 return outputs
@@ -376,6 +463,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
 
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(childContainerPosition, animatedPosition.identifier)
             XCTAssertEqual(output.value.effects.count, 1)
             XCTAssertEqual(CountingRendererEffect.effectValueCalls, 1)
 
@@ -386,6 +474,139 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             animatedPosition.setValue(CGPoint(x: 40, y: 50))
             XCTAssertEqual(output.value.effects.count, 1)
             XCTAssertEqual(CountingRendererEffect.effectValueCalls, 2)
+        }
+    }
+
+    func testRendererEffectScrapeableOwnershipAndAttributeFlag() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let modifier = graph.makeInput(value: ScrapeableRendererEffect())
+            var source = DisplayList()
+            source.appendItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) {
+                _ in
+            }
+            let sourceList = graph.makeInput(value: source)
+            var inputs = makeViewInputs(graph: graph)
+            inputs.needsGeometry = true
+            inputs.scrapeableParentID = ScrapeableID(value: 41)
+            XCTAssertTrue(inputs.isScrapeable)
+
+            var childParentID = ScrapeableID.none
+            let outputs = _RendererEffectSupport.makeView(
+                effect: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, childInputs in
+                childParentID = childInputs.scrapeableParentID
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(
+                    DisplayList.Key.self,
+                    node: sourceList.identifier
+                )
+                return outputs
+            }
+
+            XCTAssertNotEqual(childParentID, .none)
+            XCTAssertNotEqual(childParentID, inputs.scrapeableParentID)
+            let outputID = try XCTUnwrap(
+                outputs.preferences.value(for: DisplayList.Key.self)
+            )
+            XCTAssertTrue(
+                Attribute<DisplayList>(outputID).flags.contains(.scrapeable)
+            )
+
+            inputs.isScrapeable = false
+            XCTAssertFalse(inputs.isScrapeable)
+            inputs.isScrapeable = true
+            XCTAssertTrue(inputs.isScrapeable)
+        }
+    }
+
+    func testRendererEffectScopesGeometryProxyUsingDisplayListVersionSeed() throws {
+        GeometryProxyReadingRendererEffect.proxySizes = []
+        GeometryProxyReadingRendererEffect.proxySeeds = []
+        GeometryProxyReadingRendererEffect.sawThreadContext = false
+
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let modifier = graph.makeInput(
+                value: GeometryProxyReadingRendererEffect()
+            )
+            var source = DisplayList()
+            source.appendItem(
+                bounds: CGRect(x: 0, y: 0, width: 10, height: 10)
+            ) { _ in }
+            let sourceList = graph.makeInput(value: source)
+            let size = graph.makeInput(
+                value: ViewSize(width: 18, height: 24)
+            )
+            var inputs = makeViewInputs(graph: graph)
+            inputs.size = size
+
+            let outputs = _RendererEffectSupport.makeView(
+                effect: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(
+                    DisplayList.Key.self,
+                    node: sourceList.identifier
+                )
+                return outputs
+            }
+
+            let outputID = try XCTUnwrap(
+                outputs.preferences.value(for: DisplayList.Key.self)
+            )
+            let output = Attribute<DisplayList>(outputID)
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertTrue(GeometryProxyReadingRendererEffect.sawThreadContext)
+            XCTAssertEqual(
+                GeometryProxyReadingRendererEffect.proxySizes,
+                [CGSize(width: 18, height: 24)]
+            )
+            XCTAssertGreaterThan(
+                try XCTUnwrap(GeometryProxyReadingRendererEffect.proxySeeds.first),
+                0
+            )
+            XCTAssertNil(ThreadGeometryProxyData.current)
+
+            size.setValue(ViewSize(width: 30, height: 40))
+            XCTAssertEqual(output.value.effects.count, 1)
+            XCTAssertEqual(
+                GeometryProxyReadingRendererEffect.proxySizes,
+                [
+                    CGSize(width: 18, height: 24),
+                    CGSize(width: 30, height: 40),
+                ]
+            )
+            XCTAssertGreaterThan(
+                GeometryProxyReadingRendererEffect.proxySeeds[1],
+                GeometryProxyReadingRendererEffect.proxySeeds[0]
+            )
+            XCTAssertNil(ThreadGeometryProxyData.current)
+        }
+    }
+
+    func testResetPositionTransformTracksPositionAndPreservesOtherItems() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            var transform = ViewTransform.identity
+            transform.appendTranslation(CGSize(width: 3, height: 5))
+            transform.appendPosition(CGPoint(x: 20, y: 30))
+            let transformAttribute = graph.makeInput(value: transform)
+            let position = graph.makeInput(value: CGPoint(x: 7, y: 11))
+            let reset = graph.makeRule(
+                ResetPositionTransform(
+                    _position: position,
+                    _transform: transformAttribute
+                )
+            )
+
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 13, y: 19))
+            XCTAssertEqual(reset.value.translations, [CGSize(width: 3, height: 5)])
+
+            position.setValue(CGPoint(x: 2, y: 4))
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 18, y: 26))
         }
     }
 
@@ -1491,6 +1712,8 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let position = position ?? graph.makeInput(value: CGPoint.zero)
+        var preferenceKeys = PreferenceKeys()
+        preferenceKeys.add(DisplayList.Key.self)
         let base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
             phase: graph.makeInput(value: _GraphInputs.Phase()),
@@ -1501,7 +1724,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
             base: base,
             customInputs: PropertyList(),
             preferences: PreferencesInputs(
-                keys: PreferenceKeys(),
+                keys: preferenceKeys,
                 hostKeys: graph.makeInput(value: PreferenceKeys())
             ),
             transform: graph.makeInput(value: ViewTransform()),

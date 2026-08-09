@@ -137,10 +137,10 @@ enum ScrollViewUtilities {
 
         var size = (contentComputer ?? LayoutComputer.defaultValue)
             .sizeThatFits(_ProposedSize(contentProposal))
-        if !axes.contains(.horizontal), let width = proposal.width {
+        if axes.contains(.horizontal), let width = proposal.width {
             size.width = width
         }
-        if !axes.contains(.vertical), let height = proposal.height {
+        if axes.contains(.vertical), let height = proposal.height {
             size.height = height
         }
         return size
@@ -323,9 +323,36 @@ class HostingScrollView {
         var resolvedOffset: CGPoint
     }
 
-    final class PlatformContainer {
+    final class PlatformGroupContainer {
+        weak var scrollView: HostingScrollView?
+        private(set) var bounds = CGRect.zero
+        private(set) var clipBounds = CGRect.zero
+
+        func updateViewport(
+            contentOffset: CGPoint,
+            containingSize: CGSize
+        ) {
+            let viewport = CGRect(
+                origin: contentOffset,
+                size: containingSize
+            )
+            bounds = viewport
+            clipBounds = viewport
+        }
+    }
+
+    final class PlatformContainer: PlatformGroupFactory {
+        let scrollView: HostingScrollView
         private(set) var safeAreaInsets = EdgeInsets()
         private(set) var layoutDirection = LayoutDirection.leftToRight
+
+        init(scrollView: HostingScrollView) {
+            self.scrollView = scrollView
+        }
+
+        var platformGroupContainer: AnyObject {
+            scrollView.host
+        }
 
         func updateSafeArea(
             _ safeAreaInsets: EdgeInsets,
@@ -333,6 +360,21 @@ class HostingScrollView {
         ) {
             self.safeAreaInsets = safeAreaInsets
             self.layoutDirection = layoutDirection
+        }
+
+        func renderPlatformGroup(
+            contents: DisplayList,
+            in context: GraphicsContext,
+            render: (DisplayList, GraphicsContext) -> Void
+        ) {
+            let group = scrollView.host
+            var context = context
+            context.translateBy(
+                x: -group.bounds.origin.x,
+                y: -group.bounds.origin.y
+            )
+            context.clip(to: Path(group.clipBounds))
+            render(contents, context)
         }
     }
 
@@ -342,6 +384,10 @@ class HostingScrollView {
     private let containerSize: WeakAttribute<CGSize>
     private var dragState: DragState?
     private var decelerationState: DecelerationState?
+
+    let host: PlatformGroupContainer
+    weak var parentContainer: PlatformContainer?
+    weak var responder: HostingScrollViewResponder?
 
     private(set) var pendingContext: HostingScrollViewUpdateContext?
     private(set) var configuration = ScrollViewConfiguration()
@@ -373,6 +419,8 @@ class HostingScrollView {
         self.layoutState = layoutState
         self.phaseState = phaseState
         self.containerSize = containerSize
+        self.host = PlatformGroupContainer()
+        self.host.scrollView = self
     }
 
     @discardableResult
@@ -418,6 +466,10 @@ class HostingScrollView {
             animationTarget = nil
             animationTargetConfig = nil
         }
+        host.updateViewport(
+            contentOffset: context.contentOffset,
+            containingSize: context.containingSize
+        )
         pendingContext = context
         retargetContentOffsetIfNeeded()
         return false
@@ -1227,6 +1279,222 @@ struct MakeHostingScrollView: StatefulRule {
             phaseState: _phaseState.asWeak(),
             containerSize: _containerSize.asWeak()
         ))
+    }
+}
+
+/// Retains the logical outer platform container for one attachment lifetime.
+struct UpdatedScrollViewContainer: StatefulRule {
+    typealias Value = HostingScrollView.PlatformContainer
+
+    var _scrollView: Attribute<HostingScrollView>
+    var container: HostingScrollView.PlatformContainer?
+
+    init(
+        _scrollView: Attribute<HostingScrollView>,
+        container: HostingScrollView.PlatformContainer? = nil
+    ) {
+        self._scrollView = _scrollView
+        self.container = container
+    }
+
+    mutating func updateValue() {
+        if container == nil {
+            let scrollView = _scrollView.value
+            let newContainer = HostingScrollView.PlatformContainer(
+                scrollView: scrollView
+            )
+            scrollView.parentContainer = newContainer
+            container = newContainer
+        }
+        guard let container else {
+            fatalError("UpdatedScrollViewContainer failed to create its container")
+        }
+        _AGGraph.setStatefulOutput(container)
+    }
+}
+
+/// Computes the framed platform-group output at the scroll attachment boundary.
+struct ScrollViewDisplayListFrame: Rule {
+    typealias Value = CGRect
+
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _position: Attribute<CGPoint>
+    var _containerPosition: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _safeAreaInsets: Attribute<EdgeInsets>
+    var _alignmentAdjustment: Attribute<CGSize>
+    var _rtlAdjustment: Attribute<CGSize>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _pixelLength: Attribute<CGFloat>
+
+    var value: CGRect {
+        let configuration = _configuration.value
+        let insets = _safeAreaInsets.value
+            .in(configuration.edgesToExpandDisplayListFrame)
+            .xFlipIfRightToLeft { _layoutDirection.value }
+            .adding(configuration.contentInsets)
+        let position = _position.value
+        let containerPosition = _containerPosition.value
+        let size = _size.value
+        var frame = CGRect(
+            x: position.x - containerPosition.x - insets.leading,
+            y: position.y - containerPosition.y - insets.top,
+            width: size.value.width + insets.leading + insets.trailing,
+            height: size.value.height + insets.top + insets.bottom
+        )
+        let rtlAdjustment = _rtlAdjustment.value
+        frame.origin.x -= rtlAdjustment.width
+        frame.origin.y -= rtlAdjustment.height
+        frame.size.width += rtlAdjustment.width
+        frame.size.height += rtlAdjustment.height
+        frame = frame.standardized
+
+        var rounded = ViewFrame(
+            origin: frame.origin,
+            size: ViewSize(frame.size)
+        )
+        rounded.round(toMultipleOf: _pixelLength.value)
+        return CGRect(origin: rounded.origin, size: rounded.size.value)
+    }
+}
+
+/// Replaces child display output with one stable logical platform-group item.
+struct ScrollViewDisplayList: Rule {
+    typealias Value = DisplayList
+
+    var identity: _DisplayList_Identity
+    var _scrollView: Attribute<HostingScrollView>
+    var _frame: Attribute<CGRect>
+    var _contentList: OptionalAttribute<DisplayList>
+
+    var value: DisplayList {
+        let contents = _contentList.attribute?.value ?? DisplayList()
+        guard let container = _scrollView.value.parentContainer else {
+            return contents
+        }
+
+        var item = DisplayList.Item(
+            effect: .platformGroup(container),
+            contents: contents,
+            frame: _frame.value,
+            identity: identity,
+            version: DisplayList.Version(forUpdate: ())
+        )
+        item.canonicalize(options: .defaultValue)
+
+        var result = DisplayList()
+        result.items.append(item)
+        result.recordInterpolationBounds(item.frame)
+        result.numericValue = contents.numericValue
+        return result
+    }
+}
+
+private struct TrivialContentResponder: ContentResponder {
+}
+
+/// Responder mounted at the same logical platform-group boundary as display output.
+final class HostingScrollViewResponder: MultiViewResponder {
+    fileprivate var helper = ContentResponderHelper<TrivialContentResponder>()
+    weak var representedView: HostingScrollView.PlatformGroupContainer?
+    weak var hostContainer: HostingScrollView.PlatformContainer?
+    let layoutResponder: DefaultLayoutViewResponder
+
+    init(layoutResponder: DefaultLayoutViewResponder) {
+        self.layoutResponder = layoutResponder
+        super.init()
+        layoutResponder.parent = self
+    }
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        helper.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options,
+            children: children
+        )
+    }
+
+    override func addContentPath(
+        to path: inout Path,
+        kind: ContentShapeKinds,
+        in coordinateSpace: CoordinateSpace,
+        observer: (any ContentPathObserver)?
+    ) {
+        helper.addContentPath(
+            to: &path,
+            kind: kind,
+            in: coordinateSpace,
+            observer: observer
+        )
+    }
+
+    override func addObserver(_ observer: any ContentPathObserver) {
+        helper.observers.add(observer: observer)
+    }
+
+    override var features: Features {
+        var features = super.features
+        features.insert(.platformViews)
+        return features
+    }
+}
+
+/// Retains one scroll responder and reconnects its geometry and child responders.
+struct ScrollViewResponder: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _scrollView: Attribute<HostingScrollView>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _transform: Attribute<ViewTransform>
+    var _children: Attribute<[ViewResponder]>
+    var _responder: HostingScrollViewResponder?
+    var layoutResponder: DefaultLayoutViewResponder
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        if _responder == nil {
+            _responder = HostingScrollViewResponder(
+                layoutResponder: layoutResponder
+            )
+        }
+        guard let responder = _responder else {
+            fatalError("ScrollViewResponder failed to create its responder")
+        }
+
+        let scrollView = _scrollView.value
+        responder.representedView = scrollView.host
+        responder.hostContainer = scrollView.parentContainer
+        scrollView.responder = responder
+        responder.helper.update(
+            data: (
+                value: TrivialContentResponder(),
+                changed: isInitialValue
+            ),
+            size: (
+                value: _size.value,
+                changed: _AGGraph.currentStatefulInputChanged(_size.identifier)
+            ),
+            position: (
+                value: _position.value,
+                changed: _AGGraph.currentStatefulInputChanged(_position.identifier)
+            ),
+            transform: (
+                value: _transform.value,
+                changed: _AGGraph.currentStatefulInputChanged(_transform.identifier)
+            ),
+            parent: responder
+        )
+        if isInitialValue
+            || _AGGraph.currentStatefulInputChanged(_children.identifier) {
+            responder.children = _children.value
+        }
+        _AGGraph.setStatefulOutput([responder])
     }
 }
 

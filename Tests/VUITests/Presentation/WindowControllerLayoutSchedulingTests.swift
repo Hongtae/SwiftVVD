@@ -4,6 +4,161 @@ import XCTest
 
 final class WindowControllerLayoutSchedulingTests: XCTestCase {
     @MainActor
+    func testScrollViewRootDisplayListMountsContentOnlyInsidePlatformGroup() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view display-list test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let list = try displayList(in: controller)
+        XCTAssertEqual(list.items.count, 1, displayListTreeDescription(list))
+        let item = try XCTUnwrap(list.items.first)
+        let effect = try XCTUnwrap(item.effectItem)
+        guard case .platformGroup = effect.effect else {
+            return XCTFail("expected platform group: \(displayListTreeDescription(list))")
+        }
+        XCTAssertEqual(item.frame, CGRect(x: 70, y: 60, width: 80, height: 100))
+        XCTAssertEqual(effect.contents.items.count, 8)
+        XCTAssertEqual(
+            effect.contents.interpolationBounds,
+            CGRect(x: 0, y: 0, width: 80, height: 320)
+        )
+    }
+
+    @MainActor
+    func testScrollViewRootDisplayListMountsInitiallyPlacedLazyContent() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingLazyScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingLazyScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Lazy scroll-view display-list test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let list = try displayList(in: controller)
+        XCTAssertEqual(list.items.count, 1, displayListTreeDescription(list))
+        let item = try XCTUnwrap(list.items.first)
+        let effect = try XCTUnwrap(item.effectItem)
+        guard case .platformGroup = effect.effect else {
+            return XCTFail("expected platform group: \(displayListTreeDescription(list))")
+        }
+        XCTAssertEqual(item.frame, CGRect(x: 60, y: 60, width: 100, height: 100))
+        XCTAssertEqual(
+            shapeFillBounds(in: effect.contents),
+            [
+                CGRect(x: 10, y: 0, width: 80, height: 40),
+                CGRect(x: 10, y: 40, width: 80, height: 40),
+                CGRect(x: 10, y: 80, width: 80, height: 40),
+            ],
+            displayListTreeDescription(list)
+        )
+        XCTAssertEqual(
+            effect.contents.effects.map(\.frame),
+            [
+                CGRect(x: 10, y: 0, width: 80, height: 40),
+                CGRect(x: 10, y: 40, width: 80, height: 40),
+                CGRect(x: 10, y: 80, width: 80, height: 40),
+            ],
+            displayListTreeDescription(list)
+        )
+        XCTAssertEqual(
+            effect.contents.effects.flatMap { shapeFillBounds(in: $0.contents) },
+            [
+                CGRect(x: 0, y: 0, width: 80, height: 40),
+                CGRect(x: 0, y: 0, width: 80, height: 40),
+                CGRect(x: 0, y: 0, width: 80, height: 40),
+            ],
+            displayListTreeDescription(list)
+        )
+    }
+
+    @MainActor
+    func testScrollViewRootDisplayListReplacesEagerContentWithPlacedLazyContent() throws {
+        let probe = LayoutSchedulingLazyScrollReplacementProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingLazyScrollReplacementRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingLazyScrollReplacementRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Lazy scroll-view replacement test should not request graphics resources.")
+        }
+        var redraw = false
+
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        var list = try displayList(in: controller)
+        var effect = try XCTUnwrap(try XCTUnwrap(list.items.first).effectItem)
+        XCTAssertEqual(
+            shapeFillBounds(in: effect.contents),
+            (0..<8).map {
+                CGRect(x: 0, y: CGFloat($0) * 40, width: 80, height: 40)
+            },
+            displayListTreeDescription(list)
+        )
+
+        try XCTUnwrap(probe.toggle)()
+        for tick in 1...2 {
+            redraw = false
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        list = try displayList(in: controller)
+        effect = try XCTUnwrap(try XCTUnwrap(list.items.first).effectItem)
+        XCTAssertEqual(
+            shapeFillBounds(in: effect.contents),
+            [
+                CGRect(x: 10, y: 0, width: 80, height: 40),
+                CGRect(x: 10, y: 40, width: 80, height: 40),
+                CGRect(x: 10, y: 80, width: 80, height: 40),
+            ],
+            displayListTreeDescription(list)
+        )
+    }
+
+    @MainActor
     func testAnimationTimeAccumulatesDeltaIndependentlyOfEventTime() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -5970,6 +6125,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                     label = "identity"
                 case .archive:
                     label = "archive"
+                case .platformGroup:
+                    label = "platformGroup"
                 case .opacity:
                     label = "opacity"
                 case let .transform(transform):
@@ -7246,6 +7403,67 @@ private struct LayoutSchedulingRoot: View {
             Color.clear
                 .frame(width: 10, height: 10)
         }
+    }
+}
+
+private struct LayoutSchedulingScrollViewAttachmentRoot: View {
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { _ in
+                    Color.green
+                        .frame(width: 80, height: 40)
+                }
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private struct LayoutSchedulingLazyScrollViewAttachmentRoot: View {
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<120, id: \.self) { _ in
+                    Color.green
+                        .frame(width: 80, height: 40)
+                }
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private final class LayoutSchedulingLazyScrollReplacementProbe {
+    var toggle: (() -> Void)?
+}
+
+private struct LayoutSchedulingLazyScrollReplacementRoot: View {
+    let probe: LayoutSchedulingLazyScrollReplacementProbe
+    @State private var usesLazyContent = false
+
+    var body: some View {
+        probe.toggle = {
+            usesLazyContent.toggle()
+        }
+        return ScrollView(.vertical) {
+            if usesLazyContent {
+                LazyVStack(spacing: 0) {
+                    ForEach(0..<120, id: \.self) { _ in
+                        Color.green
+                            .frame(width: 80, height: 40)
+                    }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        Color.blue
+                            .frame(width: 80, height: 40)
+                    }
+                }
+            }
+        }
+        .frame(width: 100, height: 100)
     }
 }
 

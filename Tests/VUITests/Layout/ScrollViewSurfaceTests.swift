@@ -70,6 +70,59 @@ private struct ScrollViewRecordingContent: View, TestPrimitiveView {
     }
 }
 
+private struct ScrollViewAttachmentContent: View, TestPrimitiveView {
+    var responder: ViewResponder
+    var serial: UInt32
+
+    typealias Body = Never
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewAttachmentContent._makeView requires AG context")
+        }
+
+        var outputs = _ViewOutputs(
+            layoutComputer: OptionalAttribute(graph.makeRule {
+                LayoutComputer.fixed(CGSize(width: 500, height: 800))
+            })
+        )
+        if inputs.preferences.keys.contains(DisplayList.Key.self) {
+            let displayList: Attribute<DisplayList> = graph.makeRule {
+                let serial = view._attribute.value.serial
+                var list = DisplayList()
+                list.items.append(DisplayList.Item(
+                    effect: .identity,
+                    contents: DisplayList(),
+                    frame: CGRect(x: 0, y: 0, width: 500, height: 800),
+                    identity: _DisplayList_Identity(decodedValue: serial),
+                    version: DisplayList.Version(value: Int(serial))
+                ))
+                return list
+            }
+            outputs.preferences.append(
+                DisplayList.Key.self,
+                node: displayList.identifier
+            )
+        }
+        if inputs.preferences.keys.contains(ViewRespondersKey.self) {
+            let responders: Attribute<[ViewResponder]> = graph.makeRule {
+                [view._attribute.value.responder]
+            }
+            outputs.preferences.append(
+                ViewRespondersKey.self,
+                node: responders.identifier
+            )
+        }
+        return outputs
+    }
+}
+
+private final class ScrollViewAttachmentTestResponder: ViewResponder {
+}
+
 private struct ScrollViewChildScrollableContent: View, TestPrimitiveView {
     var recorder: ScrollViewInputRecorder
     var child: ScrollViewChildCollectionScrollable
@@ -2206,6 +2259,100 @@ final class ScrollViewSurfaceTests: XCTestCase {
                     height: size.height - updatedInsets.top - updatedInsets.bottom
                 )
             )
+        }
+    }
+
+    func testSystemScrollViewMakeViewInstallsAttachmentOutputsAndReusesOwners() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            let subgraph = AGSubgraph()
+            try AGSubgraph.withCurrent(subgraph) {
+                var preferenceKeys = PreferenceKeys()
+                preferenceKeys.add(DisplayList.Key.self)
+                preferenceKeys.add(ViewRespondersKey.self)
+                let firstChild = ScrollViewAttachmentTestResponder()
+                let secondChild = ScrollViewAttachmentTestResponder()
+                let view = SystemScrollView(
+                    configuration: ScrollViewConfiguration(),
+                    content: ScrollViewAttachmentContent(
+                        responder: firstChild,
+                        serial: 81
+                    )
+                )
+                let viewAttr = graph.makeInput(value: view)
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    preferenceKeys: preferenceKeys
+                )
+                inputs.size = graph.makeInput(value: ViewSize(
+                    CGSize(width: 240, height: 160)
+                ))
+                let outputs = SystemScrollView<ScrollViewAttachmentContent>._makeView(
+                    view: _GraphValue(_attribute: viewAttr),
+                    inputs: inputs
+                )
+
+                let displayID = try XCTUnwrap(
+                    outputs.preferences.value(for: DisplayList.Key.self)
+                )
+                let responderID = try XCTUnwrap(
+                    outputs.preferences.value(for: ViewRespondersKey.self)
+                )
+                let display = Attribute<DisplayList>(displayID)
+                let responders = Attribute<[ViewResponder]>(responderID)
+
+                let firstList = display.value
+                let firstItem = try XCTUnwrap(firstList.items.first)
+                let firstEffect = try XCTUnwrap(firstItem.effectItem)
+                guard case let .platformGroup(firstFactory) = firstEffect.effect else {
+                    return XCTFail("expected platform-group attachment")
+                }
+                let firstResponder = try XCTUnwrap(
+                    responders.value.first as? HostingScrollViewResponder
+                )
+                XCTAssertEqual(firstList.items.count, 1)
+                XCTAssertEqual(firstEffect.contents.items.first?.identity.value, 81)
+                XCTAssertTrue(firstResponder.children.first === firstChild)
+                XCTAssertTrue(firstChild.parent === firstResponder)
+                XCTAssertTrue(
+                    firstFactory.platformGroupContainer
+                        === firstResponder.representedView
+                )
+                XCTAssertTrue(
+                    firstResponder.hostContainer
+                        === (firstFactory as? HostingScrollView.PlatformContainer)
+                )
+
+                var updatedView = view
+                updatedView.content = ScrollViewAttachmentContent(
+                    responder: secondChild,
+                    serial: 82
+                )
+                viewAttr.setValue(updatedView)
+
+                let secondList = display.value
+                let secondEffect = try XCTUnwrap(
+                    try XCTUnwrap(secondList.items.first).effectItem
+                )
+                guard case let .platformGroup(secondFactory) = secondEffect.effect else {
+                    return XCTFail("expected updated platform-group attachment")
+                }
+                let secondResponder = try XCTUnwrap(
+                    responders.value.first as? HostingScrollViewResponder
+                )
+                XCTAssertEqual(firstItem.identity, secondList.items.first?.identity)
+                XCTAssertEqual(secondEffect.contents.items.first?.identity.value, 82)
+                XCTAssertEqual(
+                    ObjectIdentifier(firstFactory),
+                    ObjectIdentifier(secondFactory)
+                )
+                XCTAssertTrue(secondResponder === firstResponder)
+                XCTAssertTrue(secondResponder.children.first === secondChild)
+                XCTAssertNil(firstChild.parent)
+                XCTAssertTrue(secondChild.parent === secondResponder)
+            }
         }
     }
 

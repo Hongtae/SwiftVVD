@@ -606,6 +606,86 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         )
     }
 
+    func testPlatformGroupUsesRootRendererTranslationAndViewportClipOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        let attachment = graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: CGPoint(x: 2, y: 3),
+                contentFrame: CGRect(x: 0, y: 0, width: 12, height: 12),
+                containingSize: CGSize(width: 4, height: 3),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+            return (host, HostingScrollView.PlatformContainer(scrollView: host))
+        }
+        XCTAssertTrue(
+            attachment.1.platformGroupContainer === attachment.0.host
+        )
+
+        let width = 16
+        let height = 16
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: SceneResources(),
+            environment: EnvironmentValues(),
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .clear)
+
+        let contentBounds = CGRect(x: 0, y: 0, width: 12, height: 12)
+        let viewportFrame = CGRect(x: 5, y: 4, width: 4, height: 3)
+        var contents = DisplayList()
+        contents.appendItem(bounds: contentBounds) { context in
+            context.fill(Path(contentBounds), with: .color(.red))
+        }
+        var list = DisplayList()
+        list.appendEffect(
+            .platformGroup(attachment.1),
+            contents: contents,
+            frame: viewportFrame,
+            identity: _DisplayList_Identity(decodedValue: 91),
+            version: DisplayList.Version(value: 1)
+        )
+
+        let renderer = DisplayList.GraphicsRenderer()
+        renderer.render(list: list, at: .zero, in: context)
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: width * height * 4
+        )
+        var occupiedBounds = CGRect.null
+        for y in 0..<height {
+            for x in 0..<width where bytes[(y * width + x) * 4 + 3] > 0 {
+                occupiedBounds = occupiedBounds.union(
+                    CGRect(x: x, y: y, width: 1, height: 1)
+                )
+            }
+        }
+
+        XCTAssertEqual(occupiedBounds, viewportFrame)
+        XCTAssertEqual(renderer.animatorCount, 0)
+    }
+
     func testDifferentModeDisplayListMasksMergeComplementaryBranchesOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

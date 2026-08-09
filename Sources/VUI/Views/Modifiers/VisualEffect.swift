@@ -331,6 +331,21 @@ public struct GeometryProxy {
     }
 }
 
+enum ThreadGeometryProxyData {
+    private static let storage = _AGThreadLocal<GeometryProxy?>(nil)
+
+    static var current: GeometryProxy? {
+        storage.value
+    }
+
+    static func withValue<Result>(
+        _ proxy: GeometryProxy,
+        _ body: () throws -> Result
+    ) rethrows -> Result {
+        try storage.withValue(proxy, operation: body)
+    }
+}
+
 @available(*, unavailable)
 extension GeometryProxy: Sendable {
 }

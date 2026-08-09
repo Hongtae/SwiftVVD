@@ -141,6 +141,15 @@ extension EdgeInsets {
         )
     }
 
+    func adding(_ other: EdgeInsets) -> EdgeInsets {
+        EdgeInsets(
+            top: top + other.top,
+            leading: leading + other.leading,
+            bottom: bottom + other.bottom,
+            trailing: trailing + other.trailing
+        )
+    }
+
     func xFlipIfRightToLeft(layoutDirection: () -> LayoutDirection) -> EdgeInsets {
         guard layoutDirection() == .rightToLeft else {
             return self

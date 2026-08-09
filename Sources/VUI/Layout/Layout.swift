@@ -2119,29 +2119,6 @@ private extension CGRect {
     }
 }
 
-/// Creates a single AG reduce rule whose input list is resolved dynamically
-/// from `nodeListAttr` at evaluation time.
-///
-/// SE-0352 allows this to be called with `any PreferenceKey.Type`. The
-/// compiler opens the existential and binds `K` to the concrete key type,
-/// so `Attribute<K.Value>` is correctly typed at call time.
-func _makeDynReduceAttr<K: PreferenceKey>(
-    _ keyType: K.Type,
-    nodeListAttr: Attribute<[AGWeakAttribute]>,
-    in graph: _AGGraph
-) -> AGAttribute {
-    let attr: Attribute<K.Value> = graph.makeRule {
-        let nodes = nodeListAttr.value          // registers dep on the ID list
-        var combined = K.defaultValue
-        for weakNode in nodes where weakNode.isValid(in: graph) {
-            let val = Attribute<K.Value>(weakNode.toStrong()).value  // registers dep on each child
-            K.reduce(value: &combined) { val }
-        }
-        return combined
-    }
-    return attr.identifier
-}
-
 public protocol Layout: Sendable, Animatable {
     static var layoutProperties: LayoutProperties { get }
 

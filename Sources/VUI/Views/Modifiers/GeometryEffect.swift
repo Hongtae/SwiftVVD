@@ -75,7 +75,7 @@ private struct GeometryEffectTransform<Effect: GeometryEffect>:
     }
 }
 
-private struct RoundedSize: Rule, AsyncAttribute {
+struct RoundedSize: Rule, AsyncAttribute {
     var _position: Attribute<CGPoint>
     var _size: Attribute<ViewSize>
     var _pixelLength: Attribute<CGFloat>

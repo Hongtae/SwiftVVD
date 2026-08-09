@@ -287,7 +287,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(horizontalEmissions[0].point, .zero)
             XCTAssertEqual(
                 horizontalEmissions[0].proposal,
-                _ProposedSize(width: nil, height: 33)
+                _ProposedSize(width: 1, height: 33)
             )
             XCTAssertEqual(horizontalEmissions[0].anchor, .bottom)
 
@@ -316,7 +316,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(verticalEmissions[0].point, .zero)
             XCTAssertEqual(
                 verticalEmissions[0].proposal,
-                _ProposedSize(width: 44, height: nil)
+                _ProposedSize(width: 44, height: 1)
             )
             XCTAssertEqual(verticalEmissions[0].anchor, .trailing)
         }
@@ -971,10 +971,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placedHeader.placement.proposedSize.width, 120)
             XCTAssertEqual(placedHeader.frame, CGRect(x: 0, y: 0, width: 120, height: 30))
 
-            XCTAssertEqual(firstBody.placement.anchorPosition, CGPoint(x: 0, y: 30))
-            XCTAssertEqual(secondBody.placement.anchorPosition, CGPoint(x: 60, y: 30))
-            XCTAssertEqual(thirdBody.placement.anchorPosition, CGPoint(x: 0, y: 80))
-            XCTAssertEqual(fourthBody.placement.anchorPosition, CGPoint(x: 60, y: 80))
+            XCTAssertEqual(firstBody.placement.anchorPosition, CGPoint(x: 0, y: 55))
+            XCTAssertEqual(secondBody.placement.anchorPosition, CGPoint(x: 60, y: 55))
+            XCTAssertEqual(thirdBody.placement.anchorPosition, CGPoint(x: 0, y: 105))
+            XCTAssertEqual(fourthBody.placement.anchorPosition, CGPoint(x: 60, y: 105))
             XCTAssertEqual(placedFooter.placement.anchorPosition, CGPoint(x: 0, y: 130))
             XCTAssertEqual(placedFooter.placement.anchor, .topLeading)
             XCTAssertEqual(placedFooter.placement.proposedSize.width, 120)
@@ -1036,10 +1036,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placedHorizontalHeader.placement.proposedSize.height, 120)
             XCTAssertEqual(placedHorizontalHeader.frame, CGRect(x: 0, y: 0, width: 30, height: 120))
 
-            XCTAssertEqual(firstHorizontalBody.placement.anchorPosition, CGPoint(x: 30, y: 0))
-            XCTAssertEqual(secondHorizontalBody.placement.anchorPosition, CGPoint(x: 30, y: 60))
-            XCTAssertEqual(thirdHorizontalBody.placement.anchorPosition, CGPoint(x: 80, y: 0))
-            XCTAssertEqual(fourthHorizontalBody.placement.anchorPosition, CGPoint(x: 80, y: 60))
+            XCTAssertEqual(firstHorizontalBody.placement.anchorPosition, CGPoint(x: 55, y: 0))
+            XCTAssertEqual(secondHorizontalBody.placement.anchorPosition, CGPoint(x: 55, y: 60))
+            XCTAssertEqual(thirdHorizontalBody.placement.anchorPosition, CGPoint(x: 105, y: 0))
+            XCTAssertEqual(fourthHorizontalBody.placement.anchorPosition, CGPoint(x: 105, y: 60))
             XCTAssertEqual(placedHorizontalFooter.placement.anchorPosition, CGPoint(x: 130, y: 0))
             XCTAssertEqual(placedHorizontalFooter.placement.anchor, .topLeading)
             XCTAssertEqual(placedHorizontalFooter.placement.proposedSize.height, 120)
@@ -1383,7 +1383,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 index: 7,
                 skipFirst: true,
                 position: 13,
-                stoppingCondition: .index(11),
+                stoppingCondition: .afterIndex(11),
                 currentSubviews: [lazySubview],
                 lastSubviews: [lazySubview],
                 pendingHeader: lazySubview,
@@ -1404,7 +1404,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(stackPlacement.index, 7)
             XCTAssertTrue(stackPlacement.skipFirst)
             XCTAssertEqual(stackPlacement.position, 13)
-            XCTAssertEqual(stackPlacement.stoppingCondition, .index(11))
+            XCTAssertEqual(stackPlacement.stoppingCondition, .afterIndex(11))
             XCTAssertEqual(stackPlacement.currentSubviews[0].index, 8)
             XCTAssertEqual(stackPlacement.lastSubviews?[0].index, 8)
             XCTAssertEqual(stackPlacement.pendingHeader?.index, 8)
@@ -1802,7 +1802,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let subviews = cache.subviews(context: ruleContext)
             var from = 3
             var target: _LazyLayout_PlacedSubview?
-            XCTAssertFalse(subviews.apply(from: &from) { index, subview, stop in
+            XCTAssertFalse(subviews.apply(from: &from) { subview, stop in
                 target = subview.place(
                     at: _Placement(
                         proposedSize: CGSize(width: 10, height: 10),
@@ -1810,7 +1810,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         at: CGPoint(x: 5, y: 300)
                     )
                 )
-                XCTAssertEqual(index, 3)
+                XCTAssertEqual(subview.index, 3)
                 stop = true
             })
             let targetPlacedSubview = try XCTUnwrap(target)
@@ -1858,9 +1858,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertFalse(subviews.apply(
                 from: &identityScanFrom,
                 style: _ViewList_IteratorStyle(value: 2)
-            ) { index, subview, stop in
+            ) { subview, stop in
                 if subview.id == targetPlacedSubview.id {
-                    matchingIndex = index
+                    matchingIndex = subview.index
                     stop = true
                 }
             })
@@ -1919,8 +1919,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var from = 1
             var indices: [Int] = []
-            XCTAssertTrue(subviews.apply(from: &from) { index, subview, _ in
-                XCTAssertEqual(index, subview.index)
+            XCTAssertTrue(subviews.apply(from: &from) { subview, _ in
                 indices.append(subview.index)
             })
             XCTAssertEqual(indices, [1, 2])
@@ -1971,7 +1970,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 queriedIndex: nil,
                 index: 2,
                 position: 12,
-                stoppingCondition: .position(20),
+                stoppingCondition: .afterVisible,
                 currentSubviews: [subview],
                 lastSubviews: [subview],
                 pendingHeader: subview,
@@ -2002,18 +2001,19 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertFalse(placement.isVisible(length: 0))
 
             placement.queriedIndex = nil
-            placement.position = 19
+            placement.position = 29
             XCTAssertFalse(placement.shouldStop())
-            placement.position = 20
+            placement.position = 30
             XCTAssertTrue(placement.shouldStop())
 
-            placement.stoppingCondition = .index(4)
+            placement.stoppingCondition = .afterIndex(4)
             placement.index = 4
             XCTAssertFalse(placement.shouldStop())
             placement.index = 5
             XCTAssertTrue(placement.shouldStop())
 
-            placement.stoppingCondition = .never
+            placement.stoppingCondition = .afterVisible
+            placement.position = 29
             placement.index = Int.max
             XCTAssertFalse(placement.shouldStop())
 
@@ -2065,14 +2065,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
             placement.reset(
                 index: 9,
                 position: 44,
-                stoppingCondition: .index(11),
+                stoppingCondition: .afterIndex(11),
                 skipFirst: true
             )
             XCTAssertEqual(placement.queriedIndex, 6)
             XCTAssertEqual(placement.index, 9)
             XCTAssertTrue(placement.skipFirst)
             XCTAssertEqual(placement.position, 44)
-            XCTAssertEqual(placement.stoppingCondition, .index(11))
+            XCTAssertEqual(placement.stoppingCondition, .afterIndex(11))
             XCTAssertTrue(placement.currentSubviews.isEmpty)
             XCTAssertNil(placement.lastSubviews)
             XCTAssertNil(placement.pendingHeader)
@@ -2191,7 +2191,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _Placement(
                     proposedSize: CGSize(width: 30, height: 55),
                     anchoring: .leading,
-                    at: CGPoint(x: 0, y: 10)
+                    at: CGPoint(x: 0, y: 37.5)
                 )
             )
             let secondPlacement = try XCTUnwrap(secondItem.pendingPlacement)
@@ -2200,7 +2200,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 _Placement(
                     proposedSize: CGSize(width: 50, height: 55),
                     anchoring: .trailing,
-                    at: CGPoint(x: 30, y: 10)
+                    at: CGPoint(x: 80, y: 37.5)
                 )
             )
         }
@@ -2261,20 +2261,23 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let id = _ViewList_ID(implicitID: 0).elementID(at: index)
                 let item = try XCTUnwrap(cache.items[id.canonicalID])
                 let itemPlacement = try XCTUnwrap(item.pendingPlacement)
-                XCTAssertEqual(itemPlacement.proposedSize, CGSize(width: 80, height: 10))
+                XCTAssertEqual(
+                    itemPlacement.proposedSize,
+                    CGSize(width: 80, height: sizes[index].height)
+                )
                 XCTAssertEqual(itemPlacement.anchor, .center)
             }
             XCTAssertEqual(
                 cache.items[_ViewList_ID(implicitID: 0).elementID(at: 0).canonicalID]?.pendingPlacement?.anchorPosition,
-                CGPoint(x: 0, y: 7)
+                CGPoint(x: 40, y: 22)
             )
             XCTAssertEqual(
                 cache.items[_ViewList_ID(implicitID: 0).elementID(at: 1).canonicalID]?.pendingPlacement?.anchorPosition,
-                CGPoint(x: 0, y: 42)
+                CGPoint(x: 40, y: 62)
             )
             XCTAssertEqual(
                 cache.items[_ViewList_ID(implicitID: 0).elementID(at: 2).canonicalID]?.pendingPlacement?.anchorPosition,
-                CGPoint(x: 0, y: 87)
+                CGPoint(x: 40, y: 112)
             )
         }
     }
@@ -2310,7 +2313,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 index: 99,
                 skipFirst: true,
                 position: 44,
-                stoppingCondition: .position(45),
+                stoppingCondition: .afterVisible,
                 placedIndex: (min: 4, max: 9),
                 placedPosition: (min: 11, max: 12),
                 placedQuery: (min: 13, max: 14)
@@ -2320,7 +2323,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 subviews: subviews,
                 from: 1,
                 position: 7,
-                stopping: .never,
+                stopping: .afterVisible,
                 style: _ViewList_IteratorStyle()
             ))
             XCTAssertFalse(placement.skipFirst)
@@ -2350,7 +2353,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 subviews: subviews,
                 from: 0,
                 position: 7,
-                stopping: .index(0),
+                stopping: .afterIndex(0),
                 style: _ViewList_IteratorStyle()
             ))
             XCTAssertEqual(stoppedPlacement.placedSubviews.map(\.index), [0])
@@ -2380,7 +2383,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let subviews = cache.subviews(context: context)
             var from = 0
             var pending: _LazyLayout_Subview?
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 pending = subview
                 stop = true
             }
@@ -2492,7 +2495,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 subviews: subviews,
                 from: 3,
                 position: 100,
-                stopping: .never,
+                stopping: .afterVisible,
                 style: _ViewList_IteratorStyle()
             ))
             XCTAssertFalse(placement.skipFirst)
@@ -2508,7 +2511,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let bodyItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 3 }?.item)
             XCTAssertEqual(
                 bodyItem.pendingPlacement?.anchorPosition,
-                CGPoint(x: 0, y: 110)
+                CGPoint(x: 0, y: 130)
             )
             let footerItem = try XCTUnwrap(placement.placedSubviews.first { $0.index == 4 }?.item)
             XCTAssertEqual(
@@ -2564,7 +2567,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var headerFrom = 0
             var headerItems: [(Int, LazyLayoutCacheSection)] = []
             var headerIDs: [_ViewList_ID] = []
-            XCTAssertTrue(section.header.apply(from: &headerFrom) { _, subview, _ in
+            XCTAssertTrue(section.header.apply(from: &headerFrom) { subview, _ in
                 headerItems.append((subview.index, subview.data.section))
                 headerIDs.append(subview.data.id)
             })
@@ -2576,7 +2579,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var contentFrom = 0
             var contentItems: [(Int, LazyLayoutCacheSection)] = []
             var contentIDs: [_ViewList_ID] = []
-            XCTAssertTrue(section.content.apply(from: &contentFrom) { _, subview, _ in
+            XCTAssertTrue(section.content.apply(from: &contentFrom) { subview, _ in
                 contentItems.append((subview.index, subview.data.section))
                 contentIDs.append(subview.data.id)
             })
@@ -2591,7 +2594,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var footerFrom = 0
             var footerItems: [(Int, LazyLayoutCacheSection)] = []
             var footerIDs: [_ViewList_ID] = []
-            XCTAssertTrue(section.footer.apply(from: &footerFrom) { _, subview, _ in
+            XCTAssertTrue(section.footer.apply(from: &footerFrom) { subview, _ in
                 footerItems.append((subview.index, subview.data.section))
                 footerIDs.append(subview.data.id)
             })
@@ -2608,7 +2611,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
             var result: _ViewList_ID?
             var from = 0
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 result = subview.data.id
                 stop = true
             }
@@ -2676,7 +2679,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
             var result: _ViewList_ID?
             var from = 0
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 result = subview.data.id
                 stop = true
             }
@@ -2747,7 +2750,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
             var result: _ViewList_ID?
             var from = 0
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 result = subview.data.id
                 stop = true
             }
@@ -2840,7 +2843,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         func firstID(in subviews: _LazyLayout_Subviews) -> _ViewList_ID? {
             var result: _ViewList_ID?
             var from = 0
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 result = subview.data.id
                 stop = true
             }
@@ -2924,7 +2927,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         func ids(in subviews: _LazyLayout_Subviews) -> [_ViewList_ID] {
             var result: [_ViewList_ID] = []
             var from = 0
-            _ = subviews.apply(from: &from) { _, subview, _ in
+            _ = subviews.apply(from: &from) { subview, _ in
                 result.append(subview.data.id)
             }
             return result
@@ -2984,7 +2987,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(contentIDs.count, 4)
             var skippedFrom = 2
             var skippedContentIDs: [_ViewList_ID] = []
-            _ = section.content.apply(from: &skippedFrom) { _, subview, _ in
+            _ = section.content.apply(from: &skippedFrom) { subview, _ in
                 skippedContentIDs.append(subview.data.id)
             }
             XCTAssertEqual(skippedContentIDs, Array(contentIDs.dropFirst(2)))
@@ -4469,7 +4472,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let subviews = cache.subviews(context: context)
             var from = 0
             var groups: [[_LazyLayout_Subview]] = []
-            XCTAssertTrue(subviews.apply(from: &from) { _, subview, _ in
+            XCTAssertTrue(subviews.apply(from: &from) { subview, _ in
                 groups.append([subview])
             })
             XCTAssertEqual(groups.map { $0.map(\.index) }, [[0], [1], [2]])
@@ -4485,7 +4488,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 visible: CGFloat(0)..<CGFloat(160),
                 index: 42,
                 position: -10,
-                stoppingCondition: .index(42),
+                stoppingCondition: .afterIndex(42),
                 currentSubviews: groups[1],
                 lastSubviews: groups[2],
                 placedSubviews: [
@@ -6130,6 +6133,119 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyStackCachePlaceStopsAfterInitialViewportWithoutCancelling() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sizes = Array(
+                repeating: CGSize(width: 80, height: 40),
+                count: 120
+            )
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+            )
+            let (cache, _, _) = makeLazyCache(host: host, implicitID: 99, list: list)
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
+            let subviews = cache.subviews(context: context)
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .center, spacing: 0),
+                pinnedViews: []
+            )
+            var stackCache = _LazyStack_Cache<LazyVStackLayout>()
+
+            let placements = stackCache.place(
+                stack: layout,
+                subviews: subviews,
+                from: 0,
+                position: 0,
+                visible: CGFloat(0)..<CGFloat(100),
+                visibleLength: 100,
+                containerLength: 4_800,
+                minor: MinorProperties(count: 1, size: 100, geometry: 100)
+            )
+
+            XCTAssertEqual(placements.subviews.map(\.index), [0, 1, 2])
+            XCTAssertEqual(cache.items.count, 3)
+            XCTAssertFalse(placements.wasCancelled)
+            XCTAssertNil(stackCache.endIndex)
+            XCTAssertEqual(stackCache.placedIndices, 0..<3)
+            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)..<CGFloat(120))
+        }
+    }
+
+    func testLazyStackCacheResolvesAndPlacesDisplacedViewports() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let sizes = Array(
+                repeating: CGSize(width: 80, height: 40),
+                count: 120
+            )
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(alignment: .center, spacing: 0),
+                pinnedViews: []
+            )
+            let minor = MinorProperties<LazyVStackLayout>(
+                count: 1,
+                size: 100,
+                geometry: 100
+            )
+            let cases: [(offset: CGFloat, expected: [Int])] = [
+                (0, [0, 1, 2]),
+                (80, [2, 3, 4]),
+                (1_960, [49, 50, 51]),
+            ]
+
+            for (caseIndex, testCase) in cases.enumerated() {
+                let list = BaseViewList(
+                    elements: IndexedLayoutViewListElements(graph: graph, sizes: sizes)
+                )
+                let (cache, _, _) = makeLazyCache(
+                    host: host,
+                    implicitID: 100 + caseIndex,
+                    list: list
+                )
+                cache.items.removeAll()
+                cache.lru.invalidate()
+
+                let context = AnyRuleContext(
+                    attribute: graph.makeInput(value: ()).identifier
+                )
+                let subviews = cache.subviews(context: context)
+                let visible = testCase.offset..<(testCase.offset + 100)
+                var stackCache = _LazyStack_Cache<LazyVStackLayout>()
+                let start = stackCache.resolveIndexAndPosition(
+                    stack: layout,
+                    subviews: subviews,
+                    visible: visible,
+                    minor: minor
+                )
+                let placements = stackCache.place(
+                    stack: layout,
+                    subviews: subviews,
+                    from: start.index,
+                    position: start.position,
+                    visible: visible,
+                    visibleLength: 100,
+                    containerLength: 4_800,
+                    minor: minor
+                )
+
+                XCTAssertEqual(
+                    placements.subviews.map(\.index),
+                    testCase.expected,
+                    "offset \(testCase.offset)"
+                )
+                XCTAssertFalse(placements.wasCancelled)
+            }
+        }
+    }
+
     func testLazyLayoutSubviewsApplyMaterializesSelectedElement() throws {
         let host = GraphHost()
 
@@ -6152,9 +6268,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var from = 2
             var proposed: _LazyLayout_ProposedSubview?
 
-            XCTAssertFalse(subviews.apply(from: &from) { index, subview, stop in
+            XCTAssertFalse(subviews.apply(from: &from) { subview, stop in
                 proposed = subview.proposeSize(ProposedViewSize(width: 44, height: nil))
-                XCTAssertEqual(index, 2)
+                XCTAssertEqual(subview.index, 2)
                 XCTAssertEqual(subview.index, 2)
                 stop = true
             })
@@ -6191,9 +6307,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var from = 2
             var proposed: _LazyLayout_ProposedSubview?
 
-            XCTAssertFalse(subviews.apply(from: &from) { index, subview, stop in
+            XCTAssertFalse(subviews.apply(from: &from) { subview, stop in
                 proposed = subview.proposeSize(ProposedViewSize(width: nil, height: 45))
-                XCTAssertEqual(index, 2)
+                XCTAssertEqual(subview.index, 2)
                 XCTAssertEqual(subview.index, 2)
                 stop = true
             })
@@ -8279,6 +8395,196 @@ final class LazyContainerSurfaceTests: XCTestCase {
             ordinaryItem.outputs = _ViewOutputs(preferences: secondPreferences)
 
             XCTAssertEqual(cache.prefetchOutputs(), .some)
+        }
+    }
+
+    func testLazyPreferenceTracksPlacedSubviewsAfterInitialEmptyEvaluation() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, first, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, second, secondState) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+
+            func installPreferences(
+                _ item: LazyLayoutCacheItem,
+                value: String
+            ) {
+                let node = graph.makeInput(value: [value])
+                var preferences = PreferencesOutputs()
+                preferences.append(
+                    LazyContainerOrderedPreferenceKey.self,
+                    node: node.identifier
+                )
+                preferences.append(
+                    LazyContainerIncludingRemovedPreferenceKey.self,
+                    node: node.identifier
+                )
+                item.outputs = _ViewOutputs(preferences: preferences)
+            }
+
+            installPreferences(first, value: "first")
+            installPreferences(second, value: "second")
+
+            var removedState = secondState.value
+            removedState.isRemoved = true
+            secondState.setValue(removedState)
+
+            let active: Attribute<[String]> = graph.makeRule(
+                LazyPreference<LazyContainerOrderedPreferenceKey>(
+                    subviews: cache._placedSubviews
+                )
+            )
+            graph.mutateRule(
+                active.identifier,
+                as: LazyPreference<LazyContainerOrderedPreferenceKey>.self,
+                invalidating: true
+            ) {
+                $0.updateCache(cache)
+            }
+
+            let includingRemoved: Attribute<[String]> = graph.makeRule(
+                LazyPreference<LazyContainerIncludingRemovedPreferenceKey>(
+                    subviews: cache._placedSubviews
+                )
+            )
+            graph.mutateRule(
+                includingRemoved.identifier,
+                as: LazyPreference<LazyContainerIncludingRemovedPreferenceKey>.self,
+                invalidating: true
+            ) {
+                $0.updateCache(cache)
+            }
+
+            XCTAssertEqual(active.value, ["default"])
+            XCTAssertEqual(includingRemoved.value, ["default"])
+
+            let firstPlacement = _LazyLayout_PlacedSubview(
+                item: first,
+                placement: _Placement(proposedSize: CGSize(width: 10, height: 10)),
+                index: 1
+            )
+            let secondPlacement = _LazyLayout_PlacedSubview(
+                item: second,
+                placement: _Placement(proposedSize: CGSize(width: 10, height: 10)),
+                index: 2
+            )
+            cache._placedSubviews.setValue([secondPlacement, firstPlacement])
+
+            XCTAssertEqual(active.value, ["first"])
+            XCTAssertEqual(includingRemoved.value, ["second", "first"])
+
+            removedState.isRemoved = false
+            secondState.setValue(removedState)
+            XCTAssertEqual(active.value, ["second", "first"])
+
+            cache._placedSubviews.setValue([firstPlacement, secondPlacement])
+            XCTAssertEqual(active.value, ["first", "second"])
+        }
+    }
+
+    func testLazyPreferenceDisplayPrefetchRulesUsePlacedSubviewAndSignalInputs() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, visible, _) = makeLazyCache(
+                host: host,
+                implicitID: 1,
+                supportsPrefetching: true
+            )
+            let (_, pendingDisplay, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            let (_, pendingRemoval, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 3
+            )
+            let (_, prefetching, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 4
+            )
+
+            visible.prefetchPhase = .pendingDisplay
+            pendingDisplay.prefetchPhase = .pendingDisplay
+            pendingRemoval.prefetchPhase = .pendingRemoval
+            prefetching.prefetchPhase = .prefetching
+
+            func placement(
+                _ item: LazyLayoutCacheItem,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(
+                        proposedSize: CGSize(width: 10, height: 10)
+                    ),
+                    index: index
+                )
+            }
+
+            let visiblePlacement = placement(visible, index: 1)
+            let pendingDisplayPlacement = placement(pendingDisplay, index: 2)
+            let pendingRemovalPlacement = placement(pendingRemoval, index: 3)
+            cache._placedSubviews.setValue([
+                visiblePlacement,
+                pendingDisplayPlacement,
+                pendingRemovalPlacement,
+            ])
+
+            let limitedSubviews: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeRule(
+                LazyPreferencePrefetchSubviews(
+                    _subviews: cache._placedSubviews,
+                    cache: cache
+                )
+            )
+            XCTAssertEqual(limitedSubviews.value.map(\.index), [1, 2, 3])
+
+            cache.maxDisplayListSubviews = 2
+            cache._prefetchSignal.invalidateValue()
+            XCTAssertEqual(limitedSubviews.value.map(\.index), [1, 2])
+
+            cache._placedSubviews.setValue([visiblePlacement])
+            let prefetchItems: Attribute<[LazyLayoutCacheItem]> = graph.makeRule(
+                LazyPreferencePrefetchItems(
+                    _subviews: cache._placedSubviews,
+                    cache: cache
+                )
+            )
+            XCTAssertEqual(
+                Set(prefetchItems.value.map(ObjectIdentifier.init)),
+                Set([
+                    ObjectIdentifier(pendingDisplay),
+                    ObjectIdentifier(pendingRemoval),
+                ])
+            )
+
+            let displayPreference: Attribute<DisplayList> = graph.makeRule(
+                LazyPreference<DisplayList.Key>(subviews: cache._placedSubviews)
+            )
+            graph.mutateRule(
+                displayPreference.identifier,
+                as: LazyPreference<DisplayList.Key>.self,
+                invalidating: true
+            ) {
+                $0.updateCache(cache)
+            }
+            var installedPrefetchItems = false
+            graph.mutateRule(
+                displayPreference.identifier,
+                as: LazyPreference<DisplayList.Key>.self
+            ) {
+                installedPrefetchItems = $0._prefetchItems.attribute != nil
+            }
+            XCTAssertTrue(installedPrefetchItems)
         }
     }
 
@@ -13185,7 +13491,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let scrollablesAttr = try XCTUnwrap(outputs.preferences.value(for: ScrollablePreferenceKey.self))
             scrollablesID = scrollablesAttr
             XCTAssertFalse(Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value.isEmpty)
-            XCTAssertFalse(host.hasPendingTransactions)
+            // Reading the preference evaluates live placements. Their first
+            // measured extent schedules the follow-up size transaction.
+            XCTAssertTrue(host.hasPendingTransactions)
         }
 
         try host.data.withCurrent {
@@ -13249,8 +13557,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             phaseAttr.setValue(phase)
             host.data.rootSubgraph.update(flags: AGAttributeFlags.transactional.rawValue)
 
-            // Reset publishes generation 1; the dependent placement pass
-            // advances the three cache generations to their settled value.
+            // Reset publishes generation 1; the phase-dependent placement
+            // pass advances the three cache generations to their settled value.
             XCTAssertEqual(cache.lru.transactionSeed, 2)
             XCTAssertEqual(cache.commitSeed, 2)
             XCTAssertEqual(cache.placementSeed, 2)
@@ -13308,8 +13616,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             viewGraph.data.rootSubgraph.update(flags: AGAttributeFlags.transactional.rawValue)
 
             XCTAssertEqual(viewGraph.data._phase.value.resetSeed, 1)
-            // Reset publishes generation 1; the dependent placement pass
-            // advances the three cache generations to their settled value.
+            // Reset publishes generation 1; the phase-dependent placement
+            // pass advances the three cache generations to their settled value.
             XCTAssertEqual(cache.lru.transactionSeed, 2)
             XCTAssertEqual(cache.commitSeed, 2)
             XCTAssertEqual(cache.placementSeed, 2)
@@ -14052,6 +14360,23 @@ private struct SectionConfigurationValuesCaptureView: View, TestPrimitiveView {
 
 private struct LazyContainerOrdinaryPreferenceKey: PreferenceKey {
     static var defaultValue: [String] { [] }
+
+    static func reduce(value: inout [String], nextValue: () -> [String]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct LazyContainerOrderedPreferenceKey: PreferenceKey {
+    static var defaultValue: [String] { ["default"] }
+
+    static func reduce(value: inout [String], nextValue: () -> [String]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct LazyContainerIncludingRemovedPreferenceKey: PreferenceKey {
+    static var defaultValue: [String] { ["default"] }
+    static var _includesRemovedValues: Bool { true }
 
     static func reduce(value: inout [String], nextValue: () -> [String]) {
         value.append(contentsOf: nextValue())

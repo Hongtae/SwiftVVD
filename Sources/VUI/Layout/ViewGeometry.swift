@@ -399,6 +399,11 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         _transformItems.append(.positionAdjustment(size))
     }
 
+    mutating func offsetPosition(by offset: CGSize) {
+        _globalPosition.x += offset.width
+        _globalPosition.y += offset.height
+    }
+
     // Coordinate conversion
 
     /// Converts `points` from global window coordinates into the view's local space.
@@ -989,16 +994,5 @@ private extension SafeAreaInsets.OptionalValue {
         case .insets(let insets):
             return insets.value
         }
-    }
-}
-
-private extension EdgeInsets {
-    func adding(_ other: EdgeInsets) -> EdgeInsets {
-        EdgeInsets(
-            top: top + other.top,
-            leading: leading + other.leading,
-            bottom: bottom + other.bottom,
-            trailing: trailing + other.trailing
-        )
     }
 }

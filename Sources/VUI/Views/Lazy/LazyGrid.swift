@@ -69,7 +69,7 @@ extension HVGrid where Self: HVGridLayoutStorage {
             }
 
             var from = index
-            _ = subviews.apply(from: &from) { _, subview, stop in
+            _ = subviews.apply(from: &from) { subview, stop in
                 defer { stop = true }
 
                 if _AGGraph.currentUpdateContext != nil,

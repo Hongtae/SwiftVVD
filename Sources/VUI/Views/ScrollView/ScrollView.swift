@@ -42,6 +42,20 @@ struct ScrollViewConfiguration {
         }
         return edges
     }
+
+    var edgesToExpandDisplayListFrame: Edge.Set {
+        guard !_SemanticFeature<Semantics_v6>.isEnabled else {
+            return .all
+        }
+        var edges = Edge.Set()
+        if axes.contains(.horizontal) {
+            edges.formUnion(.horizontal)
+        }
+        if axes.contains(.vertical) {
+            edges.formUnion(.vertical)
+        }
+        return edges
+    }
 }
 
 /// Scroll container view that wraps content in the system scroll-view shell.
@@ -155,6 +169,15 @@ struct SystemScrollView<Content>: View where Content: View {
             fatalError("SystemScrollView._makeView called outside an active _AGGraph context.")
         }
 
+        let wantsResponderAttachment = inputs.preferences.keys.contains(
+            ViewRespondersKey.self
+        )
+        let wantsDisplayAttachment = inputs.preferences.keys.contains(
+            DisplayList.Key.self
+        )
+        let needsPlatformAttachment = wantsResponderAttachment
+            || wantsDisplayAttachment
+
         var contentInputs = inputs
         let phaseState = contentInputs.base.scrollPhaseState.attribute ?? {
             let state = graph.makeInput(value: ScrollPhaseState())
@@ -181,6 +204,16 @@ struct SystemScrollView<Content>: View where Content: View {
                 graphRef: graphRef
             )
         )
+        let platformContainer: Attribute<HostingScrollView.PlatformContainer>?
+        if needsPlatformAttachment {
+            platformContainer = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(
+                    _scrollView: hostingScrollView
+                )
+            )
+        } else {
+            platformContainer = nil
+        }
         let scrollable = ScrollViewScrollable(
             graphRef: graphRef,
             layoutState: layoutState,
@@ -373,6 +406,24 @@ struct SystemScrollView<Content>: View where Content: View {
                 _rtlAdjustment: rtlAdjustment
             )
         )
+        let displayListFrame: Attribute<CGRect>?
+        if needsPlatformAttachment {
+            displayListFrame = graph.makeRule(
+                ScrollViewDisplayListFrame(
+                    _configuration: configuration,
+                    _position: inputs.position,
+                    _containerPosition: inputs.containerPosition,
+                    _size: inputs.size,
+                    _safeAreaInsets: adjustedSafeArea,
+                    _alignmentAdjustment: alignmentAdjustment,
+                    _rtlAdjustment: rtlAdjustment,
+                    _layoutDirection: layoutDirection,
+                    _pixelLength: pixelLength
+                )
+            )
+        } else {
+            displayListFrame = nil
+        }
         let containerSize: Attribute<CGSize> = graph.makeRule {
             inputs.size.value.value
         }
@@ -389,6 +440,14 @@ struct SystemScrollView<Content>: View where Content: View {
                 _environment: environment
             )
         )
+        if let platformContainer {
+            graph.mutateStatefulRule(
+                updatedHostingScrollView.identifier,
+                as: UpdatedHostingScrollView.self
+            ) { updated in
+                updated._container = OptionalAttribute(platformContainer)
+            }
+        }
         _ = graph.makeSideEffectRule {
             _ = updatedHostingScrollView.value
             return ()
@@ -454,6 +513,48 @@ struct SystemScrollView<Content>: View where Content: View {
         _ = graph.makeSideEffectRule {
             _ = enqueueRequests.value
             return ()
+        }
+
+        if wantsResponderAttachment {
+            let childResponders = outputs.preferences.reducedValue(
+                for: ViewRespondersKey.self,
+                in: graph
+            ) ?? graph.makeInput(value: ViewRespondersKey.defaultValue)
+            let responders: Attribute<[ViewResponder]> = graph.makeStatefulRule(
+                ScrollViewResponder(
+                    _scrollView: updatedHostingScrollView,
+                    _position: inputs.position,
+                    _size: inputs.size,
+                    _transform: inputs.transform,
+                    _children: childResponders,
+                    _responder: nil,
+                    layoutResponder: DefaultLayoutViewResponder(inputs: inputs)
+                )
+            )
+            outputs.preferences.setValue(
+                responders.identifier,
+                for: ViewRespondersKey.self
+            )
+        }
+
+        if wantsDisplayAttachment, let displayListFrame {
+            let childDisplayList = outputs.preferences.reducedValue(
+                for: DisplayList.Key.self,
+                in: graph
+            )
+            var identityInputs = inputs
+            let displayList: Attribute<DisplayList> = graph.makeRule(
+                ScrollViewDisplayList(
+                    identity: identityInputs.pushIdentity(),
+                    _scrollView: updatedHostingScrollView,
+                    _frame: displayListFrame,
+                    _contentList: OptionalAttribute(childDisplayList)
+                )
+            )
+            outputs.preferences.setValue(
+                displayList.identifier,
+                for: DisplayList.Key.self
+            )
         }
 
         let gestureModifier: Attribute<SystemScrollViewGesture> = graph.makeRule {
@@ -812,17 +913,6 @@ private struct ScrollViewLayoutComputer: StatefulRule {
                 )
             }
         }
-    }
-}
-
-private extension EdgeInsets {
-    func adding(_ other: EdgeInsets) -> EdgeInsets {
-        EdgeInsets(
-            top: top + other.top,
-            leading: leading + other.leading,
-            bottom: bottom + other.bottom,
-            trailing: trailing + other.trailing
-        )
     }
 }
 

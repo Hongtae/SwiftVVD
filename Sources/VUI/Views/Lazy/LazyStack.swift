@@ -218,7 +218,8 @@ private struct LazyDynamicStackOrientationRule<L: LazyLayout>: Rule {
     }
 }
 
-/// Resets and republishes the shared lazy cache when the graph phase advances.
+/// Resets the shared lazy cache when the graph phase advances and installs its
+/// stateful output on first evaluation.
 struct UpdateViewCache: StatefulRule, ObservedAttribute {
     typealias Value = LazyLayoutViewCache
 
@@ -241,7 +242,9 @@ struct UpdateViewCache: StatefulRule, ObservedAttribute {
             cache.reset()
         }
         lastResetSeed = resetSeed
-        _AGGraph.setStatefulOutput(cache)
+        if !hasValue {
+            _AGGraph.setStatefulOutput(cache)
+        }
     }
 
     mutating func destroy() {
@@ -269,38 +272,48 @@ where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
     var layout: Attribute<LayoutType>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
+    var transform: Attribute<ViewTransform>
     var containerSize: OptionalAttribute<ViewSize>
     var environment: Attribute<EnvironmentValues>
     var layoutDirection: Attribute<LayoutDirection>
     var accessibilityEnabled: Attribute<Bool>
     var _cache: Attribute<LazyLayoutViewCache>
     var _layoutComputer: OptionalAttribute<LayoutComputer>
+    var resetSeed: UInt32
 
     init(
         layout: Attribute<LayoutType>,
         size: Attribute<ViewSize>,
         position: Attribute<CGPoint>,
+        transform: Attribute<ViewTransform>,
         containerSize: OptionalAttribute<ViewSize>,
         environment: Attribute<EnvironmentValues>,
         layoutDirection: Attribute<LayoutDirection>,
         accessibilityEnabled: Attribute<Bool>,
         cache: Attribute<LazyLayoutViewCache>,
-        layoutComputer: OptionalAttribute<LayoutComputer> = OptionalAttribute()
+        layoutComputer: OptionalAttribute<LayoutComputer> = OptionalAttribute(),
+        resetSeed: UInt32 = 0
     ) {
         self.layout = layout
         self.size = size
         self.position = position
+        self.transform = transform
         self.containerSize = containerSize
         self.environment = environment
         self.layoutDirection = layoutDirection
         self.accessibilityEnabled = accessibilityEnabled
         self._cache = cache
         self._layoutComputer = layoutComputer
+        self.resetSeed = resetSeed
     }
 
     mutating func updateValue() {
         guard let cache = _cache.value as? _LazyLayoutViewCache<LayoutType> else {
             fatalError("LazySubviewPlacements requires its matching concrete cache.")
+        }
+        let resetSeed = cache.inputs.base.phase.value.resetSeed
+        if self.resetSeed != resetSeed {
+            self.resetSeed = resetSeed
         }
         let previousSubviews = _AGGraph.currentStatefulOutput([_LazyLayout_PlacedSubview].self)
         // A layout pass owns the next commit generation before any subview is
@@ -326,6 +339,7 @@ where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
                 )
             }
         }
+        cache.updatePrefetchPhases()
     }
 
     private func shouldInvalidateSize(
@@ -359,84 +373,33 @@ where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
         }
         let ruleContext = AnyRuleContext(attribute: owner)
         let layout = layout.value
-        _ = environment.value
-        _ = layoutDirection.value
-        _ = accessibilityEnabled.value
-        let containerSize = size.value.value
+        let placementContext = _LazyLayout_PlacementContext(
+            base: _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                owner: owner,
+                environment: environment,
+                containerSize: containerSize
+            ),
+            position: position.value,
+            size: size.value,
+            transform: transform.value,
+            layoutDirection: layoutDirection.value,
+            pinnedViews: layout.pinnedViews,
+            isAccessibilityEnabled: accessibilityEnabled.value
+        )
         let subviews = cache.subviews(context: ruleContext)
-        var minorSize = minorLength(containerSize)
-        if !minorSize.isFinite || minorSize < 0 {
-            minorSize = layout.flexibleMinorSize(subviews: subviews)
-        }
-        if !minorSize.isFinite || minorSize < 0 {
-            minorSize = 0
-        }
-        let minorData = layout.minorGeometry(updatingSize: &minorSize)
-        let minor = MinorProperties<LayoutType>(
-            count: minorData.count,
-            size: minorSize,
-            geometry: minorData.data
-        )
-        let visible = visibleRange(position: position.value, size: containerSize)
         var cacheState = cache.cacheState
-        let start = cacheState.resolveIndexAndPosition(
-            stack: layout,
+        var placements = _LazyLayout_Placements()
+        layout.place(
             subviews: subviews,
-            visible: visible,
-            minor: minor
-        )
-        let placements = cacheState.place(
-            stack: layout,
-            subviews: subviews,
-            from: start.index,
-            position: start.position,
-            visible: visible,
-            visibleLength: max(0, visible.upperBound - visible.lowerBound),
-            containerLength: majorLength(containerSize),
-            minor: minor,
-            pinnedViews: layout.pinnedViews
+            context: placementContext,
+            cache: &cacheState,
+            in: &placements
         )
         // The concrete cache is the shared owner read by sizing, transitions,
         // and imperative scroll-target lookup after this placement pass.
         cache.cacheState = cacheState
         return placements
-    }
-
-    private func majorLength(_ size: CGSize) -> CGFloat {
-        switch LayoutType.majorAxis {
-        case .horizontal:
-            return size.width
-        case .vertical:
-            return size.height
-        }
-    }
-
-    private func minorLength(_ size: CGSize) -> CGFloat {
-        switch LayoutType.majorAxis {
-        case .horizontal:
-            return size.height
-        case .vertical:
-            return size.width
-        }
-    }
-
-    private func visibleRange(position: CGPoint, size: CGSize) -> Range<CGFloat> {
-        let lower: CGFloat
-        let length: CGFloat
-        switch LayoutType.majorAxis {
-        case .horizontal:
-            lower = position.x
-            length = size.width
-        case .vertical:
-            lower = position.y
-            length = size.height
-        }
-        guard lower.isFinite,
-              length.isFinite,
-              length > 0 else {
-            return CGFloat.zero..<CGFloat.greatestFiniteMagnitude
-        }
-        return lower..<(lower + length)
     }
 }
 
@@ -1157,7 +1120,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
     func id(at index: Int, style: _ViewList_IteratorStyle = _ViewList_IteratorStyle()) -> _ViewList_ID? {
         var from = index
         var resolved: _ViewList_ID?
-        _ = apply(from: &from, style: style) { _, subview, stop in
+        _ = apply(from: &from, style: style) { subview, stop in
             resolved = subview.data.id
             stop = true
         }
@@ -1170,7 +1133,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
     ) -> Int? {
         var from = 0
         var resolved: Int?
-        _ = apply(from: &from, style: style) { _, subview, stop in
+        _ = apply(from: &from, style: style) { subview, stop in
             guard _viewListID(subview.data.id, matches: id) else { return }
             resolved = subview.index
             stop = true
@@ -1182,7 +1145,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
     func apply(
         from: inout Int,
         style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
-        to body: (inout Int, _LazyLayout_Subview, inout Bool) -> Void
+        to body: (_LazyLayout_Subview, inout Bool) -> Void
     ) -> Bool {
         var remainingToSkip = max(0, from)
         var traversalIndex = baseIndex
@@ -1198,7 +1161,6 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     continue
                 }
 
-                var index = traversalIndex
                 var shouldStop = false
                 let id = sublist.id.elementID(at: offset)
                 let data = _LazyLayout_Subview.Data(
@@ -1212,11 +1174,11 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     cache: cache,
                     context: context,
                     data: data,
-                    index: index
+                    index: traversalIndex
                 )
-                body(&index, subview, &shouldStop)
+                body(subview, &shouldStop)
                 if shouldStop { return false }
-                traversalIndex = index + 1
+                traversalIndex += 1
             }
             return true
         }
@@ -1230,25 +1192,11 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
         style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
         to body: (inout Int, Node, inout Bool) -> Void
     ) -> Bool {
-        if case .section(let section) = node {
-            var index = baseIndex + max(0, from)
-            var shouldStop = false
-            let child = _LazyLayout_Section(
-                base: section,
-                transform: transform,
-                cache: cache,
-                context: context,
-                baseIndex: baseIndex
-            )
-            body(&index, .section(child), &shouldStop)
-            from = max(0, index - baseIndex)
-            return !shouldStop
-        }
-
         var traversalIndex = baseIndex
         return forEachNode(from: &from, style: style) { nodeFrom, node, temporaryTransform in
             var shouldStop = false
             let nodeTransform = combinedTransform(with: temporaryTransform)
+            let estimatedCount: Int
 
             switch node {
             case .section(let section):
@@ -1259,10 +1207,8 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     context: context,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex + max(0, nodeFrom)
-                body(&index, .section(child), &shouldStop)
-                traversalIndex = child.baseIndex + section.estimatedCount(style: style)
-                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
+                body(&nodeFrom, .section(child), &shouldStop)
+                estimatedCount = section.estimatedCount(style: style)
 
             case .sublist(let sublist):
                 let child = _LazyLayout_Subviews(
@@ -1273,10 +1219,8 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex + max(0, nodeFrom)
-                body(&index, .subviews(child), &shouldStop)
-                traversalIndex = index + max(0, sublist.count - max(0, sublist.start))
-                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
+                body(&nodeFrom, .subviews(child), &shouldStop)
+                estimatedCount = child.estimatedCount(style: style)
 
             case .list(let list, let attribute):
                 let child = _LazyLayout_Subviews(
@@ -1287,10 +1231,8 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex + max(0, nodeFrom)
-                body(&index, .subviews(child), &shouldStop)
-                traversalIndex = child.baseIndex + list.estimatedCount(style: style)
-                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
+                body(&nodeFrom, .subviews(child), &shouldStop)
+                estimatedCount = list.estimatedCount(style: style)
 
             case .group(let group):
                 let child = _LazyLayout_Subviews(
@@ -1301,11 +1243,10 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     section: section,
                     baseIndex: traversalIndex
                 )
-                var index = child.baseIndex + max(0, nodeFrom)
-                body(&index, .subviews(child), &shouldStop)
-                traversalIndex = child.baseIndex + group.estimatedCount(style: style)
-                nodeFrom = shouldStop ? max(0, index - child.baseIndex) : 0
+                body(&nodeFrom, .subviews(child), &shouldStop)
+                estimatedCount = group.estimatedCount(style: style)
             }
+            traversalIndex += estimatedCount
             return !shouldStop
         }
     }
@@ -3173,6 +3114,138 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     }
 }
 
+struct LazyPreferencePrefetchSubviews: Rule, AsyncAttribute {
+    var _subviews: Attribute<[_LazyLayout_PlacedSubview]>
+    var cache: LazyLayoutViewCache?
+
+    var value: [_LazyLayout_PlacedSubview] {
+        let subviews = _subviews.value
+        guard let cache else {
+            fatalError("LazyPreferencePrefetchSubviews requires an installed cache.")
+        }
+        guard cache.supportsViewHierarchyPrefetching else {
+            return subviews
+        }
+
+        _ = cache._prefetchSignal.value
+        guard let limit = cache.maxDisplayListSubviews else {
+            return subviews
+        }
+        return Array(subviews.prefix(limit))
+    }
+}
+
+struct LazyPreferencePrefetchItems: Rule, AsyncAttribute {
+    var _subviews: Attribute<[_LazyLayout_PlacedSubview]>
+    var cache: LazyLayoutViewCache?
+
+    var value: [LazyLayoutCacheItem] {
+        guard let cache else {
+            fatalError("LazyPreferencePrefetchItems requires an installed cache.")
+        }
+        guard cache.supportsViewHierarchyPrefetching else {
+            return []
+        }
+
+        _ = cache._prefetchSignal.value
+        let visibleItems = Set(_subviews.value.map { ObjectIdentifier($0.item) })
+        return cache.items.values.filter { item in
+            guard !visibleItems.contains(ObjectIdentifier(item)) else {
+                return false
+            }
+            switch item.prefetchPhase {
+            case .pendingDisplay, .pendingRemoval:
+                return true
+            case .notPrefetching, .prefetching:
+                return false
+            }
+        }
+    }
+}
+
+struct LazyPreference<Key: PreferenceKey>: Rule, AsyncAttribute {
+    var _subviews: Attribute<[_LazyLayout_PlacedSubview]>
+    var _prefetchItems: OptionalAttribute<[LazyLayoutCacheItem]>
+    var cache: LazyLayoutViewCache?
+
+    init(
+        subviews: Attribute<[_LazyLayout_PlacedSubview]>,
+        prefetchItems: OptionalAttribute<[LazyLayoutCacheItem]> = OptionalAttribute(),
+        cache: LazyLayoutViewCache? = nil
+    ) {
+        self._subviews = subviews
+        self._prefetchItems = prefetchItems
+        self.cache = cache
+    }
+
+    mutating func updateCache(_ cache: LazyLayoutViewCache) {
+        self.cache = cache
+        guard ObjectIdentifier(Key.self) == ObjectIdentifier(DisplayList.Key.self) else {
+            return
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError("LazyPreference.updateCache called outside an active AttributeGraph.")
+        }
+        let prefetchItems: Attribute<[LazyLayoutCacheItem]> = graph.makeRule(
+            LazyPreferencePrefetchItems(
+                _subviews: _subviews,
+                cache: cache
+            )
+        )
+        _prefetchItems = OptionalAttribute(prefetchItems)
+    }
+
+    var prefetchItems: [LazyLayoutCacheItem]? {
+        _prefetchItems.attribute?.value
+    }
+
+    var value: Key.Value {
+        guard let graph = _AGGraph.current else {
+            fatalError("LazyPreference.value accessed outside an active AttributeGraph.")
+        }
+        guard let cache else {
+            fatalError("LazyPreference requires an installed cache.")
+        }
+
+        var result = Key.defaultValue
+        var hasValue = false
+
+        func reduce(_ item: LazyLayoutCacheItem) {
+            guard AGSubgraphIsValid(item.subgraph) else {
+                return
+            }
+            for node in item.outputs.preferences.values(for: Key.self) {
+                guard graph.weakAttributeIfValid(for: node) != nil else {
+                    continue
+                }
+                let next = Attribute<Key.Value>(node).value
+                if hasValue {
+                    Key.reduce(value: &result) { next }
+                } else {
+                    result = next
+                    hasValue = true
+                }
+            }
+        }
+
+        for subview in _subviews.value {
+            let item = subview.item
+            if !Key._includesRemovedValues && item._state.value.isRemoved {
+                continue
+            }
+            reduce(item)
+        }
+
+        if cache.supportsViewHierarchyPrefetching,
+           let prefetchItems {
+            for item in prefetchItems {
+                reduce(item)
+            }
+        }
+        return result
+    }
+}
+
 /// Binds the type-erased lazy cache lifecycle to one concrete layout and its
 /// opaque user-defined `Cache` value.
 final class _LazyLayoutViewCache<LayoutType: LazyLayout>: LazyLayoutViewCache {
@@ -4410,11 +4483,10 @@ struct PlacementProperties<LayoutType: LazyStack>: LazyLayoutNamespace {
     }
 }
 
-/// Selects the terminal index or major-axis position for a placement traversal.
+/// Selects the terminal index or visible major-axis bound for a placement traversal.
 enum StoppingCondition: LazyLayoutNamespace, Equatable {
-    case never
-    case position(CGFloat)
-    case index(Int)
+    case afterIndex(Int)
+    case afterVisible
 }
 
 /// Traverses lazy list nodes while measuring, grouping, and emitting visible stack items.
@@ -4449,7 +4521,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         index: Int = 0,
         skipFirst: Bool = false,
         position: CGFloat = 0,
-        stoppingCondition: StoppingCondition = .never,
+        stoppingCondition: StoppingCondition = .afterVisible,
         currentSubviews: [_LazyLayout_Subview] = [],
         lastSubviews: [_LazyLayout_Subview]? = nil,
         pendingHeader: _LazyLayout_Subview? = nil,
@@ -4504,12 +4576,10 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
 
     func shouldStop() -> Bool {
         switch stoppingCondition {
-        case .never:
-            return false
-        case .position(let limit):
-            return position >= limit
-        case .index(let limit):
+        case .afterIndex(let limit):
             return index > limit
+        case .afterVisible:
+            return position >= visible.upperBound
         }
     }
 
@@ -4605,13 +4675,9 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
     ) {
         switch node {
         case .subviews(let child):
-            from = max(0, index - child.baseIndex)
-            let childCompleted = child.apply(from: &from, style: style) { _, subview, childStop in
+            _ = child.apply(from: &from, style: style) { subview, childStop in
                 placeBody(subview: subview)
                 childStop = shouldStop()
-            }
-            if !childCompleted {
-                stop = true
             }
         case .section(let section):
             placeSection(section, from: &from, style: style)
@@ -4632,7 +4698,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         }
 
         var headerFrom = 0
-        _ = section.header.apply(from: &headerFrom, style: style) { _, subview, childStop in
+        _ = section.header.apply(from: &headerFrom, style: style) { subview, childStop in
             placeBoundary(subview: subview)
             childStop = shouldStop()
         }
@@ -4641,7 +4707,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         }
 
         from = max(0, index - section.content.baseIndex)
-        let contentCompleted = section.content.apply(from: &from, style: style) { _, subview, childStop in
+        let contentCompleted = section.content.apply(from: &from, style: style) { subview, childStop in
             placeBody(subview: subview)
             childStop = shouldStop()
         }
@@ -4657,7 +4723,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         }
 
         var footerFrom = 0
-        _ = section.footer.apply(from: &footerFrom, style: style) { _, subview, childStop in
+        _ = section.footer.apply(from: &footerFrom, style: style) { subview, childStop in
             placeBoundary(subview: subview)
             childStop = shouldStop()
         }
@@ -4685,7 +4751,7 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         reset(
             index: lastIndex,
             position: lastPosition,
-            stoppingCondition: .position(visible.lowerBound),
+            stoppingCondition: .afterVisible,
             skipFirst: true
         )
         if atEnd {
@@ -4880,10 +4946,14 @@ struct StackPlacement<LayoutType: LazyStack>: LazyLayoutNamespace {
         proposal: _ProposedSize,
         anchor: UnitPoint
     ) -> _LazyLayout_PlacedSubview {
+        let anchorPosition = CGPoint(
+            x: point.x + (proposal.width ?? 0) * anchor.x,
+            y: point.y + (proposal.height ?? 0) * anchor.y
+        )
         let placed = subview.place(at: _Placement(
-            proposedSize: proposal.fixingUnspecifiedDimensions(),
+            proposedSize: proposal,
             anchoring: anchor,
-            at: point
+            at: anchorPosition
         ))
         placedSubviews.append(placed)
         return placed
@@ -4983,7 +5053,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
         visibleLength: CGFloat,
         containerLength: CGFloat,
         minor: MinorProperties<LayoutType>,
-        stopping: StoppingCondition = .never,
+        stopping: StoppingCondition = .afterVisible,
         style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
         pinnedViews: PinnedScrollableViews = []
     ) -> _LazyLayout_Placements {
@@ -5039,7 +5109,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
             validRect: placement.placedBounds(minorAxis: 0...minor.size),
             invalidSize: false,
             translation: .zero,
-            wasCancelled: placement.wasCancelled || !completed
+            wasCancelled: placement.wasCancelled
         )
     }
 
@@ -5174,7 +5244,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
             switch child.node {
             case .sublist:
                 var childFrom = 0
-                let completed = child.apply(from: &childFrom, style: style) { _, subview, childStop in
+                let completed = child.apply(from: &childFrom, style: style) { subview, childStop in
                     collect(subview, stop: &childStop)
                 }
                 if !completed {
@@ -5284,7 +5354,7 @@ struct _LazyStack_Cache<LayoutType: LazyStack>: LazyLayoutNamespace {
             switch child.node {
             case .sublist:
                 var childFrom = 0
-                let completed = child.apply(from: &childFrom, style: style) { _, subview, childStop in
+                let completed = child.apply(from: &childFrom, style: style) { subview, childStop in
                     collect(subview, stop: &childStop)
                 }
                 if !completed {
@@ -6004,11 +6074,11 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         _ = subviews.apply(
             from: &from,
             style: _ViewList_IteratorStyle(value: 2)
-        ) { index, subview, stop in
+        ) { subview, stop in
             if subview.id == target.id {
-                nearbyIndex = index
+                nearbyIndex = subview.index
                 stop = true
-            } else if index >= limit {
+            } else if subview.index >= limit {
                 stop = true
             }
         }
@@ -6283,7 +6353,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
                 subviews: subviews,
                 from: placement.index,
                 position: placement.position,
-                stopping: .index(groupIndex),
+                stopping: .afterIndex(groupIndex),
                 style: style
             )
         } else {
@@ -6291,7 +6361,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
                 subviews: subviews,
                 from: cache.placedIndices.lowerBound,
                 position: cache.placedExtent.lowerBound,
-                stopping: .index(groupIndex),
+                stopping: .afterIndex(groupIndex),
                 style: style
             )
         }
@@ -6399,8 +6469,8 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         }
 
         _ = subviews.apply(from: &from, style: _ViewList_IteratorStyle()) {
-            sourceIndex, subview, stop in
-            guard sourceIndex < upperBound else {
+            subview, stop in
+            guard subview.index < upperBound else {
                 stop = true
                 return
             }
@@ -6438,8 +6508,8 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         var current: [_LazyLayout_Subview] = []
         var result: [[_LazyLayout_Subview]] = []
         let completed = subviews.apply(from: &from, style: style) {
-            sourceIndex, subview, stop in
-            guard sourceIndex < upperBound else {
+            subview, stop in
+            guard subview.index < upperBound else {
                 stop = true
                 return
             }
@@ -6586,6 +6656,7 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
                 layout: root._attribute,
                 size: inputs.size,
                 position: inputs.position,
+                transform: inputs.transform,
                 containerSize: inputs.containerSize,
                 environment: inputs.base.cachedEnvironment.value.environment,
                 layoutDirection: layoutDirection,
@@ -6625,19 +6696,46 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
 
         var preferences = PreferencesOutputs()
         var childScrollables: Attribute<ScrollablePreferenceKey.Value>?
-        for keyType in inputs.preferences.keys.keys {
-            let nodeListAttr: Attribute<[AGWeakAttribute]> = graph.makeRule {
-                return cache.items.values.flatMap { item in
-                    item.outputs.preferences.values(for: keyType).compactMap {
-                        graph.weakAttributeIfValid(for: $0)
-                    }
+        var installPreferenceCaches: [(LazyLayoutViewCache) -> Void] = []
+
+        func appendLazyPreference<Key: PreferenceKey>(_ key: Key.Type) {
+            let preferenceSubviews: Attribute<[_LazyLayout_PlacedSubview]>
+            if ObjectIdentifier(Key.self) == ObjectIdentifier(DisplayList.Key.self) {
+                preferenceSubviews = graph.makeRule(
+                    LazyPreferencePrefetchSubviews(
+                        _subviews: placedSubviews,
+                        cache: cache
+                    )
+                )
+            } else {
+                preferenceSubviews = placedSubviews
+            }
+
+            let preference: Attribute<Key.Value> = graph.makeRule(
+                LazyPreference<Key>(subviews: preferenceSubviews)
+            )
+            preferences.append(Key.self, node: preference.identifier)
+            installPreferenceCaches.append { cache in
+                graph.mutateRule(
+                    preference.identifier,
+                    as: LazyPreference<Key>.self,
+                    invalidating: true
+                ) {
+                    $0.updateCache(cache)
                 }
             }
-            let reducedID = _makeDynReduceAttr(keyType, nodeListAttr: nodeListAttr, in: graph)
-            preferences.append(keyType, node: reducedID)
-            if ObjectIdentifier(keyType) == ObjectIdentifier(ScrollablePreferenceKey.self) {
-                childScrollables = Attribute<ScrollablePreferenceKey.Value>(reducedID)
+            if ObjectIdentifier(Key.self) == ObjectIdentifier(ScrollablePreferenceKey.self) {
+                childScrollables = Attribute<ScrollablePreferenceKey.Value>(
+                    preference.identifier
+                )
             }
+        }
+
+        for keyType in inputs.preferences.keys.keys {
+            appendLazyPreference(keyType)
+        }
+        for installCache in installPreferenceCaches {
+            installCache(cache)
         }
 
         let emptyScrollables = graph.makeInput(value: ScrollablePreferenceKey.defaultValue)
@@ -6759,7 +6857,7 @@ extension LazyStack {
             from: ProposedViewSize(context.size)
         )
 
-        _ = subviews.apply(from: &from) { _, subview, stop in
+        _ = subviews.apply(from: &from) { subview, stop in
             proposedSizes.subviews.append(subview.proposeSize(proposal))
             stop = true
         }
@@ -6830,7 +6928,7 @@ extension LazyHVStack {
         _ = subviews.apply(
             from: &from,
             style: _ViewList_IteratorStyle(value: 2)
-        ) { _, subview, stop in
+        ) { subview, stop in
             if _AGGraph.currentUpdateContext != nil,
                _AGGraphCancelUpdateIfNeeded() {
                 stop = true
@@ -6883,14 +6981,13 @@ extension LazyHVStack {
         minorGeometry: CGFloat,
         emit: (_LazyLayout_Subview, CGPoint, _ProposedSize, UnitPoint) -> Void
     ) {
-        _ = length
         // One HV-stack minor group contains exactly one child. Group traversal
         // and major-axis advancement remain the caller's responsibility.
         emit(
             subviews[0],
             .zero,
             _ProposedSize(
-                nil,
+                length,
                 in: Self.majorAxis,
                 by: minorGeometry
             ),

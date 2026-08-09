@@ -12,6 +12,17 @@ nonisolated(unsafe) private var _displayListIdentityCounter: UInt32 = 0
 protocol RBDisplayListContents: AnyObject {
 }
 
+/// Supplies a logical platform-group boundary while retaining the active renderer.
+protocol PlatformGroupFactory: AnyObject {
+    var platformGroupContainer: AnyObject { get }
+
+    func renderPlatformGroup(
+        contents: DisplayList,
+        in context: GraphicsContext,
+        render: (DisplayList, GraphicsContext) -> Void
+    )
+}
+
 struct _DisplayList_Identity: Codable, Hashable, CustomStringConvertible {
     private(set) var value: UInt32
 
@@ -602,6 +613,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
     enum Effect {
         case identity
         case archive(ArchiveIDs?)
+        case platformGroup(any PlatformGroupFactory)
         case opacity(Float)
         case transform(ProjectionTransform)
         case mask(DisplayList, GraphicsContext.ClipOptions)
@@ -3585,6 +3597,18 @@ struct DisplayList: Equatable, CustomStringConvertible {
                  .interpolatorAnimation:
                 renderItems(in: contents, context: context, includeDebug: includeDebug)
 
+            case let .platformGroup(factory):
+                factory.renderPlatformGroup(
+                    contents: contents,
+                    in: context
+                ) { contents, context in
+                    self.renderItems(
+                        in: contents,
+                        context: context,
+                        includeDebug: includeDebug
+                    )
+                }
+
             case let .shader(shader):
                 guard shader.shader != nil,
                       let layer = context.makeLayerContext() else {
@@ -3885,6 +3909,7 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     enum Kind: UInt8, Equatable {
         case identity
         case archive
+        case platformGroup
         case opacity
         case transform
         case mask
@@ -3913,6 +3938,7 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     var effectAnimation: DisplayListEffectAnimationSurfaceRecord?
     var archiveIDs: DisplayList.ArchiveIDs?
     var clipOptionsRawValue: UInt32?
+    var platformGroupID: ObjectIdentifier?
 }
 
 private struct DisplayListEffectAnimationSurfaceRecord: Equatable {
@@ -3927,6 +3953,11 @@ private extension DisplayList.Effect {
             return DisplayListEffectSurfaceRecord(kind: .identity)
         case let .archive(ids):
             return DisplayListEffectSurfaceRecord(kind: .archive, archiveIDs: ids)
+        case let .platformGroup(factory):
+            return DisplayListEffectSurfaceRecord(
+                kind: .platformGroup,
+                platformGroupID: ObjectIdentifier(factory)
+            )
         case let .opacity(opacity):
             return DisplayListEffectSurfaceRecord(kind: .opacity, opacity: opacity)
         case let .transform(transform):
@@ -4052,7 +4083,7 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
+        case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
             break
@@ -4070,7 +4101,7 @@ private extension DisplayList.Item {
             body(self)
         case let .effect(effect, contents):
             switch effect {
-            case .identity, .archive, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
+            case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
                 contents.forEachRenderItem(includeDebug: includeDebug, body)
             case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
                 break

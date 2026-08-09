@@ -31,7 +31,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         }
     }
 
-    func testScrollViewLayoutSizeKeepsSpecifiedNonScrollableAxis() {
+    func testScrollViewLayoutSizeKeepsSpecifiedScrollableAxis() {
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
             _ = graph.makeInput(value: ())
@@ -51,7 +51,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 observedProposal,
                 _ProposedSize(width: 100, height: nil)
             )
-            XCTAssertEqual(size, CGSize(width: 100, height: 260))
+            XCTAssertEqual(size, CGSize(width: 75, height: 180))
             XCTAssertNil(ScrollViewUtilities.sizeThatFits(
                 in: ProposedViewSize(width: 100, height: 180),
                 contentComputer: contentComputer,
@@ -1363,6 +1363,328 @@ final class SystemScrollViewHostTests: XCTestCase {
             ))
         }
     }
+
+    func testUpdatedScrollViewContainerRetainsOneAttachmentIdentity() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = graph.makeInput(value: HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            ))
+            let container = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(_scrollView: host)
+            )
+
+            let first = container.value
+            XCTAssertTrue(first === container.value)
+            XCTAssertTrue(first.scrollView === host.value)
+            XCTAssertTrue(host.value.parentContainer === first)
+            XCTAssertTrue(host.value.host.scrollView === host.value)
+
+            let secondHost = graph.makeInput(value: HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            ))
+            let secondContainer = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(_scrollView: secondHost)
+            ).value
+            XCTAssertFalse(first === secondContainer)
+            XCTAssertFalse(host.value === secondHost.value)
+            XCTAssertFalse(host.value.host === secondHost.value.host)
+        }
+    }
+
+    func testScrollViewDisplayListFrameUsesPinnedInsetRTLAndPixelOrder() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let configuration = graph.makeInput(value: ScrollViewConfiguration(
+                axes: .vertical,
+                contentInsets: EdgeInsets(
+                    top: 0.5,
+                    leading: 1.5,
+                    bottom: 2.5,
+                    trailing: 3.5
+                )
+            ))
+            let alignmentAdjustment = graph.makeInput(
+                value: CGSize(width: 90, height: 80)
+            )
+            let rule = ScrollViewDisplayListFrame(
+                _configuration: configuration,
+                _position: graph.makeInput(value: CGPoint(x: 10.25, y: 20.25)),
+                _containerPosition: graph.makeInput(value: CGPoint(x: 2, y: 4)),
+                _size: graph.makeInput(value: ViewSize(
+                    CGSize(width: 100.2, height: 50.2)
+                )),
+                _safeAreaInsets: graph.makeInput(value: EdgeInsets(
+                    top: 1,
+                    leading: 2,
+                    bottom: 3,
+                    trailing: 4
+                )),
+                _alignmentAdjustment: alignmentAdjustment,
+                _rtlAdjustment: graph.makeInput(value: CGSize(width: 5, height: 6)),
+                _layoutDirection: graph.makeInput(value: .rightToLeft),
+                _pixelLength: graph.makeInput(value: 0.5)
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: rule).children.compactMap(\.label),
+                [
+                    "_configuration", "_position", "_containerPosition",
+                    "_size", "_safeAreaInsets", "_alignmentAdjustment",
+                    "_rtlAdjustment", "_layoutDirection", "_pixelLength",
+                ]
+            )
+            let frame = graph.makeRule(rule)
+
+            XCTAssertEqual(
+                configuration.value.edgesToExpandDisplayListFrame,
+                .all
+            )
+            XCTAssertEqual(
+                frame.value,
+                CGRect(x: -2, y: 9, width: 116, height: 63)
+            )
+
+            alignmentAdjustment.setValue(CGSize(width: -30, height: -40))
+            XCTAssertEqual(
+                frame.value,
+                CGRect(x: -2, y: 9, width: 116, height: 63)
+            )
+        }
+    }
+
+    func testScrollViewDisplayListPassesThroughWithoutLiveContainer() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = graph.makeInput(value: HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            ))
+            let frame = graph.makeInput(value: CGRect(x: 1, y: 2, width: 30, height: 40))
+            let child = graph.makeInput(value: attachmentDisplayList(serial: 1))
+            let passedThrough = graph.makeRule(ScrollViewDisplayList(
+                identity: _DisplayList_Identity(decodedValue: 71),
+                _scrollView: host,
+                _frame: frame,
+                _contentList: OptionalAttribute(child)
+            ))
+            let empty = graph.makeRule(ScrollViewDisplayList(
+                identity: _DisplayList_Identity(decodedValue: 72),
+                _scrollView: host,
+                _frame: frame,
+                _contentList: OptionalAttribute()
+            ))
+
+            XCTAssertEqual(passedThrough.value, child.value)
+            XCTAssertTrue(empty.value.items.isEmpty)
+        }
+    }
+
+    func testScrollViewDisplayListReusesGroupIdentityAcrossChildUpdates() throws {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        try graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = graph.makeInput(value: HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            ))
+            let container = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(_scrollView: host)
+            )
+            _ = container.value
+            let frameValue = CGRect(x: 2, y: 3, width: 90, height: 70)
+            let frame = graph.makeInput(value: frameValue)
+            let child = graph.makeInput(value: attachmentDisplayList(serial: 1))
+            let identity = _DisplayList_Identity(decodedValue: 73)
+            let displayList = graph.makeRule(ScrollViewDisplayList(
+                identity: identity,
+                _scrollView: host,
+                _frame: frame,
+                _contentList: OptionalAttribute(child)
+            ))
+
+            let first = displayList.value
+            let firstItem = try XCTUnwrap(first.items.first)
+            let firstEffect = try XCTUnwrap(firstItem.effectItem)
+            guard case let .platformGroup(factory) = firstEffect.effect else {
+                return XCTFail("expected platform-group effect")
+            }
+            XCTAssertEqual(first.items.count, 1)
+            XCTAssertEqual(firstItem.identity, identity)
+            XCTAssertEqual(firstItem.frame, frameValue)
+            XCTAssertEqual(firstEffect.contents, child.value)
+            XCTAssertEqual(ObjectIdentifier(factory), ObjectIdentifier(container.value))
+            XCTAssertTrue(factory.platformGroupContainer === host.value.host)
+
+            child.setValue(attachmentDisplayList(serial: 2))
+            let second = displayList.value
+            let secondItem = try XCTUnwrap(second.items.first)
+            let secondEffect = try XCTUnwrap(secondItem.effectItem)
+            XCTAssertEqual(secondItem.identity, identity)
+            XCTAssertEqual(secondItem.frame, frameValue)
+            XCTAssertNotEqual(firstItem.version, secondItem.version)
+            XCTAssertEqual(secondEffect.contents, child.value)
+            XCTAssertTrue(host.value.parentContainer === container.value)
+        }
+    }
+
+    func testScrollViewResponderReusesIdentityAndNestsUpdatedChildren() throws {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        try graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = graph.makeInput(value: HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            ))
+            let container = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(_scrollView: host)
+            )
+            _ = container.value
+            let firstChild = ScrollHostTestResponder()
+            let secondChild = ScrollHostTestResponder()
+            let children: Attribute<[ViewResponder]> = graph.makeInput(
+                value: [firstChild]
+            )
+            let position = graph.makeInput(value: CGPoint(x: 10, y: 20))
+            let size = graph.makeInput(value: ViewSize(
+                CGSize(width: 100, height: 80)
+            ))
+            let transform = graph.makeInput(value: ViewTransform.identity)
+            let inputs = makeAttachmentViewInputs(
+                graph: graph,
+                position: position,
+                size: size,
+                transform: transform
+            )
+            let layoutResponder = DefaultLayoutViewResponder(
+                inputs: inputs,
+                viewSubgraph: AGSubgraph()
+            )
+            let rule = ScrollViewResponder(
+                _scrollView: host,
+                _position: position,
+                _size: size,
+                _transform: transform,
+                _children: children,
+                _responder: nil,
+                layoutResponder: layoutResponder
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: rule).children.compactMap(\.label),
+                [
+                    "_scrollView", "_position", "_size", "_transform",
+                    "_children", "_responder", "layoutResponder",
+                ]
+            )
+            let responders = graph.makeStatefulRule(rule)
+
+            let first = try XCTUnwrap(
+                responders.value.first as? HostingScrollViewResponder
+            )
+            XCTAssertTrue(first === responders.value.first)
+            XCTAssertTrue(host.value.responder === first)
+            XCTAssertTrue(first.representedView === host.value.host)
+            XCTAssertTrue(first.hostContainer === container.value)
+            XCTAssertNil(first.parent)
+            XCTAssertTrue(layoutResponder.parent === first)
+            XCTAssertTrue(first.children.first === firstChild)
+            XCTAssertTrue(firstChild.parent === first)
+
+            children.setValue([secondChild])
+            let updated = try XCTUnwrap(
+                responders.value.first as? HostingScrollViewResponder
+            )
+            XCTAssertTrue(updated === first)
+            XCTAssertTrue(updated.children.first === secondChild)
+            XCTAssertNil(firstChild.parent)
+            XCTAssertTrue(secondChild.parent === updated)
+        }
+    }
+
+    func testScrollViewAttachmentBacklinksDoNotRetainTheOwnerChain() {
+        weak var weakHost: HostingScrollView?
+        weak var weakContainer: HostingScrollView.PlatformContainer?
+        weak var weakGroup: HostingScrollView.PlatformGroupContainer?
+
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        graphRef.withCurrent {
+            do {
+                let state = graph.makeInput(value: SystemScrollLayoutState())
+                let host = HostingScrollView(
+                    graphRef: graphRef,
+                    layoutState: state.asWeak()
+                )
+                let container = HostingScrollView.PlatformContainer(
+                    scrollView: host
+                )
+                host.parentContainer = container
+                weakHost = host
+                weakContainer = container
+                weakGroup = host.host
+            }
+
+            XCTAssertNil(weakHost)
+            XCTAssertNil(weakContainer)
+            XCTAssertNil(weakGroup)
+        }
+    }
+
+    private func attachmentDisplayList(serial: UInt32) -> DisplayList {
+        var list = DisplayList()
+        list.items.append(DisplayList.Item(
+            effect: .identity,
+            contents: DisplayList(),
+            frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            identity: _DisplayList_Identity(decodedValue: serial),
+            version: DisplayList.Version(value: Int(serial))
+        ))
+        return list
+    }
+
+    private func makeAttachmentViewInputs(
+        graph: _AGGraph,
+        position: Attribute<CGPoint>,
+        size: Attribute<ViewSize>,
+        transform: Attribute<ViewTransform>
+    ) -> _ViewInputs {
+        let keys = PreferenceKeys()
+        return _ViewInputs(
+            base: _GraphInputs(
+                time: graph.makeInput(value: Time()),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
+                environment: graph.makeInput(value: EnvironmentValues.tracking()),
+                transaction: graph.makeInput(value: Transaction())
+            ),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: keys,
+                hostKeys: graph.makeInput(value: keys)
+            ),
+            transform: transform,
+            position: position,
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: size,
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
+    }
+}
+
+private final class ScrollHostTestResponder: ViewResponder {
 }
 
 private final class HostScrollTargetBehaviorRecorder {
