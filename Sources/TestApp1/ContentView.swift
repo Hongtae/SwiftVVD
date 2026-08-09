@@ -14,6 +14,7 @@ private enum LabCategory: Int, Identifiable {
     case customAnimation
     case images
     case textVariants
+    case scrollView
     case scrollViewReader
 
     var id: Int { rawValue }
@@ -103,7 +104,10 @@ struct ContentView: View {
                     categoryButton("Images", category: .images, width: 145)
                     categoryButton("Text Variants", category: .textVariants, width: 145)
                 }
-                categoryButton("ScrollView Reader", category: .scrollViewReader, width: 145)
+                HStack(spacing: 10) {
+                    categoryButton("Scroll View", category: .scrollView, width: 145)
+                    categoryButton("ScrollView Reader", category: .scrollViewReader, width: 145)
+                }
             }
 
             Divider()
@@ -303,6 +307,10 @@ struct ContentView: View {
             }
         case .textVariants:
             TextVariantLabSheet {
+                selectedCategory = nil
+            }
+        case .scrollView:
+            ScrollViewLabSheet {
                 selectedCategory = nil
             }
         case .scrollViewReader:
