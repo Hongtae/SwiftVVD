@@ -23,14 +23,111 @@ public struct FillStyle: Equatable, Sendable {
     }
 }
 
+struct FixedRoundedRect: Equatable {
+    var rect: CGRect
+    var cornerSize: CGSize
+    var style: RoundedCornerStyle
+}
+
 public struct Path: Equatable {
-    public init() {
+    public enum Element: Equatable, Sendable {
+        case move(to: CGPoint)
+        case line(to: CGPoint)
+        case quadCurve(to: CGPoint, control: CGPoint)
+        case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
+        case closeSubpath
     }
 
-    public var isEmpty: Bool { self.elements.isEmpty }
+    struct PathData: Equatable {
+        var elements: [Element] = []
+        var boundingBox: CGRect = .null
+        var boundingBoxOfPath: CGRect = .null
+        var initialPoint: CGPoint?
+        var currentPoint: CGPoint?
+    }
+
+    final class PathBox: Equatable {
+        enum Kind: Equatable {
+            case buffer
+        }
+
+        var kind: Kind
+        var data: PathData
+
+        init(kind: Kind = .buffer, data: PathData = PathData()) {
+            self.kind = kind
+            self.data = data
+        }
+
+        static func == (lhs: PathBox, rhs: PathBox) -> Bool {
+            lhs.kind == rhs.kind && lhs.data == rhs.data
+        }
+    }
+
+    enum Storage: Equatable {
+        case empty
+        case rect(CGRect)
+        case ellipse(CGRect)
+        indirect case roundedRect(FixedRoundedRect)
+        case path(PathBox)
+    }
+
+    var storage: Storage
+
+    public init() {
+        storage = .empty
+    }
+
+    private init(storage: Storage) {
+        self.storage = storage
+    }
+
+    public var isEmpty: Bool {
+        switch storage {
+        case .empty:
+            return true
+        case .path(let box):
+            return box.data.elements.isEmpty
+        case .rect, .ellipse, .roundedRect:
+            return false
+        }
+    }
+
+    private static func rectContains(_ rect: CGRect, point: CGPoint) -> Bool {
+        rect.contains(point)
+    }
+
+    private static func ellipseContains(_ rect: CGRect, point: CGPoint) -> Bool {
+        guard !rect.isNull else { return false }
+        let radiusX = rect.size.width * 0.5
+        let radiusY = rect.size.height * 0.5
+        guard radiusX > 0, radiusY > 0 else { return false }
+        let x = (point.x - rect.midX) / radiusX
+        let y = (point.y - rect.midY) / radiusY
+        return x * x + y * y < 1.0
+    }
 
     public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
-        let bounds = boundingBoxOfPath
+        switch storage {
+        case .empty:
+            return false
+        case .rect(let rect):
+            return Self.rectContains(rect, point: p)
+        case .ellipse(let rect):
+            return Self.ellipseContains(rect, point: p)
+        case .roundedRect, .path:
+            break
+        }
+
+        return contains(p, eoFill: eoFill, data: materializedData())
+    }
+
+    private func contains(
+        _ p: CGPoint,
+        eoFill: Bool,
+        data: PathData
+    ) -> Bool {
+        let bounds = data.boundingBoxOfPath
         guard !bounds.isNull,
               p.x >= bounds.minX, p.x <= bounds.maxX,
               p.y >= bounds.minY, p.y <= bounds.maxY else {
@@ -101,7 +198,7 @@ public struct Path: Equatable {
 
         var startPoint: CGPoint? = nil
         var currentPoint: CGPoint? = nil
-        self.elements.forEach {
+        data.elements.forEach {
             switch $0 {
             case .move(let to):
                 startPoint = to
@@ -138,40 +235,214 @@ public struct Path: Equatable {
         eoFill: Bool,
         origin: CGPoint
     ) -> BitVector64 {
+        let pointCount = min(points.count, 64)
+        guard pointCount > 0 else { return BitVector64() }
+
+        switch storage {
+        case .empty:
+            return BitVector64()
+        case .rect(let rect):
+            var result = BitVector64()
+            for index in 0..<pointCount {
+                let point = CGPoint(
+                    x: points[index].x - origin.x,
+                    y: points[index].y - origin.y
+                )
+                result[index] = Self.rectContains(rect, point: point)
+            }
+            return result
+        case .ellipse(let rect):
+            var result = BitVector64()
+            for index in 0..<pointCount {
+                let point = CGPoint(
+                    x: points[index].x - origin.x,
+                    y: points[index].y - origin.y
+                )
+                result[index] = Self.ellipseContains(rect, point: point)
+            }
+            return result
+        case .roundedRect, .path:
+            guard pointCloudIntersectsPathBounds(
+                points: points,
+                count: pointCount,
+                origin: origin
+            ) else {
+                return BitVector64()
+            }
+        }
+
+        let data = materializedData()
         var result = BitVector64()
-        for (index, point) in points.prefix(64).enumerated() {
+        for index in 0..<pointCount {
+            let point = points[index]
             result[index] = contains(
                 CGPoint(
                     x: point.x - origin.x,
                     y: point.y - origin.y
                 ),
-                eoFill: eoFill
+                eoFill: eoFill,
+                data: data
             )
         }
         return result
     }
 
-    public enum Element: Equatable, Sendable {
-        case move(to: CGPoint)
-        case line(to: CGPoint)
-        case quadCurve(to: CGPoint, control: CGPoint)
-        case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
-        case closeSubpath
+    private func pointCloudIntersectsPathBounds(
+        points: UnsafeBufferPointer<CGPoint>,
+        count: Int,
+        origin: CGPoint
+    ) -> Bool {
+        let bounds = boundingRect
+        guard !bounds.isNull else { return false }
+
+        var minimumX = Float.infinity
+        var minimumY = Float.infinity
+        var maximumX = -Float.infinity
+        var maximumY = -Float.infinity
+        for index in 0..<count {
+            let x = Float(points[index].x - origin.x)
+            let y = Float(points[index].y - origin.y)
+            minimumX = min(minimumX, x)
+            minimumY = min(minimumY, y)
+            maximumX = max(maximumX, x)
+            maximumY = max(maximumY, y)
+        }
+
+        let standardizedBounds = bounds.standardized
+        let boundsMinimumX = Float(standardizedBounds.minX)
+        let boundsMinimumY = Float(standardizedBounds.minY)
+        let boundsMaximumX = Float(standardizedBounds.maxX)
+        let boundsMaximumY = Float(standardizedBounds.maxY)
+
+        if minimumX == maximumX && minimumY == maximumY {
+            return minimumX >= boundsMinimumX && minimumX <= boundsMaximumX
+                && minimumY >= boundsMinimumY && minimumY <= boundsMaximumY
+        }
+
+        guard minimumX < maximumX, minimumY < maximumY else {
+            return false
+        }
+        return minimumX < boundsMaximumX && maximumX > boundsMinimumX
+            && minimumY < boundsMaximumY && maximumY > boundsMinimumY
     }
-    private var elements: [Element] = []
 
-    // smallest rectangle completely enclosing all points in the path,
-    // including control points for Bézier and quadratic curves.
-    var boundingBox: CGRect = .null
-    
-    // smallest rectangle completely enclosing all points in the path
-    // but not including control points for Bézier and quadratic curves.
-    var boundingBoxOfPath: CGRect = .null
+    private var elements: [Element] {
+        get { materializedData().elements }
+        set { ensureUniquePathBox().data.elements = newValue }
+    }
 
-    public var boundingRect: CGRect { boundingBoxOfPath }
+    // Smallest rectangle enclosing all points, including curve controls.
+    private var boundingBox: CGRect {
+        get { materializedData().boundingBox }
+        set { ensureUniquePathBox().data.boundingBox = newValue }
+    }
 
-    public private(set) var initialPoint: CGPoint? = nil
-    public private(set) var currentPoint: CGPoint? = nil
+    // Smallest rectangle enclosing the path geometry, excluding controls.
+    var boundingBoxOfPath: CGRect {
+        get { materializedData().boundingBoxOfPath }
+        set { ensureUniquePathBox().data.boundingBoxOfPath = newValue }
+    }
+
+    public var boundingRect: CGRect {
+        switch storage {
+        case .empty:
+            return .null
+        case .rect(let rect), .ellipse(let rect):
+            return rect
+        case .roundedRect(let roundedRect):
+            return roundedRect.rect
+        case .path(let box):
+            return box.data.boundingBoxOfPath
+        }
+    }
+
+    public private(set) var initialPoint: CGPoint? {
+        get { materializedData().initialPoint }
+        set { ensureUniquePathBox().data.initialPoint = newValue }
+    }
+
+    public private(set) var currentPoint: CGPoint? {
+        get {
+            switch storage {
+            case .empty:
+                return nil
+            case .rect(let rect):
+                return rect.origin
+            case .ellipse(let rect):
+                let rect = rect.standardized
+                return CGPoint(x: rect.maxX, y: rect.midY)
+            case .roundedRect(let roundedRect):
+                guard roundedRect.cornerSize.width > 0,
+                      roundedRect.cornerSize.height > 0 else {
+                    return roundedRect.rect.origin
+                }
+                let rect = roundedRect.rect.standardized
+                return CGPoint(x: rect.maxX, y: rect.midY)
+            case .path(let box):
+                return box.data.currentPoint
+            }
+        }
+        set { ensureUniquePathBox().data.currentPoint = newValue }
+    }
+
+    private func materializedData() -> PathData {
+        switch storage {
+        case .empty:
+            return PathData()
+        case .path(let box):
+            return box.data
+        case .rect(let rect):
+            var path = Path(storage: .path(PathBox()))
+            path.addRect(rect)
+            guard case .path(let box) = path.storage else {
+                preconditionFailure("rect materialization must use path storage")
+            }
+            var data = box.data
+            data.boundingBox = rect
+            data.boundingBoxOfPath = rect
+            return data
+        case .ellipse(let rect):
+            var path = Path(storage: .path(PathBox()))
+            path.addEllipse(in: rect)
+            guard case .path(let box) = path.storage else {
+                preconditionFailure("ellipse materialization must use path storage")
+            }
+            var data = box.data
+            data.boundingBox = rect
+            data.boundingBoxOfPath = rect
+            return data
+        case .roundedRect(let roundedRect):
+            var path = Path(storage: .path(PathBox()))
+            path.addRoundedRect(
+                in: roundedRect.rect,
+                cornerSize: roundedRect.cornerSize,
+                style: roundedRect.style
+            )
+            guard case .path(let box) = path.storage else {
+                preconditionFailure("rounded-rect materialization must use path storage")
+            }
+            var data = box.data
+            data.boundingBox = roundedRect.rect
+            data.boundingBoxOfPath = roundedRect.rect
+            return data
+        }
+    }
+
+    @discardableResult
+    private mutating func ensureUniquePathBox() -> PathBox {
+        if case .path(var box) = storage {
+            storage = .empty
+            if !isKnownUniquelyReferenced(&box) {
+                box = PathBox(kind: box.kind, data: box.data)
+            }
+            storage = .path(box)
+            return box
+        }
+
+        let box = PathBox(data: materializedData())
+        storage = .path(box)
+        return box
+    }
 
     public func forEach(_ body: (Path.Element) -> Void) {
         self.elements.forEach(body)
@@ -179,7 +450,7 @@ public struct Path: Equatable {
 
     public func strokedPath(_ style: StrokeStyle) -> Path {
         let halfWidth = style.lineWidth * 0.5
-        if halfWidth < .ulpOfOne { return Path() }
+        if isEmpty { return Path() }
 
         // Internal Types
         enum Seg {
@@ -582,6 +853,10 @@ public struct Path: Equatable {
         let from = clamp(from, min: 0, max: 1)
         let to = clamp(to, min: 0, max: 1)
 
+        if from == 0, to == 1 {
+            return self
+        }
+
         let quadraticBezierSubdivision = 2
         let cubicBezierSubdivision = 3
 
@@ -818,6 +1093,8 @@ extension Path {
         self.elements.append(.move(to: p))
         self.initialPoint = p
         self.currentPoint = p
+        self.boundingBox.expand(by: p)
+        self.boundingBoxOfPath.expand(by: p)
     }
 
     public mutating func addLine(to p1: CGPoint) {
@@ -861,32 +1138,83 @@ extension Path {
 
 extension Path {
     public init(_ rect: CGRect) {
-        self.addRect(rect)
+        if rect.isNull {
+            storage = .empty
+        } else {
+            storage = .rect(rect)
+        }
     }
 
     public init(roundedRect rect: CGRect,
                 cornerSize: CGSize,
                 style: RoundedCornerStyle = .circular) {
-        self.addRoundedRect(in: rect, cornerSize: cornerSize, style: style)
+        if rect.isNull {
+            storage = .empty
+        } else if cornerSize == .zero {
+            storage = .rect(rect)
+        } else {
+            storage = .roundedRect(FixedRoundedRect(
+                rect: rect,
+                cornerSize: cornerSize,
+                style: style
+            ))
+        }
     }
 
     public init(roundedRect rect: CGRect,
                 cornerRadius: CGFloat,
                 style: RoundedCornerStyle = .circular) {
-        self.addRoundedRect(in: rect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius), style: style)
+        self.init(
+            roundedRect: rect,
+            cornerSize: CGSize(width: cornerRadius, height: cornerRadius),
+            style: style
+        )
     }
 
     public init(ellipseIn rect: CGRect) {
-        self.addEllipse(in: rect)
+        if rect.isNull {
+            storage = .empty
+        } else {
+            storage = .ellipse(rect)
+        }
     }
 
     public init(_ callback: (inout Path) -> ()) {
+        self.init()
         callback(&self)
+    }
+
+    private static func preservesAxisAlignment(
+        _ transform: CGAffineTransform
+    ) -> Bool {
+        (transform.b == 0 && transform.c == 0)
+            || (transform.a == 0 && transform.d == 0)
+    }
+
+    private static func transformedCornerSize(
+        _ cornerSize: CGSize,
+        by transform: CGAffineTransform
+    ) -> CGSize {
+        if transform.b == 0 && transform.c == 0 {
+            return CGSize(
+                width: cornerSize.width * abs(transform.a),
+                height: cornerSize.height * abs(transform.d)
+            )
+        }
+        return CGSize(
+            width: cornerSize.height * abs(transform.c),
+            height: cornerSize.width * abs(transform.b)
+        )
     }
 
     public mutating func addRect(_ rect: CGRect,
                                  transform: CGAffineTransform = .identity) {
         if rect.isNull { return }
+        if case .empty = storage,
+           Self.preservesAxisAlignment(transform) {
+            storage = .rect(rect.applying(transform).standardized)
+            return
+        }
         let pt = [
             CGPoint(x: rect.minX, y: rect.minY).applying(transform),
             CGPoint(x: rect.maxX, y: rect.minY).applying(transform),
@@ -905,6 +1233,8 @@ extension Path {
                                         style: RoundedCornerStyle = .circular,
                                         transform: CGAffineTransform = .identity) {
         if rect.isNull { return }
+        let sourceRect = rect
+        let rect = sourceRect.standardized
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
@@ -914,7 +1244,26 @@ extension Path {
         let cx = clamp(cornerSize.width, min: 0, max: maxX - midX)
         let cy = clamp(cornerSize.height, min: 0, max: maxY - midY)
 
-        if cx > .ulpOfOne && cy > .ulpOfOne {
+        if case .empty = storage,
+           Self.preservesAxisAlignment(transform) {
+            let transformedRect = sourceRect.applying(transform).standardized
+            let transformedCornerSize = Self.transformedCornerSize(
+                cornerSize,
+                by: transform
+            )
+            if transformedCornerSize == .zero {
+                storage = .rect(transformedRect)
+            } else {
+                storage = .roundedRect(FixedRoundedRect(
+                    rect: transformedRect,
+                    cornerSize: transformedCornerSize,
+                    style: style
+                ))
+            }
+            return
+        }
+
+        if cornerSize != .zero {
 
             let t1 = CGAffineTransform(scaleX: cx, y: cy)
                 .concatenating(CGAffineTransform(translationX: maxX - cx, y: maxY - cy))
@@ -1008,6 +1357,12 @@ extension Path {
     public mutating func addEllipse(in rect: CGRect,
                                     transform: CGAffineTransform = .identity) {
         if rect.isNull { return }
+        if case .empty = storage,
+           Self.preservesAxisAlignment(transform) {
+            storage = .ellipse(rect.applying(transform).standardized)
+            return
+        }
+        let rect = rect.standardized
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
@@ -1178,6 +1533,33 @@ extension Path {
     }
 
     public mutating func addPath(_ path: Path, transform: CGAffineTransform = .identity) {
+        guard !path.isEmpty else { return }
+        if case .empty = storage {
+            if transform.isIdentity {
+                self = path
+                return
+            }
+            switch path.storage {
+            case .empty:
+                return
+            case .rect(let rect):
+                addRect(rect, transform: transform)
+                return
+            case .ellipse(let rect):
+                addEllipse(in: rect, transform: transform)
+                return
+            case .roundedRect(let roundedRect):
+                addRoundedRect(
+                    in: roundedRect.rect,
+                    cornerSize: roundedRect.cornerSize,
+                    style: roundedRect.style,
+                    transform: transform
+                )
+                return
+            case .path:
+                break
+            }
+        }
         self.elements.reserveCapacity(self.elements.count + path.elements.count)
         path.elements.forEach {
             switch $0 {
@@ -1215,6 +1597,7 @@ extension Path {
 
 extension Path: LosslessStringConvertible {
     public init?(_ string: String) {
+        self.init()
         let commands = string.components(separatedBy: .whitespacesAndNewlines)
         var floats: [Double] = []
         for str in commands {

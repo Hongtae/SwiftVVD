@@ -441,6 +441,66 @@ struct ContentPathObservers {
     }
 }
 
+func hitPoints(
+    point: CGPoint,
+    radius: CGFloat
+) -> (points: [CGPoint], weights: [Double]) {
+    let magnitude = abs(radius)
+    let spacing: CGFloat
+    let effectiveRadius: CGFloat
+    if magnitude <= 1.0 {
+        spacing = 4.0
+        effectiveRadius = 1.0
+    } else if magnitude <= 60.0 {
+        spacing = max(4.0, magnitude / 6.0)
+        effectiveRadius = magnitude
+    } else {
+        spacing = 10.0
+        effectiveRadius = 60.0
+    }
+
+    let levelCount = min(Int(ceil(effectiveRadius / spacing)), 6)
+    var points = [point]
+    var weights = [24.0]
+    guard levelCount > 1 else {
+        return (points, weights)
+    }
+
+    var ringRadius = spacing
+    for level in 1..<levelCount {
+        let ringPointCount = level * 4
+        let ringWeight = 24.0 / Double(ringPointCount)
+        let angle = 2.0 * Double.pi / Double(ringPointCount)
+        let stepSine = CGFloat(sin(angle))
+        let stepCosine = CGFloat(cos(angle))
+        var cosine: CGFloat = 1.0
+        var sine: CGFloat = 0.0
+
+        for _ in 0..<ringPointCount {
+            points.append(CGPoint(
+                x: point.x + ringRadius * cosine,
+                y: point.y + ringRadius * sine
+            ))
+            weights.append(ringWeight)
+
+            let nextSine = stepCosine * sine + stepSine * cosine
+            let nextCosine = stepCosine * cosine - stepSine * sine
+            sine = nextSine
+            cosine = nextCosine
+        }
+        ringRadius += spacing
+    }
+    return (points, weights)
+}
+
+struct HitTestPassThroughFeature {
+    nonisolated(unsafe) static var overrideValue: Bool?
+
+    static var isEnabled: Bool {
+        overrideValue ?? isLinkedOnOrAfter(.v7)
+    }
+}
+
 class ViewResponder: ResponderNode, CustomStringConvertible {
     // The responder tree owns access to this process-global, non-atomic counter.
     nonisolated(unsafe) private static var _hitTestKey: UInt32 = 0
@@ -610,6 +670,114 @@ class ViewResponder: ResponderNode, CustomStringConvertible {
             return nil
         }
         return (self, result.priority)
+    }
+
+    func hitTest(
+        globalPoint: CGPoint,
+        radius: CGFloat,
+        cacheKey: UInt32? = nil,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder? {
+        let resolvedCacheKey = options.contains(.uncached)
+            ? nil
+            : (cacheKey ?? Self.nextHitTestKey())
+        if options.contains(.disablePointCloudHitTesting) {
+            return singlePointHitTest(
+                globalPoint: globalPoint,
+                cacheKey: resolvedCacheKey,
+                options: options
+            )?.responder
+        }
+        let (points, weights) = hitPoints(point: globalPoint, radius: radius)
+        return hitTest(
+            globalPoints: points,
+            weights: weights,
+            mask: [],
+            cacheKey: resolvedCacheKey,
+            options: options
+        )?.responder
+    }
+
+    func hitTest(
+        globalPoints: [CGPoint],
+        weights: [Double],
+        mask: BitVector64,
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> (responder: ViewResponder, priority: Double, mask: BitVector64)? {
+        guard hitTestPolicy(options: options) != .exclude else {
+            return nil
+        }
+
+        let result = containsGlobalPoints(
+            globalPoints,
+            cacheKey: cacheKey,
+            options: options
+        )
+        let pointCount = min(globalPoints.count, 64)
+        var childMask = mask
+        var opacityMask = mask
+        var weight = 0.0
+
+        for index in 0..<pointCount {
+            guard !mask[index], result.mask[index] else {
+                childMask[index] = true
+                continue
+            }
+            weight += weights[index]
+            opacityMask[index] = opacity > 0.5
+        }
+
+        let priority = result.priority * weight * opacity
+        guard priority != 0 else {
+            return nil
+        }
+
+        var bestResponder: ViewResponder?
+        var bestPriority = 0.0
+        var nextPriority = 0.0
+
+        for child in result.children.reversed() {
+            guard let candidate = child.hitTest(
+                globalPoints: globalPoints,
+                weights: weights,
+                mask: childMask,
+                cacheKey: cacheKey,
+                options: options
+            ) else {
+                continue
+            }
+            childMask = candidate.mask
+
+            if nextPriority >= candidate.priority {
+                continue
+            }
+            if bestPriority >= candidate.priority {
+                nextPriority = candidate.priority
+                continue
+            }
+            if let bestResponder, bestResponder === candidate.responder {
+                bestPriority = candidate.priority
+            } else {
+                nextPriority = bestPriority
+                bestPriority = candidate.priority
+                bestResponder = candidate.responder
+            }
+        }
+
+        if let bestResponder {
+            let threshold = HitTestPassThroughFeature.isEnabled
+                ? 0.0
+                : max(nextPriority * 1.2, 8.0)
+            if bestPriority > threshold {
+                return (bestResponder, priority, opacityMask)
+            }
+        }
+
+        guard hitTestPolicy(options: options) == .include else {
+            return nil
+        }
+        return (self, priority, opacityMask)
     }
 
     func addContentPath(
@@ -899,17 +1067,30 @@ final class HitTestBindingResponder: DefaultLayoutViewResponder {
             return super.bindEvent(event)
         }
         let options = event.customHitTestOptions ?? .platformDefault
-        guard options.contains(.disablePointCloudHitTesting) else {
-            return super.bindEvent(event)
-        }
         let cacheKey = options.contains(.uncached)
             ? nil
             : ViewResponder.nextHitTestKey()
-        return singlePointHitTest(
-            globalPoint: event.hitTestLocation,
-            cacheKey: cacheKey,
-            options: options
-        )?.responder ?? super.bindEvent(event)
+        let responder: ViewResponder?
+        if options.contains(.disablePointCloudHitTesting) {
+            responder = singlePointHitTest(
+                globalPoint: event.hitTestLocation,
+                cacheKey: cacheKey,
+                options: options
+            )?.responder
+        } else {
+            let (points, weights) = hitPoints(
+                point: event.hitTestLocation,
+                radius: event.hitTestRadius
+            )
+            responder = hitTest(
+                globalPoints: points,
+                weights: weights,
+                mask: [],
+                cacheKey: cacheKey,
+                options: options
+            )?.responder
+        }
+        return responder ?? super.bindEvent(event)
     }
 }
 

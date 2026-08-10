@@ -118,6 +118,9 @@ struct ContentResponderHelper<Data: ContentResponder> {
         children: [ViewResponder]
     ) -> ViewResponder.ContainsPointsResult {
         cache.fetch(key: cacheKey) {
+            guard !points.isEmpty else {
+                return .passthrough(to: children)
+            }
             guard let data else {
                 return .stop
             }
@@ -128,7 +131,7 @@ struct ContentResponderHelper<Data: ContentResponder> {
             }
             return ViewResponder.ContainsPointsResult(
                 mask: mask,
-                priority: 0,
+                priority: 1.0,
                 children: children
             )
         }

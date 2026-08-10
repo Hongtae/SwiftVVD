@@ -106,6 +106,20 @@ final class ShapeStyledHitTestingTests: XCTestCase {
 
         XCTAssertEqual(recorder.count, 65)
         XCTAssertEqual(result.mask.rawValue, UInt64.max)
+        XCTAssertEqual(result.priority, 1.0)
+
+        let child = MultiViewResponder()
+        let emptyResult = helper.containsGlobalPoints(
+            [],
+            cacheKey: nil,
+            options: [],
+            children: [child]
+        )
+        XCTAssertEqual(recorder.count, 65)
+        XCTAssertEqual(emptyResult.mask.rawValue, 0)
+        XCTAssertEqual(emptyResult.priority, 0)
+        XCTAssertEqual(emptyResult.children.count, 1)
+        XCTAssertTrue(emptyResult.children[0] === child)
     }
 
     private func contains<Leaf: ShapeStyledLeafView>(
