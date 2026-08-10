@@ -80,6 +80,16 @@ struct ScrollViewDragAutoScrollKey: PreferenceKey {
 
 // EventBinding / EventBindingManager
 
+/// Receives backend events at a responder-owned platform boundary without
+/// materializing a view gesture around that boundary.
+protocol ResponderEventConsumer: AnyObject {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> GesturePhase<Void>
+}
+
 /// Binds a single EventID to a specific ResponderNode for the duration of an interaction.
 struct EventBinding: Equatable {
     var responder: ResponderNode
@@ -680,6 +690,12 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     }
 
     func eventBinding(at location: CGPoint, accepting eventType: Any.Type) -> EventBinding? {
+        if let consumer = hitTestEventConsumer(
+            at: location,
+            accepting: eventType
+        ), let responder = consumer as? ResponderNode {
+            return EventBinding(responder: responder)
+        }
         guard let responder = hitTestResponders(
             at: location
         ).first else {
@@ -707,6 +723,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
         }
 
         if rootResponder == nil {
+            var phases = dispatchToEventConsumers(events, at: time)
             let candidates: [any AnyGestureResponder]
             if let bound = events.values.compactMap({ event -> AnyGestureResponder? in
                 (event as? any ResponderBoundEvent)?.binding?.responder
@@ -720,7 +737,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             } else {
                 candidates = []
             }
-            let phases = candidates.map { responder -> GesturePhase<Void> in
+            phases.append(contentsOf: candidates.map { responder -> GesturePhase<Void> in
                 let manager = responder.gestureGraph.eventBindingManager
                 let phase = manager.sendDownstream(events, at: time)
                 if phase.isTerminal {
@@ -728,7 +745,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
                     manager.reset()
                 }
                 return phase
-            }
+            })
             if phases.contains(where: { $0.isActive }) { return .active(()) }
             if phases.contains(where: { $0.isEnded }) { return .ended(()) }
             if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
@@ -749,6 +766,112 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             }
             return phase
         }
+    }
+
+    private func dispatchToEventConsumers(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> [GesturePhase<Void>] {
+        struct Dispatch {
+            var consumer: any ResponderEventConsumer
+            var responder: ResponderNode
+            var events: [EventID: any EventType]
+            var terminalIDs: [EventID]
+        }
+
+        var dispatches: [ObjectIdentifier: Dispatch] = [:]
+        for (eventID, event) in events {
+            let eventType = type(of: event)
+            let consumerAndResponder: (
+                consumer: any ResponderEventConsumer,
+                responder: ResponderNode
+            )?
+
+            if let responder = event.binding?.responder,
+               let consumer = responder as? any ResponderEventConsumer {
+                consumerAndResponder = (consumer, responder)
+            } else if let responder = eventBindingManager.bindings[eventID]?.responder,
+                      let consumer = responder as? any ResponderEventConsumer {
+                consumerAndResponder = (consumer, responder)
+            } else if let event = event as? any HitTestableEventType,
+                      let consumer = hitTestEventConsumer(
+                        at: event.hitTestLocation,
+                        accepting: eventType
+                      ),
+                      let responder = consumer as? ResponderNode {
+                consumerAndResponder = (consumer, responder)
+            } else {
+                consumerAndResponder = nil
+            }
+
+            guard let consumerAndResponder else { continue }
+            if event.phase == .began {
+                eventBindingManager.rebindEvent(
+                    eventID,
+                    to: consumerAndResponder.responder
+                )
+            }
+            let identifier = ObjectIdentifier(
+                consumerAndResponder.consumer as AnyObject
+            )
+            var dispatch = dispatches[identifier] ?? Dispatch(
+                consumer: consumerAndResponder.consumer,
+                responder: consumerAndResponder.responder,
+                events: [:],
+                terminalIDs: []
+            )
+            dispatch.events[eventID] = event
+            if event.phase.isTerminal {
+                dispatch.terminalIDs.append(eventID)
+            }
+            dispatches[identifier] = dispatch
+        }
+
+        return dispatches.values.map { dispatch in
+            let phase = dispatch.consumer.consumeEvents(
+                dispatch.events,
+                at: time
+            )
+            for eventID in dispatch.terminalIDs {
+                eventBindingManager.rebindEvent(eventID, to: nil)
+            }
+            return phase
+        }
+    }
+
+    private func hitTestEventConsumer(
+        at location: CGPoint,
+        accepting eventType: Any.Type
+    ) -> (any ResponderEventConsumer)? {
+        let root = (eventBindingManager.rootResponder as? MultiViewResponder)
+            ?? gestureGraphRuntimeState(self).ownedRootResponder
+
+        func firstConsumer(
+            in responders: [ViewResponder]
+        ) -> (any ResponderEventConsumer)? {
+            for responder in responders.reversed() {
+                let options = ViewResponder.ContainsPointsOptions.platformDefault
+                guard responder.hitTestPolicy(options: options) != .exclude else {
+                    continue
+                }
+                let result = responder.containsGlobalPoints(
+                    [location],
+                    cacheKey: nil,
+                    options: options
+                )
+                guard result.mask[0] else { continue }
+                if let descendant = firstConsumer(in: result.children) {
+                    return descendant
+                }
+                if let consumer = responder as? any ResponderEventConsumer,
+                   consumer.acceptsEventType(eventType) {
+                    return consumer
+                }
+            }
+            return nil
+        }
+
+        return firstConsumer(in: root.children)
     }
 
     /// Returns hit responders at a given point, filtered by exclusion policy.

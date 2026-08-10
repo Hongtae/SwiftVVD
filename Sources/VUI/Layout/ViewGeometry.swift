@@ -272,11 +272,11 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         case translation(CGSize)
 
         /// 2-D affine transform (rotation / scale / shear).
-        /// `inverse == true` means the stored transform is already the inverted form.
+        /// `inverse == true` means the stored transform is in local-to-global form.
         case affineTransform(CGAffineTransform, inverse: Bool)
 
         /// 3-D projective transform.
-        /// `inverse == true` means the stored transform is already the inverted form.
+        /// `inverse == true` means the stored transform is in local-to-global form.
         case projectionTransform(ProjectionTransform, inverse: Bool)
 
         /// Scroll-container geometry (offset, clip).
@@ -351,12 +351,15 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     }
 
     /// Appends a 2-D affine transform.
-    /// Pass `inverse: true` when the transform is already stored in inverted form.
+    /// Pass `inverse: true` when the transform maps local coordinates to
+    /// global coordinates.
     mutating func appendAffineTransform(_ t: CGAffineTransform, inverse: Bool) {
         _transformItems.append(.affineTransform(t, inverse: inverse))
     }
 
     /// Appends a 3-D projective transform.
+    /// Pass `inverse: true` when the transform maps local coordinates to
+    /// global coordinates.
     mutating func appendProjectionTransform(_ t: ProjectionTransform, inverse: Bool) {
         _transformItems.append(.projectionTransform(t, inverse: inverse))
     }
@@ -610,19 +613,18 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         to points: inout A
     ) where A.Element == CGPoint {
         switch item {
-        case .affineTransform(let t, let isStoredInverse):
-            // When inverted==true (global to local) and !isStoredInverse: use t.inverted()
-            // When inverted==true  and  isStoredInverse: use t (already inverted stored)
-            // When inverted==false and !isStoredInverse: use t
-            // When inverted==false and  isStoredInverse: use t.inverted()
-            // Summary: effective = (inverted == isStoredInverse) ? t : t.inverted()
-            let effective: CGAffineTransform = (inverted == isStoredInverse) ? t : t.inverted()
+        case .affineTransform(let t, let isLocalToGlobal):
+            let effective: CGAffineTransform = (inverted == isLocalToGlobal)
+                ? t.inverted()
+                : t
             for i in points.indices {
                 points[i] = points[i].applying(effective)
             }
 
-        case .projectionTransform(let t, let isStoredInverse):
-            let effective: ProjectionTransform = (inverted == isStoredInverse) ? t : t.inverted()
+        case .projectionTransform(let t, let isLocalToGlobal):
+            let effective: ProjectionTransform = (inverted == isLocalToGlobal)
+                ? t.inverted()
+                : t
             for i in points.indices {
                 points[i] = points[i].applying(effective)
             }

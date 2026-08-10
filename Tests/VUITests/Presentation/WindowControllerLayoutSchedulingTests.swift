@@ -41,6 +41,325 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testScrollViewHostConsumesDiscreteWheelAtMountedResponderBoundary() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: root)
+        )
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertTrue(responder.acceptsEventType(SystemWheelEvent.self))
+        let responderHit = responder.containsGlobalPoints(
+            [CGPoint(x: 110, y: 110)],
+            cacheKey: nil,
+            options: .platformDefault
+        )
+        XCTAssertTrue(responderHit.mask[0])
+        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+            at: CGPoint(x: 110, y: 110),
+            accepting: SystemWheelEvent.self
+        ))
+        XCTAssertTrue(binding.responder === responder)
+
+        XCTAssertTrue(controller.handleMouseWheel(
+            at: CGPoint(x: 110, y: 110),
+            delta: CGPoint(x: 0, y: 40)
+        ))
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            40,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
+    func testScrollViewHostCapturesPointerPanAfterAxisThreshold() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+            at: CGPoint(x: 110, y: 110),
+            accepting: ScrollEvent.self
+        ))
+        XCTAssertTrue(binding.responder === responder)
+
+        XCTAssertFalse(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonDown,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: CGPoint(x: 110, y: 110),
+                timestamp: 0
+            ),
+            at: Time(seconds: 0)
+        ))
+        XCTAssertFalse(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: CGPoint(x: 110, y: 104),
+                timestamp: 0.01
+            ),
+            at: Time(seconds: 0.01)
+        ))
+        controller.updateView(
+            tick: 1,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            0,
+            accuracy: 0.001
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: CGPoint(x: 110, y: 94),
+                timestamp: 0.02
+            ),
+            at: Time(seconds: 0.02)
+        ))
+        controller.updateView(
+            tick: 2,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            16,
+            accuracy: 0.001
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonUp,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: CGPoint(x: 110, y: 94),
+                timestamp: 0.03
+            ),
+            at: Time(seconds: 0.03)
+        ))
+        XCTAssertFalse(
+            controller.gestureGraph?.eventBindingManager.bindings.values
+                .contains { $0.responder === responder } ?? true
+        )
+    }
+
+    @MainActor
+    func testTransformedScrollViewHostInverseMapsWheelHitTesting() throws {
+        let baselineController = WindowController(
+            content: LayoutSchedulingScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollViewAttachmentRoot.self)
+            )
+        )
+        let controller = WindowController(
+            content: LayoutSchedulingTransformedScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingTransformedScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        baselineController.updateView(
+            tick: 0,
+            delta: 0,
+            date: baselineController.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let baselineRoot = try XCTUnwrap(
+            baselineController.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let baselineResponder = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: baselineRoot)
+        )
+        let baselineBounds = try XCTUnwrap(sampledHitBounds(
+            of: baselineResponder,
+            in: CGSize(width: 220, height: 220)
+        ))
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let bounds = try XCTUnwrap(sampledHitBounds(
+            of: responder,
+            in: CGSize(width: 220, height: 220)
+        ))
+        XCTAssertEqual(bounds.width, baselineBounds.width * 1.5, accuracy: 3)
+        XCTAssertEqual(bounds.height, baselineBounds.height * 1.5, accuracy: 3)
+
+        let location = try XCTUnwrap(firstExclusiveHitPoint(
+            in: responder,
+            excluding: baselineResponder,
+            size: CGSize(width: 220, height: 220)
+        ))
+        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+            at: location,
+            accepting: SystemWheelEvent.self
+        ))
+        XCTAssertTrue(binding.responder === responder)
+    }
+
+    @MainActor
+    func testNestedScrollViewWheelSelectsInnermostMountedHost() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingNestedScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingNestedScrollViewAttachmentRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 260, height: 260),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responders = allHostingScrollViewResponders(in: root)
+        XCTAssertEqual(responders.count, 2)
+        let inner = try XCTUnwrap(responders.first { candidate in
+            responders.contains { ancestor in
+                ancestor !== candidate && candidate.isDescendant(of: ancestor)
+            }
+        })
+        let outer = try XCTUnwrap(responders.first { candidate in
+            candidate !== inner && inner.isDescendant(of: candidate)
+        })
+        let location = try XCTUnwrap(firstCommonHitPoint(
+            for: [outer, inner],
+            in: CGSize(width: 260, height: 260)
+        ))
+        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+            at: location,
+            accepting: SystemWheelEvent.self
+        ))
+        XCTAssertTrue(binding.responder === inner)
+
+        XCTAssertTrue(controller.handleMouseWheel(
+            at: location,
+            delta: CGPoint(x: 0, y: 40)
+        ))
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date,
+            contentSize: CGSize(width: 260, height: 260),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(inner.hostContainer?.scrollView.pendingContext)
+                .contentOffset.y,
+            40,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(outer.hostContainer?.scrollView.pendingContext)
+                .contentOffset.y,
+            0,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
     func testScrollViewRootDisplayListMountsInitiallyPlacedLazyContent() throws {
         let controller = WindowController(
             content: LayoutSchedulingLazyScrollViewAttachmentRoot(),
@@ -7418,6 +7737,138 @@ private struct LayoutSchedulingScrollViewAttachmentRoot: View {
         }
         .frame(width: 100, height: 100)
     }
+}
+
+private struct LayoutSchedulingTransformedScrollViewAttachmentRoot: View {
+    var body: some View {
+        LayoutSchedulingScrollViewAttachmentRoot()
+            .scaleEffect(
+                CGSize(width: 1.5, height: 1.5),
+                anchor: .topLeading
+            )
+    }
+}
+
+private struct LayoutSchedulingNestedScrollViewAttachmentRoot: View {
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                ScrollView(.vertical) {
+                    VStack(spacing: 0) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            Color.green
+                                .frame(width: 80, height: 30)
+                        }
+                    }
+                }
+                .frame(width: 100, height: 100)
+
+                Color.blue
+                    .frame(width: 100, height: 220)
+            }
+        }
+        .frame(width: 120, height: 140)
+    }
+}
+
+private func firstHostingScrollViewResponder(
+    in responder: ViewResponder
+) -> HostingScrollViewResponder? {
+    if let responder = responder as? HostingScrollViewResponder {
+        return responder
+    }
+    for child in responder.children {
+        if let match = firstHostingScrollViewResponder(in: child) {
+            return match
+        }
+    }
+    return nil
+}
+
+private func allHostingScrollViewResponders(
+    in responder: ViewResponder
+) -> [HostingScrollViewResponder] {
+    var result: [HostingScrollViewResponder] = []
+    if let responder = responder as? HostingScrollViewResponder {
+        result.append(responder)
+    }
+    for child in responder.children {
+        result.append(contentsOf: allHostingScrollViewResponders(in: child))
+    }
+    return result
+}
+
+private func sampledHitBounds(
+    of responder: HostingScrollViewResponder,
+    in size: CGSize
+) -> CGRect? {
+    var points: [CGPoint] = []
+    for y in stride(from: CGFloat(1), to: size.height, by: 2) {
+        for x in stride(from: CGFloat(1), to: size.width, by: 2) {
+            let point = CGPoint(x: x, y: y)
+            let result = responder.containsGlobalPoints(
+                [point],
+                cacheKey: nil,
+                options: .platformDefault
+            )
+            if result.mask[0] {
+                points.append(point)
+            }
+        }
+    }
+    guard let first = points.first else { return nil }
+    return points.dropFirst().reduce(
+        CGRect(origin: first, size: .zero)
+    ) { bounds, point in
+        bounds.union(CGRect(origin: point, size: .zero))
+    }
+}
+
+private func firstCommonHitPoint(
+    for responders: [HostingScrollViewResponder],
+    in size: CGSize
+) -> CGPoint? {
+    for y in stride(from: CGFloat(2), to: size.height, by: 4) {
+        for x in stride(from: CGFloat(2), to: size.width, by: 4) {
+            let point = CGPoint(x: x, y: y)
+            if responders.allSatisfy({ responder in
+                responder.containsGlobalPoints(
+                    [point],
+                    cacheKey: nil,
+                    options: .platformDefault
+                ).mask[0]
+            }) {
+                return point
+            }
+        }
+    }
+    return nil
+}
+
+private func firstExclusiveHitPoint(
+    in responder: HostingScrollViewResponder,
+    excluding other: HostingScrollViewResponder,
+    size: CGSize
+) -> CGPoint? {
+    for y in stride(from: CGFloat(1), to: size.height, by: 2) {
+        for x in stride(from: CGFloat(1), to: size.width, by: 2) {
+            let point = CGPoint(x: x, y: y)
+            let responderHit = responder.containsGlobalPoints(
+                [point],
+                cacheKey: nil,
+                options: .platformDefault
+            ).mask[0]
+            let otherHit = other.containsGlobalPoints(
+                [point],
+                cacheKey: nil,
+                options: .platformDefault
+            ).mask[0]
+            if responderHit && !otherHit {
+                return point
+            }
+        }
+    }
+    return nil
 }
 
 private struct LayoutSchedulingLazyScrollViewAttachmentRoot: View {

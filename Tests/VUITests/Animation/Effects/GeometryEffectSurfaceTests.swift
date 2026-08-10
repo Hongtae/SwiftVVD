@@ -152,6 +152,41 @@ final class GeometryEffectSurfaceTests: XCTestCase {
         XCTAssertFalse(singular.isInvertible)
     }
 
+    func testViewTransformInverseFlagPreservesBothStoredDirections() {
+        let affine = CGAffineTransform(
+            a: 1.5,
+            b: 0,
+            c: 0.25,
+            d: 2,
+            tx: 7,
+            ty: -5
+        )
+        let localPoints = [
+            CGPoint(x: 4, y: 6),
+            CGPoint(x: 12, y: -3),
+        ]
+        let expectedGlobal = localPoints.map { $0.applying(affine) }
+
+        var forwardStored = ViewTransform.identity
+        forwardStored.appendProjectionTransform(
+            ProjectionTransform(affine),
+            inverse: true
+        )
+        var forwardGlobal = localPoints
+        forwardStored.convertGlobal(from: .local, points: &forwardGlobal)
+        XCTAssertEqual(forwardGlobal, expectedGlobal)
+        forwardStored.convertGlobal(to: .local, points: &forwardGlobal)
+        assertPointsEqual(forwardGlobal, localPoints)
+
+        var inverseStored = ViewTransform.identity
+        inverseStored.appendAffineTransform(affine.inverted(), inverse: false)
+        var inverseGlobal = localPoints
+        inverseStored.convertGlobal(from: .local, points: &inverseGlobal)
+        XCTAssertEqual(inverseGlobal, expectedGlobal)
+        inverseStored.convertGlobal(to: .local, points: &inverseGlobal)
+        assertPointsEqual(inverseGlobal, localPoints)
+    }
+
     func testRotation3DEffectMatrixAndAnimatableDataScaling() {
         XCTAssertEqual(MemoryLayout<_Rotation3DEffect>.size, 64)
         XCTAssertEqual(MemoryLayout<_Rotation3DEffect>.stride, 64)
@@ -332,5 +367,19 @@ private func assertTransform(
             file: file,
             line: line
         )
+    }
+}
+
+private func assertPointsEqual(
+    _ actual: [CGPoint],
+    _ expected: [CGPoint],
+    accuracy: CGFloat = 0.000_001,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    XCTAssertEqual(actual.count, expected.count, file: file, line: line)
+    for (actual, expected) in zip(actual, expected) {
+        XCTAssertEqual(actual.x, expected.x, accuracy: accuracy, file: file, line: line)
+        XCTAssertEqual(actual.y, expected.y, accuracy: accuracy, file: file, line: line)
     }
 }

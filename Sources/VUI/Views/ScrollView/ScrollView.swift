@@ -557,17 +557,7 @@ struct SystemScrollView<Content>: View where Content: View {
             )
         }
 
-        let gestureModifier: Attribute<SystemScrollViewGesture> = graph.makeRule {
-            SystemScrollViewGesture(scrollView: motionHostingScrollView.value)
-        }
-        // Wrap the completed content outputs so child responders remain nested
-        // under the scroll responder for click-versus-pan arbitration.
-        return SystemScrollViewGesture.makeView(
-            modifier: _GraphValue(_attribute: gestureModifier),
-            inputs: inputs
-        ) { _, _ in
-            outputs
-        }
+        return outputs
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

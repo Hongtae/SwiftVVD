@@ -1394,11 +1394,32 @@ private struct TrivialContentResponder: ContentResponder {
 }
 
 /// Responder mounted at the same logical platform-group boundary as display output.
-final class HostingScrollViewResponder: MultiViewResponder {
+final class HostingScrollViewResponder: MultiViewResponder, ResponderEventConsumer {
+    private struct PanSession {
+        var eventID: EventID?
+        var wasActive = false
+        var lastTranslation = CGSize.zero
+        var lastTime = Time.zero
+        var lastValue = PanGesture.Value(
+            timestamp: .zero,
+            translation: .zero,
+            touchType: .indirect,
+            velocity: _Velocity(valuePerSecond: .zero)
+        )
+
+        mutating func reset() {
+            eventID = nil
+            wasActive = false
+            lastTranslation = .zero
+            lastTime = .zero
+        }
+    }
+
     fileprivate var helper = ContentResponderHelper<TrivialContentResponder>()
     weak var representedView: HostingScrollView.PlatformGroupContainer?
     weak var hostContainer: HostingScrollView.PlatformContainer?
     let layoutResponder: DefaultLayoutViewResponder
+    private var panSession = PanSession()
 
     init(layoutResponder: DefaultLayoutViewResponder) {
         self.layoutResponder = layoutResponder
@@ -1441,6 +1462,149 @@ final class HostingScrollViewResponder: MultiViewResponder {
         var features = super.features
         features.insert(.platformViews)
         return features
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        guard let scrollView = hostContainer?.scrollView,
+              scrollView.properties.isEnabled,
+              scrollView.configuration.isScrollEnabled ?? true,
+              !scrollView.configuration.axes.isEmpty else {
+            return false
+        }
+        return eventType == SystemWheelEvent.self || eventType == ScrollEvent.self
+    }
+
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> GesturePhase<Void> {
+        guard let scrollView = hostContainer?.scrollView else {
+            panSession.reset()
+            return .failed
+        }
+        guard scrollView.properties.isEnabled,
+              scrollView.configuration.isScrollEnabled ?? true,
+              !scrollView.configuration.axes.isEmpty else {
+            panSession.reset()
+            scrollView.dispatchScrollGesturePhase(.failed)
+            return .failed
+        }
+
+        var phases: [GesturePhase<Void>] = []
+        for (eventID, event) in events.sorted(by: { $0.key.serial < $1.key.serial }) {
+            if let wheel = event as? SystemWheelEvent {
+                let phase: GesturePhase<ScrollGesture.Value>
+                switch wheel.phase {
+                case .began, .active:
+                    phase = .active(.wheel(wheel.delta))
+                case .ended:
+                    phase = .ended(.wheel(wheel.delta))
+                case .failed:
+                    phase = .failed
+                }
+                scrollView.dispatchScrollGesturePhase(phase)
+                phases.append(phase.map { _ in () })
+            } else if let event = event as? ScrollEvent {
+                let phase = consumePanEvent(
+                    event,
+                    id: eventID,
+                    axes: scrollView.configuration.axes,
+                    at: time
+                )
+                scrollView.dispatchScrollGesturePhase(phase)
+                phases.append(phase.map { _ in () })
+            }
+        }
+
+        if phases.contains(where: { $0.isActive }) { return .active(()) }
+        if phases.contains(where: { $0.isEnded }) { return .ended(()) }
+        if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
+        return .possible(nil)
+    }
+
+    private func consumePanEvent(
+        _ event: ScrollEvent,
+        id eventID: EventID,
+        axes: Axis.Set,
+        at time: Time
+    ) -> GesturePhase<ScrollGesture.Value> {
+        switch event.phase {
+        case .began:
+            panSession.reset()
+            panSession.eventID = eventID
+            return .possible(nil)
+
+        case .active:
+            guard panSession.eventID == eventID else {
+                panSession.reset()
+                return .failed
+            }
+            let translation = event.translation
+            guard panSession.wasActive || acceptsPan(
+                translation: translation,
+                minimumDistance: 10,
+                axes: axes
+            ) else {
+                return .possible(nil)
+            }
+            let elapsed = time.seconds - panSession.lastTime.seconds
+            let delta = CGSize(
+                width: translation.width - panSession.lastTranslation.width,
+                height: translation.height - panSession.lastTranslation.height
+            )
+            let velocity: CGSize
+            if panSession.wasActive, elapsed.isFinite, elapsed > 0 {
+                velocity = CGSize(
+                    width: delta.width / elapsed,
+                    height: delta.height / elapsed
+                )
+            } else {
+                velocity = delta
+            }
+            let value = PanGesture.Value(
+                timestamp: time,
+                translation: translation,
+                touchType: event.touchType,
+                velocity: _Velocity(valuePerSecond: velocity)
+            )
+            panSession.wasActive = true
+            panSession.lastTranslation = translation
+            panSession.lastTime = time
+            panSession.lastValue = value
+            return .active(.pan(value))
+
+        case .ended:
+            guard panSession.eventID == eventID, panSession.wasActive else {
+                panSession.reset()
+                return .failed
+            }
+            let value = PanGesture.Value(
+                timestamp: time,
+                translation: event.translation,
+                touchType: event.touchType,
+                velocity: panSession.lastValue.velocity
+            )
+            panSession.reset()
+            return .ended(.pan(value))
+
+        case .failed:
+            panSession.reset()
+            return .failed
+        }
+    }
+
+    private func acceptsPan(
+        translation: CGSize,
+        minimumDistance: CGFloat,
+        axes: Axis.Set
+    ) -> Bool {
+        guard hypot(translation.width, translation.height) >= minimumDistance else {
+            return false
+        }
+        if abs(translation.width) >= abs(translation.height) {
+            return axes.contains(.horizontal)
+        }
+        return axes.contains(.vertical)
     }
 }
 
