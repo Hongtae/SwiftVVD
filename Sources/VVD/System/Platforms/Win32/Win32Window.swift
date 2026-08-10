@@ -860,13 +860,16 @@ final class Win32Window: Window {
      modal queue, using the actual HWND styles rather than the requested VVD
      styles:
 
-         captioned host + captionless modal -> Attached
-         every other combination             -> Independent
+         (captioned host or Attached host) + captionless modal -> Attached
+         every other combination                               -> Independent
 
      Reading WS_CAPTION from both HWNDs is important because the final native
      style is the authoritative indication that a system title bar exists.
-     Borderless/custom-skinned hosts therefore use Independent mode even when
-     their application-level appearance resembles a normal window.
+     An Attached modal is also an eligible host so a captionless nested modal
+     continues the same sheet chain whose ancestor owns the system title bar.
+     A standalone borderless/custom-skinned host, or a host presented as
+     Independent, still uses Independent mode even when its application-level
+     appearance resembles a normal window.
 
      Shared rules
      ------------
@@ -938,6 +941,9 @@ final class Win32Window: Window {
      oscillate or lose the final placement. This continuous policy also supports
      a UI framework's normal creation sequence, where a modal starts at a small
      placeholder size and receives its fitted content size only after layout.
+     Repositioning preserves Z-order: the owner chain already keeps each modal
+     above its host, while raising an intermediate modal in a nested chain can
+     expose it above its child until the child's subsequent WM_MOVE is handled.
 
      Independent mode -- AppKit/Win32 hybrid dialog semantics
      --------------------------------------------------------
@@ -1014,7 +1020,9 @@ final class Win32Window: Window {
         guard let host = self.hWnd, let modal = modal.hWnd else {
             return .independent
         }
-        if Self.hasSystemCaption(host) && !Self.hasSystemCaption(modal) {
+        let supportsAttachedPresentation = Self.hasSystemCaption(host) ||
+            self.modalPresentationContext?.mode == .attached
+        if supportsAttachedPresentation && !Self.hasSystemCaption(modal) {
             return .attached
         }
         return .independent
@@ -1151,7 +1159,8 @@ final class Win32Window: Window {
             var current = RECT()
             guard GetWindowRect(modal, &current) else { return }
             if current.left != target.x || current.top != target.y || shouldShow {
-                var flags = UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
+                var flags = UINT(SWP_NOSIZE | SWP_NOZORDER |
+                                 SWP_NOOWNERZORDER | SWP_NOACTIVATE)
                 if shouldShow { flags |= UINT(SWP_SHOWWINDOW) }
                 shouldShow = false
                 SetWindowPos(modal, HWND_TOP, target.x, target.y, 0, 0, flags)
@@ -1169,7 +1178,14 @@ final class Win32Window: Window {
 
         var rect = RECT()
         guard let modal = self.hWnd, GetWindowRect(modal, &rect) else { return }
+        let changesOrigin = position.pointee.flags & UINT(SWP_NOMOVE) == 0
         let changesSize = position.pointee.flags & UINT(SWP_NOSIZE) == 0
+        if changesOrigin || changesSize {
+            // Geometry synchronization must not promote an intermediate modal
+            // above its active nested child. Pure activation/Z-order requests
+            // have neither geometry flag and remain unaffected.
+            position.pointee.flags |= UINT(SWP_NOZORDER)
+        }
         let width = changesSize ? position.pointee.cx : rect.right - rect.left
         let height = changesSize ? position.pointee.cy : rect.bottom - rect.top
         guard let target = self.attachedModalOrigin(outerWidth: width,
