@@ -54,6 +54,7 @@ typealias ButtonPressingAction = (ButtonPressPhase) -> ()
 //   -> DelayedGesture<SpatialEvent>   (duration=0 for buttons, so immediate)
 //   -> MapGesture<SpatialEvent, Value> (event to locationInBounds hit test)
 //   -> SizeGesture<...>               (provides CGSize for bounds check)
+//   -> TruePreferenceWritingGestureModifier<IsCancellableGestureKey, Value>
 struct PrimitiveButtonGestureCore: Gesture {
     // reserved1 is omitted until its role is confirmed.
     var outset: CGFloat       // effectiveOutset for hit-test expansion
@@ -67,7 +68,7 @@ struct PrimitiveButtonGestureCore: Gesture {
     }
 
     // Body chain type for event listening, immediate delay, hit-test mapping, and size input.
-    typealias Body = SizeGesture<
+    typealias SizingBody = SizeGesture<
         ModifierGesture<
             MapGesture<SpatialEvent, Value>,
             ModifierGesture<
@@ -75,6 +76,10 @@ struct PrimitiveButtonGestureCore: Gesture {
                 EventListener<SpatialEvent>
             >
         >
+    >
+    typealias Body = ModifierGesture<
+        TruePreferenceWritingGestureModifier<IsCancellableGestureKey, Value>,
+        SizingBody
     >
 
     var body: Body {
@@ -102,7 +107,7 @@ struct PrimitiveButtonGestureCore: Gesture {
                     body: EventListener<SpatialEvent>()
                 )
             )
-        }
+        }.cancellable()
     }
 }
 

@@ -127,6 +127,55 @@ extension Gesture {
     }
 }
 
+// MARK: - TruePreferenceWritingGestureModifier
+
+struct TruePreferenceWritingGestureModifier<K: PreferenceKey, V>: GestureModifier
+where K.Value == Bool {
+    typealias BodyValue = V
+    typealias Value = V
+    typealias Body = Never
+
+    static func _makeGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs,
+        body: (_GestureInputs) -> _GestureOutputs<V>
+    ) -> _GestureOutputs<V> {
+        var childInputs = inputs
+        childInputs.preferences.remove(K.self)
+        var outputs = body(childInputs)
+        outputs.preferences.makePreferenceWriter(
+            inputs: inputs.preferences,
+            key: K.self,
+            value: GraphHost.currentHost.intern(
+                true,
+                for: Bool.self,
+                id: .trueValue
+            )
+        )
+        return outputs
+    }
+}
+
+extension Gesture {
+    func truePreference<K: PreferenceKey>(
+        _ key: K.Type
+    ) -> ModifierGesture<TruePreferenceWritingGestureModifier<K, Value>, Self>
+    where K.Value == Bool {
+        ModifierGesture(
+            modifier: TruePreferenceWritingGestureModifier<K, Value>(),
+            body: self
+        )
+    }
+
+    func cancellable()
+        -> ModifierGesture<
+            TruePreferenceWritingGestureModifier<IsCancellableGestureKey, Value>,
+            Self
+        > {
+        truePreference(IsCancellableGestureKey.self)
+    }
+}
+
 // MARK: - EventFilter
 
 // EventFilter forwards the shared event stream unchanged.

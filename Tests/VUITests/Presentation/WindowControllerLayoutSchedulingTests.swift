@@ -216,6 +216,285 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testScrollPanCancelsActiveDescendantButtonWithoutTriggeringAction() throws {
+        let probe = LayoutSchedulingScrollGestureArbitrationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingScrollButtonArbitrationRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollButtonArbitrationRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view arbitration test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let movement = CGSize(width: 0, height: -20)
+        let start = try XCTUnwrap(firstGesturePanStart(
+            in: root,
+            descendantOf: responder,
+            movement: movement,
+            size: CGSize(width: 220, height: 220)
+        ))
+        let moved = CGPoint(
+            x: start.x + movement.width,
+            y: start.y + movement.height
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonDown,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: start,
+                timestamp: 0
+            ),
+            at: Time(seconds: 0)
+        ))
+        XCTAssertEqual(probe.pressing, [true])
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.02
+            ),
+            at: Time(seconds: 0.02)
+        ))
+        XCTAssertEqual(probe.pressing, [true, false])
+        XCTAssertEqual(probe.actions, 0)
+
+        controller.updateView(
+            tick: 1,
+            delta: 0.02,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertGreaterThan(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            0
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonUp,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.03
+            ),
+            at: Time(seconds: 0.03)
+        ))
+        XCTAssertEqual(probe.pressing, [true, false])
+        XCTAssertEqual(probe.actions, 0)
+    }
+
+    @MainActor
+    func testActiveDescendantDragPreventsScrollPan() throws {
+        let probe = LayoutSchedulingScrollGestureArbitrationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingScrollDragArbitrationRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollDragArbitrationRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view arbitration test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let movement = CGSize(width: 0, height: -24)
+        let start = try XCTUnwrap(firstGesturePanStart(
+            in: root,
+            descendantOf: responder,
+            movement: movement,
+            size: CGSize(width: 220, height: 220)
+        ))
+        let moved = CGPoint(
+            x: start.x + movement.width,
+            y: start.y + movement.height
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonDown,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: start,
+                timestamp: 0
+            ),
+            at: Time(seconds: 0)
+        ))
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.02
+            ),
+            at: Time(seconds: 0.02)
+        ))
+        controller.updateView(
+            tick: 1,
+            delta: 0.02,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertGreaterThan(probe.dragChanges, 0)
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            0,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonUp,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.03
+            ),
+            at: Time(seconds: 0.03)
+        ))
+    }
+
+    @MainActor
+    func testActiveSimultaneousDescendantDragStillPreventsScrollPan() throws {
+        let probe = LayoutSchedulingScrollGestureArbitrationProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingScrollSimultaneousDragArbitrationRoot(
+                probe: probe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingScrollSimultaneousDragArbitrationRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view arbitration test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let movement = CGSize(width: 0, height: -24)
+        let start = try XCTUnwrap(firstGesturePanStart(
+            in: root,
+            descendantOf: responder,
+            movement: movement,
+            size: CGSize(width: 220, height: 220)
+        ))
+        let moved = CGPoint(
+            x: start.x + movement.width,
+            y: start.y + movement.height
+        )
+
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonDown,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: start,
+                timestamp: 0
+            ),
+            at: Time(seconds: 0)
+        ))
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.02
+            ),
+            at: Time(seconds: 0.02)
+        ))
+        controller.updateView(
+            tick: 1,
+            delta: 0.02,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertGreaterThan(probe.dragChanges, 0)
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            0,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(controller.handleMouseEvent(
+            event: MouseEvent(
+                type: .buttonUp,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: moved,
+                timestamp: 0.03
+            ),
+            at: Time(seconds: 0.03)
+        ))
+    }
+
+    @MainActor
     func testTransformedScrollViewHostInverseMapsWheelHitTesting() throws {
         let baselineController = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -7739,6 +8018,73 @@ private struct LayoutSchedulingScrollViewAttachmentRoot: View {
     }
 }
 
+private final class LayoutSchedulingScrollGestureArbitrationProbe:
+    @unchecked Sendable {
+    var pressing: [Bool] = []
+    var actions = 0
+    var dragChanges = 0
+}
+
+private struct LayoutSchedulingScrollButtonArbitrationRoot: View {
+    let probe: LayoutSchedulingScrollGestureArbitrationProbe
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                Color.green
+                    .frame(width: 80, height: 80)
+                    ._onButtonGesture(
+                        pressing: { probe.pressing.append($0) },
+                        perform: { probe.actions += 1 }
+                    )
+                Color.blue
+                    .frame(width: 80, height: 240)
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private struct LayoutSchedulingScrollDragArbitrationRoot: View {
+    let probe: LayoutSchedulingScrollGestureArbitrationProbe
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                Color.green
+                    .frame(width: 80, height: 80)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in probe.dragChanges += 1 }
+                    )
+                Color.blue
+                    .frame(width: 80, height: 240)
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private struct LayoutSchedulingScrollSimultaneousDragArbitrationRoot: View {
+    let probe: LayoutSchedulingScrollGestureArbitrationProbe
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                Color.green
+                    .frame(width: 80, height: 80)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in probe.dragChanges += 1 }
+                    )
+                Color.blue
+                    .frame(width: 80, height: 240)
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
 private struct LayoutSchedulingTransformedScrollViewAttachmentRoot: View {
     var body: some View {
         LayoutSchedulingScrollViewAttachmentRoot()
@@ -7796,6 +8142,43 @@ private func allHostingScrollViewResponders(
         result.append(contentsOf: allHostingScrollViewResponders(in: child))
     }
     return result
+}
+
+private func firstGesturePanStart(
+    in root: MultiViewResponder,
+    descendantOf host: HostingScrollViewResponder,
+    movement: CGSize,
+    size: CGSize
+) -> CGPoint? {
+    func descendantGestureIDs(at point: CGPoint) -> Set<ObjectIdentifier> {
+        Set(root.respondersContaining(point: point).compactMap { responder in
+            guard responder is any AnyGestureResponder,
+                  responder.isDescendant(of: host) else {
+                return nil
+            }
+            return ObjectIdentifier(responder)
+        })
+    }
+
+    for y in stride(from: CGFloat(2), to: size.height - 2, by: 2) {
+        for x in stride(from: CGFloat(2), to: size.width - 2, by: 2) {
+            let start = CGPoint(x: x, y: y)
+            let moved = CGPoint(
+                x: x + movement.width,
+                y: y + movement.height
+            )
+            guard moved.x >= 0, moved.y >= 0,
+                  moved.x < size.width, moved.y < size.height else {
+                continue
+            }
+            let startIDs = descendantGestureIDs(at: start)
+            guard !startIDs.isEmpty else { continue }
+            if !startIDs.isDisjoint(with: descendantGestureIDs(at: moved)) {
+                return start
+            }
+        }
+    }
+    return nil
 }
 
 private func sampledHitBounds(

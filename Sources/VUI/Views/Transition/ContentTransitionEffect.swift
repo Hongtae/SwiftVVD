@@ -123,10 +123,7 @@ struct ResetPositionTransform: Rule, AsyncAttribute {
 
     var value: ViewTransform {
         var transform = _transform.value
-        let position = _position.value
-        transform.offsetPosition(
-            by: CGSize(width: -position.x, height: -position.y)
-        )
+        transform.resetPosition(_position.value)
         return transform
     }
 }

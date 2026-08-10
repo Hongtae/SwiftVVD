@@ -191,6 +191,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
     // Generic-dependent callback state.
     var state: C.StateType
     var lastResetSeed: UInt32
+    var cancel: ((C.StateType) -> (() -> Void)?)?
 
     // Back-reference for async dispatch (routed through enqueueAction when useGestureGraph=true).
     weak var gestureGraph: GestureGraph?
@@ -212,10 +213,20 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
         self.gestureGraph    = gestureGraph
         self.state           = C.initialState
         self.lastResetSeed   = 0
+        self.cancel          = nil
     }
 
     mutating func resetPhase() {
+        let cancellation = cancel
+        let currentState = state
+        let action = _AGGraph.withoutTracking {
+            cancellation?(currentState)
+        }
+        if let action {
+            Update.enqueueAction(action)
+        }
         state = C.initialState
+        cancel = nil
         _AGGraph.setStatefulOutput(GesturePhase<C.Value>.possible(nil))
     }
 
@@ -243,7 +254,27 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule,
             }
         }
 
+        if currentPhase.isTerminal {
+            cancel = nil
+        } else {
+            cancel = { state in
+                callbacks.cancel(state: state)
+            }
+        }
+
         _AGGraph.setStatefulOutput(currentPhase)
+    }
+
+    static func willRemove(attribute: AGAttribute) {
+        guard let graph = _AGGraph.current else { return }
+        _AGGraph.withRuleContext(attribute) {
+            graph.mutateStatefulRule(
+                attribute,
+                as: Self.self
+            ) { phase in
+                phase.resetPhase()
+            }
+        }
     }
 }
 

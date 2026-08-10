@@ -242,32 +242,27 @@ extension CGSize {
 ///    in local-to-global application order.
 ///    Appended by `appendAffineTransform`, `appendProjectionTransform`, etc.
 ///
-/// 2. **`_globalPosition`** - the view's accumulated global translation,
-///    set (and replaced) by `appendPosition`.  This is always the final step
-///    when converting local to global.
+/// 2. **Position storage** - a position adjustment plus a folded
+///    global-to-local translation. Appending a position replaces the previous
+///    adjustment by folding their delta into the translation. Resetting a
+///    position performs the same fold and clears the adjustment, allowing
+///    descendants to append positions relative to that boundary.
 ///
 /// Converting **global to local** (`convertGlobal(to: .local, ...)`) is the
 /// canonical hit-test path:
-///   1. Subtract `_globalPosition`.
+///   1. Subtract the resolved position.
 ///   2. Apply the inverse of each `_transformItem` in **reverse** order.
 ///
 /// Converting **local to global** (`convertGlobal(from: .local, ...)`) is used
 /// to compute a child view's global position from its parent-local offset:
 ///   1. Apply each `_transformItem` in **forward** order.
-///   2. Add `_globalPosition`.
+///   2. Add the resolved position.
 struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
     // Item
 
     /// One entry in the transform chain.
     enum Item: Equatable, @unchecked Sendable {
-        /// View position in global window coordinates.
-        /// Set by `appendPosition`; replaces any previous position.
-        case position(CGPoint)
-
-        /// Position with display-scale factor (for sub-pixel placement).
-        case positionWithScale(CGPoint, CGFloat)
-
         /// Additional translation in the current local space (e.g. `.offset`).
         case translation(CGSize)
 
@@ -293,12 +288,6 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
         /// Sized coordinate-space marker (by internal coordinate-space id).
         case sizedSpaceID(id: CoordinateSpace.ID, size: CGSize)
-
-        /// Reset the accumulated position to an explicit global point.
-        case resetPosition(CGPoint)
-
-        /// Fine-grained position adjustment (e.g. pixel-boundary snapping).
-        case positionAdjustment(CGSize)
     }
 
     // Storage
@@ -306,8 +295,11 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     /// Non-translation transform items, in local-to-global order.
     private var _transformItems: [Item] = []
 
-    /// Accumulated global position (the final translation in local-to-global order).
-    private var _globalPosition: CGPoint = .zero
+    /// Most recently appended position used to replace absolute placement.
+    private var _positionAdjustment: CGSize = .zero
+
+    /// Folded translation applied when converting global coordinates to local.
+    private var _positionTranslation: CGSize = .zero
 
     // Init
 
@@ -316,33 +308,35 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     // Accessors
 
     var isEmpty: Bool {
-        _transformItems.isEmpty && _globalPosition == .zero
+        _transformItems.isEmpty &&
+            _positionTranslation == .zero
     }
 
     var description: String {
         var components = _transformItems.map { String(describing: $0) }
-        if _globalPosition != .zero {
-            components.append(
-                String(describing: CGSize(
-                    width: _globalPosition.x,
-                    height: _globalPosition.y
-                ))
-            )
+        if _positionTranslation != .zero {
+            components.append(String(describing: _positionTranslation))
         }
         return components.joined(separator: "; ")
     }
 
     // Append / mutate methods
 
-    /// Sets the view's position in global coordinates.
-    /// Replaces any previous position; non-position items are preserved.
+    /// Replaces the prior position adjustment while preserving folded ancestry.
     mutating func appendPosition(_ position: CGPoint) {
-        _globalPosition = position
+        _positionTranslation.width -= position.x - _positionAdjustment.width
+        _positionTranslation.height -= position.y - _positionAdjustment.height
+        _positionAdjustment = CGSize(width: position.x, height: position.y)
     }
 
     /// Sets the view's position with an explicit display-scale multiplier.
     mutating func appendPosition(_ position: CGPoint, scale: CGFloat) {
-        _globalPosition = CGPoint(x: position.x * scale, y: position.y * scale)
+        _positionTranslation.width -= position.x - _positionAdjustment.width
+        _positionTranslation.height -= position.y - _positionAdjustment.height
+        _positionAdjustment = CGSize(
+            width: position.x * scale,
+            height: position.y * scale
+        )
     }
 
     /// Appends a translation in the current local coordinate space.
@@ -389,22 +383,18 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         _transformItems.append(.sizedSpaceID(id: id, size: size))
     }
 
-    /// Resets the accumulated global position to an explicit value.
+    /// Folds a coordinate-boundary position and clears the position adjustment.
     mutating func resetPosition(_ point: CGPoint) {
-        _globalPosition = point
-        _transformItems.append(.resetPosition(point))
+        _positionTranslation.width -= point.x - _positionAdjustment.width
+        _positionTranslation.height -= point.y - _positionAdjustment.height
+        _positionAdjustment = .zero
     }
 
-    /// Applies a fine-grained position adjustment (sub-pixel snapping etc.).
+    var positionAdjustment: CGSize { _positionAdjustment }
+
+    /// Replaces the position adjustment used by the next append or reset.
     mutating func setPositionAdjustment(_ size: CGSize) {
-        _globalPosition.x += size.width
-        _globalPosition.y += size.height
-        _transformItems.append(.positionAdjustment(size))
-    }
-
-    mutating func offsetPosition(by offset: CGSize) {
-        _globalPosition.x += offset.width
-        _globalPosition.y += offset.height
+        _positionAdjustment = size
     }
 
     // Coordinate conversion
@@ -412,7 +402,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     /// Converts `points` from global window coordinates into the view's local space.
     ///
     /// This is the canonical hit-test path:
-    /// 1. Subtract the view's `_globalPosition`.
+    /// 1. Subtract the view's resolved position.
     /// 2. Apply the inverse of each `_transformItem` in reverse order.
     func convertGlobal<A: MutableCollection>(
         to space: CoordinateSpace,
@@ -428,8 +418,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
                 return
             }
             for i in points.indices {
-                points[i].x -= _globalPosition.x
-                points[i].y -= _globalPosition.y
+                points[i].x -= globalPosition.x
+                points[i].y -= globalPosition.y
             }
             let suffixStart = _transformItems.index(after: markerIndex)
             for item in _transformItems[suffixStart...].reversed() {
@@ -438,8 +428,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
             return
         }
         for i in points.indices {
-            points[i].x -= _globalPosition.x
-            points[i].y -= _globalPosition.y
+            points[i].x -= globalPosition.x
+            points[i].y -= globalPosition.y
         }
         // Step 2: undo non-translation items in reverse.
         for item in _transformItems.reversed() {
@@ -451,7 +441,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     ///
     /// Used to compute a child view's global position from its parent-local offset:
     /// 1. Apply each `_transformItem` in forward order.
-    /// 2. Add `_globalPosition`.
+    /// 2. Add the resolved position.
     func convertGlobal<A: MutableCollection>(
         from space: CoordinateSpace,
         points: inout A
@@ -463,8 +453,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         }
         // Step 2: apply global translation.
         for i in points.indices {
-            points[i].x += _globalPosition.x
-            points[i].y += _globalPosition.y
+            points[i].x += globalPosition.x
+            points[i].y += globalPosition.y
         }
     }
 
@@ -489,15 +479,26 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     // Item iteration.
 
     /// Iterates all transform items in forward or reverse order.
-    /// Forward order: `[_transformItems..., .position(_globalPosition)]`
-    /// Reverse order: `[.position(_globalPosition), ..._transformItems.reversed()]`
+    /// Forward order ends with the folded global-to-local translation.
+    /// Reverse order starts with its inverse and inverts each stored item.
     func forEach(inverted: Bool, _ body: (Item, inout Bool) -> ()) {
+        guard !_transformItems.isEmpty else { return }
         var stop = false
         if inverted {
-            body(.position(_globalPosition), &stop)
+            if _positionTranslation != .zero {
+                body(
+                    .translation(
+                        CGSize(
+                            width: -_positionTranslation.width,
+                            height: -_positionTranslation.height
+                        )
+                    ),
+                    &stop
+                )
+            }
             if !stop {
                 for item in _transformItems.reversed() {
-                    body(item, &stop)
+                    body(iterationItem(item, inverted: true), &stop)
                     if stop { break }
                 }
             }
@@ -506,7 +507,9 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
                 body(item, &stop)
                 if stop { return }
             }
-            body(.position(_globalPosition), &stop)
+            if _positionTranslation != .zero {
+                body(.translation(_positionTranslation), &stop)
+            }
         }
     }
 
@@ -563,7 +566,12 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     // Global position (read-only)
 
     /// The accumulated global position of this view (the origin in window coordinates).
-    var globalPosition: CGPoint { _globalPosition }
+    var globalPosition: CGPoint {
+        CGPoint(
+            x: -_positionTranslation.width,
+            y: -_positionTranslation.height
+        )
+    }
 
     // Private helpers
 
@@ -575,6 +583,26 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
             stop = true
         }
         return geometry
+    }
+
+    private func iterationItem(_ item: Item, inverted: Bool) -> Item {
+        guard inverted else { return item }
+        switch item {
+        case .translation(let size):
+            return .translation(
+                CGSize(width: -size.width, height: -size.height)
+            )
+        case .affineTransform(let transform, let inverse):
+            return .affineTransform(transform, inverse: !inverse)
+        case .projectionTransform(let transform, let inverse):
+            return .projectionTransform(transform, inverse: !inverse)
+        case .scrollGeometry,
+             .coordinateSpaceName,
+             .coordinateSpaceID,
+             .sizedSpace,
+             .sizedSpaceID:
+            return item
+        }
     }
 
     private func lastCoordinateSpaceMarkerIndex(matching id: CoordinateSpace.ID) -> [Item].Index? {
@@ -652,18 +680,10 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
                 for i in points.indices { points[i].x += dx; points[i].y += dy }
             }
 
-        case .positionAdjustment(let sz):
-            if inverted {
-                for i in points.indices { points[i].x -= sz.width; points[i].y -= sz.height }
-            } else {
-                for i in points.indices { points[i].x += sz.width; points[i].y += sz.height }
-            }
-
-        case .position, .positionWithScale, .resetPosition,
-             .coordinateSpaceName, .coordinateSpaceID,
+        case .coordinateSpaceName, .coordinateSpaceID,
              .sizedSpace, .sizedSpaceID:
             // Coordinate-space markers and position items are handled separately
-            // (position via _globalPosition; markers are no-ops for point conversion).
+            // (position via globalPosition; markers are no-ops for point conversion).
             break
         }
     }

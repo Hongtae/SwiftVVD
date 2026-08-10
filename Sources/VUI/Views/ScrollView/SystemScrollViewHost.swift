@@ -1394,7 +1394,8 @@ private struct TrivialContentResponder: ContentResponder {
 }
 
 /// Responder mounted at the same logical platform-group boundary as display output.
-final class HostingScrollViewResponder: MultiViewResponder, ResponderEventConsumer {
+final class HostingScrollViewResponder: MultiViewResponder,
+    GestureArbitratingEventConsumer {
     private struct PanSession {
         var eventID: EventID?
         var wasActive = false
@@ -1420,6 +1421,7 @@ final class HostingScrollViewResponder: MultiViewResponder, ResponderEventConsum
     weak var hostContainer: HostingScrollView.PlatformContainer?
     let layoutResponder: DefaultLayoutViewResponder
     private var panSession = PanSession()
+    private var preventedPanEventIDs: Set<EventID> = []
 
     init(layoutResponder: DefaultLayoutViewResponder) {
         self.layoutResponder = layoutResponder
@@ -1474,10 +1476,35 @@ final class HostingScrollViewResponder: MultiViewResponder, ResponderEventConsum
         return eventType == SystemWheelEvent.self || eventType == ScrollEvent.self
     }
 
+    func isPrevented(by responder: any AnyGestureResponder) -> Bool {
+        let hostPolicy: GestureResponderExclusionPolicy = responder.isCancellable
+            ? .simultaneous(.descendants)
+            : .default
+        return responder.canPrevent(
+            self,
+            otherExclusionPolicy: hostPolicy
+        )
+    }
+
+    func preventRecognition(for events: [EventID: any EventType]) {
+        for (eventID, event) in events where event is ScrollEvent {
+            preventedPanEventIDs.insert(eventID)
+        }
+    }
+
+    func cancels(_ responder: any AnyGestureResponder) -> Bool {
+        responder.isCancellable
+    }
+
     func consumeEvents(
         _ events: [EventID: any EventType],
         at time: Time
     ) -> GesturePhase<Void> {
+        defer {
+            for (eventID, event) in events where event.phase.isTerminal {
+                preventedPanEventIDs.remove(eventID)
+            }
+        }
         guard let scrollView = hostContainer?.scrollView else {
             panSession.reset()
             return .failed
@@ -1528,6 +1555,12 @@ final class HostingScrollViewResponder: MultiViewResponder, ResponderEventConsum
         axes: Axis.Set,
         at time: Time
     ) -> GesturePhase<ScrollGesture.Value> {
+        if preventedPanEventIDs.contains(eventID) {
+            if panSession.eventID == eventID {
+                panSession.reset()
+            }
+            return .failed
+        }
         switch event.phase {
         case .began:
             panSession.reset()

@@ -70,6 +70,42 @@ final class GestureCallbackTransactionTests: XCTestCase {
         }
     }
 
+    func testCallbacksPhaseRemovalCancelsActiveCallbackState() {
+        let host = GraphHost()
+        var observed: [Bool] = []
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let phase = graph.makeInput(value: GesturePhase<Int>.possible(nil))
+                let resetSeed = graph.makeInput(value: UInt32.zero)
+                let modifier = graph.makeInput(value: CallbacksGesture(
+                    callbacks: PressableGestureCallbacks<Int>(
+                        pressing: { observed.append($0) },
+                        pressed: nil
+                    )
+                ))
+                let callbackPhase = CallbacksPhase<PressableGestureCallbacks<Int>>(
+                    modifierAttr: modifier,
+                    phaseAttr: phase,
+                    resetSeedAttr: resetSeed,
+                    useGestureGraph: false,
+                    gestureGraph: nil
+                )
+                let output = graph.makeStatefulRule(callbackPhase)
+
+                Update.ensure {
+                    phase.setValue(.active(12))
+                    _ = output.value
+                }
+            }
+        }
+
+        XCTAssertEqual(observed, [true])
+        host.removedState = .unattached
+        XCTAssertEqual(observed, [true, false])
+    }
+
     func testFullGestureCallbacksChangedReturnsValueCapturingTracksVelocityScopedAction() {
         var observed: [(value: Int, tracksVelocity: Bool, parentKey: Int)] = []
         let callbacks = FullGestureCallbacks<Int>(

@@ -114,6 +114,65 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         }
     }
 
+    func testTruePreferenceWriterRemovesKeyFromChildAndPublishesTrue() throws {
+        let host = GraphHost()
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            var inputs = makeGestureInputs(graph: graph)
+            inputs.preferences.add(IsCancellableGestureKey.self)
+            let modifier = graph.makeInput(
+                value: TruePreferenceWritingGestureModifier<
+                    IsCancellableGestureKey,
+                    Int
+                >()
+            )
+            let childPhase = graph.makeInput(value: GesturePhase<Int>.active(4))
+            var childReceivedKey = true
+
+            let outputs = TruePreferenceWritingGestureModifier<
+                IsCancellableGestureKey,
+                Int
+            >._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { childInputs in
+                childReceivedKey = childInputs.preferences.keys.contains(
+                    IsCancellableGestureKey.self
+                )
+                return _GestureOutputs(phase: childPhase)
+            }
+
+            XCTAssertFalse(childReceivedKey)
+            let preferenceID = try XCTUnwrap(
+                outputs.preferences.value(for: IsCancellableGestureKey.self)
+            )
+            XCTAssertTrue(Attribute<Bool>(preferenceID).value)
+        }
+    }
+
+    func testPrimitiveButtonCorePublishesCancellablePreference() throws {
+        let host = GraphHost()
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            var inputs = makeGestureInputs(graph: graph)
+            inputs.preferences.add(IsCancellableGestureKey.self)
+            let gesture = graph.makeInput(value: PrimitiveButtonGestureCore(
+                outset: 0,
+                alwaysActive: false
+            ))
+
+            let outputs = PrimitiveButtonGestureCore._makeGesture(
+                gesture: _GraphValue(_attribute: gesture),
+                inputs: inputs
+            )
+
+            let preferenceID = try XCTUnwrap(
+                outputs.preferences.value(for: IsCancellableGestureKey.self)
+            )
+            XCTAssertTrue(Attribute<Bool>(preferenceID).value)
+        }
+    }
+
     func testResponderArbitrationMatchesPriorityDependencyAndTapCountRules() {
         let defaultParent = ArbitrationTestResponder(exclusionPolicy: .default)
         let defaultChild = ArbitrationTestResponder(exclusionPolicy: .default)

@@ -981,6 +981,10 @@ extension PreferencesInputs {
     mutating func add<K: PreferenceKey>(_ key: K.Type) {
         keys.add(key)
     }
+
+    mutating func remove<K: PreferenceKey>(_ key: K.Type) {
+        keys.remove(key)
+    }
 }
 
 private struct PreferenceTransform<K: PreferenceKey>: Rule, AsyncAttribute,
@@ -1213,6 +1217,17 @@ extension PreferencesOutputs {
         }
 
         _openExistential(key, do: appendOpened)
+    }
+
+    mutating func makePreferenceWriter<K: PreferenceKey>(
+        inputs: PreferencesInputs,
+        key: K.Type,
+        value: @autoclosure () -> Attribute<K.Value>
+    ) {
+        guard inputs.keys.contains(K.self) else {
+            return
+        }
+        setValue(value().identifier, for: K.self)
     }
 
     mutating func makePreferenceTransformer<K: PreferenceKey>(

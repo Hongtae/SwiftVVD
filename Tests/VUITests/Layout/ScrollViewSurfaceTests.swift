@@ -2385,24 +2385,18 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let transform = try XCTUnwrap(recorder.transform).value
             let containing = try XCTUnwrap(transform.containingScrollGeometry)
             let nearest = try XCTUnwrap(transform.nearestScrollGeometry)
-            var resetPosition: CGPoint?
-            var resetPrecedesScrollGeometry = false
-            var sawReset = false
+            var scrollGeometryFollowsPosition = false
             transform.forEach(inverted: false) { item, stop in
                 switch item {
-                case .resetPosition(let point):
-                    resetPosition = point
-                    sawReset = true
-                case .scrollGeometry where sawReset:
-                    resetPrecedesScrollGeometry = true
+                case .scrollGeometry:
+                    scrollGeometryFollowsPosition = true
                     stop = true
                 default:
                     break
                 }
             }
             XCTAssertEqual(transform.globalPosition, position)
-            XCTAssertEqual(resetPosition, position)
-            XCTAssertTrue(resetPrecedesScrollGeometry)
+            XCTAssertTrue(scrollGeometryFollowsPosition)
 
             XCTAssertEqual(containing.contentOffset, .zero)
             XCTAssertTrue(containing.contentSize.width.isInfinite)
@@ -2587,6 +2581,76 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 )
             )
         }
+    }
+
+    func testViewTransformResetFoldsScrollBoundaryIntoDescendantPosition() {
+        var transform = ViewTransform.identity
+        transform.appendPosition(CGPoint(x: 100, y: 200))
+        transform.resetPosition(CGPoint(x: 100, y: 200))
+
+        transform.appendPosition(CGPoint(x: 9, y: 11))
+        XCTAssertEqual(transform.globalPosition, CGPoint(x: 109, y: 211))
+
+        transform.appendPosition(CGPoint(x: 3, y: 5))
+        XCTAssertEqual(transform.globalPosition, CGPoint(x: 103, y: 205))
+
+        var localOrigin = [CGPoint(x: 103, y: 205)]
+        transform.convertGlobal(to: .local, points: &localOrigin)
+        XCTAssertEqual(localOrigin, [.zero])
+    }
+
+    func testViewTransformPositionAdjustmentUsesFoldedTranslationRecurrence() {
+        var transform = ViewTransform.identity
+        transform.setPositionAdjustment(CGSize(width: 4, height: 6))
+
+        XCTAssertTrue(transform.isEmpty)
+        XCTAssertEqual(
+            transform.positionAdjustment,
+            CGSize(width: 4, height: 6)
+        )
+        XCTAssertEqual(transform.globalPosition, .zero)
+
+        transform.appendPosition(CGPoint(x: 10, y: 15))
+        XCTAssertEqual(
+            transform.positionAdjustment,
+            CGSize(width: 10, height: 15)
+        )
+        XCTAssertEqual(transform.globalPosition, CGPoint(x: 6, y: 9))
+
+        transform.resetPosition(CGPoint(x: 8, y: 12))
+        XCTAssertEqual(transform.positionAdjustment, .zero)
+        XCTAssertEqual(transform.globalPosition, CGPoint(x: 4, y: 6))
+
+        var scaled = ViewTransform.identity
+        scaled.appendPosition(CGPoint(x: 10, y: 20), scale: 2)
+        XCTAssertEqual(
+            scaled.positionAdjustment,
+            CGSize(width: 20, height: 40)
+        )
+        XCTAssertEqual(scaled.globalPosition, CGPoint(x: 10, y: 20))
+
+        scaled.appendPosition(CGPoint(x: 25, y: 50))
+        XCTAssertEqual(scaled.globalPosition, CGPoint(x: 15, y: 30))
+    }
+
+    func testViewTransformForEachEmitsFoldedTranslationInTraversalDirection() {
+        var transform = ViewTransform.identity
+        transform.appendTranslation(CGSize(width: 1, height: 2))
+        transform.appendPosition(CGPoint(x: 10, y: 15))
+
+        var forward: [ViewTransform.Item] = []
+        transform.forEach(inverted: false) { item, _ in forward.append(item) }
+        XCTAssertEqual(forward, [
+            .translation(CGSize(width: 1, height: 2)),
+            .translation(CGSize(width: -10, height: -15)),
+        ])
+
+        var inverted: [ViewTransform.Item] = []
+        transform.forEach(inverted: true) { item, _ in inverted.append(item) }
+        XCTAssertEqual(inverted, [
+            .translation(CGSize(width: 10, height: 15)),
+            .translation(CGSize(width: -1, height: -2)),
+        ])
     }
 
     func testSystemScrollViewScrollableAppliesScrollToPointRequestToGeometryState() {

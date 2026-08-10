@@ -602,11 +602,15 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
                 )
             )
 
-            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 13, y: 19))
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 7, y: 11))
             XCTAssertEqual(reset.value.translations, [CGSize(width: 3, height: 5)])
 
+            var descendant = reset.value
+            descendant.appendPosition(CGPoint(x: 4, y: 6))
+            XCTAssertEqual(descendant.globalPosition, CGPoint(x: 11, y: 17))
+
             position.setValue(CGPoint(x: 2, y: 4))
-            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 18, y: 26))
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 2, y: 4))
         }
     }
 
