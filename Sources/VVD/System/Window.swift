@@ -28,6 +28,7 @@ public enum MouseEventType {
     case move
     case wheel
     case pointing
+    case cancelled
 }
 
 public enum MouseEventDevice {
@@ -63,20 +64,14 @@ public struct ScrollEventData: Sendable, Hashable {
     public var source: ScrollEventSource = .unknown
     public var isPrecise: Bool = false
     public var isDirectionInvertedFromDevice: Bool = false
+}
 
-    init(
-        phase: ScrollEventPhase? = nil,
-        nativeMomentumPhase: ScrollEventPhase? = nil,
-        source: ScrollEventSource = .unknown,
-        isPrecise: Bool = false,
-        isDirectionInvertedFromDevice: Bool = false
-    ) {
-        self.phase = phase
-        self.nativeMomentumPhase = nativeMomentumPhase
-        self.source = source
-        self.isPrecise = isPrecise
-        self.isDirectionInvertedFromDevice = isDirectionInvertedFromDevice
-    }
+public struct TouchEventData: Sendable, Hashable {
+    /// Major-axis contact radius in the same logical coordinate units as location.
+    public var majorRadius: CGFloat = 0.0
+    /// Platform-reported uncertainty for `majorRadius`, when available.
+    public var majorRadiusTolerance: CGFloat = 0.0
+    public var maximumPossiblePressure: CGFloat = 1.0
 }
 
 public struct MouseEvent {
@@ -94,6 +89,8 @@ public struct MouseEvent {
     public var timestamp: TimeInterval
     /// Additional raw semantics for wheel input. Non-nil when `type == .wheel`.
     public var scrollData: ScrollEventData? = nil
+    /// Additional contact semantics for direct touch or stylus input.
+    public var touchData: TouchEventData? = nil
 }
 
 public enum KeyboardEventType {

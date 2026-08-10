@@ -34,6 +34,10 @@ struct MenuPresentationTrigger {
                 }
                 self.activeResponder = nil
                 return true
+            case .cancelled:
+                activeResponder.onPressingChanged?(false)
+                self.activeResponder = nil
+                return true
             case .move, .pointing:
                 return true
             default:

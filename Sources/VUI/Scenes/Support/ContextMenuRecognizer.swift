@@ -168,6 +168,10 @@ struct ContextMenuRecognizer {
             }
             return shouldOpen
 
+        case .cancelled:
+            pending = nil
+            return true
+
         default:
             pending = nil
             return false

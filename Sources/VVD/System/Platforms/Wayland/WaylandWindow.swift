@@ -446,8 +446,13 @@ final class WaylandWindow: Window {
 
     }
 
-    func mousePosition(forDeviceID: Int) -> CGPoint? {
-        nil
+    func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+        guard deviceID == 0,
+              let app = WaylandApplication.shared,
+              app.pointerTarget === self else {
+            return nil
+        }
+        return app.pointerLocation
     }
 
     func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {

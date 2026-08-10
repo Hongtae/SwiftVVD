@@ -55,12 +55,68 @@ private let updateKeyboardMouseTimeInterval: UINT = 10
 private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_VVDWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
+// Windows marks mouse messages synthesized from pen/touch input with this
+// signature in GetMessageExtraInfo(). The low byte carries source details.
+private let pointerCompatibilityMouseSignature: UInt64 = 0xFF51_5700
+private let pointerCompatibilityMouseSignatureMask: UInt64 = 0xFFFF_FF00
+private let win32PointerPressureMaximum: CGFloat = 1024.0
+
 // Converts GID_ROTATE ullArguments to a cumulative angle in radians.
 // Maps WORD range 0...65535 to -2 * Double.pi ... +2 * Double.pi.
 @inline(__always)
 private func gestureRotateAngle(_ arg: ULONGLONG) -> Double {
     let word = Double(arg & 0xFFFF)
     return (word / 65535.0) * (4.0 * Double.pi) - 2.0 * Double.pi
+}
+
+@inline(__always)
+private func GET_POINTERID_WPARAM(_ wParam: WPARAM) -> UINT32 {
+    UINT32(wParam & 0xFFFF)
+}
+
+@inline(__always)
+private func isPointerCompatibilityMouseMessage() -> Bool {
+    let extraInfo = UInt64(bitPattern: GetMessageExtraInfo()) & 0xFFFF_FFFF
+    return (extraInfo & pointerCompatibilityMouseSignatureMask) ==
+        pointerCompatibilityMouseSignature
+}
+
+@inline(__always)
+private func timestampFromLow32Uptime(_ low32: DWORD) -> TimeInterval {
+    let messageTime = UInt64(low32)
+    let uptime = UInt64(GetTickCount64())
+    let cycle = UInt64(UInt32.max) + 1
+    var fullTime = (uptime & ~(cycle - 1)) | messageTime
+    if fullTime > uptime {
+        fullTime -= cycle
+    }
+    return TimeInterval(fullTime) / 1_000
+}
+
+@inline(__always)
+private func degreesToRadians(_ degrees: CGFloat) -> CGFloat {
+    degrees * .pi / 180.0
+}
+
+@inline(__always)
+private func penAzimuthAltitude(
+    tiltXDegrees: CGFloat,
+    tiltYDegrees: CGFloat
+) -> CGPoint {
+    // Windows reports independent axis inclinations. Reconstruct the pen's
+    // screen-plane direction before converting to azimuth and altitude.
+    let projectedX = tan(degreesToRadians(tiltXDegrees))
+    let projectedY = tan(degreesToRadians(tiltYDegrees))
+    let altitude = atan2(1.0, hypot(projectedX, projectedY))
+
+    guard projectedX != 0.0 || projectedY != 0.0 else {
+        return CGPoint(x: 0.0, y: altitude)
+    }
+    var azimuth = atan2(projectedY, projectedX)
+    if azimuth < 0.0 {
+        azimuth += 2.0 * .pi
+    }
+    return CGPoint(x: azimuth, y: altitude)
 }
 
 
@@ -87,6 +143,28 @@ final class Win32Window: Window {
         static let button6 = MouseButtonDownMask(rawValue: 1 << 5)
         static let button7 = MouseButtonDownMask(rawValue: 1 << 6)
         static let button8 = MouseButtonDownMask(rawValue: 1 << 7)
+    }
+
+    private static let mouseButtonMappings: [(MouseButtonDownMask, Int)] = [
+        (.button1, 0),
+        (.button2, 1),
+        (.button3, 2),
+        (.button4, 3),
+        (.button5, 4),
+        (.button6, 5),
+        (.button7, 6),
+        (.button8, 7),
+    ]
+
+    private struct PointerInputState {
+        var device: MouseEventDevice
+        var buttonID: Int
+        var location: CGPoint
+        var tilt: CGPoint
+        var pressure: CGFloat
+        var timestamp: TimeInterval
+        var touchData: TouchEventData?
+        var hasActiveContact: Bool
     }
 
     typealias HWND = WinSDK.HWND
@@ -120,6 +198,7 @@ final class Win32Window: Window {
     private var lockedMousePosition: CGPoint = .zero
     private var mouseButtonDownMask: MouseButtonDownMask = []
     private var mouseLocked: Bool = false
+    private var pointerStates: [UINT32: PointerInputState] = [:]
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
     private var pendingKeyRepeat: Int? = nil
@@ -603,6 +682,10 @@ final class Win32Window: Window {
     }
 
     func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+        if let pointerID = UINT32(exactly: deviceID),
+           let state = self.pointerStates[pointerID] {
+            return state.location
+        }
         if let hWnd = self.hWnd, deviceID == 0 {
             var pt = POINT()
             GetCursorPos(&pt)
@@ -670,6 +753,8 @@ final class Win32Window: Window {
             ScreenToClient(hWnd, &pt)
             mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
         }
+        self.mouseButtonDownMask = []
+        self.pointerStates.removeAll()
     }
 
     private func suspendMouseCaptureForModal() {
@@ -816,6 +901,246 @@ final class Win32Window: Window {
         GetKeyboardState(&keyboardStates) // Empty the keyboard queue.
         self.keyboardStates = [UInt8](repeating: 0, count: 256)
         self.pendingKeyRepeat = nil
+    }
+
+    // MARK: - Pointer Input
+
+    private func pointFromScreenPixel(_ point: POINT) -> CGPoint? {
+        guard let hWnd = self.hWnd else { return nil }
+        var pt = point
+        guard ScreenToClient(hWnd, &pt) else { return nil }
+        return CGPoint(x: Int(pt.x), y: Int(pt.y)) *
+            (1.0 / self.contentScaleFactor)
+    }
+
+    private func pointerEventType(
+        for message: UINT,
+        flags: POINTER_FLAGS
+    ) -> MouseEventType? {
+        if flags & DWORD(POINTER_FLAG_CANCELED) != 0 {
+            return .cancelled
+        }
+        switch message {
+        case UINT(WM_POINTERDOWN):
+            return .buttonDown
+        case UINT(WM_POINTERUP):
+            return .buttonUp
+        case UINT(WM_POINTERUPDATE):
+            if flags & DWORD(POINTER_FLAG_INCONTACT) != 0 {
+                return .move
+            }
+            return .pointing
+        default:
+            return nil
+        }
+    }
+
+    private func pointerDelta(for pointerID: UINT32,
+                              type: MouseEventType,
+                              location: CGPoint) -> CGPoint {
+        guard type == .move || type == .pointing ||
+                type == .buttonUp || type == .cancelled,
+              let previous = self.pointerStates[pointerID]?.location else {
+            return .zero
+        }
+        return CGPoint(x: location.x - previous.x,
+                       y: location.y - previous.y)
+    }
+
+    @discardableResult
+    private func cancelActiveMouseButtons(timestamp: TimeInterval) -> Bool {
+        let downMask = self.mouseButtonDownMask
+        guard downMask.rawValue != 0 else { return false }
+
+        self.mouseButtonDownMask = []
+        let location = self.mousePosition(forDeviceID: 0) ?? self.mousePosition
+        for (mask, buttonID) in Self.mouseButtonMappings where downMask.contains(mask) {
+            self.postMouseEvent(MouseEvent(
+                type: .cancelled,
+                window: self,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: buttonID,
+                location: location,
+                timestamp: timestamp
+            ))
+        }
+        return true
+    }
+
+    private func postPointerMouseEvent(type: MouseEventType,
+                                       pointerID: UINT32,
+                                       state: PointerInputState,
+                                       delta: CGPoint) {
+        self.pointerStates[pointerID] = state
+        self.postMouseEvent(MouseEvent(
+            type: type,
+            window: self,
+            device: state.device,
+            deviceID: Int(pointerID),
+            buttonID: state.buttonID,
+            location: state.location,
+            delta: delta,
+            tilt: state.tilt,
+            pressure: state.pressure,
+            timestamp: state.timestamp,
+            touchData: state.touchData
+        ))
+        if type == .buttonUp || type == .cancelled {
+            self.pointerStates.removeValue(forKey: pointerID)
+        }
+    }
+
+    @discardableResult
+    private func cancelPointerEvent(pointerID: UINT32,
+                                    timestamp: TimeInterval) -> Bool {
+        guard let state = self.pointerStates[pointerID] else {
+            return false
+        }
+        if state.hasActiveContact {
+            self.postMouseEvent(MouseEvent(
+                type: .cancelled,
+                window: self,
+                device: state.device,
+                deviceID: Int(pointerID),
+                buttonID: state.buttonID,
+                location: state.location,
+                delta: .zero,
+                tilt: state.tilt,
+                pressure: state.pressure,
+                timestamp: timestamp,
+                touchData: state.touchData
+            ))
+        }
+        self.pointerStates.removeValue(forKey: pointerID)
+        return true
+    }
+
+    @discardableResult
+    private func cancelActivePointerEvents(timestamp: TimeInterval) -> Bool {
+        var cancelled = false
+        for pointerID in self.pointerStates.keys.sorted() {
+            if self.cancelPointerEvent(pointerID: pointerID, timestamp: timestamp) {
+                cancelled = true
+            }
+        }
+        return cancelled
+    }
+
+    private func pointerContactMajorRadius(_ rect: RECT) -> CGFloat {
+        let width = max(0, CGFloat(rect.right - rect.left))
+        let height = max(0, CGFloat(rect.bottom - rect.top))
+        return max(width, height) * 0.5 / self.contentScaleFactor
+    }
+
+    @discardableResult
+    private func postPointerEvent(_ message: UINT,
+                                  wParam: WPARAM,
+                                  timestamp fallbackTimestamp: TimeInterval) -> Bool {
+        let pointerID = GET_POINTERID_WPARAM(wParam)
+        var pointerType = POINTER_INPUT_TYPE()
+        guard GetPointerType(pointerID, &pointerType) else { return false }
+
+        switch pointerType {
+        case POINTER_INPUT_TYPE(PT_TOUCH.rawValue):
+            var info = POINTER_TOUCH_INFO()
+            guard GetPointerTouchInfo(pointerID, &info),
+                  let type = self.pointerEventType(
+                    for: message,
+                    flags: info.pointerInfo.pointerFlags
+                  ),
+                  type != .pointing,
+                  let location = self.pointFromScreenPixel(
+                    info.pointerInfo.ptPixelLocation
+                  ) else {
+                return false
+            }
+
+            let hasContactArea =
+                info.touchMask & DWORD(TOUCH_MASK_CONTACTAREA) != 0
+            let hasPressure =
+                info.touchMask & DWORD(TOUCH_MASK_PRESSURE) != 0
+            let pressure = hasPressure ? CGFloat(info.pressure) : 0.0
+            let timestamp = info.pointerInfo.dwTime != 0
+                ? timestampFromLow32Uptime(info.pointerInfo.dwTime)
+                : fallbackTimestamp
+            let delta = self.pointerDelta(for: pointerID,
+                                          type: type,
+                                          location: location)
+            let touchData = TouchEventData(
+                majorRadius: hasContactArea
+                    ? self.pointerContactMajorRadius(info.rcContact)
+                    : 0.0,
+                maximumPossiblePressure: win32PointerPressureMaximum
+            )
+            self.postPointerMouseEvent(
+                type: type,
+                pointerID: pointerID,
+                state: PointerInputState(
+                    device: .touch,
+                    buttonID: 0,
+                    location: location,
+                    tilt: .zero,
+                    pressure: pressure,
+                    timestamp: timestamp,
+                    touchData: touchData,
+                    hasActiveContact: type != .buttonUp && type != .cancelled
+                ),
+                delta: delta
+            )
+            return true
+
+        case POINTER_INPUT_TYPE(PT_PEN.rawValue):
+            var info = POINTER_PEN_INFO()
+            guard GetPointerPenInfo(pointerID, &info),
+                  let type = self.pointerEventType(
+                    for: message,
+                    flags: info.pointerInfo.pointerFlags
+                  ),
+                  let location = self.pointFromScreenPixel(
+                    info.pointerInfo.ptPixelLocation
+                  ) else {
+                return false
+            }
+
+            let hasPressure = info.penMask & DWORD(PEN_MASK_PRESSURE) != 0
+            let hasTiltX = info.penMask & DWORD(PEN_MASK_TILT_X) != 0
+            let hasTiltY = info.penMask & DWORD(PEN_MASK_TILT_Y) != 0
+            let pressure = hasPressure ? CGFloat(info.pressure) : 0.0
+            let tilt = penAzimuthAltitude(
+                tiltXDegrees: hasTiltX ? CGFloat(info.tiltX) : 0.0,
+                tiltYDegrees: hasTiltY ? CGFloat(info.tiltY) : 0.0
+            )
+            let timestamp = info.pointerInfo.dwTime != 0
+                ? timestampFromLow32Uptime(info.pointerInfo.dwTime)
+                : fallbackTimestamp
+            let delta = self.pointerDelta(for: pointerID,
+                                          type: type,
+                                          location: location)
+            self.postPointerMouseEvent(
+                type: type,
+                pointerID: pointerID,
+                state: PointerInputState(
+                    device: .stylus,
+                    buttonID: 0,
+                    location: location,
+                    tilt: tilt,
+                    pressure: pressure,
+                    timestamp: timestamp,
+                    touchData: TouchEventData(
+                        maximumPossiblePressure: win32PointerPressureMaximum
+                    ),
+                    hasActiveContact: type != .pointing &&
+                        type != .buttonUp &&
+                        type != .cancelled
+                ),
+                delta: delta
+            )
+            return true
+
+        default:
+            return false
+        }
     }
 
     // MARK: - Coordinate Conversion
@@ -1068,6 +1393,8 @@ final class Win32Window: Window {
              UINT(WM_RBUTTONDOWN), UINT(WM_RBUTTONUP), UINT(WM_RBUTTONDBLCLK),
              UINT(WM_MBUTTONDOWN), UINT(WM_MBUTTONUP), UINT(WM_MBUTTONDBLCLK),
              UINT(WM_XBUTTONDOWN), UINT(WM_XBUTTONUP), UINT(WM_XBUTTONDBLCLK),
+             UINT(WM_POINTERDOWN), UINT(WM_POINTERUPDATE), UINT(WM_POINTERUP),
+             UINT(WM_POINTERWHEEL), UINT(WM_POINTERHWHEEL),
              UINT(WM_MOUSEWHEEL), UINT(WM_MOUSEHWHEEL),
              UINT(WM_GESTURENOTIFY), UINT(WM_GESTURE),
              UINT(WM_KEYDOWN), UINT(WM_KEYUP),
@@ -1088,6 +1415,7 @@ final class Win32Window: Window {
         switch message {
         case UINT(WM_LBUTTONDOWN), UINT(WM_RBUTTONDOWN),
              UINT(WM_MBUTTONDOWN), UINT(WM_XBUTTONDOWN),
+             UINT(WM_POINTERDOWN), UINT(WM_NCPOINTERDOWN),
              UINT(WM_NCLBUTTONDOWN), UINT(WM_NCRBUTTONDOWN),
              UINT(WM_NCMBUTTONDOWN), UINT(WM_NCXBUTTONDOWN):
             return true
@@ -1489,16 +1817,7 @@ final class Win32Window: Window {
             // GetMessageTime carries the low 32 bits of the uptime at which the
             // message entered the queue. Reconstruct the most recent matching
             // 64-bit epoch so timestamps remain monotonic across its rollover.
-            let messageTime = UInt64(
-                UInt32(truncatingIfNeeded: GetMessageTime())
-            )
-            let uptime = UInt64(GetTickCount64())
-            let cycle = UInt64(UInt32.max) + 1
-            var fullTime = (uptime & ~(cycle - 1)) | messageTime
-            if fullTime > uptime {
-                fullTime -= cycle
-            }
-            return TimeInterval(fullTime) / 1_000
+            timestampFromLow32Uptime(UInt32(truncatingIfNeeded: GetMessageTime()))
         }
 
         if let window = window, window.hWnd == hWnd {
@@ -1515,6 +1834,9 @@ final class Win32Window: Window {
             let inactivateWindow = {
                 if window.activated {
                     numActiveWindows -= 1
+                    let timestamp = messageTimestamp()
+                    window.cancelActiveMouseButtons(timestamp: timestamp)
+                    window.cancelActivePointerEvents(timestamp: timestamp)
                     window.resetKeyStates()
                     window.resetMouse()
                     window.activated = false
@@ -1790,7 +2112,31 @@ final class Win32Window: Window {
                     window.synchronizeMouse()
                     return 0
                 }
+            case UINT(WM_POINTERDOWN), UINT(WM_POINTERUPDATE), UINT(WM_POINTERUP):
+                // Keep the default pointer path alive so DefWindowProc can
+                // synthesize higher-level gesture messages.
+                _ = window.postPointerEvent(uMsg,
+                                            wParam: wParam,
+                                            timestamp: messageTimestamp())
+                break
+            case UINT(WM_POINTERCAPTURECHANGED):
+                _ = window.cancelPointerEvent(
+                    pointerID: GET_POINTERID_WPARAM(wParam),
+                    timestamp: messageTimestamp()
+                )
+                break
+            case UINT(WM_CAPTURECHANGED):
+                _ = window.cancelActiveMouseButtons(timestamp: messageTimestamp())
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                break
+            case UINT(WM_CANCELMODE):
+                let timestamp = messageTimestamp()
+                _ = window.cancelActiveMouseButtons(timestamp: timestamp)
+                _ = window.cancelActivePointerEvents(timestamp: timestamp)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                break
             case UINT(WM_MOUSEMOVE):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 let pt = MAKEPOINTS(lParam)
                 let oldPtX = Int((window.mousePosition.x * window.contentScaleFactor).rounded())
                 let oldPtY = Int((window.mousePosition.y * window.contentScaleFactor).rounded())
@@ -1832,6 +2178,7 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_LBUTTONDOWN):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button1)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1846,6 +2193,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_LBUTTONUP):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button1)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1860,6 +2208,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONDOWN):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button2)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1874,6 +2223,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONUP):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button2)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1888,6 +2238,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONDOWN):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button3)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1902,6 +2253,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONUP):
+                if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button3)
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1916,6 +2268,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_XBUTTONDOWN):
+                if isPointerCompatibilityMouseMessage() { return 1 }
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
@@ -1944,6 +2297,7 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 1 // Return TRUE.
             case UINT(WM_XBUTTONUP):
+                if isPointerCompatibilityMouseMessage() { return 1 }
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
@@ -1972,7 +2326,8 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // Return TRUE.
             case UINT(WM_GESTURENOTIFY):
-                // Enable Zoom and Rotate. Block Pan so it falls through as WM_MOUSEWHEEL.
+                // Enable zoom and rotation. Raw pointer contacts drive panning,
+                // so GID_PAN is deliberately consumed below.
                 var configs: [GESTURECONFIG] = [
                     GESTURECONFIG(dwID: DWORD(GID_ZOOM),   dwWant: DWORD(GC_ZOOM),   dwBlock: 0),
                     GESTURECONFIG(dwID: DWORD(GID_ROTATE), dwWant: DWORD(GC_ROTATE), dwBlock: 0),
@@ -1989,7 +2344,6 @@ final class Win32Window: Window {
                 var gi = GESTUREINFO()
                 gi.cbSize = UINT(MemoryLayout<GESTUREINFO>.size)
                 guard GetGestureInfo(hGesture, &gi) else { break }
-                defer { _ = CloseGestureInfoHandle(hGesture) }
 
                 var pt = POINT(x: LONG(gi.ptsLocation.x), y: LONG(gi.ptsLocation.y))
                 ScreenToClient(hWnd, &pt)
@@ -2022,9 +2376,16 @@ final class Win32Window: Window {
                         type: .rotate, window: window, phase: phase,
                         location: location, rotation: rotationDeg))
 
-                default:
+                case DWORD(GID_PAN):
+                    // The raw pointer sequence already feeds pan recognition.
                     break
+
+                default:
+                    // DefWindowProc owns the gesture handle for forwarded
+                    // messages, including GID_BEGIN and GID_END.
+                    return DefWindowProcW(hWnd, uMsg, wParam, lParam)
                 }
+                _ = CloseGestureInfoHandle(hGesture)
                 return 0
 
             case UINT(WM_MOUSEWHEEL), UINT(WM_MOUSEHWHEEL):

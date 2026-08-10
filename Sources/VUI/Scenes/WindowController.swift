@@ -199,18 +199,21 @@ class WindowController: WindowDelegate,
     ) -> any EventType {
         switch event.device {
         case .touch, .stylus:
+            let touchData = event.touchData
             return TouchEvent(
                 timestamp: time,
                 phase: phase,
                 binding: nil,
                 location: event.location,
                 globalLocation: event.location,
-                radius: 0,
+                radius: touchData?.majorRadius ?? 0,
                 force: event.pressure,
-                maximumPossibleForce: 1,
+                maximumPossibleForce: Double(
+                    touchData?.maximumPossiblePressure ?? 1
+                ),
                 modifiers: [],
-                altitude: .zero,
-                azimuth: .zero,
+                altitude: Angle(radians: Double(event.tilt.y)),
+                azimuth: Angle(radians: Double(event.tilt.x)),
                 touchType: event.device == .stylus ? .pencil : .direct
             )
         default:
@@ -1678,7 +1681,10 @@ class WindowController: WindowDelegate,
                 }
                 phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
 
-            case .buttonUp:
+            case .buttonUp, .cancelled:
+                let terminalPhase: EventPhase = event.type == .cancelled
+                    ? .failed
+                    : .ended
                 let pointerEventID: EventID?
                 if isTouch {
                     pointerEventID = self._touchEventIDs.removeValue(forKey: event.deviceID)
@@ -1689,7 +1695,7 @@ class WindowController: WindowDelegate,
                 guard let pointerEventID else { return false }
                 self._activeEvents[pointerEventID] = self.pointerEvent(
                     from: event,
-                    phase: .ended,
+                    phase: terminalPhase,
                     at: time
                 )
                 let scrollState = self._pointerScrollStates.removeValue(forKey: pointerScrollKey)
@@ -1704,7 +1710,7 @@ class WindowController: WindowDelegate,
                     )
                     self._activeEvents[scrollState.eventID] = ScrollEvent(
                         timestamp: time,
-                        phase: .ended,
+                        phase: terminalPhase,
                         binding: nil,
                         translation: translation,
                         modifiers: [],

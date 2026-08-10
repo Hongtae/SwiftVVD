@@ -283,7 +283,12 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  delta: .zero,
                                                  tilt: tilt,
                                                  pressure: touch.force,
-                                                 timestamp: touch.timestamp))
+                                                 timestamp: touch.timestamp,
+                                                 touchData: TouchEventData(
+                                                     majorRadius: touch.majorRadius,
+                                                     majorRadiusTolerance: touch.majorRadiusTolerance,
+                                                     maximumPossiblePressure: touch.maximumPossibleForce
+                                                 )))
             }
             self.touches[index] = touch
         }
@@ -310,7 +315,12 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  delta: delta,
                                                  tilt: tilt,
                                                  pressure: touch.force,
-                                                 timestamp: touch.timestamp))
+                                                 timestamp: touch.timestamp,
+                                                 touchData: TouchEventData(
+                                                     majorRadius: touch.majorRadius,
+                                                     majorRadiusTolerance: touch.majorRadiusTolerance,
+                                                     maximumPossiblePressure: touch.maximumPossibleForce
+                                                 )))
                 processed = true
             }
             if processed == false {
@@ -339,7 +349,12 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                      delta: delta,
                                                      tilt: tilt,
                                                      pressure: touch.force,
-                                                     timestamp: touch.timestamp))
+                                                     timestamp: touch.timestamp,
+                                                     touchData: TouchEventData(
+                                                         majorRadius: touch.majorRadius,
+                                                         majorRadiusTolerance: touch.majorRadiusTolerance,
+                                                         maximumPossiblePressure: touch.maximumPossibleForce
+                                                     )))
                 }
                 self.touches[index] = nil
                 processed = true
@@ -351,7 +366,41 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        self.touchesEnded(touches, with: event)
+        for touch in touches {
+            var processed = false
+
+            if let index = self.touches.firstIndex(of: touch) {
+                if let window = self.proxyWindow {
+                    let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
+                    let pos = touch.location(in: self)
+                    let old = touch.previousLocation(in: self)
+                    let delta = CGPoint(x: pos.x - old.x, y: pos.y - old.y)
+                    let tilt = CGPoint(x: touch.azimuthAngle(in: self), y: touch.altitudeAngle)
+                    window.postMouseEvent(MouseEvent(
+                        type: .cancelled,
+                        window: window,
+                        device: device,
+                        deviceID: index,
+                        buttonID: 0,
+                        location: pos,
+                        delta: delta,
+                        tilt: tilt,
+                        pressure: touch.force,
+                        timestamp: touch.timestamp,
+                        touchData: TouchEventData(
+                            majorRadius: touch.majorRadius,
+                            majorRadiusTolerance: touch.majorRadiusTolerance,
+                            maximumPossiblePressure: touch.maximumPossibleForce
+                        )
+                    ))
+                }
+                self.touches[index] = nil
+                processed = true
+            }
+            if processed == false {
+                Log.err("Untrackable touch event: \(touch)")
+            }
+        }
     }
 
     override func motionBegan(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {

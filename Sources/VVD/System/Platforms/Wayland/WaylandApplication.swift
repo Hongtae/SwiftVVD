@@ -118,6 +118,7 @@ private var seatListener = wl_seat_listener(
             }
         } else {
             if app.pointer != nil {
+                app.cancelActivePointerButtons()
                 wl_pointer_destroy(app.pointer)
                 app.pointer = nil
             }
@@ -511,6 +512,13 @@ final class WaylandApplication: Application, @unchecked Sendable {
     var pointerLocation: CGPoint = .zero    // location in target surface
     weak var activeWindow: WaylandWindow? = nil
 
+    private struct PointerButtonState {
+        weak var target: WaylandWindow?
+        var buttonID: Int
+        var location: CGPoint
+        var timestamp: TimeInterval
+    }
+
     private struct PointerAxisFrame {
         var delta = CGPoint.zero
         var axes: UInt8 = 0
@@ -523,13 +531,16 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private var pointerAxisActiveAxes: UInt8 = 0
     private var pointerAxisSource = ScrollEventSource.unknown
     private var pointerEventClock = MillisecondTimestampExtender()
+    private var pointerButtonStates: [Int: PointerButtonState] = [:]
 
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerTarget = self.window(forSurface: surface)
+        pointerLocation = CGPoint(x: x, y: y)
         Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
     }
 
     fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
+        cancelActivePointerButtons()
         pointerTarget = nil
         pointerAxisFrame = PointerAxisFrame()
         pointerAxisActiveAxes = 0
@@ -541,6 +552,10 @@ final class WaylandApplication: Application, @unchecked Sendable {
         let timestamp = pointerEventClock.timestamp(for: time)
         if let target = pointerTarget {
             pointerLocation = CGPoint(x: x, y: y)
+            for buttonID in Array(pointerButtonStates.keys) {
+                pointerButtonStates[buttonID]?.location = pointerLocation
+                pointerButtonStates[buttonID]?.timestamp = timestamp
+            }
             MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(type: .move,
                                       window: target,
@@ -556,7 +571,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
         let timestamp = pointerEventClock.timestamp(for: time)
-        if let target = pointerTarget {
+        let buttonID = Int(button) - BTN_MOUSE
+        let previousState = pointerButtonStates[buttonID]
+        if let target = pointerTarget ?? previousState?.target {
+            let location = pointerTarget == nil
+                ? previousState?.location ?? pointerLocation
+                : pointerLocation
 
             // alt+ctrl+click to move window if server-side decoration is not used.
             if self.decorationManager == nil && target.isServerSideDecoration == false {
@@ -573,19 +593,49 @@ final class WaylandApplication: Application, @unchecked Sendable {
                 }
             }
 
-            let buttonID = Int(button) - BTN_MOUSE
             let type: MouseEventType = state == 0 ? .buttonUp : .buttonDown
+            if type == .buttonDown {
+                pointerButtonStates[buttonID] = PointerButtonState(
+                    target: target,
+                    buttonID: buttonID,
+                    location: location,
+                    timestamp: timestamp
+                )
+            } else {
+                pointerButtonStates.removeValue(forKey: buttonID)
+            }
             MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(type: type,
-                                                 window: target,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: buttonID,
-                                                 location: pointerLocation,
-                                                 timestamp: timestamp))
+                                                  window: target,
+                                                  device: .genericMouse,
+                                                  deviceID: 0,
+                                                  buttonID: buttonID,
+                                                  location: location,
+                                                  timestamp: timestamp))
             }
         }
         Log.debug("wl_pointer_listener.button (serial:\(serial), time:\(time), button:\(button), state:\(state))")
+    }
+
+    fileprivate func cancelActivePointerButtons() {
+        let states = pointerButtonStates.values.sorted { $0.buttonID < $1.buttonID }
+        guard !states.isEmpty else { return }
+
+        pointerButtonStates.removeAll()
+        for state in states {
+            guard let target = state.target else { continue }
+            MainActor.assumeIsolated {
+                target.postMouseEvent(MouseEvent(
+                    type: .cancelled,
+                    window: target,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: state.buttonID,
+                    location: state.location,
+                    timestamp: state.timestamp
+                ))
+            }
+        }
     }
 
     fileprivate func pointerAxis(time: UInt32, axis: UInt32, value: Double) {
