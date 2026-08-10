@@ -121,7 +121,7 @@ struct ContentResponderHelper<Data: ContentResponder> {
             guard let data else {
                 return .stop
             }
-            var localPoints = Array(points.prefix(64))
+            var localPoints = points
             transform.convertGlobal(to: .local, points: &localPoints)
             let mask = localPoints.withUnsafeBufferPointer {
                 data.contains(points: $0, size: size)

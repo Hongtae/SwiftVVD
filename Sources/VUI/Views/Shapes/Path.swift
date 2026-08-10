@@ -133,6 +133,24 @@ public struct Path: Equatable {
         return winding != 0 // non zero fill
     }
 
+    func contains(
+        points: UnsafeBufferPointer<CGPoint>,
+        eoFill: Bool,
+        origin: CGPoint
+    ) -> BitVector64 {
+        var result = BitVector64()
+        for (index, point) in points.prefix(64).enumerated() {
+            result[index] = contains(
+                CGPoint(
+                    x: point.x - origin.x,
+                    y: point.y - origin.y
+                ),
+                eoFill: eoFill
+            )
+        }
+        return result
+    }
+
     public enum Element: Equatable, Sendable {
         case move(to: CGPoint)
         case line(to: CGPoint)

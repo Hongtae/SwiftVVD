@@ -305,6 +305,53 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         XCTAssertEqual(ViewResponder.hitTestKey, previous &+ 1)
     }
 
+    func testContainsPointsCacheOnlyReusesMatchingNonnilKeys() {
+        var cache = ViewResponder.ContainsPointsCache()
+        var bodyCalls = 0
+
+        func result(_ rawValue: UInt64) -> ViewResponder.ContainsPointsResult {
+            ViewResponder.ContainsPointsResult(
+                mask: BitVector64(rawValue: rawValue),
+                priority: 0,
+                children: []
+            )
+        }
+
+        let firstNil = cache.fetch(key: nil) {
+            bodyCalls += 1
+            return result(1)
+        }
+        let repeatedNil = cache.fetch(key: nil) {
+            bodyCalls += 1
+            return result(2)
+        }
+        XCTAssertEqual(firstNil.mask.rawValue, 1)
+        XCTAssertEqual(repeatedNil.mask.rawValue, 2)
+        XCTAssertNil(cache.storage?.key)
+        XCTAssertEqual(bodyCalls, 2)
+
+        let firstKey = cache.fetch(key: 7) {
+            bodyCalls += 1
+            return result(4)
+        }
+        let repeatedKey = cache.fetch(key: 7) {
+            bodyCalls += 1
+            return result(8)
+        }
+        XCTAssertEqual(firstKey.mask.rawValue, 4)
+        XCTAssertEqual(repeatedKey.mask.rawValue, 4)
+        XCTAssertEqual(cache.storage?.key, 7)
+        XCTAssertEqual(bodyCalls, 3)
+
+        let replacedNil = cache.fetch(key: nil) {
+            bodyCalls += 1
+            return result(16)
+        }
+        XCTAssertEqual(replacedNil.mask.rawValue, 16)
+        XCTAssertNil(cache.storage?.key)
+        XCTAssertEqual(bodyCalls, 4)
+    }
+
     func testResponderVisitorSkipsChildrenAndCancelsTraversal() {
         let root = MultiViewResponder()
         let skipped = MultiViewResponder()

@@ -463,7 +463,10 @@ class ViewResponder: ResponderNode, CustomStringConvertible {
     }
 
     struct ContainsPointsCache {
-        var storage: (key: UInt32, value: ViewResponder.ContainsPointsResult)?
+        var storage: (
+            key: UInt32?,
+            value: ViewResponder.ContainsPointsResult
+        )?
 
         init() {}
 
@@ -471,10 +474,10 @@ class ViewResponder: ResponderNode, CustomStringConvertible {
             key: UInt32?,
             _ body: () -> ViewResponder.ContainsPointsResult
         ) -> ViewResponder.ContainsPointsResult {
-            guard let key else {
-                return body()
-            }
-            if let storage, storage.key == key {
+            if let storage,
+               let storedKey = storage.key,
+               let key,
+               storedKey == key {
                 return storage.value
             }
             let value = body()

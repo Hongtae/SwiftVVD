@@ -50,12 +50,38 @@ extension ShapeStyledLeafView {
         points: UnsafeBufferPointer<CGPoint>,
         size: CGSize
     ) -> BitVector64 {
-        let path = contentPath(size: size)
-        var result = BitVector64()
-        for (index, point) in points.prefix(64).enumerated() {
-            result[index] = path.contains(point)
+        let rendered: (
+            shape: _ShapeStyle_RenderedShape.Shape,
+            frame: CGRect
+        )
+        if Self.hasBackground {
+            let background = backgroundShape(in: size)
+            if case .empty = background.shape {
+                rendered = shape(in: size)
+            } else {
+                rendered = background
+            }
+        } else {
+            rendered = shape(in: size)
         }
-        return result
+
+        switch rendered.shape {
+        case let .path(path, fillStyle):
+            guard points.contains(where: rendered.frame.contains) else {
+                return []
+            }
+            return path.contains(
+                points: points,
+                eoFill: fillStyle.isEOFilled,
+                origin: rendered.frame.origin
+            )
+        case .text, .image, .empty:
+            var result = BitVector64()
+            for (index, point) in points.prefix(64).enumerated() {
+                result[index] = rendered.frame.contains(point)
+            }
+            return result
+        }
     }
 
     func contentPath(size: CGSize) -> Path {
