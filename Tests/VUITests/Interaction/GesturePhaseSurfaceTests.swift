@@ -114,6 +114,67 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         }
     }
 
+    func testEventFilterProjectsFilteredEventsAndFailsOnRemoval() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let primaryID = EventID(type: VUI.MouseEvent.self, serial: 1)
+            let secondaryID = EventID(type: VUI.MouseEvent.self, serial: 2)
+            let unrelatedID = EventID(type: Event.self, serial: 3)
+            let primary = VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .began,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )
+            let secondary = VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .secondary,
+                phase: .began,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )
+            let unrelated = Event(primary)
+            let events = graph.makeInput(value: [
+                primaryID: primary,
+                secondaryID: secondary,
+                unrelatedID: unrelated,
+            ] as [EventID: any EventType])
+            var inputs = makeGestureInputs(graph: graph)
+            inputs._events = events
+            let modifier = graph.makeInput(value: EventFilter<Int> { event in
+                guard let event = event as? VUI.MouseEvent else { return true }
+                return event.button == .primary
+            })
+            let childPhase = graph.makeInput(value: GesturePhase<Int>.active(7))
+            var projectedEvents: Attribute<[EventID: any EventType]>?
+
+            let outputs = EventFilter<Int>._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { childInputs in
+                projectedEvents = childInputs.events
+                return _GestureOutputs(phase: childPhase)
+            }
+
+            let filtered = try XCTUnwrap(projectedEvents).value
+            XCTAssertNotNil(filtered[primaryID] as? VUI.MouseEvent)
+            XCTAssertNil(filtered[secondaryID])
+            XCTAssertNotNil(filtered[unrelatedID] as? Event)
+            XCTAssertEqual(outputs.phase.value, .failed)
+
+            events.setValue([
+                primaryID: primary,
+                unrelatedID: unrelated,
+            ] as [EventID: any EventType])
+            XCTAssertEqual(outputs.phase.value, .active(7))
+        }
+    }
+
     func testTruePreferenceWriterRemovesKeyFromChildAndPublishesTrue() throws {
         let host = GraphHost()
         try host.data.withCurrent {

@@ -54,6 +54,9 @@ typealias ButtonPressingAction = (ButtonPressPhase) -> ()
 //   -> DelayedGesture<SpatialEvent>   (duration=0 for buttons, so immediate)
 //   -> MapGesture<SpatialEvent, Value> (event to locationInBounds hit test)
 //   -> SizeGesture<...>               (provides CGSize for bounds check)
+//   -> DependentGesture<Value>         (fails while an inherited gesture is active)
+//   -> EventFilter<Value>              (primary mouse button only)
+//   -> EventFilter<Value>              (excludes pan spatial events)
 //   -> TruePreferenceWritingGestureModifier<IsCancellableGestureKey, Value>
 struct PrimitiveButtonGestureCore: Gesture {
     // reserved1 is omitted until its role is confirmed.
@@ -77,9 +80,21 @@ struct PrimitiveButtonGestureCore: Gesture {
             >
         >
     >
+    typealias DependentBody = ModifierGesture<
+        DependentGesture<Value>,
+        SizingBody
+    >
+    typealias MouseFilteredBody = ModifierGesture<
+        EventFilter<Value>,
+        DependentBody
+    >
+    typealias SpatialFilteredBody = ModifierGesture<
+        EventFilter<Value>,
+        MouseFilteredBody
+    >
     typealias Body = ModifierGesture<
         TruePreferenceWritingGestureModifier<IsCancellableGestureKey, Value>,
-        SizingBody
+        SpatialFilteredBody
     >
 
     var body: Body {
@@ -107,7 +122,15 @@ struct PrimitiveButtonGestureCore: Gesture {
                     body: EventListener<SpatialEvent>()
                 )
             )
-        }.cancellable()
+        }
+        .dependency(.failIfActive)
+        .eventFilter(forType: MouseEvent.self) { event in
+            event.button == .primary
+        }
+        .eventFilter(forType: SpatialEvent.self) { event in
+            event.kind != .pan
+        }
+        .cancellable()
     }
 }
 

@@ -152,7 +152,12 @@ struct SpatialDragGesture: Gesture {
             body: ModifierGesture(
                 modifier: CoordinateSpaceGesture(coordinateSpace: cs),
                 body: ModifierGesture(
-                    modifier: EventFilter(),
+                    modifier: EventFilter<MouseEvent> { event in
+                        guard let mouseEvent = MouseEvent(event) else {
+                            return true
+                        }
+                        return mouseEvent.button == .primary
+                    },
                     body: EventListener<MouseEvent>()
                 )
             )

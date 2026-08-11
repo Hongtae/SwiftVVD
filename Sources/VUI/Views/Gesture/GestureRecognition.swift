@@ -178,22 +178,89 @@ extension Gesture {
 
 // MARK: - EventFilter
 
-// EventFilter forwards the shared event stream unchanged.
-// Event type filtering is handled in EventListenerPhase.
-struct EventFilter<E: EventType>: GestureModifier {
-    typealias BodyValue = E
-    typealias Value = E
+struct FilteredEvents {
+    var events: [EventID: any EventType]
+    var didFilter: Bool
+}
+
+struct EventFilterEvents<V>: Rule {
+    var modifier: Attribute<EventFilter<V>>
+    var events: Attribute<[EventID: any EventType]>
+
+    var value: FilteredEvents {
+        let source = events.value
+        let predicate = modifier.value.predicate
+        let filtered = source.filter { predicate($0.value) }
+        return FilteredEvents(
+            events: filtered,
+            didFilter: filtered.count != source.count
+        )
+    }
+}
+
+struct EventFilterPhase<V>: Rule {
+    var phase: Attribute<GesturePhase<V>>
+    var filteredEvents: Attribute<FilteredEvents>
+
+    var value: GesturePhase<V> {
+        filteredEvents.value.didFilter ? .failed : phase.value
+    }
+}
+
+struct EventFilter<V>: GestureModifier {
+    typealias BodyValue = V
+    typealias Value = V
     typealias Body = Never
 
-    // Retained for the API shape expected by callers that construct this modifier.
-    var predicate: ((E) -> Bool)?
+    var predicate: (any EventType) -> Bool
 
     static func _makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
-        body: (_GestureInputs) -> _GestureOutputs<E>
-    ) -> _GestureOutputs<E> {
-        body(inputs)
+        body: (_GestureInputs) -> _GestureOutputs<V>
+    ) -> _GestureOutputs<V> {
+        guard let graph = _AGGraph.current else {
+            fatalError("EventFilter.makeGesture requires AG context")
+        }
+        let filteredEvents = graph.makeRule(EventFilterEvents(
+            modifier: modifier._attribute,
+            events: inputs.events
+        ))
+        var childInputs = inputs
+        childInputs._events = filteredEvents[offset: { filtered in
+            PointerOffset.of(&filtered.events)
+        }]
+        var outputs = body(childInputs)
+        outputs.phase = graph.makeRule(EventFilterPhase(
+            phase: outputs.phase,
+            filteredEvents: filteredEvents
+        ))
+        return outputs
+    }
+}
+
+extension Gesture {
+    func eventFilter<E: EventType>(
+        _ type: E.Type,
+        allowOtherTypes: Bool,
+        _ predicate: @escaping (E) -> Bool
+    ) -> ModifierGesture<EventFilter<Value>, Self> {
+        ModifierGesture(
+            modifier: EventFilter { event in
+                guard let typedEvent = E(event) else {
+                    return allowOtherTypes
+                }
+                return predicate(typedEvent)
+            },
+            body: self
+        )
+    }
+
+    func eventFilter<E: EventType>(
+        forType type: E.Type,
+        _ predicate: @escaping (E) -> Bool
+    ) -> ModifierGesture<EventFilter<Value>, Self> {
+        eventFilter(type, allowOtherTypes: true, predicate)
     }
 }
 
