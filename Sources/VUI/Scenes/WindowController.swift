@@ -197,8 +197,9 @@ class WindowController: WindowDelegate,
         phase: EventPhase,
         at time: Time
     ) -> any EventType {
-        switch event.device {
-        case .touch, .stylus:
+        let usesTouchPayload = event.device == .touch ||
+            (event.device == .stylus && event.buttonID == 0)
+        if usesTouchPayload {
             let touchData = event.touchData
             return TouchEvent(
                 timestamp: time,
@@ -216,17 +217,16 @@ class WindowController: WindowDelegate,
                 azimuth: Angle(radians: Double(event.tilt.x)),
                 touchType: event.device == .stylus ? .pencil : .direct
             )
-        default:
-            return MouseEvent(
-                timestamp: time,
-                binding: nil,
-                button: MouseEvent.Button(rawValue: event.buttonID + 1),
-                phase: phase,
-                location: event.location,
-                globalLocation: event.location,
-                modifiers: []
-            )
         }
+        return MouseEvent(
+            timestamp: time,
+            binding: nil,
+            button: MouseEvent.Button(rawValue: event.buttonID + 1),
+            phase: phase,
+            location: event.location,
+            globalLocation: event.location,
+            modifiers: []
+        )
     }
 
     private func keyCharacter(for key: VirtualKey) -> Character? {
@@ -1501,10 +1501,18 @@ class WindowController: WindowDelegate,
             self.handleMouseWheel(event: event, time: time ?? currentTimestamp)
         } else {
             self.handleMouseEvent(event: event, at: time ?? currentTimestamp)
-            if event.type == .move || event.type == .buttonUp {
-                self.handleMouseHover(at: event.location,
-                                      deviceID: event.deviceID,
-                                      isTopMost: true)
+            // Direct touch has no hover phase independent of contact.
+            if event.device != .touch {
+                if event.type == .move || event.type == .pointing ||
+                    event.type == .buttonUp {
+                    self.handleMouseHover(at: event.location,
+                                          deviceID: event.deviceID,
+                                          isTopMost: true)
+                } else if event.type == .cancelled {
+                    self.handleMouseHover(at: event.location,
+                                          deviceID: event.deviceID,
+                                          isTopMost: false)
+                }
             }
         }
     }
@@ -1607,19 +1615,24 @@ class WindowController: WindowDelegate,
             }
 
             // Map backend device IDs to EventID values before forwarding to GestureGraph.
-            let isTouch = event.device == .touch || event.device == .stylus
+            let hasIndependentPointerIdentity = event.device == .touch ||
+                event.device == .stylus
+            let usesTouchPayload = event.device == .touch ||
+                (event.device == .stylus && event.buttonID == 0)
             let pointerScrollKey = PointerScrollKey(
-                isTouch: isTouch,
-                deviceID: isTouch ? event.deviceID : 0
+                isTouch: hasIndependentPointerIdentity,
+                deviceID: hasIndependentPointerIdentity ? event.deviceID : 0
             )
 
             let phase: GesturePhase<Void>
             switch event.type {
             case .buttonDown:
                 let serial = self.nextEventSerial()
-                let eventType: Any.Type = isTouch ? TouchEvent.self : MouseEvent.self
+                let eventType: Any.Type = usesTouchPayload
+                    ? TouchEvent.self
+                    : MouseEvent.self
                 let pointerEventID = EventID(type: eventType, serial: serial)
-                if isTouch {
+                if hasIndependentPointerIdentity {
                     self._touchEventIDs[event.deviceID] = pointerEventID
                 } else {
                     self._mouseEventID = pointerEventID
@@ -1650,7 +1663,7 @@ class WindowController: WindowDelegate,
                 phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
 
             case .move:
-                let pointerEventID = isTouch
+                let pointerEventID = hasIndependentPointerIdentity
                     ? self._touchEventIDs[event.deviceID]
                     : self._mouseEventID
                 guard let pointerEventID else { return false }
@@ -1686,7 +1699,7 @@ class WindowController: WindowDelegate,
                     ? .failed
                     : .ended
                 let pointerEventID: EventID?
-                if isTouch {
+                if hasIndependentPointerIdentity {
                     pointerEventID = self._touchEventIDs.removeValue(forKey: event.deviceID)
                 } else {
                     pointerEventID = self._mouseEventID

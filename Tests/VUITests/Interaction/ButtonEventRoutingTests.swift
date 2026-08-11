@@ -45,6 +45,59 @@ final class ButtonEventRoutingTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowSecondaryMouseClickDoesNotInvokeButtonAction() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+
+        _ = pointerClick(
+            controller,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 1,
+            at: CGPoint(x: 210, y: 120)
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 0)
+    }
+
+    @MainActor
+    func testWindowStylusTipInvokesButtonAction() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+
+        let consumed = pointerClick(
+            controller,
+            device: .stylus,
+            deviceID: 17,
+            buttonID: 0,
+            at: CGPoint(x: 210, y: 120)
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertTrue(consumed.down)
+        XCTAssertTrue(consumed.up)
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    @MainActor
+    func testWindowStylusBarrelClickDoesNotInvokeButtonAction() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+
+        _ = pointerClick(
+            controller,
+            device: .stylus,
+            deviceID: 18,
+            buttonID: 1,
+            at: CGPoint(x: 210, y: 120)
+        )
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 0)
+    }
+
+    @MainActor
     func testWindowMouseClickStartsANewGestureSession() {
         let counter = ButtonActionCounter()
         let controller = WindowController(
@@ -275,22 +328,64 @@ final class ButtonEventRoutingTests: XCTestCase {
 
     @MainActor
     private func click(_ controller: WindowController, at location: CGPoint) {
-        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+        let consumed = pointerClick(
+            controller,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            at: location
+        )
+        XCTAssertTrue(consumed.down)
+        XCTAssertTrue(consumed.up)
+    }
+
+    @MainActor
+    private func makeButtonController(
+        counter: ButtonActionCounter
+    ) -> WindowController {
+        let controller = WindowController(
+            content: ButtonEventRoutingRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(ButtonEventRoutingRoot.self)
+            )
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        return controller
+    }
+
+    @MainActor
+    private func pointerClick(
+        _ controller: WindowController,
+        device: MouseEventDevice,
+        deviceID: Int,
+        buttonID: Int,
+        at location: CGPoint
+    ) -> (down: Bool, up: Bool) {
+        let down = controller.handleMouseEvent(event: MouseEvent(
             type: .buttonDown,
-            device: .genericMouse,
-            deviceID: 0,
-            buttonID: 0,
+            device: device,
+            deviceID: deviceID,
+            buttonID: buttonID,
             location: location,
             timestamp: 0
-        )))
-        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+        ))
+        let up = controller.handleMouseEvent(event: MouseEvent(
             type: .buttonUp,
-            device: .genericMouse,
-            deviceID: 0,
-            buttonID: 0,
+            device: device,
+            deviceID: deviceID,
+            buttonID: buttonID,
             location: location,
             timestamp: 0
-        )))
+        ))
+        return (down, up)
     }
 }
 

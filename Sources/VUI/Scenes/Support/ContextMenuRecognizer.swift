@@ -72,7 +72,10 @@ struct ContextMenuRecognizer {
                                                rootResponder: rootResponder) else {
                 return
             }
-            let policy = responder.resolvedTriggerPolicy(for: event.device)
+            let policy = responder.resolvedTriggerPolicy(
+                for: event.device,
+                buttonID: event.buttonID
+            )
             guard canStartContextMenuSession(event, policy: policy) else {
                 return
             }
@@ -204,7 +207,9 @@ struct ContextMenuRecognizer {
             switch event.device {
             case .genericMouse, .unknown:
                 return event.buttonID == 1 || (event.buttonID == 0 && isControlPressed)
-            case .touch, .stylus:
+            case .stylus:
+                return event.buttonID == 0 || event.buttonID == 1
+            case .touch:
                 return event.buttonID == 0
             }
 

@@ -229,14 +229,19 @@ final class ContextMenuResponder: ViewResponder {
         }
     }
 
-    func resolvedTriggerPolicy(for device: MouseEventDevice) -> ContextMenuTriggerPolicy {
+    func resolvedTriggerPolicy(
+        for device: MouseEventDevice,
+        buttonID: Int
+    ) -> ContextMenuTriggerPolicy {
         let policy = environment.value.contextMenuTriggerPolicy
         guard policy == .automatic else {
             return policy
         }
         switch device {
-        case .touch, .stylus:
+        case .touch:
             return .longPress
+        case .stylus:
+            return buttonID == 1 ? .secondaryDown : .longPress
         case .genericMouse, .unknown:
             return .secondaryDown
         }

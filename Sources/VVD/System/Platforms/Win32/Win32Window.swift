@@ -119,6 +119,46 @@ private func penAzimuthAltitude(
     return CGPoint(x: azimuth, y: altitude)
 }
 
+func win32PenButtonID(
+    pointerFlags: POINTER_FLAGS,
+    penFlags: PEN_FLAGS,
+    buttonChange: POINTER_BUTTON_CHANGE_TYPE,
+    activeButtonID: Int?
+) -> Int {
+    // Keep one logical button for the complete contact sequence. Pointer-up
+    // samples may no longer carry the button flag that selected the contact.
+    if let activeButtonID {
+        return activeButtonID
+    }
+    if buttonChange == POINTER_CHANGE_SECONDBUTTON_DOWN ||
+        buttonChange == POINTER_CHANGE_SECONDBUTTON_UP {
+        return 1
+    }
+    if buttonChange == POINTER_CHANGE_FIRSTBUTTON_DOWN ||
+        buttonChange == POINTER_CHANGE_FIRSTBUTTON_UP {
+        return 0
+    }
+    if pointerFlags & DWORD(POINTER_FLAG_SECONDBUTTON) != 0 ||
+        penFlags & DWORD(PEN_FLAG_BARREL) != 0 {
+        return 1
+    }
+    return 0
+}
+
+func win32RetainsPointerStateAfterEvent(
+    type: MouseEventType,
+    device: MouseEventDevice
+) -> Bool {
+    if type == .cancelled {
+        return false
+    }
+    if type == .buttonUp {
+        // A pen can return to hover after contact ends. Direct touch has no
+        // independent post-contact hover phase in this backend.
+        return device == .stylus
+    }
+    return true
+}
 
 nonisolated(unsafe) private let HWND_TOP:HWND? = nil
 nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
@@ -761,9 +801,12 @@ final class Win32Window: Window {
         // A modal may be presented synchronously from the host's button-down
         // callback. The matching button-up will then go to the modal, so keeping
         // the host's old button mask/capture would redirect later caption clicks
-        // back into the host client area. Preserve only the intentional locked-
+        // back into the host client area. End every host-owned pointer sequence
+        // before transferring focus, then preserve only the intentional locked-
         // mouse state and rebuild it after the modal presentation ends.
-        self.mouseButtonDownMask = []
+        let timestamp = TimeInterval(GetTickCount64()) / 1_000
+        self.cancelActiveMouseButtons(timestamp: timestamp)
+        self.cancelActivePointerEvents(timestamp: timestamp)
         self.mouseLocked = false
         if let hWnd = self.hWnd, GetCapture() == hWnd {
             ReleaseCapture()
@@ -986,18 +1029,19 @@ final class Win32Window: Window {
             timestamp: state.timestamp,
             touchData: state.touchData
         ))
-        if type == .buttonUp || type == .cancelled {
+        if !win32RetainsPointerStateAfterEvent(type: type, device: state.device) {
             self.pointerStates.removeValue(forKey: pointerID)
         }
     }
 
     @discardableResult
     private func cancelPointerEvent(pointerID: UINT32,
-                                    timestamp: TimeInterval) -> Bool {
-        guard let state = self.pointerStates[pointerID] else {
+                                    timestamp: TimeInterval,
+                                    includingHover: Bool = false) -> Bool {
+        guard let state = self.pointerStates.removeValue(forKey: pointerID) else {
             return false
         }
-        if state.hasActiveContact {
+        if state.hasActiveContact || includingHover {
             self.postMouseEvent(MouseEvent(
                 type: .cancelled,
                 window: self,
@@ -1012,7 +1056,6 @@ final class Win32Window: Window {
                 touchData: state.touchData
             ))
         }
-        self.pointerStates.removeValue(forKey: pointerID)
         return true
     }
 
@@ -1020,7 +1063,11 @@ final class Win32Window: Window {
     private func cancelActivePointerEvents(timestamp: TimeInterval) -> Bool {
         var cancelled = false
         for pointerID in self.pointerStates.keys.sorted() {
-            if self.cancelPointerEvent(pointerID: pointerID, timestamp: timestamp) {
+            if self.cancelPointerEvent(
+                pointerID: pointerID,
+                timestamp: timestamp,
+                includingHover: true
+            ) {
                 cancelled = true
             }
         }
@@ -1117,12 +1164,21 @@ final class Win32Window: Window {
             let delta = self.pointerDelta(for: pointerID,
                                           type: type,
                                           location: location)
+            let activeButtonID = self.pointerStates[pointerID].flatMap {
+                $0.hasActiveContact ? $0.buttonID : nil
+            }
+            let buttonID = win32PenButtonID(
+                pointerFlags: info.pointerInfo.pointerFlags,
+                penFlags: info.penFlags,
+                buttonChange: info.pointerInfo.ButtonChangeType,
+                activeButtonID: activeButtonID
+            )
             self.postPointerMouseEvent(
                 type: type,
                 pointerID: pointerID,
                 state: PointerInputState(
                     device: .stylus,
-                    buttonID: 0,
+                    buttonID: buttonID,
                     location: location,
                     tilt: tilt,
                     pressure: pressure,
@@ -2122,7 +2178,15 @@ final class Win32Window: Window {
             case UINT(WM_POINTERCAPTURECHANGED):
                 _ = window.cancelPointerEvent(
                     pointerID: GET_POINTERID_WPARAM(wParam),
-                    timestamp: messageTimestamp()
+                    timestamp: messageTimestamp(),
+                    includingHover: true
+                )
+                break
+            case UINT(WM_POINTERLEAVE):
+                _ = window.cancelPointerEvent(
+                    pointerID: GET_POINTERID_WPARAM(wParam),
+                    timestamp: messageTimestamp(),
+                    includingHover: true
                 )
                 break
             case UINT(WM_CAPTURECHANGED):
