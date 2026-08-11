@@ -464,9 +464,15 @@ struct PreferenceCombiner<A: PreferenceKey>: Rule, AsyncAttribute,
             fatalError("PreferenceCombiner.value accessed outside AG context.")
         }
         var combined = A.defaultValue
+        var hasValue = false
         for attribute in attributes where attribute.isValid(in: graph) {
-            let value = attribute.toStrong().value
-            A.reduce(value: &combined) { value }
+            let next = attribute.toStrong().value
+            if hasValue {
+                A.reduce(value: &combined) { next }
+            } else {
+                combined = next
+                hasValue = true
+            }
         }
         return combined
     }
@@ -1045,9 +1051,15 @@ struct PreferencesOutputs {
                 let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
                 let attr: Attribute<K.Value> = graph.makeRule {
                     var combined = K.defaultValue
+                    var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
-                        let val = Attribute<K.Value>(weakNode.toStrong()).value
-                        K.reduce(value: &combined) { val }
+                        let next = Attribute<K.Value>(weakNode.toStrong()).value
+                        if hasValue {
+                            K.reduce(value: &combined) { next }
+                        } else {
+                            combined = next
+                            hasValue = true
+                        }
                     }
                     return combined
                 }
@@ -1115,9 +1127,15 @@ extension PreferencesInputs {
                 let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
                 let reduced: Attribute<K.Value> = graph.makeRule {
                     var combined = K.defaultValue
+                    var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
-                        let val = Attribute<K.Value>(weakNode.toStrong()).value
-                        K.reduce(value: &combined) { val }
+                        let next = Attribute<K.Value>(weakNode.toStrong()).value
+                        if hasValue {
+                            K.reduce(value: &combined) { next }
+                        } else {
+                            combined = next
+                            hasValue = true
+                        }
                     }
                     return combined
                 }
@@ -1135,9 +1153,15 @@ extension PreferencesInputs {
                     let weakMatches = matches.compactMap { graph.weakAttributeIfValid(for: $0.value) }
                     let reduced: Attribute<K.Value> = graph.makeRule {
                         var combined = K.defaultValue
+                        var hasValue = false
                         for weakNode in weakMatches where weakNode.isValid(in: graph) {
-                            let val = Attribute<K.Value>(weakNode.toStrong()).value
-                            K.reduce(value: &combined) { val }
+                            let next = Attribute<K.Value>(weakNode.toStrong()).value
+                            if hasValue {
+                                K.reduce(value: &combined) { next }
+                            } else {
+                                combined = next
+                                hasValue = true
+                            }
                         }
                         return combined
                     }

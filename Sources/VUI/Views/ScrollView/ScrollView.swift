@@ -312,6 +312,7 @@ struct SystemScrollView<Content>: View where Content: View {
         contentInputs.requestsLayoutComputer = true
         contentInputs.preferences.keys.add(ScrollablePreferenceKey.self)
         contentInputs.preferences.keys.add(UpdateScrollStateRequestKey.self)
+        contentInputs.preferences.keys.add(ScrollableDescendantsAxesKey.self)
 
         let contentOutputs = Content._makeView(view: view[\.content], inputs: contentInputs)
         if let contentComputer = contentOutputs._layoutComputer.attribute {
@@ -334,11 +335,12 @@ struct SystemScrollView<Content>: View where Content: View {
             )
             outputs._layoutComputer = OptionalAttribute(layoutComputer)
         }
-        let anchorStorage = graph.makeInput(value: ScrollAnchorStorage())
         let defaultAnchors: Attribute<ScrollAnchorStorage> = graph.makeStatefulRule(
             ScrollViewDefaultAnchors(
                 _configuration: configuration,
-                _anchors: anchorStorage
+                _anchors: inputs.base.scrollAnchors,
+                oldAnchors: ScrollAnchorStorage(),
+                oldAxes: .vertical
             )
         )
         let positionBinding = inputs.base.scrollPositionBinding(kind: .scrollView).attribute?.value
@@ -427,8 +429,12 @@ struct SystemScrollView<Content>: View where Content: View {
         let containerSize: Attribute<CGSize> = graph.makeRule {
             inputs.size.value.value
         }
+        let descendantScrollViewsAxes: Attribute<Axis.Set?>? = contentOutputs.preferences
+            .value(for: ScrollableDescendantsAxesKey.self)
+            .map { Attribute<Axis.Set?>($0) }
         let updatedHostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
             UpdatedHostingScrollView(
+                _descendantScrollViewsAxes: OptionalAttribute(descendantScrollViewsAxes),
                 _scrollView: hostingScrollView,
                 _configuration: configuration,
                 _properties: scrollEnvironmentProperties,
@@ -484,6 +490,12 @@ struct SystemScrollView<Content>: View where Content: View {
             )
             outputs.preferences.setValue(preferenceAttr.identifier, for: ScrollablePreferenceKey.self)
         }
+
+        outputs.preferences.makePreferenceWriter(
+            inputs: inputs.preferences,
+            key: ScrollableDescendantsAxesKey.self,
+            value: scrollableAxes.toOptional
+        )
 
         if inputs.preferences.keys.contains(ScrollGeometryPreferenceKey.self) {
             let transform: Attribute<ViewTransform> = graph.makeRule(
@@ -946,17 +958,15 @@ private struct ScrollGeometryTransformProvider: Rule {
     }
 }
 
-/// Placeholder modifier that preserves refresh-scope placement in the modifier stack.
 private struct RefreshScopeModifier: ViewModifier {
     func body(content: Content) -> some View {
-        content
+        content.environment(\.refresh, nil)
     }
 }
 
-/// Predicate used for padding paths that must always participate in layout.
 private struct InertPaddingLayoutRequired: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
-        true
+        !isLinkedOnOrAfter(.v5)
     }
 }
 
@@ -1034,27 +1044,33 @@ struct OptionalEdgeInsets: Hashable {
         self.trailing = edges.contains(.trailing) ? length : nil
     }
 
-    mutating func merge(_ other: OptionalEdgeInsets, in edges: Edge.Set) {
-        if edges.contains(.top) {
-            top = other.top
+    subscript(edge: Edge) -> CGFloat? {
+        get {
+            switch edge {
+            case .top: top
+            case .leading: leading
+            case .bottom: bottom
+            case .trailing: trailing
+            }
         }
-        if edges.contains(.leading) {
-            leading = other.leading
-        }
-        if edges.contains(.bottom) {
-            bottom = other.bottom
-        }
-        if edges.contains(.trailing) {
-            trailing = other.trailing
+        set {
+            switch edge {
+            case .top: top = newValue
+            case .leading: leading = newValue
+            case .bottom: bottom = newValue
+            case .trailing: trailing = newValue
+            }
         }
     }
 
-    func edgeInsets(in edges: Edge.Set, fallback: OptionalEdgeInsets? = nil) -> EdgeInsets {
+    static var none: OptionalEdgeInsets { OptionalEdgeInsets() }
+
+    func `in`(edges: Edge.Set) -> EdgeInsets {
         EdgeInsets(
-            top: edges.contains(.top) ? (top ?? fallback?.top ?? 0) : 0,
-            leading: edges.contains(.leading) ? (leading ?? fallback?.leading ?? 0) : 0,
-            bottom: edges.contains(.bottom) ? (bottom ?? fallback?.bottom ?? 0) : 0,
-            trailing: edges.contains(.trailing) ? (trailing ?? fallback?.trailing ?? 0) : 0
+            top: edges.contains(.top) ? (top ?? 0) : 0,
+            leading: edges.contains(.leading) ? (leading ?? 0) : 0,
+            bottom: edges.contains(.bottom) ? (bottom ?? 0) : 0,
+            trailing: edges.contains(.trailing) ? (trailing ?? 0) : 0
         )
     }
 }
@@ -1082,17 +1098,21 @@ struct ContentMarginProxy: Equatable {
         in edges: Edge.Set,
         allowAutomatic: Bool = true
     ) -> EdgeInsets {
-        let automaticFallback = allowAutomatic ? automatic : nil
+        var insets: OptionalEdgeInsets
         switch placement.role {
         case .automatic:
-            return allowAutomatic ? automatic.edgeInsets(in: edges) : EdgeInsets()
+            insets = automatic
         case .scrollContent:
-            return scrollContent.edgeInsets(in: edges, fallback: automaticFallback)
+            insets = scrollContent
         case .scrollIndicators:
-            return scrollIndicators.edgeInsets(in: edges, fallback: automaticFallback)
+            insets = scrollIndicators
         case .toolbar:
-            return toolbar.edgeInsets(in: edges, fallback: automaticFallback)
+            insets = toolbar
         }
+        if insets == .none, allowAutomatic {
+            insets = automatic
+        }
+        return insets.in(edges: edges)
     }
 }
 
@@ -1108,7 +1128,7 @@ private struct ScrollIndicatorContentMarginKey: EnvironmentKey {
     static var defaultValue: OptionalEdgeInsets { OptionalEdgeInsets() }
 }
 
-private struct ToolbarContentMarginKey: EnvironmentKey {
+private struct ToolbarMarginKey: EnvironmentKey {
     static var defaultValue: OptionalEdgeInsets { OptionalEdgeInsets() }
 }
 
@@ -1129,8 +1149,8 @@ extension EnvironmentValues {
     }
 
     var toolbarContentMargins: OptionalEdgeInsets {
-        get { self[ToolbarContentMarginKey.self] }
-        set { self[ToolbarContentMarginKey.self] = newValue }
+        get { self[ToolbarMarginKey.self] }
+        set { self[ToolbarMarginKey.self] = newValue }
     }
 
     var contentMarginProxy: ContentMarginProxy {
@@ -1142,60 +1162,48 @@ extension EnvironmentValues {
         )
     }
 
-    mutating func setContentMargins(
-        _ insets: OptionalEdgeInsets,
-        in edges: Edge.Set,
-        for placement: ContentMarginPlacement
-    ) {
-        switch placement.role {
-        case .automatic:
-            automaticContentMargins.merge(insets, in: edges)
-        case .scrollContent:
-            scrollContentContentMargins.merge(insets, in: edges)
-        case .scrollIndicators:
-            scrollIndicatorContentMargins.merge(insets, in: edges)
-        case .toolbar:
-            toolbarContentMargins.merge(insets, in: edges)
-        }
-    }
-
-    mutating func resetContentMargins(for placement: ContentMarginPlacement) {
-        switch placement.role {
-        case .automatic:
-            automaticContentMargins = OptionalEdgeInsets()
-        case .scrollContent:
-            scrollContentContentMargins = OptionalEdgeInsets()
-        case .scrollIndicators:
-            scrollIndicatorContentMargins = OptionalEdgeInsets()
-        case .toolbar:
-            toolbarContentMargins = OptionalEdgeInsets()
-        }
-    }
 }
 
-struct ContentMarginModifier: ViewModifier, _GraphInputsModifier {
+struct ContentMarginModifier: ViewModifier, EnvironmentModifier {
     typealias Body = Never
 
     var edges: Edge.Set
     var insets: OptionalEdgeInsets
     var placement: ContentMarginPlacement
 
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
-        }
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
+        let modifier = modifier.value
+        guard !modifier.edges.isEmpty else { return }
 
-        let parentEnvironment = inputs.cachedEnvironment.value.environment
-        let modifierAttribute = modifier._attribute
-        let environment: Attribute<EnvironmentValues> = graph.makeRule {
-            let modifier = modifierAttribute.value
-            var values = parentEnvironment.value.trackingCopy()
-            values.setContentMargins(modifier.insets, in: modifier.edges, for: modifier.placement)
-            return values
+        switch modifier.placement.role {
+        case .automatic:
+            var insets = environment.automaticContentMargins
+            for edge in Edge.allCases where modifier.edges.contains(Edge.Set(edge)) {
+                insets[edge] = modifier.insets[edge]
+            }
+            environment.automaticContentMargins = insets
+        case .scrollContent:
+            var insets = environment.scrollContentContentMargins
+            for edge in Edge.allCases where modifier.edges.contains(Edge.Set(edge)) {
+                insets[edge] = modifier.insets[edge]
+            }
+            environment.scrollContentContentMargins = insets
+        case .scrollIndicators:
+            var insets = environment.scrollIndicatorContentMargins
+            for edge in Edge.allCases where modifier.edges.contains(Edge.Set(edge)) {
+                insets[edge] = modifier.insets[edge]
+            }
+            environment.scrollIndicatorContentMargins = insets
+        case .toolbar:
+            var insets = environment.toolbarContentMargins
+            for edge in Edge.allCases where modifier.edges.contains(Edge.Set(edge)) {
+                insets[edge] = modifier.insets[edge]
+            }
+            environment.toolbarContentMargins = insets
         }
-        inputs.cachedEnvironment = MutableBox(
-            inputs.cachedEnvironment.value.replacingEnvironment(environment)
-        )
     }
 }
 
@@ -1292,55 +1300,44 @@ extension _ViewInputs {
     }
 }
 
-/// Clears selected content-margin channels below a scroll boundary.
-struct ResetContentMarginModifier: ViewModifier, _GraphInputsModifier {
+struct ResetContentMarginModifier: ViewModifier, EnvironmentModifier {
     typealias Body = Never
 
-    var placements: [ContentMarginPlacement]
+    var placements: [ContentMarginPlacement.Role]
 
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
-        }
-
-        let parentEnvironment = inputs.cachedEnvironment.value.environment
-        let modifierAttribute = modifier._attribute
-        let environment: Attribute<EnvironmentValues> = graph.makeRule {
-            let modifier = modifierAttribute.value
-            var values = parentEnvironment.value.trackingCopy()
-            for placement in modifier.placements {
-                values.resetContentMargins(for: placement)
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
+        for placement in modifier.value.placements {
+            let insets = OptionalEdgeInsets()
+            switch placement {
+            case .automatic:
+                environment.automaticContentMargins = insets
+            case .scrollContent:
+                environment.scrollContentContentMargins = insets
+            case .scrollIndicators:
+                environment.scrollIndicatorContentMargins = insets
+            case .toolbar:
+                environment.toolbarContentMargins = insets
             }
-            return values
         }
-        inputs.cachedEnvironment = MutableBox(
-            inputs.cachedEnvironment.value.replacingEnvironment(environment)
-        )
     }
 }
 
 /// Carries scrollable axis settings through the modifier pipeline.
-struct EnvironmentAxesModifier: ViewModifier, _GraphInputsModifier {
+struct EnvironmentAxesModifier: ViewModifier, EnvironmentModifier {
     typealias Body = Never
 
     var scrollableAxes: Axis.Set
 
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
-        }
-        let parentEnvironment = inputs.cachedEnvironment.value.environment
-        let modifierAttribute = modifier._attribute
-        let environment: Attribute<EnvironmentValues> = graph.makeRule {
-            let axes = modifierAttribute.value.scrollableAxes
-            var values = parentEnvironment.value.trackingCopy()
-            values.nearestScrollableAxes = axes
-            values.allScrollableAxes.formUnion(axes)
-            return values
-        }
-        inputs.cachedEnvironment = MutableBox(
-            inputs.cachedEnvironment.value.replacingEnvironment(environment)
-        )
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
+        let axes = modifier.scrollableAxes.value
+        environment.nearestScrollableAxes = axes
+        environment.allScrollableAxes.formUnion(axes)
     }
 }
 

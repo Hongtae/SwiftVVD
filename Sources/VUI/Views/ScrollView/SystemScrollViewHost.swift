@@ -55,6 +55,29 @@ struct ScrollAnchorStorage: Equatable {
     }
 }
 
+private struct ScrollAnchorsKey: EnvironmentKey {
+    static var defaultValue: ScrollAnchorStorage { ScrollAnchorStorage() }
+}
+
+extension EnvironmentValues {
+    var scrollAnchors: ScrollAnchorStorage {
+        get { self[ScrollAnchorsKey.self] }
+        set { self[ScrollAnchorsKey.self] = newValue }
+    }
+}
+
+private extension CachedEnvironment.ID {
+    static let scrollAnchors = CachedEnvironment.ID(base: UniqueID())
+}
+
+extension _GraphInputs {
+    var scrollAnchors: Attribute<ScrollAnchorStorage> {
+        cachedEnvironment.value.attribute(id: .scrollAnchors) {
+            $0.scrollAnchors
+        }
+    }
+}
+
 /// Configuration carried with a graph-requested scroll target.
 struct ScrollTargetConfiguration: Equatable {
     var animation: Animation?
@@ -385,6 +408,9 @@ class HostingScrollView {
     private let containerSize: WeakAttribute<CGSize>
     private var dragState: DragState?
     private var decelerationState: DecelerationState?
+    private var lastScrollGestureAxis: Axis?
+    private var orthogonalAccumulator = 0.0
+    private let accumulatedAxisChangeThreshold = 10.0
 
     let host: PlatformGroupContainer
     weak var parentContainer: PlatformContainer?
@@ -398,7 +424,8 @@ class HostingScrollView {
     private(set) var safeAreaInsets = EdgeInsets()
     private(set) var layoutDirection = LayoutDirection.leftToRight
     private(set) var rtlAdjustment = CGSize.zero
-    private(set) var descendantScrollableAxes: Axis.Set?
+    private(set) var ancestorScrollableAxes = Axis.Set()
+    private(set) var descendantScrollableAxes = Axis.Set()
     private(set) var animationTarget: ScrollTarget?
     private(set) var animationTargetConfig: ScrollTargetConfiguration?
 
@@ -503,6 +530,7 @@ class HostingScrollView {
     }
 
     func adoptEnvironment(_ environment: EnvironmentValues) {
+        ancestorScrollableAxes = environment.allScrollableAxes
         self.environment = environment.untrackedCopy()
     }
 
@@ -518,8 +546,95 @@ class HostingScrollView {
         rtlAdjustment = adjustment
     }
 
-    func updateDescendantScrollableAxes(_ axes: Axis.Set?) {
+    func updateDescendantScrollableAxes(_ axes: Axis.Set) {
         descendantScrollableAxes = axes
+    }
+
+    func wantsForwardedScrollEvents(for axis: Axis) -> Bool {
+        let orthogonalAxis: Axis = axis == .horizontal ? .vertical : .horizontal
+        if configuration.axes.contains(axis) {
+            return !descendantScrollableAxes.contains(orthogonalAxis)
+        }
+        return ancestorScrollableAxes.contains(axis)
+    }
+
+    func scrollWheelRouting(
+        for event: SystemWheelEvent
+    ) -> (sendToSelf: Bool, sendToNextResponder: Bool) {
+        let axes = configuration.axes
+        let ancestorAxes = ancestorScrollableAxes
+        guard !ancestorAxes.isEmpty,
+              axes.isOrthogonal(to: ancestorAxes) || ancestorAxes == .both else {
+            return (true, false)
+        }
+
+        switch event.kind {
+        case .continuous:
+            return shouldSendToSuperclassOrNextResponder(event)
+        case .discrete:
+            if axes == .horizontal {
+                return (
+                    event.scrollingDelta.width != 0,
+                    event.scrollingDelta.height != 0
+                )
+            }
+            if axes == .vertical {
+                return (
+                    event.scrollingDelta.height != 0,
+                    event.scrollingDelta.width != 0
+                )
+            }
+            return (false, true)
+        }
+    }
+
+    private func shouldSendToSuperclassOrNextResponder(
+        _ event: SystemWheelEvent
+    ) -> (sendToSelf: Bool, sendToNextResponder: Bool) {
+        let delta = event.scrollingDelta
+        let dominantAxis: Axis = abs(delta.width) > abs(delta.height)
+            ? .horizontal
+            : .vertical
+
+        switch event.phase {
+        case .began:
+            lastScrollGestureAxis = dominantAxis
+            orthogonalAccumulator = 0
+            return (true, true)
+        case .ended, .failed:
+            lastScrollGestureAxis = nil
+            orthogonalAccumulator = 0
+            return (true, true)
+        case .active:
+            break
+        }
+
+        let selectedAxis: Axis
+        if lastScrollGestureAxis == dominantAxis {
+            orthogonalAccumulator = 0
+            selectedAxis = dominantAxis
+        } else {
+            orthogonalAccumulator += delta[dominantAxis]
+            if orthogonalAccumulator > accumulatedAxisChangeThreshold {
+                selectedAxis = dominantAxis
+            } else {
+                selectedAxis = lastScrollGestureAxis ?? dominantAxis
+            }
+        }
+        lastScrollGestureAxis = selectedAxis
+
+        let configuredAxis: Axis?
+        if configuration.axes == .horizontal {
+            configuredAxis = .horizontal
+        } else if configuration.axes == .vertical {
+            configuredAxis = .vertical
+        } else {
+            configuredAxis = nil
+        }
+        if selectedAxis == configuredAxis {
+            return (true, false)
+        }
+        return (false, true)
     }
 
     func makeLayoutState() -> SystemScrollLayoutState {
@@ -1039,7 +1154,7 @@ struct ScrollViewDefaultAnchors: StatefulRule {
         _configuration: Attribute<ScrollViewConfiguration>,
         _anchors: Attribute<ScrollAnchorStorage>,
         oldAnchors: ScrollAnchorStorage = ScrollAnchorStorage(),
-        oldAxes: Axis.Set = []
+        oldAxes: Axis.Set = .vertical
     ) {
         self._configuration = _configuration
         self._anchors = _anchors
@@ -1440,11 +1555,35 @@ final class HostingScrollViewResponder: MultiViewResponder,
         }
     }
 
+    private struct WheelSession {
+        var eventID: EventID?
+        var translation = CGSize.zero
+
+        mutating func translation(
+            for event: SystemWheelEvent,
+            id: EventID
+        ) -> CGSize {
+            if event.phase == .began || eventID != id {
+                eventID = id
+                translation = .zero
+            }
+            translation.width -= event.scrollingDelta.width
+            translation.height -= event.scrollingDelta.height
+            return translation
+        }
+
+        mutating func reset() {
+            eventID = nil
+            translation = .zero
+        }
+    }
+
     fileprivate var helper = ContentResponderHelper<TrivialContentResponder>()
     weak var representedView: HostingScrollView.PlatformGroupContainer?
     weak var hostContainer: HostingScrollView.PlatformContainer?
     let layoutResponder: DefaultLayoutViewResponder
     private var panSession = PanSession()
+    private var wheelSession = WheelSession()
     private var preventedPanEventIDs: Set<EventID> = []
 
     init(layoutResponder: DefaultLayoutViewResponder) {
@@ -1531,12 +1670,14 @@ final class HostingScrollViewResponder: MultiViewResponder,
         }
         guard let scrollView = hostContainer?.scrollView else {
             panSession.reset()
+            wheelSession.reset()
             return .failed
         }
         guard scrollView.properties.isEnabled,
               scrollView.configuration.isScrollEnabled ?? true,
               !scrollView.configuration.axes.isEmpty else {
             panSession.reset()
+            wheelSession.reset()
             scrollView.dispatchScrollGesturePhase(.failed)
             return .failed
         }
@@ -1544,38 +1685,7 @@ final class HostingScrollViewResponder: MultiViewResponder,
         var phases: [GesturePhase<Void>] = []
         for (eventID, event) in events.sorted(by: { $0.key.serial < $1.key.serial }) {
             if let wheel = event as? SystemWheelEvent {
-                let phase: GesturePhase<ScrollGesture.Value>
-                switch wheel.kind {
-                case .discrete:
-                    switch wheel.phase {
-                    case .began, .active:
-                        phase = .active(.wheel(wheel.delta))
-                    case .ended:
-                        phase = .ended(.wheel(wheel.delta))
-                    case .failed:
-                        phase = .failed
-                    }
-                case .continuous:
-                    let value = ScrollGesture.Value.pan(PanGesture.Value(
-                        timestamp: wheel.timestamp,
-                        translation: wheel.delta,
-                        touchType: .indirect,
-                        velocity: wheel.velocity
-                    ))
-                    switch wheel.phase {
-                    case .began:
-                        scrollView.willStartPanning()
-                        phase = .active(value)
-                    case .active:
-                        phase = .active(value)
-                    case .ended:
-                        phase = .ended(value)
-                    case .failed:
-                        phase = .failed
-                    }
-                }
-                scrollView.dispatchScrollGesturePhase(phase)
-                phases.append(phase.map { _ in () })
+                phases.append(consumeWheelEvent(wheel, id: eventID))
             } else if let event = event as? ScrollEvent {
                 let phase = consumePanEvent(
                     event,
@@ -1588,6 +1698,93 @@ final class HostingScrollViewResponder: MultiViewResponder,
             }
         }
 
+        if phases.contains(where: { $0.isActive }) { return .active(()) }
+        if phases.contains(where: { $0.isEnded }) { return .ended(()) }
+        if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
+        return .possible(nil)
+    }
+
+    private func consumeWheelEvent(
+        _ event: SystemWheelEvent,
+        id eventID: EventID
+    ) -> GesturePhase<Void> {
+        guard let scrollView = hostContainer?.scrollView,
+              scrollView.properties.isEnabled,
+              scrollView.configuration.isScrollEnabled ?? true,
+              !scrollView.configuration.axes.isEmpty else {
+            wheelSession.reset()
+            return .failed
+        }
+
+        let routing = scrollView.scrollWheelRouting(for: event)
+        var phases: [GesturePhase<Void>] = []
+        if routing.sendToSelf {
+            let phase = consumeWheelEventLocally(
+                event,
+                id: eventID,
+                scrollView: scrollView
+            )
+            phases.append(phase.map { _ in () })
+        }
+        if routing.sendToNextResponder,
+           let next = nextResponder?.firstAncestor(
+               ofType: HostingScrollViewResponder.self
+           ) {
+            phases.append(next.consumeWheelEvent(event, id: eventID))
+        }
+        return aggregate(phases)
+    }
+
+    private func consumeWheelEventLocally(
+        _ event: SystemWheelEvent,
+        id eventID: EventID,
+        scrollView: HostingScrollView
+    ) -> GesturePhase<ScrollGesture.Value> {
+        let phase: GesturePhase<ScrollGesture.Value>
+        switch event.kind {
+        case .discrete:
+            let delta = CGSize(
+                width: -event.scrollingDelta.width,
+                height: -event.scrollingDelta.height
+            )
+            switch event.phase {
+            case .began, .active:
+                phase = .active(.wheel(delta))
+            case .ended:
+                phase = .ended(.wheel(delta))
+            case .failed:
+                phase = .failed
+            }
+        case .continuous:
+            let translation = wheelSession.translation(for: event, id: eventID)
+            let value = ScrollGesture.Value.pan(PanGesture.Value(
+                timestamp: event.timestamp,
+                translation: translation,
+                touchType: .indirect,
+                velocity: event.velocity
+            ))
+            switch event.phase {
+            case .began:
+                scrollView.willStartPanning()
+                phase = .active(value)
+            case .active:
+                phase = .active(value)
+            case .ended:
+                phase = .ended(value)
+            case .failed:
+                phase = .failed
+            }
+            if event.phase.isTerminal {
+                wheelSession.reset()
+            }
+        }
+        scrollView.dispatchScrollGesturePhase(phase)
+        return phase
+    }
+
+    private func aggregate(
+        _ phases: [GesturePhase<Void>]
+    ) -> GesturePhase<Void> {
         if phases.contains(where: { $0.isActive }) { return .active(()) }
         if phases.contains(where: { $0.isEnded }) { return .ended(()) }
         if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }

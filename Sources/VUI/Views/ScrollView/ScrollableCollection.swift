@@ -93,6 +93,17 @@ struct ScrollablePreferenceKey: PreferenceKey {
     }
 }
 
+/// Collects the axes exposed by nested scroll containers.
+struct ScrollableDescendantsAxesKey: PreferenceKey {
+    static func reduce(value: inout Axis.Set?, nextValue: () -> Axis.Set?) {
+        guard var axes = value, let nextAxes = nextValue() else {
+            return
+        }
+        axes.formUnion(nextAxes)
+        value = axes
+    }
+}
+
 /// Publishes a single scrollable host as a preference value.
 struct UnaryScrollablePreferenceProvider: Rule {
     typealias Value = [any Scrollable]

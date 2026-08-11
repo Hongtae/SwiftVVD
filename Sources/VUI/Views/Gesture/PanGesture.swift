@@ -44,7 +44,7 @@ struct SystemWheelEvent: ResponderBoundEvent, Equatable {
     var timestamp: Time
     var phase: EventPhase
     var binding: EventBinding?
-    var delta: CGSize
+    var scrollingDelta: CGSize
     var velocity: _Velocity<CGSize> = _Velocity(valuePerSecond: .zero)
     var kind: Kind = .discrete
 
@@ -59,7 +59,7 @@ struct SystemWheelEvent: ResponderBoundEvent, Equatable {
         lhs.timestamp.seconds == rhs.timestamp.seconds &&
             lhs.phase == rhs.phase &&
             lhs.binding == rhs.binding &&
-            lhs.delta == rhs.delta &&
+            lhs.scrollingDelta == rhs.scrollingDelta &&
             lhs.velocity == rhs.velocity &&
             lhs.kind == rhs.kind
     }

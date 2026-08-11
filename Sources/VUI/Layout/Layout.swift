@@ -1428,10 +1428,16 @@ private struct DynamicPreferenceCombiner<K: PreferenceKey>: Rule {
             ? info.displayItems
             : info.activeDisplayItems
         var value = K.defaultValue
+        var hasValue = false
         for item in items {
             for attribute in item.outputs.preferences.values(for: K.self) {
                 let next = Attribute<K.Value>(attribute).value
-                K.reduce(value: &value) { next }
+                if hasValue {
+                    K.reduce(value: &value) { next }
+                } else {
+                    value = next
+                    hasValue = true
+                }
             }
         }
         return value

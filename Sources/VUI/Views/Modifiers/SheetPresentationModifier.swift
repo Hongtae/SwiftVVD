@@ -208,7 +208,7 @@ struct SheetContent<Content: View>: View {
             .environment(\._sheetHostingContext, Optional<Bool>.none)
             // Step 4: reset tint adjustment mode
             .environment(\.tintAdjustmentMode, Optional<TintAdjustmentMode>.none)
-            // Step 5: reset scroll environment (gated on Semantics_v6)
+            // Step 5: apply the current scroll-environment reset placeholder.
             .modifier(StaticIf<_SemanticFeature<Semantics_v6>,
                                ResetScrollEnvironmentModifier,
                                EmptyModifier>(trueBody: ResetScrollEnvironmentModifier(),

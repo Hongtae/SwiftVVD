@@ -96,9 +96,8 @@ extension EnvironmentValues {
 
 // MARK: - ResetScrollEnvironmentModifier
 
-// ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier
-// body(content:) applies AdditionalResetModifier and TransformScrollStorageModifier<ResetTransform>.
-// Wrapped in StaticIf<_SemanticFeature<Semantics_v6>, ...> in SheetContent.body.
+// The current placeholder keeps the reset chain connected while the scroll
+// storage transform and its observation owner are introduced together.
 struct ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier {
     static func makeEnvironment(
         modifier: Attribute<Self>,
@@ -120,7 +119,7 @@ struct ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier {
         }
     }
 
-    // ResetTransform.update resets ScrollEnvironmentProperties.
+    // ResetTransform belongs to the coupled scroll-storage replacement.
     struct ResetTransform {}
 
     func body(content: _ViewModifier_Content<ResetScrollEnvironmentModifier>) -> some View {

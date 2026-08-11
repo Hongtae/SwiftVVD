@@ -77,7 +77,6 @@ class WindowController: WindowDelegate,
     private var _scrollEventID: EventID?
     private var _scrollTranslation: CGSize = .zero
     private var _wheelScrollEventID: EventID?
-    private var _wheelScrollTranslation: CGSize = .zero
     private var _wheelScrollBinding: EventBinding?
     private var _wheelScrollLastTime: Time?
     private var _wheelScrollVelocity = _Velocity<CGSize>(valuePerSecond: .zero)
@@ -1946,19 +1945,18 @@ class WindowController: WindowDelegate,
         }
 
         let eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
-        let gestureDelta = CGSize(width: -delta.x, height: -delta.y)
         let began = SystemWheelEvent(
             timestamp: time,
             phase: .began,
             binding: binding,
-            delta: gestureDelta
+            scrollingDelta: CGSize(width: delta.x, height: delta.y)
         )
         let beganPhase = sendRecognizerOwnedEvents([eventID: began], at: time)
         let ended = SystemWheelEvent(
             timestamp: time,
             phase: .ended,
             binding: binding,
-            delta: gestureDelta
+            scrollingDelta: CGSize(width: delta.x, height: delta.y)
         )
         let endedPhase = sendRecognizerOwnedEvents([eventID: ended], at: time)
         switch (beganPhase, endedPhase) {
@@ -1995,7 +1993,6 @@ class WindowController: WindowDelegate,
             eventPhase = .began
             eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
             _wheelScrollEventID = eventID
-            _wheelScrollTranslation = .zero
             _wheelScrollBinding = resolvedBinding
             _wheelScrollLastTime = time
             _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
@@ -2013,7 +2010,6 @@ class WindowController: WindowDelegate,
                 ) else { return false }
                 eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
                 _wheelScrollEventID = eventID
-                _wheelScrollTranslation = .zero
                 _wheelScrollBinding = resolvedBinding
                 _wheelScrollLastTime = time
                 _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
@@ -2022,7 +2018,7 @@ class WindowController: WindowDelegate,
                     timestamp: time,
                     phase: .began,
                     binding: resolvedBinding,
-                    delta: .zero,
+                    scrollingDelta: .zero,
                     kind: .continuous
                 )
                 _ = sendRecognizerOwnedEvents([eventID: began], at: time)
@@ -2043,22 +2039,15 @@ class WindowController: WindowDelegate,
             return false
         }
 
-        let previousTranslation = _wheelScrollTranslation
-        _wheelScrollTranslation.width += gestureDelta.width
-        _wheelScrollTranslation.height += gestureDelta.height
         if eventPhase == .active {
             let elapsed = time.seconds - (_wheelScrollLastTime ?? time).seconds
-            let change = CGSize(
-                width: _wheelScrollTranslation.width - previousTranslation.width,
-                height: _wheelScrollTranslation.height - previousTranslation.height
-            )
             if elapsed.isFinite, elapsed > 0 {
                 _wheelScrollVelocity = _Velocity(valuePerSecond: CGSize(
-                    width: change.width / elapsed,
-                    height: change.height / elapsed
+                    width: gestureDelta.width / elapsed,
+                    height: gestureDelta.height / elapsed
                 ))
             } else {
-                _wheelScrollVelocity = _Velocity(valuePerSecond: change)
+                _wheelScrollVelocity = _Velocity(valuePerSecond: gestureDelta)
             }
             _wheelScrollLastTime = time
         }
@@ -2066,14 +2055,13 @@ class WindowController: WindowDelegate,
             timestamp: time,
             phase: eventPhase,
             binding: binding,
-            delta: _wheelScrollTranslation,
+            scrollingDelta: CGSize(width: delta.x, height: delta.y),
             velocity: _wheelScrollVelocity,
             kind: .continuous
         )
         let result = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
         if eventPhase.isTerminal {
             _wheelScrollEventID = nil
-            _wheelScrollTranslation = .zero
             _wheelScrollBinding = nil
             _wheelScrollLastTime = nil
             _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
@@ -2299,7 +2287,6 @@ class WindowController: WindowDelegate,
         _scrollEventID = nil
         _scrollTranslation = .zero
         _wheelScrollEventID = nil
-        _wheelScrollTranslation = .zero
         _wheelScrollBinding = nil
         _wheelScrollLastTime = nil
         _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)

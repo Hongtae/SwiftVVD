@@ -67,7 +67,7 @@ struct BloomFilter: CustomStringConvertible {
 }
 
 // Property-list element identity uses _AGGraph's unique-ID allocator.
-struct UniqueID: Hashable, CustomStringConvertible {
+struct UniqueID: Hashable, Sendable, CustomStringConvertible {
     let value: UInt32
 
     init() {

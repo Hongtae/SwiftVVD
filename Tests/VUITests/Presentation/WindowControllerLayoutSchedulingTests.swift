@@ -718,6 +718,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let outer = try XCTUnwrap(responders.first { candidate in
             candidate !== inner && inner.isDescendant(of: candidate)
         })
+        let innerHost = try XCTUnwrap(inner.hostContainer?.scrollView)
+        let outerHost = try XCTUnwrap(outer.hostContainer?.scrollView)
+        XCTAssertEqual(innerHost.ancestorScrollableAxes, .vertical)
+        XCTAssertEqual(innerHost.descendantScrollableAxes, Axis.Set())
+        XCTAssertEqual(outerHost.ancestorScrollableAxes, Axis.Set())
+        XCTAssertEqual(outerHost.descendantScrollableAxes, .vertical)
         let location = try XCTUnwrap(firstCommonHitPoint(
             for: [outer, inner],
             in: CGSize(width: 260, height: 260)
@@ -751,6 +757,190 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 .contentOffset.y,
             0,
             accuracy: 0.001
+        )
+    }
+
+    @MainActor
+    func testOrthogonalNestedScrollViewRoutesPhasedWheelAfterSignedThreshold() throws {
+        let controller = WindowController(
+            content: LayoutSchedulingOrthogonalNestedScrollViewAttachmentRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingOrthogonalNestedScrollViewAttachmentRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        var tick: UInt64 = 0
+        func update() {
+            tick += 1
+            controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 260, height: 260),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        update()
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responders = allHostingScrollViewResponders(in: root)
+        XCTAssertEqual(responders.count, 2)
+        let inner = try XCTUnwrap(responders.first { candidate in
+            responders.contains { ancestor in
+                ancestor !== candidate && candidate.isDescendant(of: ancestor)
+            }
+        })
+        let outer = try XCTUnwrap(responders.first { candidate in
+            candidate !== inner && inner.isDescendant(of: candidate)
+        })
+        let innerHost = try XCTUnwrap(inner.hostContainer?.scrollView)
+        let outerHost = try XCTUnwrap(outer.hostContainer?.scrollView)
+        XCTAssertEqual(innerHost.configuration.axes, .horizontal)
+        XCTAssertEqual(innerHost.ancestorScrollableAxes, .vertical)
+        XCTAssertEqual(innerHost.descendantScrollableAxes, Axis.Set())
+        XCTAssertEqual(outerHost.configuration.axes, .vertical)
+        XCTAssertEqual(outerHost.ancestorScrollableAxes, Axis.Set())
+        XCTAssertEqual(outerHost.descendantScrollableAxes, .horizontal)
+        XCTAssertTrue(innerHost.wantsForwardedScrollEvents(for: .horizontal))
+        XCTAssertTrue(innerHost.wantsForwardedScrollEvents(for: .vertical))
+        XCTAssertFalse(outerHost.wantsForwardedScrollEvents(for: .horizontal))
+        XCTAssertFalse(outerHost.wantsForwardedScrollEvents(for: .vertical))
+
+        let location = try XCTUnwrap(firstCommonHitPoint(
+            for: [outer, inner],
+            in: CGSize(width: 260, height: 260)
+        ))
+        func send(
+            _ phase: ScrollEventPhase,
+            delta: CGPoint,
+            timestamp: Double
+        ) {
+            controller.onMouseEvent(
+                event: MouseEvent(
+                    type: .wheel,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: location,
+                    delta: delta,
+                    timestamp: timestamp,
+                    scrollData: ScrollEventData(
+                        phase: phase,
+                        source: .continuous,
+                        isPrecise: true
+                    )
+                ),
+                at: Time(seconds: timestamp)
+            )
+            update()
+        }
+
+        send(.began, delta: CGPoint(x: 20, y: 0), timestamp: 0)
+        send(.changed, delta: CGPoint(x: 8, y: 0), timestamp: 0.1)
+        send(.changed, delta: CGPoint(x: 0, y: 6), timestamp: 0.2)
+        XCTAssertEqual(
+            try XCTUnwrap(outerHost.pendingContext).contentOffset.y,
+            0,
+            accuracy: 0.001
+        )
+
+        send(.changed, delta: CGPoint(x: 0, y: 6), timestamp: 0.3)
+        XCTAssertEqual(
+            try XCTUnwrap(innerHost.pendingContext).contentOffset.x,
+            28,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(outerHost.pendingContext).contentOffset.y,
+            6,
+            accuracy: 0.001
+        )
+
+        func routingEvent(
+            _ phase: EventPhase,
+            delta: CGSize,
+            kind: SystemWheelEvent.Kind = .continuous
+        ) -> SystemWheelEvent {
+            SystemWheelEvent(
+                timestamp: .zero,
+                phase: phase,
+                binding: nil,
+                scrollingDelta: delta,
+                kind: kind
+            )
+        }
+        func assertRouting(
+            _ event: SystemWheelEvent,
+            self expectedSelf: Bool,
+            next expectedNext: Bool,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            let routing = innerHost.scrollWheelRouting(for: event)
+            XCTAssertEqual(
+                routing.sendToSelf,
+                expectedSelf,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(
+                routing.sendToNextResponder,
+                expectedNext,
+                file: file,
+                line: line
+            )
+        }
+        _ = innerHost.scrollWheelRouting(for: routingEvent(.ended, delta: .zero))
+        assertRouting(
+            routingEvent(
+                .began,
+                delta: CGSize(width: 20, height: 0)
+            ),
+            self: true,
+            next: true
+        )
+        assertRouting(
+            routingEvent(
+                .active,
+                delta: CGSize(width: 0, height: -6)
+            ),
+            self: true,
+            next: false
+        )
+        assertRouting(
+            routingEvent(
+                .active,
+                delta: CGSize(width: 0, height: -6)
+            ),
+            self: true,
+            next: false
+        )
+        assertRouting(
+            routingEvent(
+                .ended,
+                delta: .zero
+            ),
+            self: true,
+            next: true
+        )
+        assertRouting(
+            routingEvent(
+                .began,
+                delta: CGSize(width: 8, height: 9),
+                kind: .discrete
+            ),
+            self: true,
+            next: true
         )
     }
 
@@ -8243,6 +8433,28 @@ private struct LayoutSchedulingNestedScrollViewAttachmentRoot: View {
                         ForEach(0..<8, id: \.self) { _ in
                             Color.green
                                 .frame(width: 80, height: 30)
+                        }
+                    }
+                }
+                .frame(width: 100, height: 100)
+
+                Color.blue
+                    .frame(width: 100, height: 220)
+            }
+        }
+        .frame(width: 120, height: 140)
+    }
+}
+
+private struct LayoutSchedulingOrthogonalNestedScrollViewAttachmentRoot: View {
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            Color.green
+                                .frame(width: 30, height: 80)
                         }
                     }
                 }

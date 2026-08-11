@@ -106,6 +106,56 @@ final class PreferenceBridgeTests: XCTestCase {
         XCTAssertEqual(reduced.seed.value, 2)
     }
 
+    func testPreferenceCombinersSeedFromFirstProducedValue() throws {
+        let graph = _AGGraph()
+
+        try _AGGraph.withCurrent(graph) {
+            let first = graph.makeInput(value: Optional<Int>.some(1))
+            let second = graph.makeInput(value: Optional<Int>.some(2))
+            let explicitNil = graph.makeInput(value: Optional<Int>.none)
+
+            let single = graph.makeRule(
+                PreferenceCombiner<OptionalAccumulatingPreferenceKey>(
+                    attributes: [first.asWeak()]
+                )
+            )
+            XCTAssertEqual(single.value, 1)
+
+            let combined = graph.makeRule(
+                PreferenceCombiner<OptionalAccumulatingPreferenceKey>(
+                    attributes: [first.asWeak(), second.asWeak()]
+                )
+            )
+            XCTAssertEqual(combined.value, 3)
+
+            let nilThenValue = graph.makeRule(
+                PreferenceCombiner<OptionalAccumulatingPreferenceKey>(
+                    attributes: [explicitNil.asWeak(), second.asWeak()]
+                )
+            )
+            XCTAssertNil(nilThenValue.value)
+
+            var firstOutputs = PreferencesOutputs()
+            firstOutputs.append(
+                OptionalAccumulatingPreferenceKey.self,
+                node: first.identifier
+            )
+            var secondOutputs = PreferencesOutputs()
+            secondOutputs.append(
+                OptionalAccumulatingPreferenceKey.self,
+                node: second.identifier
+            )
+            let merged = PreferencesOutputs.merge(
+                [firstOutputs, secondOutputs],
+                in: graph
+            )
+            let mergedValue = try XCTUnwrap(
+                merged.value(for: OptionalAccumulatingPreferenceKey.self)
+            )
+            XCTAssertEqual(Attribute<Int?>(mergedValue).value, 3)
+        }
+    }
+
     func testPreferenceBridgeAddRemoveValueMutatesCombiner() {
         let host = GraphHost()
 
@@ -870,6 +920,15 @@ private struct OptionalRelayPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout String, nextValue: () -> String) {
         value += nextValue()
+    }
+}
+
+private struct OptionalAccumulatingPreferenceKey: PreferenceKey {
+    static func reduce(value: inout Int?, nextValue: () -> Int?) {
+        guard let current = value, let next = nextValue() else {
+            return
+        }
+        value = current + next
     }
 }
 

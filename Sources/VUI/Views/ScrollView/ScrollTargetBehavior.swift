@@ -546,15 +546,35 @@ final class ScrollEnvironmentStorage: Observable {
         self._baseProperties = properties
         self._transform = transform
         self._$observationRegistrar = ObservationRegistrar()
-        _$observationRegistrar.withMutation(of: self, keyPath: \._transform) {
+    }
+
+    var baseProperties: ScrollEnvironmentProperties {
+        get {
+            _$observationRegistrar.access(self, keyPath: \._baseProperties)
+            return _baseProperties
+        }
+        set {
+            _$observationRegistrar.withMutation(of: self, keyPath: \._baseProperties) {
+                _baseProperties = newValue
+            }
+        }
+    }
+
+    var transform: (any ScrollEnvironmentTransform)? {
+        get {
+            _$observationRegistrar.access(self, keyPath: \._transform)
+            return _transform
+        }
+        set {
+            _$observationRegistrar.withMutation(of: self, keyPath: \._transform) {
+                _transform = newValue
+            }
         }
     }
 
     var properties: ScrollEnvironmentProperties {
-        _$observationRegistrar.access(self, keyPath: \._baseProperties)
-        var properties = _baseProperties
-        _$observationRegistrar.access(self, keyPath: \._transform)
-        _transform?.update(properties: &properties)
+        var properties = baseProperties
+        transform?.update(properties: &properties)
         return properties
     }
 }

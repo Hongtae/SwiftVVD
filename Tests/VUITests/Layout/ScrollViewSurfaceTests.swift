@@ -30,6 +30,7 @@ extension PositionAwareContainerRelayLayout: UnaryLayout {
 private final class ScrollViewInputRecorder {
     var sawScrollablePreferenceKey = false
     var sawUpdateScrollStateRequestKey = false
+    var sawScrollableDescendantsAxesKey = false
     var sawScrollPhasePreferenceKey = false
     var sawScrollGeometryPreferenceKey = false
     var scrollableAttribute: AGAttribute?
@@ -38,6 +39,36 @@ private final class ScrollViewInputRecorder {
     var safeAreaInsets: Attribute<SafeAreaInsets>?
     var containerPosition: Attribute<CGPoint>?
     var containerSize: Attribute<ViewSize>?
+}
+
+private final class RefreshEnvironmentRecorder {
+    var didReadEnvironment = false
+    var action: RefreshAction?
+}
+
+private final class RefreshActionFlag: @unchecked Sendable {
+    var value = false
+}
+
+private struct RefreshEnvironmentRecordingContent: View, TestPrimitiveView {
+    var recorder: RefreshEnvironmentRecorder
+
+    typealias Body = Never
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("RefreshEnvironmentRecordingContent._makeView requires an active graph.")
+        }
+        let recorder = view._attribute.value.recorder
+        recorder.didReadEnvironment = true
+        recorder.action = inputs.base.cachedEnvironment.value.environment.value.refresh
+        return _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
+            LayoutComputer.fixed(CGSize(width: 10, height: 10))
+        }))
+    }
 }
 
 private struct ScrollViewRecordingContent: View, TestPrimitiveView {
@@ -54,6 +85,9 @@ private struct ScrollViewRecordingContent: View, TestPrimitiveView {
         let recorder = view._attribute.value.recorder
         recorder.sawScrollablePreferenceKey = inputs.preferences.keys.contains(ScrollablePreferenceKey.self)
         recorder.sawUpdateScrollStateRequestKey = inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self)
+        recorder.sawScrollableDescendantsAxesKey = inputs.preferences.keys.contains(
+            ScrollableDescendantsAxesKey.self
+        )
         recorder.sawScrollPhasePreferenceKey = inputs.preferences.keys.contains(ScrollPhasePreferenceKey.self)
         recorder.sawScrollGeometryPreferenceKey = inputs.preferences.keys.contains(ScrollGeometryPreferenceKey.self)
         recorder.scrollableAttribute = inputs.scrollable.attribute?.identifier
@@ -1894,14 +1928,24 @@ final class ScrollViewSurfaceTests: XCTestCase {
             EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
         )
 
+        var updatedBase = storage.baseProperties
+        updatedBase.edgeEffectStyle[.top] = .soft
+        storage.baseProperties = updatedBase
+        storage.transform = ScrollEnvironmentProbeTransform(seed: 29)
+
+        let updated = storage.properties
+        XCTAssertEqual(updated.indicatorFlashSeed, 29)
+        XCTAssertEqual(updated.edgeEffectStyle[.top], .soft)
+        XCTAssertEqual(updated.edgeEffectHidden[.bottom], true)
+
         var values = EnvironmentValues()
         values.layoutDirection = .rightToLeft
         values.scrollEnvironmentStorage = storage
 
         let inherited = ScrollEnvironmentProperties(environment: values)
         XCTAssertEqual(inherited.layoutDirection, .rightToLeft)
-        XCTAssertEqual(inherited.indicatorFlashSeed, 17)
-        XCTAssertEqual(inherited.edgeEffectStyle[.top], .hard)
+        XCTAssertEqual(inherited.indicatorFlashSeed, 29)
+        XCTAssertEqual(inherited.edgeEffectStyle[.top], .soft)
         XCTAssertEqual(inherited.edgeEffectHidden[.bottom], true)
     }
 
@@ -1995,23 +2039,18 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(edgeInsets["trailing"]!, 4)
     }
 
-    func testContentMarginEnvironmentProxyMergesPlacementAndAutomaticFallback() {
+    func testContentMarginEnvironmentProxyUsesWholeValueAutomaticFallback() {
         var values = EnvironmentValues()
-        values.setContentMargins(
-            OptionalEdgeInsets(edges: .all, length: 5),
-            in: .all,
-            for: .automatic
-        )
-        values.setContentMargins(
-            OptionalEdgeInsets(edges: .horizontal, length: 12),
-            in: .horizontal,
-            for: .scrollContent
+        values.automaticContentMargins = OptionalEdgeInsets(edges: .all, length: 5)
+        values.scrollContentContentMargins = OptionalEdgeInsets(
+            edges: .horizontal,
+            length: 12
         )
 
         let proxy = values.contentMarginProxy
         XCTAssertEqual(
             proxy.margins(for: .scrollContent, in: .all, allowAutomatic: true),
-            EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12)
+            EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
         )
         XCTAssertEqual(
             proxy.margins(for: .scrollContent, in: .all, allowAutomatic: false),
@@ -2020,6 +2059,18 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(
             proxy.margins(for: .automatic, in: .vertical, allowAutomatic: true),
             EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0)
+        )
+        XCTAssertEqual(
+            proxy.margins(for: .automatic, in: .vertical, allowAutomatic: false),
+            EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0)
+        )
+        XCTAssertEqual(
+            proxy.margins(for: .scrollIndicators, in: .all, allowAutomatic: true),
+            EdgeInsets(top: 5, leading: 5, bottom: 5, trailing: 5)
+        )
+        XCTAssertEqual(
+            proxy.margins(for: .scrollIndicators, in: .all, allowAutomatic: false),
+            EdgeInsets()
         )
     }
 
@@ -2052,7 +2103,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let proxy = inputs.base.contentMarginProxy
             XCTAssertEqual(
                 proxy.value.margins(for: .scrollContent, in: .all, allowAutomatic: true),
-                EdgeInsets(top: 8, leading: 13, bottom: 8, trailing: 13)
+                EdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
             )
             XCTAssertEqual(inputs.base.contentMarginProxy.identifier, proxy.identifier)
 
@@ -2074,6 +2125,48 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 EdgeInsets()
             )
         }
+    }
+
+    func testRefreshablePublishesActionAndScrollContainerClearsItsScope() async throws {
+        let flag = RefreshActionFlag()
+        let recorder = RefreshEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let view = RefreshEnvironmentRecordingContent(recorder: recorder)
+                .refreshable { flag.value = true }
+            let viewAttribute = graph.makeInput(value: view)
+            _ = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertTrue(recorder.didReadEnvironment)
+        let action = try XCTUnwrap(recorder.action)
+        XCTAssertEqual(Mirror(reflecting: action).children.compactMap(\.label), ["action", "id"])
+        await action()
+        XCTAssertTrue(flag.value)
+
+        let scopedRecorder = RefreshEnvironmentRecorder()
+        let scopedGraph = _AGGraph()
+        let scopedRef = _AGGraphContext(graph: scopedGraph)
+        scopedRef.withCurrent {
+            let view = SystemScrollViewContainer(
+                configuration: ScrollViewConfiguration(),
+                content: RefreshEnvironmentRecordingContent(recorder: scopedRecorder)
+            )
+            .refreshable {}
+            let viewAttribute = scopedGraph.makeInput(value: view)
+            _ = type(of: view)._makeView(
+                view: _GraphValue(_attribute: viewAttribute),
+                inputs: makeViewInputs(graph: scopedGraph)
+            )
+        }
+
+        XCTAssertTrue(scopedRecorder.didReadEnvironment)
+        XCTAssertNil(scopedRecorder.action)
     }
 
     func testEnvironmentAxesModifierPublishesScrollableAxesEnvironment() {
@@ -2132,6 +2225,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
             XCTAssertTrue(recorder.sawScrollablePreferenceKey)
             XCTAssertTrue(recorder.sawUpdateScrollStateRequestKey)
+            XCTAssertTrue(recorder.sawScrollableDescendantsAxesKey)
             XCTAssertNotNil(recorder.scrollableAttribute)
             XCTAssertNotNil(recorder.phaseStateAttribute)
 
@@ -2164,9 +2258,53 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
             XCTAssertTrue(recorder.sawScrollablePreferenceKey)
             XCTAssertTrue(recorder.sawUpdateScrollStateRequestKey)
+            XCTAssertTrue(recorder.sawScrollableDescendantsAxesKey)
             XCTAssertNotNil(recorder.scrollableAttribute)
             XCTAssertNil(outputs.preferences.value(for: ScrollablePreferenceKey.self))
         }
+    }
+
+    func testSystemScrollViewPublishesOptionalAxesOnlyWhenRequested() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var preferenceKeys = PreferenceKeys()
+            preferenceKeys.add(ScrollableDescendantsAxesKey.self)
+            let view = SystemScrollView(
+                configuration: ScrollViewConfiguration(axes: .horizontal),
+                content: ScrollViewRecordingContent(recorder: ScrollViewInputRecorder())
+            )
+            let viewAttr = graph.makeInput(value: view)
+            let requested = SystemScrollView<ScrollViewRecordingContent>._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
+            )
+            let axesID = try XCTUnwrap(
+                requested.preferences.value(for: ScrollableDescendantsAxesKey.self)
+            )
+            XCTAssertEqual(Attribute<Axis.Set?>(axesID).value, .horizontal)
+
+            let unrequested = SystemScrollView<ScrollViewRecordingContent>._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: makeViewInputs(graph: graph)
+            )
+            XCTAssertNil(
+                unrequested.preferences.value(for: ScrollableDescendantsAxesKey.self)
+            )
+        }
+    }
+
+    func testScrollableDescendantsAxesKeyReducesOnlyPresentPairs() {
+        var missing: Axis.Set? = nil
+        ScrollableDescendantsAxesKey.reduce(value: &missing) { .horizontal }
+        XCTAssertNil(missing)
+
+        var axes: Axis.Set? = .horizontal
+        ScrollableDescendantsAxesKey.reduce(value: &axes) { .vertical }
+        XCTAssertEqual(axes, [.horizontal, .vertical])
+        ScrollableDescendantsAxesKey.reduce(value: &axes) { nil }
+        XCTAssertEqual(axes, [.horizontal, .vertical])
     }
 
     func testSystemScrollViewMakeViewPublishesGeometryPreferenceWhenRequested() {
