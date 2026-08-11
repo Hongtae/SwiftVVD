@@ -104,6 +104,122 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     @MainActor
+    func testScrollViewHostConsumesPhasedWheelWithoutPanThreshold() throws {
+        let phaseProbe = LayoutSchedulingScrollPhaseProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingPhasedWheelRoot(probe: phaseProbe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingPhasedWheelRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let location = CGPoint(x: 110, y: 110)
+
+        controller.onMouseEvent(
+            event: MouseEvent(
+                type: .wheel,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: location,
+                delta: .zero,
+                timestamp: 0,
+                scrollData: ScrollEventData(
+                    phase: .began,
+                    source: .continuous,
+                    isPrecise: true
+                )
+            ),
+            at: Time(seconds: 0)
+        )
+        controller.updateView(
+            tick: 1,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertEqual(phaseProbe.changes.map(\.new), [.interacting])
+
+        controller.onMouseEvent(
+            event: MouseEvent(
+                type: .wheel,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: location,
+                delta: CGPoint(x: 0, y: 4),
+                timestamp: 0.1,
+                scrollData: ScrollEventData(
+                    phase: .changed,
+                    source: .continuous,
+                    isPrecise: true
+                )
+            ),
+            at: Time(seconds: 0.1)
+        )
+        controller.updateView(
+            tick: 2,
+            delta: 0.1,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            4,
+            accuracy: 0.001
+        )
+
+        controller.onMouseEvent(
+            event: MouseEvent(
+                type: .wheel,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: location,
+                delta: CGPoint(x: 0, y: 20),
+                timestamp: 0.2,
+                scrollData: ScrollEventData(
+                    phase: .ended,
+                    nativeMomentumPhase: .began,
+                    source: .continuous,
+                    isPrecise: true
+                )
+            ),
+            at: Time(seconds: 0.2)
+        )
+
+        XCTAssertTrue(host.isDecelerating)
+        XCTAssertEqual(
+            host.currentMotionVelocity.valuePerSecond.height,
+            40,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
     func testScrollViewHostCapturesPointerPanAfterAxisThreshold() throws {
         let controller = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -8013,6 +8129,29 @@ private struct LayoutSchedulingScrollViewAttachmentRoot: View {
                         .frame(width: 80, height: 40)
                 }
             }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private final class LayoutSchedulingScrollPhaseProbe: @unchecked Sendable {
+    var changes: [(old: ScrollPhase, new: ScrollPhase)] = []
+}
+
+private struct LayoutSchedulingPhasedWheelRoot: View {
+    let probe: LayoutSchedulingScrollPhaseProbe
+
+    var body: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                ForEach(0..<8, id: \.self) { _ in
+                    Color.green
+                        .frame(width: 80, height: 40)
+                }
+            }
+        }
+        .onScrollPhaseChange { oldPhase, newPhase in
+            probe.changes.append((oldPhase, newPhase))
         }
         .frame(width: 100, height: 100)
     }

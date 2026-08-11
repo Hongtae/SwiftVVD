@@ -78,6 +78,9 @@ class WindowController: WindowDelegate,
     private var _scrollTranslation: CGSize = .zero
     private var _wheelScrollEventID: EventID?
     private var _wheelScrollTranslation: CGSize = .zero
+    private var _wheelScrollBinding: EventBinding?
+    private var _wheelScrollLastTime: Time?
+    private var _wheelScrollVelocity = _Velocity<CGSize>(valuePerSecond: .zero)
 
     // Pointer scrolling shares the pointer lifetime but keeps its own EventID so
     // tap and pan recognizers can resolve the same physical interaction independently.
@@ -1868,29 +1871,39 @@ class WindowController: WindowDelegate,
             )
         }
 
-        // Native inertial samples are preserved by VVD for low-level clients,
-        // but VUI uses one cross-platform deceleration model and must not apply
-        // both streams to the same scroll view.
-        if scrollData.nativeMomentumPhase != nil {
-            return gestureGraph?.eventBinding(
-                at: event.location,
-                accepting: ScrollEvent.self
-            ) != nil
-        }
-
-        guard let phase = scrollData.phase else {
+        guard scrollData.phase != nil || scrollData.nativeMomentumPhase != nil else {
             return dispatchDiscreteWheel(
                 at: event.location,
                 delta: event.delta,
                 time: time
             )
         }
-        return dispatchContinuousWheel(
-            at: event.location,
-            delta: event.delta,
-            phase: phase,
-            time: time
-        )
+
+        var handled = false
+        if let phase = scrollData.phase {
+            // A handoff event can carry the terminal direct phase and the first
+            // native momentum phase together. Its displacement belongs to the
+            // inertial stream, which is intentionally replaced by host motion.
+            let directDelta = scrollData.nativeMomentumPhase == nil
+                ? event.delta
+                : .zero
+            handled = dispatchContinuousWheel(
+                at: event.location,
+                delta: directDelta,
+                phase: phase,
+                time: time
+            )
+        }
+
+        if scrollData.nativeMomentumPhase != nil {
+            // The host already owns one deceleration model. Native inertial
+            // samples are acknowledged but never applied a second time.
+            handled = (gestureGraph?.eventBinding(
+                at: event.location,
+                accepting: SystemWheelEvent.self
+            ) != nil) || handled
+        }
+        return handled
     }
 
     private func dispatchDiscreteWheel(
@@ -1965,63 +1978,105 @@ class WindowController: WindowDelegate,
         if phase == .mayBegin {
             return gestureGraph?.eventBinding(
                 at: location,
-                accepting: ScrollEvent.self
+                accepting: SystemWheelEvent.self
             ) != nil
         }
 
         let gestureDelta = CGSize(width: -delta.x, height: -delta.y)
         let eventPhase: EventPhase
         let eventID: EventID
+        let binding: EventBinding
         switch phase {
         case .began:
+            guard let resolvedBinding = gestureGraph?.eventBinding(
+                at: location,
+                accepting: SystemWheelEvent.self
+            ) else { return false }
             eventPhase = .began
-            eventID = EventID(type: ScrollEvent.self, serial: nextEventSerial())
+            eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
             _wheelScrollEventID = eventID
             _wheelScrollTranslation = .zero
+            _wheelScrollBinding = resolvedBinding
+            _wheelScrollLastTime = time
+            _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
+            binding = resolvedBinding
         case .stationary, .changed:
             eventPhase = .active
-            if let activeID = _wheelScrollEventID {
+            if let activeID = _wheelScrollEventID,
+               let activeBinding = _wheelScrollBinding {
                 eventID = activeID
+                binding = activeBinding
             } else {
-                eventID = EventID(type: ScrollEvent.self, serial: nextEventSerial())
+                guard let resolvedBinding = gestureGraph?.eventBinding(
+                    at: location,
+                    accepting: SystemWheelEvent.self
+                ) else { return false }
+                eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
                 _wheelScrollEventID = eventID
                 _wheelScrollTranslation = .zero
-                let began = ScrollEvent(
+                _wheelScrollBinding = resolvedBinding
+                _wheelScrollLastTime = time
+                _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
+                binding = resolvedBinding
+                let began = SystemWheelEvent(
                     timestamp: time,
                     phase: .began,
-                    binding: nil,
-                    translation: .zero,
-                    modifiers: [],
-                    hitTestLocation: location
+                    binding: resolvedBinding,
+                    delta: .zero,
+                    kind: .continuous
                 )
                 _ = sendRecognizerOwnedEvents([eventID: began], at: time)
             }
         case .ended:
             eventPhase = .ended
-            guard let activeID = _wheelScrollEventID else { return false }
+            guard let activeID = _wheelScrollEventID,
+                  let activeBinding = _wheelScrollBinding else { return false }
             eventID = activeID
+            binding = activeBinding
         case .cancelled:
             eventPhase = .failed
-            guard let activeID = _wheelScrollEventID else { return false }
+            guard let activeID = _wheelScrollEventID,
+                  let activeBinding = _wheelScrollBinding else { return false }
             eventID = activeID
+            binding = activeBinding
         case .mayBegin:
             return false
         }
 
+        let previousTranslation = _wheelScrollTranslation
         _wheelScrollTranslation.width += gestureDelta.width
         _wheelScrollTranslation.height += gestureDelta.height
-        let scrollEvent = ScrollEvent(
+        if eventPhase == .active {
+            let elapsed = time.seconds - (_wheelScrollLastTime ?? time).seconds
+            let change = CGSize(
+                width: _wheelScrollTranslation.width - previousTranslation.width,
+                height: _wheelScrollTranslation.height - previousTranslation.height
+            )
+            if elapsed.isFinite, elapsed > 0 {
+                _wheelScrollVelocity = _Velocity(valuePerSecond: CGSize(
+                    width: change.width / elapsed,
+                    height: change.height / elapsed
+                ))
+            } else {
+                _wheelScrollVelocity = _Velocity(valuePerSecond: change)
+            }
+            _wheelScrollLastTime = time
+        }
+        let scrollEvent = SystemWheelEvent(
             timestamp: time,
             phase: eventPhase,
-            binding: nil,
-            translation: _wheelScrollTranslation,
-            modifiers: [],
-            hitTestLocation: location
+            binding: binding,
+            delta: _wheelScrollTranslation,
+            velocity: _wheelScrollVelocity,
+            kind: .continuous
         )
         let result = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
         if eventPhase.isTerminal {
             _wheelScrollEventID = nil
             _wheelScrollTranslation = .zero
+            _wheelScrollBinding = nil
+            _wheelScrollLastTime = nil
+            _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
         }
         switch result {
         case .active, .ended:
@@ -2245,6 +2300,9 @@ class WindowController: WindowDelegate,
         _scrollTranslation = .zero
         _wheelScrollEventID = nil
         _wheelScrollTranslation = .zero
+        _wheelScrollBinding = nil
+        _wheelScrollLastTime = nil
+        _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
         _pointerScrollStates.removeAll()
         _keyEventIDs.removeAll()
         _hoverEventIDs.removeAll()

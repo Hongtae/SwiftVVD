@@ -33,13 +33,20 @@ struct WheelEvent: ResponderBoundEvent, Equatable {
 }
 
 /// Cross-platform wheel carrier used by the logical hosting scroll view.
-/// The separate carrier preserves both axes while the scalar event remains
-/// available to single-axis gesture chains.
+/// The separate carrier preserves both axes and phased host input while the
+/// scalar event remains available to single-axis gesture chains.
 struct SystemWheelEvent: ResponderBoundEvent, Equatable {
+    enum Kind: Equatable {
+        case discrete
+        case continuous
+    }
+
     var timestamp: Time
     var phase: EventPhase
     var binding: EventBinding?
     var delta: CGSize
+    var velocity: _Velocity<CGSize> = _Velocity(valuePerSecond: .zero)
+    var kind: Kind = .discrete
 
     var eventPhase: EventPhase { phase }
 
@@ -52,7 +59,9 @@ struct SystemWheelEvent: ResponderBoundEvent, Equatable {
         lhs.timestamp.seconds == rhs.timestamp.seconds &&
             lhs.phase == rhs.phase &&
             lhs.binding == rhs.binding &&
-            lhs.delta == rhs.delta
+            lhs.delta == rhs.delta &&
+            lhs.velocity == rhs.velocity &&
+            lhs.kind == rhs.kind
     }
 }
 

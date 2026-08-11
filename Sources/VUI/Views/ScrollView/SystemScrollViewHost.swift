@@ -308,6 +308,7 @@ class HostingScrollView {
     private struct DragState {
         var initialOffset: CGPoint
         var translation: CGSize
+        var hasExplicitInteractionPhase = false
     }
 
     private struct DecelerationState {
@@ -550,6 +551,27 @@ class HostingScrollView {
         }
     }
 
+    func willStartPanning() {
+        graphRef.withCurrent {
+            guard let graph = _AGGraph.current,
+                  layoutState.isValid(in: graph) else {
+                return
+            }
+            let currentOffset = layoutState.toStrong().value.contentOffset
+            decelerationState = nil
+            dragState = DragState(
+                initialOffset: currentOffset,
+                translation: .zero,
+                hasExplicitInteractionPhase: true
+            )
+            publishInteraction(
+                offset: currentOffset,
+                phase: .interacting,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+        }
+    }
+
     func dispatchScrollGesturePhase(_ gesturePhase: GesturePhase<ScrollGesture.Value>) {
         graphRef.withCurrent {
             guard let graph = _AGGraph.current,
@@ -588,7 +610,9 @@ class HostingScrollView {
                 let moved = nextOffset != currentOffset
                 publishInteraction(
                     offset: nextOffset,
-                    phase: moved ? .interacting : .tracking,
+                    phase: moved || drag.hasExplicitInteractionPhase
+                        ? .interacting
+                        : .tracking,
                     velocity: velocity
                 )
 
@@ -1521,13 +1545,34 @@ final class HostingScrollViewResponder: MultiViewResponder,
         for (eventID, event) in events.sorted(by: { $0.key.serial < $1.key.serial }) {
             if let wheel = event as? SystemWheelEvent {
                 let phase: GesturePhase<ScrollGesture.Value>
-                switch wheel.phase {
-                case .began, .active:
-                    phase = .active(.wheel(wheel.delta))
-                case .ended:
-                    phase = .ended(.wheel(wheel.delta))
-                case .failed:
-                    phase = .failed
+                switch wheel.kind {
+                case .discrete:
+                    switch wheel.phase {
+                    case .began, .active:
+                        phase = .active(.wheel(wheel.delta))
+                    case .ended:
+                        phase = .ended(.wheel(wheel.delta))
+                    case .failed:
+                        phase = .failed
+                    }
+                case .continuous:
+                    let value = ScrollGesture.Value.pan(PanGesture.Value(
+                        timestamp: wheel.timestamp,
+                        translation: wheel.delta,
+                        touchType: .indirect,
+                        velocity: wheel.velocity
+                    ))
+                    switch wheel.phase {
+                    case .began:
+                        scrollView.willStartPanning()
+                        phase = .active(value)
+                    case .active:
+                        phase = .active(value)
+                    case .ended:
+                        phase = .ended(value)
+                    case .failed:
+                        phase = .failed
+                    }
                 }
                 scrollView.dispatchScrollGesturePhase(phase)
                 phases.append(phase.map { _ in () })
