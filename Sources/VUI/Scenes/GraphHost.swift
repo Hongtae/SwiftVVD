@@ -1148,7 +1148,13 @@ class GraphHost: CustomReflectable {
             guard let observer else { return }
 
             self.observer = observer
+            #if canImport(Darwin)
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            #else
+            // swift-corelibs-foundation builds with DEPLOYMENT_RUNTIME_SWIFT,
+            // so CFRunLoopMode is a bare CFString without the wrapper struct.
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, kCFRunLoopCommonModes)
+            #endif
         }
 
         private func flushObserverActions() {
